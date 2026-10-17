@@ -176,7 +176,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         category: { $ref: '#/components/schemas/PlaceCategory' }
-        area: { type: string, description: Curated human-readable area label; exact-match filter, not a geospatial boundary. }
+        area: { type: string, description: "Curated human-readable area label; exact-match filter, not a geospatial boundary." }
         average_rating: { type: [number, 'null'], minimum: 1, maximum: 5 }
     Place:
       allOf:
