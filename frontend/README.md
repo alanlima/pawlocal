@@ -13,14 +13,25 @@ docker compose up --build -d
 docker compose ps
 ```
 
-The app is at <http://localhost:5173>. Grafana is at <http://localhost:3000> and loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo and the Collector health endpoint are also host-reachable on localhost ports 9090, 3100, 3200 and 13133. Compose binds every published port to loopback.
+If a host port is already in use, override the frontend and Grafana published ports and the Collector's allowed browser origin before startup. Example for PowerShell:
+
+```powershell
+$env:PAWLOCAL_FRONTEND_PORT = '5174'
+$env:PAWLOCAL_GRAFANA_PORT = '3001'
+$env:PAWLOCAL_FRONTEND_ORIGIN = 'http://localhost:5174'
+docker compose up --build -d
+```
+
+These override values make PawLocal available at <http://localhost:5174> and Grafana at <http://localhost:3001>. The Collector permits OTLP browser requests from `http://localhost:5174` for this run.
+
+With default ports, the app is at <http://localhost:5173> and Grafana is at <http://localhost:3000>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo and the Collector health endpoint are also host-reachable on localhost ports 9090, 3100, 3200 and 13133. Compose binds every published port to loopback.
 
 | Service | Host address | Purpose |
 |---|---|---|
-| Frontend | `localhost:5173` | Vite development UI |
+| Frontend (default) | `localhost:5173` | Vite development UI |
 | Collector OTLP/HTTP | `localhost:4318` | Browser traces, metrics and logs |
 | Collector health | `localhost:13133` | Collector readiness |
-| Grafana | `localhost:3000` | Dashboards, logs and Tempo traces |
+| Grafana (default) | `localhost:3000` | Dashboards, logs and Tempo traces |
 | Prometheus | `localhost:9090` | Scraped frontend metrics |
 | Loki | `localhost:3100` | Structured frontend logs |
 | Tempo | `localhost:3200` | Frontend traces |
@@ -30,24 +41,24 @@ The app is at <http://localhost:5173>. Grafana is at <http://localhost:3000> and
 `docker compose ps` reports container health. From PowerShell, also check the service endpoints:
 
 ```powershell
-Invoke-WebRequest http://localhost:5173 -UseBasicParsing
+Invoke-WebRequest http://localhost:5173 -UseBasicParsing # use 5174 for the port-conflict example above
 Invoke-WebRequest http://localhost:13133/ -UseBasicParsing
 Invoke-WebRequest http://localhost:9090/-/ready -UseBasicParsing
 Invoke-WebRequest http://localhost:3100/ready -UseBasicParsing
 Invoke-WebRequest http://localhost:3200/ready -UseBasicParsing
-Invoke-WebRequest http://localhost:3000/api/health -UseBasicParsing
+Invoke-WebRequest http://localhost:3000/api/health -UseBasicParsing # use 3001 for the port-conflict example above
 ```
 
 Compose checks Collector readiness at `http://127.0.0.1:13133/` and Tempo readiness at `http://127.0.0.1:3200/ready`. Their upstream images do not include HTTP client tools, so the local images add a static BusyBox probe for these healthchecks.
 
-The Collector accepts browser OTLP/HTTP only from `http://localhost:5173` and `http://127.0.0.1:5173`; its published receiver port is bound to loopback. Browser exports use the local endpoint `http://localhost:4318`. There are no credentials in browser requests.
+The Collector accepts browser OTLP/HTTP only from the origin in `PAWLOCAL_FRONTEND_ORIGIN` (default `http://localhost:5173`); set it to match the overridden frontend origin, as in the example above. Its published receiver port is bound to loopback. Browser exports use the local endpoint `http://localhost:4318`. There are no credentials in browser requests.
 
 ### Walkthrough and synthetic failures
 
 1. Open PawLocal, search for a matching area or place, then open a result.
 2. In Grafana's PawLocal dashboard, inspect search/detail outcomes, latency and frontend logs. Open a log's trace ID to view its trace in Tempo. A successful search, a search with no results, and a failed search have distinct bounded outcomes.
 3. Exercise **Share this place**, save a favourite in demo-member mode, submit a demo contribution and send a report to emit bounded action outcome counters/logs.
-4. To inject a deterministic search error, open <http://localhost:5173/?demoFault=search-error>, then search or change a filter. The UI shows its existing error state; Grafana records `search/error` and `PAWLOCAL_OPERATION_FAILED`. For a bounded delay instead, use `?demoFault=search-delay`. Reload without the query parameter to restore normal mock behavior.
+4. To inject a deterministic search error, open `http://localhost:<frontend-port>/?demoFault=search-error` (default port `5173`; `5174` in the example above), then search or change a filter. The UI shows its existing error state; Grafana records `search/error` and `PAWLOCAL_OPERATION_FAILED`. For a bounded delay instead, use `?demoFault=search-delay`. Reload without the query parameter to restore normal mock behavior.
 
 Fault controls are available only in the Vite development server when `VITE_DEMO_FAULTS=true`; the production build removes their code. Do not put search text or personal data in issue/PR telemetry screenshots. Telemetry records operation, outcome, duration and small fixed categories only; it excludes query text, place IDs, contribution/report payloads, names, email addresses and credentials. Error text from exceptions is not exported.
 

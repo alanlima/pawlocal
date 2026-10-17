@@ -77,7 +77,7 @@ export async function shutdownTelemetry() {
 }
 
 export type Operation = 'search' | 'detail' | 'share' | 'favourite' | 'contribution' | 'report'
-export type Outcome = 'success' | 'empty' | 'not_found' | 'error'
+export type Outcome = 'success' | 'empty' | 'not_found' | 'error' | 'cancelled'
 
 function boundedAttributes(attributes: Attributes = {}): Attributes {
   const allowed: Record<string, Set<string>> = {
@@ -122,6 +122,11 @@ export async function recordOperation<T>(
     writeSafeLog(span, operation, outcome)
     return value
   } catch (error) {
+    if (isAbortError(error)) {
+      span.setAttribute('pawlocal.outcome', 'cancelled')
+      writeSafeLog(span, operation, 'cancelled')
+      throw error
+    }
     span.setStatus({ code: SpanStatusCode.ERROR, message: 'operation_failed' })
     span.setAttribute('pawlocal.outcome', 'error')
     outcomeCounter?.add(1, { operation, outcome: 'error', ...safeAttributes })
@@ -132,6 +137,10 @@ export async function recordOperation<T>(
   } finally {
     span.end()
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 export function recordDemoAction(

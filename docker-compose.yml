@@ -10,7 +10,7 @@ services:
       VITE_OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
       VITE_DEMO_FAULTS: ${PAWLOCAL_DEMO_FAULTS:-true}
     ports:
-      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:${PAWLOCAL_FRONTEND_PORT:-5173}:5173"
     depends_on:
       otel-collector:
         condition: service_started
@@ -27,6 +27,8 @@ services:
       dockerfile: observability/healthcheck-images/otel-collector.Dockerfile
     image: pawlocal-stage2/otel-collector:0.136.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      PAWLOCAL_FRONTEND_ORIGIN: ${PAWLOCAL_FRONTEND_ORIGIN:-http://localhost:5173}
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
     ports:
@@ -105,7 +107,7 @@ services:
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${PAWLOCAL_GRAFANA_PORT:-3000}:3000"
     depends_on:
       prometheus:
         condition: service_started

@@ -39,6 +39,11 @@ describe('frontend telemetry', () => {
       (items) => (items.length ? 'success' : 'empty'),
     )
     await recordOperation('detail', async () => ({ id: 'private-place-name' }))
+    await expect(
+      recordOperation('search', async () => {
+        throw new DOMException('Aborted', 'AbortError')
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
     const traceHeaders = injectCurrentTraceContext({})
     await flushTelemetry()
     await new Promise((resolve) => setTimeout(resolve, 30))
@@ -60,7 +65,18 @@ describe('frontend telemetry', () => {
     )
     const searchSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.search')
     const detailSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.detail')
+    const cancelledSpan = spans.find(
+      (span: { attributes: { key: string; value: { stringValue: string } }[] }) =>
+        span.attributes.some(
+          (attribute) =>
+            attribute.key === 'pawlocal.outcome' && attribute.value.stringValue === 'cancelled',
+        ),
+    )
     expect(searchSpan.traceId).toBe(detailSpan.traceId)
+    expect(cancelledSpan.status.code).not.toBe(2)
+    expect(posts.join('\n')).toContain('search_cancelled')
+    expect(posts.join('\n')).not.toContain('search_error')
+    expect(posts.join('\n')).not.toContain('PAWLOCAL_OPERATION_FAILED')
     expect(traceHeaders.traceparent).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/)
   }, 15000)
 

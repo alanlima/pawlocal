@@ -5,8 +5,7 @@ receivers:
         endpoint: 0.0.0.0:4318
         cors:
           allowed_origins:
-            - http://localhost:5173
-            - http://127.0.0.1:5173
+            - ${env:PAWLOCAL_FRONTEND_ORIGIN}
           allowed_headers:
             - Content-Type
             - Traceparent
@@ -31,7 +30,6 @@ exporters:
     endpoint: http://loki:3100/otlp
   prometheus:
     endpoint: 0.0.0.0:8889
-    namespace: pawlocal
     resource_to_telemetry_conversion:
       enabled: true
     translation_strategy: UnderscoreEscapingWithSuffixes
