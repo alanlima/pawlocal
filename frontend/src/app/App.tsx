@@ -20,6 +20,7 @@ import { ContributionDialog } from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
 import { PlaceDetail } from '../features/place/PlaceDetail'
 import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
+import { recordOperation } from '../observability/telemetry'
 
 const categories: { id: PlaceCategory | ''; label: string; icon: string }[] = [
   { id: '', label: 'All places', icon: '✳' },
@@ -146,12 +147,14 @@ export default function App() {
   }
   const sharePlace = async (place: Place) => {
     const url = `${window.location.origin}/places/${place.id}`
-    try {
-      await navigator.clipboard.writeText(url)
-      setNotice('Link copied — ready to share!')
-    } catch {
-      setNotice(url)
-    }
+    await recordOperation('share', async () => {
+      try {
+        await navigator.clipboard.writeText(url)
+        setNotice('Link copied — ready to share!')
+      } catch {
+        setNotice(url)
+      }
+    })
   }
   const submit = async () => {
     if (!signedIn) {

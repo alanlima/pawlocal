@@ -1,0 +1,79 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (outcome) (rate(pawlocal_operations_total{operation=\"search\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "title": "Search outcomes / second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (outcome) (rate(pawlocal_operations_total{operation=\"detail\"}[5m]))", "legendFormat": "{{outcome}}", "refId": "A" }],
+      "title": "Place detail outcomes / second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "histogram_quantile(0.50, sum by (le) (rate(pawlocal_search_duration_milliseconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" }, { "expr": "histogram_quantile(0.95, sum by (le) (rate(pawlocal_search_duration_milliseconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" }],
+      "title": "Search latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "histogram_quantile(0.50, sum by (le) (rate(pawlocal_detail_duration_milliseconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" }, { "expr": "histogram_quantile(0.95, sum by (le) (rate(pawlocal_detail_duration_milliseconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" }],
+      "title": "Place detail latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [{ "expr": "sum by (operation, outcome) (rate(pawlocal_demo_actions_total[5m]))", "legendFormat": "{{operation}} / {{outcome}}", "refId": "A" }],
+      "title": "Demo action outcomes / second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
+      "targets": [{ "expr": "{service_name=\"pawlocal-frontend\"} | json | line_format \"{{.event}} outcome={{.outcome}} trace={{.traceId}}\"", "refId": "A" }],
+      "title": "Frontend outcomes and correlated trace IDs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["pawlocal", "local"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "PawLocal local observability",
+  "uid": "pawlocal-local",
+  "version": 1
+}

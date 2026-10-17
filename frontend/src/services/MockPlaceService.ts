@@ -36,6 +36,11 @@ const readIds = (key: string): string[] => {
 export class MockPlaceService implements PlaceService {
   private contributions: Contribution[] = [...demoContributions]
   async listPlaces(query: PlaceQuery, signal?: AbortSignal): Promise<Place[]> {
+    if (import.meta.env.DEV && import.meta.env.VITE_DEMO_FAULTS === 'true') {
+      const fault = new URLSearchParams(window.location.search).get('demoFault')
+      if (fault === 'search-delay') await wait(2000, signal)
+      if (fault === 'search-error') throw new Error('synthetic_search_failure')
+    }
     await wait(180, signal)
     const needle = query.q?.trim().toLocaleLowerCase()
     return demoPlaces.filter(
