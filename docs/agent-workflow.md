@@ -23,7 +23,7 @@
 - Stage 2 and Stage 3 may run in parallel in separate branches and worktrees. Keep their working directories isolated even though both may edit root Compose configuration.
 - Stage 2 dashboards, privacy checks, and synthetic failure demonstrations require review before Stage 2 completes and before Stage 3.1 starts. Stage 3 implementation may continue during this gate.
 - Stage 3.1 starts only after Stage 2 is complete and reviewed. It uses its own worktree coordinated with Stage 3, can proceed while Stage 3 continues, and reconciles/verifies the combined Compose stack.
-- Stage 3 cannot be marked complete until Stage 2's gate is satisfied and required Stage 3.1 integration evidence is available.
+- Stage 3 cannot be marked complete until Stage 2's gate passes and Stage 3.1 integration evidence has been completed and independently reviewed.
 - Full frontend/API/database persistence is required before Stage 4.
 - Billable cloud resources require explicit human cost approval before provisioning.
 
