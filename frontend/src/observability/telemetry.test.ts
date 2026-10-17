@@ -31,13 +31,15 @@ describe('frontend telemetry', () => {
     if (!address || typeof address === 'string') throw new Error('test server failed to start')
     vi.stubEnv('VITE_OTEL_EXPORTER_OTLP_ENDPOINT', `http://127.0.0.1:${address.port}`)
     vi.resetModules()
-    const { flushTelemetry, recordOperation, shutdownTelemetry } = await import('./telemetry')
+    const { flushTelemetry, injectCurrentTraceContext, recordOperation, shutdownTelemetry } =
+      await import('./telemetry')
     const results = await recordOperation(
       'search',
       async () => [{ id: 'private-place-name', query: 'private search text' }],
       (items) => (items.length ? 'success' : 'empty'),
     )
     await recordOperation('detail', async () => ({ id: 'private-place-name' }))
+    const traceHeaders = injectCurrentTraceContext({})
     await flushTelemetry()
     await new Promise((resolve) => setTimeout(resolve, 30))
     await shutdownTelemetry()
@@ -59,6 +61,7 @@ describe('frontend telemetry', () => {
     const searchSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.search')
     const detailSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.detail')
     expect(searchSpan.traceId).toBe(detailSpan.traceId)
+    expect(traceHeaders.traceparent).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/)
   }, 15000)
 
   it('keeps the journey usable and sends nothing when telemetry is disabled', async () => {
