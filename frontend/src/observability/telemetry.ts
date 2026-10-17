@@ -152,15 +152,6 @@ export function recordDemoAction(
   initializeTelemetry()
   const attrs = boundedAttributes({ kind })
   actionCounter?.add(1, { operation: action, outcome, ...attrs })
-  const span = trace.getTracer('pawlocal.frontend').startSpan(
-    `pawlocal.${action}`,
-    {
-      attributes: { 'pawlocal.operation': action, 'pawlocal.outcome': outcome, ...attrs },
-    },
-    discoveryContext ?? otelContext.active(),
-  )
-  writeSafeLog(span, action, outcome, outcome === 'error' ? 'PAWLOCAL_ACTION_FAILED' : undefined)
-  span.end()
 }
 
 export function injectCurrentTraceContext(headers: Record<string, string>) {

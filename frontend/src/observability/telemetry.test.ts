@@ -31,14 +31,25 @@ describe('frontend telemetry', () => {
     if (!address || typeof address === 'string') throw new Error('test server failed to start')
     vi.stubEnv('VITE_OTEL_EXPORTER_OTLP_ENDPOINT', `http://127.0.0.1:${address.port}`)
     vi.resetModules()
-    const { flushTelemetry, injectCurrentTraceContext, recordOperation, shutdownTelemetry } =
-      await import('./telemetry')
+    const {
+      flushTelemetry,
+      injectCurrentTraceContext,
+      recordDemoAction,
+      recordOperation,
+      shutdownTelemetry,
+    } = await import('./telemetry')
     const results = await recordOperation(
       'search',
       async () => [{ id: 'private-place-name', query: 'private search text' }],
       (items) => (items.length ? 'success' : 'empty'),
     )
     await recordOperation('detail', async () => ({ id: 'private-place-name' }))
+    await recordOperation('contribution', async () => ({ id: 'private-contribution' }), undefined, {
+      kind: 'review',
+    })
+    recordDemoAction('contribution', 'success', 'review')
+    await recordOperation('report', async () => undefined, undefined, { target_type: 'place' })
+    recordDemoAction('report', 'success', 'place')
     await expect(
       recordOperation('search', async () => {
         throw new DOMException('Aborted', 'AbortError')
@@ -65,6 +76,12 @@ describe('frontend telemetry', () => {
     )
     const searchSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.search')
     const detailSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.detail')
+    expect(
+      spans.filter((span: { name: string }) => span.name === 'pawlocal.contribution'),
+    ).toHaveLength(1)
+    expect(spans.filter((span: { name: string }) => span.name === 'pawlocal.report')).toHaveLength(
+      1,
+    )
     const cancelledSpan = spans.find(
       (span: { attributes: { key: string; value: { stringValue: string } }[] }) =>
         span.attributes.some(
@@ -77,6 +94,49 @@ describe('frontend telemetry', () => {
     expect(posts.join('\n')).toContain('search_cancelled')
     expect(posts.join('\n')).not.toContain('search_error')
     expect(posts.join('\n')).not.toContain('PAWLOCAL_OPERATION_FAILED')
+    let allLogBodies = requests
+      .filter((request) => request.path.includes('/v1/logs'))
+      .map((request) => request.body)
+      .join('\n')
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (
+        allLogBodies.includes('contribution_success') &&
+        allLogBodies.includes('report_success')
+      ) {
+        break
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      allLogBodies = requests
+        .filter((request) => request.path.includes('/v1/logs'))
+        .map((request) => request.body)
+        .join('\n')
+    }
+    expect(allLogBodies.match(/contribution_success/g)).toHaveLength(1)
+    expect(allLogBodies.match(/report_success/g)).toHaveLength(1)
+    const metricBody = JSON.parse(
+      requests.find((request) => request.path.includes('/v1/metrics'))!.body,
+    )
+    const metrics = metricBody.resourceMetrics.flatMap(
+      (resourceMetric: { scopeMetrics: { metrics: unknown[] }[] }) =>
+        resourceMetric.scopeMetrics.flatMap((scopeMetric) => scopeMetric.metrics),
+    ) as {
+      name: string
+      sum?: {
+        dataPoints: {
+          asDouble?: number
+          attributes: { key: string; value: { stringValue: string } }[]
+        }[]
+      }
+    }[]
+    const demoActions = metrics.find((metric) => metric.name === 'pawlocal.demo_actions')
+    expect(demoActions?.sum?.dataPoints).toHaveLength(2)
+    expect(demoActions?.sum?.dataPoints.map((point) => point.asDouble)).toEqual([1, 1])
+    expect(
+      demoActions?.sum?.dataPoints.map(
+        (point) =>
+          point.attributes.find((attribute) => attribute.key === 'operation')?.value.stringValue,
+      ),
+    ).toEqual(['contribution', 'report'])
     expect(traceHeaders.traceparent).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/)
   }, 15000)
 
