@@ -29,12 +29,15 @@ Write rate limits are per subject and per API process. This is suitable for loca
 
 `tests/e2e_local_server.py` is a test-only runner that applies migrations to a dedicated database, seeds one clearly synthetic place, and starts the real API plus a disposable OIDC issuer. It creates an ephemeral RSA key and short-lived access tokens on each run. The API uses its normal issuer, JWKS, expiry, token-use and client-ID validation; the helper adds no production authentication bypass. Never point it at a database containing data you need: it resets records for its fixed synthetic subject and place IDs.
 
-With the backend virtual environment and dependencies installed, set `PAWLOCAL_DATABASE_URL` to the dedicated PostgreSQL test database and run from `backend/`:
+With the backend virtual environment and dependencies installed, set `PAWLOCAL_E2E_DATABASE_URL` to a disposable PostgreSQL database whose name contains a `_test`, `_e2e`, or `_verify` segment. Explicitly opt into migration and fixture reset with `PAWLOCAL_E2E_ALLOW_RESET=true`, then run from `backend/`:
 
 ```powershell
-$env:PAWLOCAL_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@localhost:55432/pawlocal_stage3_verify"
+$env:PAWLOCAL_E2E_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@localhost:55432/pawlocal_stage3_verify"
+$env:PAWLOCAL_E2E_ALLOW_RESET = "true"
 python tests/e2e_local_server.py
 ```
+
+The runner fails before migrations or cleanup unless both settings are present, the opt-in value is exactly `true`, the URL uses PostgreSQL, and its database name includes one of the disposable-name segments. It does not fall back to `PAWLOCAL_DATABASE_URL`.
 
 The helper listens on `127.0.0.1:18001` for the API and `127.0.0.1:18002` for its issuer by default. In a second terminal, run from `frontend/`:
 

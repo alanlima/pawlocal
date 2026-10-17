@@ -18,6 +18,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from sqlalchemy import delete
 
+from pawlocal.testing import validate_e2e_database_url
+
 API_PORT = int(os.environ.get("PAWLOCAL_E2E_API_PORT", "18001"))
 ISSUER_PORT = int(os.environ.get("PAWLOCAL_E2E_ISSUER_PORT", "18002"))
 ISSUER = f"http://127.0.0.1:{ISSUER_PORT}"
@@ -28,15 +30,16 @@ KEY_ID = "pawlocal-local-e2e-key"
 
 
 def prepare_test_environment() -> None:
-    os.environ["PAWLOCAL_DATABASE_URL"] = os.environ.get(
-        "PAWLOCAL_DATABASE_URL",
-        "postgresql+psycopg://pawlocal:pawlocal-local@172.17.0.2:5432/pawlocal_stage3_verify",
+    database_url = validate_e2e_database_url(
+        os.environ.get("PAWLOCAL_E2E_DATABASE_URL"),
+        os.environ.get("PAWLOCAL_E2E_ALLOW_RESET"),
     )
+    os.environ["PAWLOCAL_DATABASE_URL"] = database_url
     os.environ["PAWLOCAL_COGNITO_ISSUER"] = ISSUER
     os.environ["PAWLOCAL_COGNITO_APP_CLIENT_ID"] = CLIENT_ID
     os.chdir(Path(__file__).resolve().parents[1])
     config = Config("alembic.ini")
-    config.set_main_option("sqlalchemy.url", os.environ["PAWLOCAL_DATABASE_URL"])
+    config.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(config, "head")
 
 
