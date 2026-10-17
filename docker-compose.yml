@@ -75,7 +75,7 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     healthcheck:
-      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
+      test: ["CMD", "/busybox-bin", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -93,7 +93,7 @@ services:
     ports:
       - "127.0.0.1:3200:3200"
     healthcheck:
-      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3200/ready"]
+      test: ["CMD", "/busybox-bin", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3200/ready"]
       interval: 10s
       timeout: 3s
       retries: 10
