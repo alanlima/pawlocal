@@ -49,7 +49,7 @@ def get_current_subject(
             signing_key.key,
             algorithms=["RS256"],
             issuer=issuer,
-            options={"verify_aud": False},
+            options={"verify_aud": False, "require": ["exp"]},
         )
     except (jwt.PyJWTError, OSError, ValueError):
         raise _unauthorized() from None

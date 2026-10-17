@@ -16,8 +16,9 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, validates
 
+from pawlocal.domain.places import PLACE_FACILITIES
 from pawlocal.infrastructure.database import Base
 
 
@@ -33,6 +34,11 @@ class PlaceRecord(Base):
             name="ck_places_average_rating",
         ),
         CheckConstraint("length(trim(name)) > 0", name="ck_places_name_nonempty"),
+        CheckConstraint(
+            "facilities <@ ARRAY['Fenced', 'Off-leash area', 'Drinking water', "
+            "'Shade', 'Picnic tables', 'Accessible paths']::varchar(80)[]",
+            name="ck_places_facilities",
+        ).ddl_if(dialect="postgresql"),
         Index("ix_places_area_category", "area", "category"),
         Index("ix_places_published_name", "is_published", "name"),
     )
@@ -65,6 +71,13 @@ class PlaceRecord(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+    @validates("facilities")
+    def validate_facilities(self, _: str, facilities: list[str]) -> list[str]:
+        unsupported = set(facilities) - set(PLACE_FACILITIES)
+        if unsupported:
+            raise ValueError(f"Unsupported place facilities: {sorted(unsupported)}")
+        return facilities
 
 
 class ContributionRecord(Base):
@@ -132,14 +145,27 @@ class ReportRecord(Base):
         CheckConstraint(
             "length(reason) BETWEEN 1 AND 2000", name="ck_reports_reason_length"
         ),
-        Index("ix_reports_target", "target_type", "target_id"),
+        CheckConstraint(
+            "(target_type = 'place' AND target_place_id IS NOT NULL "
+            "AND target_contribution_id IS NULL) OR "
+            "(target_type = 'contribution' AND target_contribution_id IS NOT NULL "
+            "AND target_place_id IS NULL)",
+            name="ck_reports_target_reference",
+        ),
+        Index("ix_reports_target_place", "target_place_id"),
+        Index("ix_reports_target_contribution", "target_contribution_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), primary_key=True, default=uuid4
     )
     target_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    target_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    target_place_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("places.id"), nullable=True
+    )
+    target_contribution_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("contributions.id"), nullable=True
+    )
     reporter_subject: Mapped[str] = mapped_column(String(255), nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(

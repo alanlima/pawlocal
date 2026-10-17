@@ -6,6 +6,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+
 from pawlocal.api import auth
 from pawlocal.config import settings
 
@@ -30,7 +31,7 @@ def jwt_keys(monkeypatch):
     return private_key, issuer, client_id
 
 
-def token(private_key, **overrides):
+def token(private_key, *, include_exp=True, **overrides):
     now = datetime.now(UTC)
     claims = {
         "iss": "https://cognito-idp.ap-southeast-2.amazonaws.com/ap-southeast-2_test",
@@ -41,6 +42,8 @@ def token(private_key, **overrides):
         "exp": now + timedelta(minutes=5),
         **overrides,
     }
+    if not include_exp:
+        claims.pop("exp")
     return jwt.encode(claims, private_key, algorithm="RS256")
 
 
@@ -53,6 +56,15 @@ def test_access_token_validates_signature_issuer_and_access_token_claims(jwt_key
     assert (
         auth.get_current_subject(credentials(token(private_key))) == "user-subject-123"
     )
+
+
+def test_access_token_requires_expiration_claim(jwt_keys):
+    private_key, _, _ = jwt_keys
+
+    with pytest.raises(HTTPException) as error:
+        auth.get_current_subject(credentials(token(private_key, include_exp=False)))
+
+    assert error.value.status_code == 401
 
 
 @pytest.mark.parametrize(

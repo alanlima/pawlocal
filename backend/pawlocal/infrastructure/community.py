@@ -104,7 +104,10 @@ class CommunityRepository:
         self.session.add(
             ReportRecord(
                 target_type=target_type,
-                target_id=target_id,
+                target_place_id=target_id if target_type == "place" else None,
+                target_contribution_id=(
+                    target_id if target_type == "contribution" else None
+                ),
                 reporter_subject=subject,
                 reason=values["reason"],
             )

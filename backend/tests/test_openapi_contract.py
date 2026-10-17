@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import yaml
+
 from pawlocal.config import settings
 from pawlocal.main import app
 

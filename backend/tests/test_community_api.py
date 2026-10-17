@@ -1,4 +1,7 @@
-from uuid import UUID
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy.exc import IntegrityError
 
 from pawlocal.api.auth import get_current_subject
 from pawlocal.infrastructure.models import ContributionRecord, PlaceRecord, ReportRecord
@@ -168,3 +171,30 @@ def test_reports_are_accepted_without_echoing_reporter_identity(
     with session_factory() as session:
         report = session.query(ReportRecord).one()
         assert report.reporter_subject == "verified-user-subject"
+        assert report.target_place_id == PLACE_ID
+        assert report.target_contribution_id is None
+
+
+@pytest.mark.parametrize(
+    ("target_type", "target_place_id", "target_contribution_id"),
+    [
+        ("place", uuid4(), None),
+        ("contribution", None, uuid4()),
+    ],
+)
+def test_database_rejects_orphan_report_targets(
+    session_factory, target_type, target_place_id, target_contribution_id
+):
+    with session_factory() as session:
+        session.add(
+            ReportRecord(
+                target_type=target_type,
+                target_place_id=target_place_id,
+                target_contribution_id=target_contribution_id,
+                reporter_subject="verified-user-subject",
+                reason="An orphan target must not persist",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()

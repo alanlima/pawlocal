@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import pytest
+
 from pawlocal.infrastructure.models import ContributionRecord, PlaceRecord
 
 PLACE_1 = UUID("00000000-0000-4000-8000-000000000001")
@@ -67,6 +69,16 @@ def test_search_filters_paginates_and_excludes_unpublished(client, session_facto
         "page_size": 1,
         "total": 1,
     }
+
+
+def test_sqlite_models_reject_unknown_persisted_facilities():
+    with pytest.raises(ValueError, match="Unsupported place facilities"):
+        PlaceRecord(
+            name="Invalid fixture",
+            category="dog_park",
+            area="Brisbane City",
+            facilities=["Invented facility"],
+        )
 
 
 def test_search_empty_result_and_invalid_parameters(client, session_factory):

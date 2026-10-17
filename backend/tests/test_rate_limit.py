@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+
 from pawlocal.api.rate_limit import InMemoryWriteRateLimiter
 
 

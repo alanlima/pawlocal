@@ -1,12 +1,13 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from pawlocal.api.rate_limit import write_rate_limiter
 from pawlocal.infrastructure import models  # noqa: F401
 from pawlocal.infrastructure.database import Base, get_session
 from pawlocal.main import app
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
@@ -16,6 +17,11 @@ def client():
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
+    )
+    event.listen(
+        engine,
+        "connect",
+        lambda connection, _: connection.execute("PRAGMA foreign_keys=ON"),
     )
     Base.metadata.create_all(engine)
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)

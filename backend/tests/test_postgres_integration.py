@@ -2,6 +2,10 @@ import os
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import create_engine, delete, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from pawlocal.infrastructure.community import CommunityRepository, DuplicateReviewError
 from pawlocal.infrastructure.contributions import SqlAlchemyContributionRepository
 from pawlocal.infrastructure.models import (
@@ -11,8 +15,6 @@ from pawlocal.infrastructure.models import (
     ReportRecord,
 )
 from pawlocal.infrastructure.places import SqlAlchemyPlaceRepository
-from sqlalchemy import create_engine, delete
-from sqlalchemy.orm import Session
 
 
 @pytest.mark.integration
@@ -40,6 +42,18 @@ def test_postgres_repositories_constraints_and_records_survive_new_sessions():
                 )
             )
             session.commit()
+
+            with pytest.raises(IntegrityError):
+                session.execute(
+                    text(
+                        "INSERT INTO places (id, name, category, area, facilities) "
+                        "VALUES (:id, 'Invalid facility integration fixture', "
+                        "'dog_park', 'Brisbane City', "
+                        "ARRAY['Unsupported facility']::varchar(80)[])"
+                    ),
+                    {"id": uuid4()},
+                )
+            session.rollback()
 
             place_repository = SqlAlchemyPlaceRepository(session)
             places, total = place_repository.search(
@@ -92,6 +106,17 @@ def test_postgres_repositories_constraints_and_records_survive_new_sessions():
                     "reason": "Synthetic integration report",
                 },
             )
+            session.add(
+                ReportRecord(
+                    target_type="place",
+                    target_place_id=uuid4(),
+                    reporter_subject=subject,
+                    reason="Synthetic orphan target check",
+                )
+            )
+            with pytest.raises(IntegrityError):
+                session.commit()
+            session.rollback()
 
         with Session(engine) as session:
             reportable, total = SqlAlchemyContributionRepository(
@@ -101,7 +126,9 @@ def test_postgres_repositories_constraints_and_records_survive_new_sessions():
             assert any(item.id == contribution_id for item in reportable)
             assert session.get(PlaceRecord, place_id) is not None
             session.execute(
-                delete(ReportRecord).where(ReportRecord.target_id == contribution_id)
+                delete(ReportRecord).where(
+                    ReportRecord.target_contribution_id == contribution_id
+                )
             )
             session.execute(
                 delete(FavouriteRecord).where(FavouriteRecord.user_subject == subject)
