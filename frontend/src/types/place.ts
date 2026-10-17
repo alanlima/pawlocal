@@ -12,7 +12,7 @@ export interface Place {
   dogAccessRules: string | null
   facilities: Facility[]
   averageRating: number | null
-  reviewCount: number
+  reviewCount: number | null
   sourceUpdatedAt: string | null
   imageUrl?: string
   accent: string

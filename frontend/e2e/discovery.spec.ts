@@ -42,3 +42,17 @@ test('demo member can submit a review and a location suggestion', async ({ page 
   await page.getByRole('button', { name: 'Share with PawLocal' }).click()
   await expect(page.getByRole('status')).toContainText('Thanks for helping the PawLocal community!')
 })
+
+test('contribution dialog contains keyboard focus and returns focus to its trigger', async ({ page }) => {
+  await page.goto('/')
+  const trigger = page.getByRole('button', { name: 'Add a place' })
+  await trigger.click()
+  const dialog = page.getByRole('dialog')
+  const closeButton = dialog.getByRole('button', { name: 'Close' })
+  await expect(closeButton).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(trigger).toBeFocused()
+})

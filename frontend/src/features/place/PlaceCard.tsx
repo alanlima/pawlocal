@@ -17,7 +17,7 @@ export function PlaceCard({ place, index, saved, onOpen, onSave }: Props) {
     <button className="card-content" onClick={onOpen}>
       <span className="place-area"><MapPin size={13} />{place.area}</span>
       <span className="place-name">{place.name}</span>
-      <span className="place-meta"><span><Star size={14} fill="currentColor" /> {place.averageRating?.toFixed(1) ?? 'New'} {place.reviewCount > 0 && <span className="review-count">({place.reviewCount})</span>} {place.reviewCount > 0 && <small>sample</small>}</span><span className="view-link">Explore <ArrowUpRight size={14} /></span></span>
+      <span className="place-meta"><span><Star size={14} fill="currentColor" /> {place.averageRating?.toFixed(1) ?? 'New'} {place.reviewCount !== null && place.reviewCount > 0 && <span className="review-count">({place.reviewCount})</span>} {place.reviewCount !== null && place.reviewCount > 0 && <small>sample</small>}</span><span className="view-link">Explore <ArrowUpRight size={14} /></span></span>
     </button>
   </article>
 }

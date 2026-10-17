@@ -1,9 +1,9 @@
 import type { ContributionInput, Place, PlaceQuery, ReportInput } from '../types/place'
 import type { PlaceService } from './PlaceService'
 
-type PlaceWire = { id: string; name: string; category: Place['category']; area: string; address?: string | null; description?: string | null; dog_access_rules?: string | null; facilities?: string[]; average_rating?: number | null; review_count?: number; source_updated_at?: string | null }
+type PlaceWire = { id: string; name: string; category: Place['category']; area: string; address?: string | null; description?: string | null; dog_access_rules?: string | null; facilities?: string[]; average_rating?: number | null; source_updated_at?: string | null }
 type ContributionWire = { id: string; created_at: string }
-const fromWire = (wire: PlaceWire): Place => ({ id: wire.id, name: wire.name, category: wire.category, area: wire.area, address: wire.address ?? null, description: wire.description ?? null, dogAccessRules: wire.dog_access_rules ?? null, facilities: (wire.facilities ?? []) as Place['facilities'], averageRating: wire.average_rating ?? null, reviewCount: wire.review_count ?? 0, sourceUpdatedAt: wire.source_updated_at ?? null, accent: 'green' })
+const fromWire = (wire: PlaceWire): Place => ({ id: wire.id, name: wire.name, category: wire.category, area: wire.area, address: wire.address ?? null, description: wire.description ?? null, dogAccessRules: wire.dog_access_rules ?? null, facilities: (wire.facilities ?? []) as Place['facilities'], averageRating: wire.average_rating ?? null, reviewCount: null, sourceUpdatedAt: wire.source_updated_at ?? null, accent: 'green' })
 
 /** HTTP adapter seam. Map API wire names here; feature components stay adapter agnostic. */
 export class HttpPlaceService implements PlaceService {
@@ -18,13 +18,23 @@ export class HttpPlaceService implements PlaceService {
     return response.status === 204 || response.status === 202 ? undefined as T : response.json() as Promise<T>
   }
   async listPlaces(query: PlaceQuery): Promise<Place[]> {
-    const params = new URLSearchParams()
-    if (query.q) params.set('q', query.q)
-    if (query.area) params.set('area', query.area)
-    if (query.category) params.set('category', query.category)
-    query.facilities?.forEach((facility) => params.append('facilities', facility))
-    const page = await this.request<{ items: PlaceWire[] }>(`/places?${params}`)
-    return page.items.map(fromWire)
+    const results: PlaceWire[] = []
+    const pageSize = 100
+    let pageNumber = 1
+    let total = Number.POSITIVE_INFINITY
+    while (results.length < total) {
+      const params = new URLSearchParams({ page: String(pageNumber), page_size: String(pageSize) })
+      if (query.q) params.set('q', query.q)
+      if (query.area) params.set('area', query.area)
+      if (query.category) params.set('category', query.category)
+      query.facilities?.forEach((facility) => params.append('facilities', facility))
+      const page = await this.request<{ items: PlaceWire[]; total: number }>(`/places?${params}`)
+      total = page.total
+      if (page.items.length === 0) break
+      results.push(...page.items)
+      pageNumber += 1
+    }
+    return results.map(fromWire)
   }
   getPlace(id: string) { return this.request<PlaceWire>(`/places/${id}`).then(fromWire).catch((error: unknown) => { if (error instanceof Error && error.message.includes('(404)')) return null; throw error }) }
   async listFavourites() { const places = await this.request<Array<{ id: string }>>('/me/favourites'); return places.map((place) => place.id) }

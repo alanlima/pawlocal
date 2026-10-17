@@ -2,6 +2,8 @@
 
 Responsive React + TypeScript + Vite + Tailwind CSS discovery experience for Stage 1. The app currently uses demo seed records and a mock service; dog access and facility facts remain unknown until verified.
 
+No fixture currently has verified access or facility facts, so facility filters intentionally return no matches until verified details are available. Sample ratings and counts are marked as demo data.
+
 ## Run locally
 
 ```powershell
