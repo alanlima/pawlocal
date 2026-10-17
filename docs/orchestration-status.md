@@ -3,7 +3,7 @@
 > Temporary orchestration log for Stage 2, Stage 3, and Stage 3.1. Keep this page current until all three workstreams pass their acceptance and review gates; then archive or remove it.
 
 **Updated:** 2026-10-18  
-**Canonical baseline:** `main` at `68c0dac` (merged PR #15)  
+**Canonical baseline:** `main` at `e3577c9` (merged PR #16; PR #15 baseline `68c0dac`)  
 **Status:** Active; no workstream is complete.
 
 ## Current workstreams
@@ -13,6 +13,10 @@
 | Stage 2 — local frontend and observability | Issue [#11](https://github.com/alanlima/pawlocal/issues/11), merged PR [#16](https://github.com/alanlima/pawlocal/pull/16) (`e3577c9`) | `D:\source\pawlocal-stage2`, `11-stage-2-observability` at `662991d` | Codex and Reviewer code reviews satisfactory; PR merged. Collector/Loki/Tempo helper images build. Frontend Docker `npm ci` and bounded container `npm ping` stall, including explicit proxy settings; host npm registry responds 200. No official Compose services have been started/recreated. Old diagnostic stack logs indicate resource starvation, not a service-specific config fault. | Find a container package-install path or justified workaround; start the official stack and complete its runtime matrix. Keep issue #11 open and Stage 3.1 gated until acceptance passes. |
 | Stage 3 — backend and persistence | Issue [#12](https://github.com/alanlima/pawlocal/issues/12), draft PR [#18](https://github.com/alanlima/pawlocal/pull/18) | `D:\source\pawlocal-stage3`, `12-stage-3-backend` at `d95fedd` | Repository integration, authenticated browser/API/PostgreSQL flow, and persistence across a fresh API process pass; synthetic fixtures removed. Stage 2 merge `e3577c9` is merged into this branch with no conflicts; combined `docker compose config --quiet` passes. PR description reflects current evidence. Reviewer re-review is satisfactory; Codex unavailable because GitHub environment setup requires manual intervention. PostgreSQL container restart remains unchecked. | Run the isolated PostgreSQL restart persistence check after Stage 2 Docker window; keep PR open for restart and stage gates. Stage 3.1 remains gated on Stage 2 runtime completion. |
 | Stage 3.1 — tracing, logs, Compose integration | Issue [#13](https://github.com/alanlima/pawlocal/issues/13); PR not opened | No implementation worktree yet | Gated on Stage 2 being complete and reviewed. Must integrate the Stage 2 frontend/observability Compose services with Stage 3 API/database services without overwriting either branch's changes. | Start only after the Stage 2 gate passes; coordinate its worktree with the Stage 3 branch and produce a separate PR. |
+
+## Deferred documentation follow-up
+
+Issue [#19](https://github.com/alanlima/pawlocal/issues/19) tracks a readable Markdown standard and orchestrator format check for future GitHub issue/PR descriptions. It is labeled `deferred`; update the orchestrator guidance after the Stage 2, Stage 3, and Stage 3.1 workstreams are complete.
 
 ## Approved contract and integration decisions
 
