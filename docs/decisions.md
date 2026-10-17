@@ -2,12 +2,11 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
-## DEC-001 — Stage delivery sequence
+## DRAFT-001 — Stage delivery sequence
 
-- **Status:** Approved for Stage 1 on 2026-10-17; later gates remain in force.
+- **Status:** Proposed by `AGENTS.md`; implementation must follow it.
 - **Decision:** Foundations → frontend with mock API → observability → backend/persistence → production readiness → submission.
-- **Context:** Human review approved the current product, API, architecture and delivery plan for Stage 1. Product decisions that do not block the mock-backed frontend remain open for review before the stages where they apply.
-- **Consequence:** Stage 1 may proceed. Stop for human approval before Stage 2; all later review and cost gates remain in force.
+- **Consequence:** Stage gates are explicit; do not begin later implementation before review approval.
 
 ## DRAFT-002 — No hosting selection yet
 
