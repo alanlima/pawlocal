@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-The project is in **Stage 0: Foundations**. Product requirements, API boundaries, agent responsibilities and the staged delivery plan are being established. No application implementation or cloud infrastructure is included yet.
+The project has started **Stage 1: Frontend with mock API**. See [frontend setup and adapter notes](frontend/README.md). The application uses demo seed records only; place access and facility details are not represented as verified facts.
 
 ## Project documentation
 
@@ -24,5 +24,5 @@ React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreS
 
 ## Development
 
-There is no runnable application yet. Stage 1 begins only after the Stage 0 documents and implementation plan receive human review.
+Run the frontend from the repository root with `cd frontend`, `npm install`, then `npm run dev`. See [frontend README](frontend/README.md) for tests and the future HTTP adapter seam. Stage 1 ends at its human review gate; observability and backend work are not included here.
 

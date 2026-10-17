@@ -27,6 +27,7 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/coverage/
+frontend/*.tsbuildinfo
 coverage/
 .vite/
 playwright-report/
