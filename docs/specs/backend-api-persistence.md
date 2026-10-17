@@ -1,6 +1,6 @@
 # Stage 3 — Backend API and persistence
 
-**Status:** Proposed for human approval before implementation starts. Open a GitHub issue with scope and acceptance criteria before assigning the Backend Engineer.
+**Status:** Approved for implementation on 2026-10-18. Issue #12 is open with scope and acceptance criteria; Stage 3 may start in parallel with Stage 2 in a separate branch and worktree.
 
 ## Workstream relationship
 
@@ -24,7 +24,7 @@ Use PostgreSQL for runtime persistence. Keep the backend runnable locally throug
 
 Implement the approved OpenAPI operations: `GET /places` with q, area, category, repeated facilities, and pagination; `GET /places/{place_id}`; `GET/PUT/DELETE /me/favourites`; `POST /contributions`; and `POST /reports`. Preserve response/error semantics and snake_case wire fields expected by `frontend/src/services/HttpPlaceService.ts`. Preserve the existing `PlaceService` boundary: UI components must not construct requests. Replace the mock adapter with the HTTP adapter through the service factory only when the backend is ready.
 
-**Contract gap requiring human decision before implementation:** the frontend `PlaceService` includes `listReportableContributions()`, but `openapi.yaml` has no read operation for contributions. Approve and add a paginated public read operation for reportable, published contributions with only public fields, or explicitly revise the frontend report flow and service contract. Update OpenAPI, the HTTP adapter, and contract tests together. Do not silently ship a placeholder that leaves the report flow incomplete.
+The human-approved contract adds unauthenticated, paginated `GET /contributions/reportable` for already-published contributions. Return only the public fields needed by the report dialog (`id`, `kind`, `body`, `place_id`, `rating`, `created_at`); never return reporter or contributor identity. Implement the HTTP adapter and contract tests against `openapi.yaml`.
 
 ## Data, behavior, and security
 
@@ -32,7 +32,7 @@ Persist places, contributions, favourites, and reports with stable IDs, created/
 
 Enforce a unique favourite per user/place and prevent duplicate ratings/reviews by the same user for the same place. Validate contribution kinds and field lengths against approved schemas. Accept reports for places or contributions, return contract-defined accepted status, and keep reporter identity private from public responses. Apply authorization, input validation, and rate limiting server-side; report submissions must not reveal whether a private moderation record contains reporter details.
 
-**Authentication is a precondition:** select and record the identity provider and token issuer/audience requirements before implementing protected endpoints. Validate signature, issuer, audience, and expiry; derive user identity from verified subject claim. The frontend demo-member toggle is not authentication. Do not create a production auth substitute or trust client-supplied user IDs. Record the selected provider and contract impact in a decision and update relevant OpenAPI security details before implementation.
+Use Amazon Cognito User Pool as the OIDC identity provider for protected API operations. Accept user-pool access tokens only; validate the configured exact issuer, signature against the pool JWKS key, `token_use=access`, expiry, and `client_id` against the configured app-client ID. Externalize issuer and app-client configuration. Cognito access-token `aud` is present only with resource binding: require and validate the configured API audience when resource binding is enabled, and validate it against configuration if present otherwise. Derive identity from the verified subject claim. The frontend demo-member toggle is not authentication. Do not trust client-supplied user IDs or provision Cognito/AWS resources in this stage. See DEC-002 and the OpenAPI security description.
 
 Community contributions follow the approved immediate-publication policy after validation, with reports supporting moderation. Do not add moderator UI or unapproved moderation roles/endpoints in this stage.
 

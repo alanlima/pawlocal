@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PawLocal API
   version: 0.1.0
-  description: Draft Stage 0 contract for the PawLocal MVP. Review before implementation.
+  description: Human-approved API contract for Stage 3 implementation as of 2026-10-18. See docs/decisions.md DEC-002 for identity and reportable-contribution decisions.
 servers:
   - url: /api/v1
 paths:
@@ -110,6 +110,28 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { description: Duplicate rating/review or conflicting contribution }
         '429': { $ref: '#/components/responses/RateLimited' }
+  /contributions/reportable:
+    get:
+      operationId: listReportableContributions
+      summary: List published contributions that can be reported
+      description: >-
+        Public and unauthenticated. Returns only already-published contributions and public fields
+        needed by the report dialog. Never include reporter or contributor identity. Supports
+        pagination; do not return pending, private, or moderation-only records.
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: A page of published, publicly reportable contributions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportableContributionPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /reports:
     post:
       operationId: submitReport
@@ -131,7 +153,14 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Placeholder contract; identity provider and token lifecycle require a Stage 0 decision.
+      description: >-
+        Amazon Cognito User Pool OIDC access token. The API validates the configured exact issuer,
+        the JWT signature against the pool JWKS, token_use=access, expiry, and client_id against the
+        configured app-client ID. Cognito access-token aud is present only with resource binding;
+        when enabled it must match the configured API resource audience. If aud is present without
+        resource binding, validate it against configured resource-audience policy. Never authorize
+        with an ID token or a client-supplied user ID. Pool issuer, app-client ID and resource
+        audience are external configuration; no AWS resource provisioning is part of the contract.
   schemas:
     PlaceCategory:
       type: string
@@ -184,6 +213,25 @@ components:
           properties:
             id: { type: string, format: uuid }
             created_at: { type: string, format: date-time }
+    ReportableContribution:
+      type: object
+      description: Published public contribution fields only; contributor and reporter identity are excluded.
+      required: [id, kind, body, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [review, location_suggestion, tip, correction] }
+        body: { type: string }
+        place_id: { type: [string, 'null'], format: uuid }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        created_at: { type: string, format: date-time }
+    ReportableContributionPage:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ReportableContribution' } }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
     ReportInput:
       type: object
       required: [target_type, target_id, reason]
