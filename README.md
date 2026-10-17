@@ -26,6 +26,10 @@ React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreS
 
 Stage 3 backend setup, migration, API, and test instructions are in [backend/README.md](backend/README.md). Protected API operations validate Cognito access tokens; no Cognito or other AWS resources are provisioned in this stage.
 
+## Frontend service mode
+
+The frontend uses `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`. When the toggle is false or unset, it selects the typed `HttpPlaceService` and uses `VITE_API_BASE_URL` (default `/api/v1`). Vite's development server proxies that path to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`); set the target to `http://backend:8000` in Compose. Production deployments should route `/api/v1` to the backend through their same-origin reverse proxy. A failed or unavailable API remains an HTTP error and never silently switches to mock data. The checked-in `.env.example` opts into mock mode for the local demo.
+
 ## Development
 
 For the local frontend and observability stack, run `docker compose up --build -d` from the repository root. The Compose project is namespaced `pawlocal-stage2` to keep it separate from the parallel Stage 3 stack. Open PawLocal at <http://localhost:5173> and Grafana at <http://localhost:3000>. See [frontend README](frontend/README.md) for all published host ports, health checks, privacy notes, telemetry controls, synthetic-failure walkthrough, shutdown, tests and the Stage 3 HTTP adapter seam. All services bind to localhost; no hosted telemetry or cloud resources are configured.

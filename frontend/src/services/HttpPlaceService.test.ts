@@ -93,6 +93,29 @@ describe('HttpPlaceService', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('sends ratings only for review contributions', async () => {
+    const response = () =>
+      new Response(JSON.stringify({ id: 'contribution-id', created_at: '2026-10-18T00:00:00Z' }), {
+        status: 201,
+      })
+    const fetchMock = vi.fn().mockResolvedValueOnce(response()).mockResolvedValueOnce(response())
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new HttpPlaceService()
+
+    await service.submitContribution({ kind: 'tip', body: 'Bring water' })
+    await service.submitContribution({
+      kind: 'review',
+      placeId: 'place-id',
+      rating: 4,
+      body: 'A helpful review',
+    })
+
+    const tipPayload = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
+    const reviewPayload = JSON.parse(fetchMock.mock.calls[1][1]?.body as string)
+    expect(tipPayload).not.toHaveProperty('rating')
+    expect(reviewPayload.rating).toBe(4)
+  })
+
   it('loads reportable contributions across pages and maps only public fields', async () => {
     const fetchMock = vi
       .fn()

@@ -121,10 +121,10 @@ threading.Thread(
     target=uvicorn.run,
     kwargs={
         "app": issuer_app,
-        "host": "0.0.0.0",
+        "host": "127.0.0.1",
         "port": ISSUER_PORT,
         "log_level": "warning",
     },
     daemon=True,
 ).start()
-uvicorn.run(api_app, host="0.0.0.0", port=API_PORT, log_level="warning")
+uvicorn.run(api_app, host="127.0.0.1", port=API_PORT, log_level="warning")

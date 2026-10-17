@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from pawlocal.domain.places import Facility
 
@@ -62,6 +62,19 @@ class ContributionInput(BaseModel):
     rating: int | None = Field(default=None, ge=1, le=5)
     body: str = Field(min_length=1, max_length=5000)
 
+    @model_validator(mode="after")
+    def validate_kind_fields(self):
+        if not self.body.strip():
+            raise ValueError("body must contain non-whitespace characters")
+        if self.kind == "review":
+            if self.place_id is None:
+                raise ValueError("reviews require a place_id")
+            if self.rating is None:
+                raise ValueError("reviews require a rating")
+        elif self.rating is not None:
+            raise ValueError("only reviews may include a rating")
+        return self
+
 
 class ContributionResponse(BaseModel):
     id: UUID
@@ -78,6 +91,12 @@ class ReportInput(BaseModel):
     target_type: Literal["place", "contribution"]
     target_id: UUID
     reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        if not self.reason.strip():
+            raise ValueError("reason must contain non-whitespace characters")
+        return self
 
 
 class ErrorResponse(BaseModel):

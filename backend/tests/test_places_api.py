@@ -116,6 +116,53 @@ def test_search_supports_text_category_and_page_boundaries(client, session_facto
     assert first_page.json()["items"][0]["id"] != second_page.json()["items"][0]["id"]
 
 
+def test_search_treats_percent_and_underscore_as_literal_text(client, session_factory):
+    with session_factory() as session:
+        session.add_all(
+            [
+                PlaceRecord(
+                    id=UUID("00000000-0000-4000-8000-000000000031"),
+                    name="100% dog park",
+                    category="cafe",
+                    area="Brisbane City",
+                    facilities=[],
+                    is_published=True,
+                ),
+                PlaceRecord(
+                    id=UUID("00000000-0000-4000-8000-000000000032"),
+                    name="100 percent dog park",
+                    category="cafe",
+                    area="Brisbane City",
+                    facilities=[],
+                    is_published=True,
+                ),
+                PlaceRecord(
+                    id=UUID("00000000-0000-4000-8000-000000000033"),
+                    name="Cedar Grove dog park",
+                    category="cafe",
+                    area="Cedar_Grove",
+                    facilities=[],
+                    is_published=True,
+                ),
+                PlaceRecord(
+                    id=UUID("00000000-0000-4000-8000-000000000034"),
+                    name="Cedar Grove dog park",
+                    category="cafe",
+                    area="Cedar Grove",
+                    facilities=[],
+                    is_published=True,
+                ),
+            ]
+        )
+        session.commit()
+
+    percent = client[0].get("/api/v1/places", params={"q": "%"})
+    underscore = client[0].get("/api/v1/places", params={"q": "_"})
+
+    assert [item["name"] for item in percent.json()["items"]] == ["100% dog park"]
+    assert [item["area"] for item in underscore.json()["items"]] == ["Cedar_Grove"]
+
+
 def test_detail_returns_unknown_facts_as_null_and_unknown_or_unpublished_is_404(
     client, session_factory
 ):
@@ -137,11 +184,23 @@ def test_reportable_contributions_are_paginated_and_exclude_private_identity(
     client, session_factory
 ):
     with session_factory() as session:
+        session.add(
+            PlaceRecord(
+                id=UUID("00000000-0000-4000-8000-000000000010"),
+                name="Public review fixture",
+                category="dog_park",
+                area="Brisbane City",
+                facilities=[],
+                is_published=True,
+            )
+        )
+        session.flush()
         session.add_all(
             [
                 ContributionRecord(
                     id=UUID("00000000-0000-4000-8000-000000000011"),
                     kind="review",
+                    place_id=UUID("00000000-0000-4000-8000-000000000010"),
                     body="A public review",
                     rating=4,
                     contributor_subject="private-subject-1",

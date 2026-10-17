@@ -1,4 +1,4 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -50,7 +50,19 @@ class CommunityRepository:
 
     def submit_contribution(self, subject: str, values: dict):
         place_id = values.get("place_id")
-        if (
+        place_record = None
+        if place_id and values["kind"] == "review":
+            place_record = self.session.scalar(
+                select(PlaceRecord)
+                .where(
+                    PlaceRecord.id == place_id,
+                    PlaceRecord.is_published.is_(True),
+                )
+                .with_for_update()
+            )
+            if place_record is None:
+                return None
+        elif (
             place_id
             and SqlAlchemyPlaceRepository(self.session).get_published(place_id) is None
         ):
@@ -65,6 +77,16 @@ class CommunityRepository:
         )
         self.session.add(record)
         try:
+            self.session.flush()
+            if values["kind"] == "review" and place_record is not None:
+                average_rating = self.session.scalar(
+                    select(func.avg(ContributionRecord.rating)).where(
+                        ContributionRecord.kind == "review",
+                        ContributionRecord.place_id == place_id,
+                        ContributionRecord.is_published.is_(True),
+                    )
+                )
+                place_record.average_rating = float(average_rating)
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
