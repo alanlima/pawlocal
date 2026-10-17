@@ -47,8 +47,10 @@ describe('PawLocal journeys', () => {
     await user.click(screen.getByRole('button', { name: 'Add a place' }))
     const dialog = screen.getByRole('dialog')
     expect(within(dialog).getByText(/visitor mode/i)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /Sign in/ }))
-    await user.type(within(dialog).getByLabelText('Your note'), 'A helpful local tip')
+    await user.click(within(dialog).getByRole('button', { name: 'Continue as demo member' }))
+    const note = within(dialog).getByLabelText('Your note')
+    expect(note).toHaveFocus()
+    await user.type(note, 'A helpful local tip')
     await user.click(within(dialog).getByRole('button', { name: /Share with PawLocal/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(screen.getByRole('status')).toHaveTextContent('Thanks for helping the PawLocal community!')
@@ -76,7 +78,7 @@ describe('PawLocal journeys', () => {
     expect(screen.getByText('Review count not provided')).toBeInTheDocument()
   })
 
-  it('can report a contribution by its UUID', async () => {
+  it('can select a visible demo contribution, then restore place reporting with the place ID', async () => {
     const user = userEvent.setup()
     const report = vi.spyOn(placeService, 'submitReport').mockResolvedValueOnce(undefined)
     render(<App />)
@@ -85,11 +87,15 @@ describe('PawLocal journeys', () => {
     const dialog = screen.getByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Continue as demo member' }))
     await user.selectOptions(within(dialog).getByLabelText('What are you reporting?'), 'contribution')
-    const id = '00000000-0000-4000-8000-000000000001'
-    await user.type(within(dialog).getByLabelText('Contribution ID'), id)
+    await screen.findByLabelText('Choose a community contribution')
+    await user.selectOptions(within(dialog).getByLabelText('Choose a community contribution'), '00000000-0000-4000-8000-000000000099')
+    expect(within(dialog).getByRole('note')).toHaveTextContent('DEMO ONLY')
+    await user.selectOptions(within(dialog).getByLabelText('What are you reporting?'), 'place')
+    expect(within(dialog).queryByLabelText('Choose a community contribution')).not.toBeInTheDocument()
+    expect(within(dialog).getByLabelText('What should our community team check?')).toBeVisible()
     await user.type(within(dialog).getByLabelText('What should our community team check?'), 'Please review this contribution.')
     await user.click(within(dialog).getByRole('button', { name: 'Send report' }))
-    await waitFor(() => expect(report).toHaveBeenCalledWith({ targetType: 'contribution', targetId: id, reason: 'Please review this contribution.' }))
+    await waitFor(() => expect(report).toHaveBeenCalledWith({ targetType: 'place', targetId: demoPlaces.find((place) => place.name === 'New Farm Park')?.id, reason: 'Please review this contribution.' }))
   })
 
   it('keeps contribution text and shows a helpful message when submit fails', async () => {

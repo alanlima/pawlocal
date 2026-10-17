@@ -27,4 +27,18 @@ describe('useDiscovery', () => {
     expect(result.current.error).toBe(false)
     expect(result.current.loading).toBe(false)
   })
+
+  it('aborts the previous service request when a new search supersedes it', () => {
+    const signals: AbortSignal[] = []
+    const service = { listPlaces: vi.fn((_query: unknown, signal?: AbortSignal) => {
+      if (signal) signals.push(signal)
+      return new Promise<typeof demoPlaces>(() => undefined)
+    }) } as unknown as PlaceService
+    const { result, unmount } = renderHook(() => useDiscovery(service))
+    act(() => result.current.updateQuery({ q: 'new search' }))
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
+    unmount()
+    expect(signals[1].aborted).toBe(true)
+  })
 })

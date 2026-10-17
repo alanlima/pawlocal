@@ -22,4 +22,13 @@ describe('MockPlaceService', () => {
     await service.toggleFavourite('place-1')
     expect(await service.listFavourites()).toEqual([])
   })
+
+  it('lists explicit demo-only report targets and keeps submitted contributions reportable', async () => {
+    const service = new MockPlaceService()
+    const initial = await service.listReportableContributions()
+    expect(initial[0].demoOnly).toBe(true)
+    expect(initial[0].body).toContain('not community data')
+    const submitted = await service.submitContribution({ kind: 'tip', body: 'A user-entered demo note.' })
+    expect((await service.listReportableContributions()).map((item) => item.id)).toContain(submitted.id)
+  })
 })

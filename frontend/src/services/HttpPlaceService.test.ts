@@ -20,4 +20,17 @@ describe('HttpPlaceService', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('page=2')
     expect(String(fetchMock.mock.calls[0][0])).toContain('page_size=100')
   })
+
+  it('passes the abort signal through pagination and stops before requesting later pages', async () => {
+    const controller = new AbortController()
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal)
+      controller.abort()
+      return new Response(JSON.stringify({ items: [{ id: '00000000-0000-4000-8000-000000000001', name: 'First', category: 'walk', area: 'Brisbane City' }], page: 1, page_size: 100, total: 250 }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(new HttpPlaceService().listPlaces({}, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

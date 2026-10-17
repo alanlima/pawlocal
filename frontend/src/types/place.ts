@@ -21,4 +21,4 @@ export interface Place {
 export interface PlaceQuery { q?: string; area?: string; category?: PlaceCategory | ''; facilities?: Facility[] }
 export interface ContributionInput { kind: ContributionKind; placeId?: string; rating?: number; body: string }
 export interface ReportInput { targetType: 'place' | 'contribution'; targetId: string; reason: string }
-export interface Contribution extends ContributionInput { id: string; createdAt: string }
+export interface Contribution extends ContributionInput { id: string; createdAt: string; demoOnly?: boolean }

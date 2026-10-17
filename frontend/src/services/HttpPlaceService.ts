@@ -17,18 +17,19 @@ export class HttpPlaceService implements PlaceService {
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
     return response.status === 204 || response.status === 202 ? undefined as T : response.json() as Promise<T>
   }
-  async listPlaces(query: PlaceQuery): Promise<Place[]> {
+  async listPlaces(query: PlaceQuery, signal?: AbortSignal): Promise<Place[]> {
     const results: PlaceWire[] = []
     const pageSize = 100
     let pageNumber = 1
     let total = Number.POSITIVE_INFINITY
     while (results.length < total) {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
       const params = new URLSearchParams({ page: String(pageNumber), page_size: String(pageSize) })
       if (query.q) params.set('q', query.q)
       if (query.area) params.set('area', query.area)
       if (query.category) params.set('category', query.category)
       query.facilities?.forEach((facility) => params.append('facilities', facility))
-      const page = await this.request<{ items: PlaceWire[]; total: number }>(`/places?${params}`)
+      const page = await this.request<{ items: PlaceWire[]; total: number }>(`/places?${params}`, { signal })
       total = page.total
       if (page.items.length === 0) break
       results.push(...page.items)
@@ -47,5 +48,7 @@ export class HttpPlaceService implements PlaceService {
     const wire = await this.request<ContributionWire>('/contributions', { method: 'POST', body: JSON.stringify({ kind: input.kind, place_id: input.placeId ?? null, rating: input.rating ?? null, body: input.body }) })
     return { ...input, id: wire.id, createdAt: wire.created_at }
   }
+  /** OpenAPI currently has contribution submission but no listing operation; the HTTP adapter cannot offer report targets yet. */
+  async listReportableContributions() { return [] }
   async submitReport(input: ReportInput) { await this.request<void>('/reports', { method: 'POST', body: JSON.stringify({ target_type: input.targetType, target_id: input.targetId, reason: input.reason }) }) }
 }

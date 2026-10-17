@@ -5,7 +5,7 @@ import { useDiscovery } from '../features/discovery/useDiscovery'
 import { ContributionDialog } from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
 import { PlaceDetail } from '../features/place/PlaceDetail'
-import type { ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
+import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
 
 const categories: { id: PlaceCategory | ''; label: string; icon: string }[] = [
   { id: '', label: 'All places', icon: '✳' }, { id: 'dog_park', label: 'Dog parks', icon: '◉' }, { id: 'beach', label: 'Beaches', icon: '⌁' }, { id: 'walk', label: 'Walks', icon: '↗' }, { id: 'hiking_area', label: 'Hiking', icon: '△' }, { id: 'cafe', label: 'Cafés', icon: '⌂' },
@@ -26,6 +26,7 @@ export default function App() {
   const [writeError, setWriteError] = useState('')
   const [reportTargetType, setReportTargetType] = useState<'place' | 'contribution'>('place')
   const [reportTargetId, setReportTargetId] = useState('')
+  const [reportableContributions, setReportableContributions] = useState<Contribution[]>([])
   const [notice, setNotice] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [view, setView] = useState<'explore' | 'favourites'>('explore')
@@ -42,6 +43,17 @@ export default function App() {
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  useEffect(() => {
+    if (dialog !== 'report' || reportTargetType !== 'contribution') return
+    let current = true
+    void placeService.listReportableContributions().then((items) => {
+      if (!current) return
+      setReportableContributions(items)
+      setReportTargetId((targetId) => targetId || items[0]?.id || '')
+    }).catch(() => { if (current) setReportableContributions([]) })
+    return () => { current = false }
+  }, [dialog, reportTargetType])
 
   const visiblePlaces = useMemo(() => view === 'favourites' ? places.filter((place) => favourites.includes(place.id)) : places, [places, favourites, view])
   const openDialog = (type: 'contribute' | 'report', nextKind?: ContributionKind, targetType: 'place' | 'contribution' = 'place') => {
@@ -105,7 +117,7 @@ export default function App() {
         <footer><a className="footer-brand" href="/" onClick={(event) => event.preventDefault()}><PawPrint size={15} /> pawlocal.</a><span>A little more outside, together.</span><span>South East Queensland, Australia</span></footer>
       </main>
     </>}
-    <ContributionDialog dialog={dialog} signedIn={signedIn} setSignedIn={setSignedIn} kind={kind} setKind={setKind} rating={rating} setRating={setRating} message={message} setMessage={setMessage} writeError={writeError} reportTargetType={reportTargetType} reportTargetId={reportTargetId} setReportTargetType={setReportTargetType} setReportTargetId={setReportTargetId} onClose={closeDialog} onSubmit={() => void submit()} onNotice={setNotice} />
+    <ContributionDialog dialog={dialog} signedIn={signedIn} setSignedIn={setSignedIn} kind={kind} setKind={setKind} rating={rating} setRating={setRating} message={message} setMessage={setMessage} writeError={writeError} reportTargetType={reportTargetType} reportTargetId={reportTargetId} reportPlaceId={selected?.id ?? places[0]?.id ?? ''} reportableContributions={reportableContributions} setReportTargetType={setReportTargetType} setReportTargetId={setReportTargetId} onClose={closeDialog} onSubmit={() => void submit()} onNotice={setNotice} />
     {notice && <div className="toast" role="status"><Check size={17} />{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={15} /></button></div>}
   </div>
 }
