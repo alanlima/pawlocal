@@ -3,7 +3,7 @@
 > Temporary orchestration log for Stage 2, Stage 3, and Stage 3.1. Keep this page current until all three workstreams pass their acceptance and review gates; then archive or remove it.
 
 **Updated:** 2026-10-18  
-**Canonical baseline:** `main` at `e3577c9` (merged PR #16; PR #15 baseline `68c0dac`)  
+**Canonical baseline:** `main` at `e3577c9` (merged PR #16; PR #15 baseline `68c0dac`)
 **Status:** Active; no workstream is complete.
 
 ## Current workstreams
