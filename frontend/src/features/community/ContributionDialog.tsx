@@ -172,9 +172,7 @@ export function ContributionDialog({
                 </>
               ) : (
                 <p className="modal-note" role="status">
-                  No reportable contributions are available from this API yet. The current OpenAPI
-                  contract supports submitting contributions but does not provide a listing
-                  endpoint.
+                  No published community contributions are available to report yet.
                 </p>
               ))}
           </>

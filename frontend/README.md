@@ -21,7 +21,10 @@ npm test
 npm run build
 npx playwright install chromium
 npm run test:e2e
+npm run test:e2e:backend
 ```
+
+`test:e2e:backend` expects the isolated PostgreSQL-backed API and ephemeral JWKS issuer from `backend/README.md` to be running on ports 18001 and 18002. It uses a separate Vite config and HTTP-service alias; the regular app factory and mock-mode tests are unchanged.
 
 ## Format and lint frontend TypeScript
 

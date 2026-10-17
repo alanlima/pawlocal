@@ -25,8 +25,23 @@ To reset a disposable local database, drop and recreate the local `pawlocal` dat
 
 Write rate limits are per subject and per API process. This is suitable for local single-instance development; it is not a distributed production limiter. Public reportable contributions include published content fields only and omit contributor identity.
 
-## Browser integration authentication (planned, not yet verified)
+## Browser integration authentication
 
-Authenticated Playwright runs must use the same `get_current_subject` validation path as production, with a disposable local OIDC test issuer. Generate a fresh RSA signing key for the test run, serve its public key from `<test-issuer>/.well-known/jwks.json`, and set `PAWLOCAL_COGNITO_ISSUER` and `PAWLOCAL_COGNITO_APP_CLIENT_ID` to that issuer and a test client ID. Sign short-lived access tokens with the exact issuer, a synthetic `sub`, `token_use=access`, `client_id`, and `exp`; include the configured resource audience when that check is enabled. Run the real API and PostgreSQL with these test-only values, and let Playwright obtain its token from a test-only frontend auth provider. Keep the private key and token ephemeral; never commit them or reuse them in production.
+`tests/e2e_local_server.py` is a test-only runner that applies migrations to a dedicated database, seeds one clearly synthetic place, and starts the real API plus a disposable OIDC issuer. It creates an ephemeral RSA key and short-lived access tokens on each run. The API uses its normal issuer, JWKS, expiry, token-use and client-ID validation; the helper adds no production authentication bypass. Never point it at a database containing data you need: it resets records for its fixed synthetic subject and place IDs.
 
-The frontend factory currently uses the mock service and Stage 2 owns its observability wrapper. Coordinate the HTTP-mode switch with that workstream and preserve its wrapper. The existing demo-member UI is mock-only and does not authenticate against the API. No browser-to-PostgreSQL authenticated journey has been run yet; this acceptance item remains open until the local issuer, HTTP adapter, database and browser flow are exercised together.
+With the backend virtual environment and dependencies installed, set `PAWLOCAL_DATABASE_URL` to the dedicated PostgreSQL test database and run from `backend/`:
+
+```powershell
+$env:PAWLOCAL_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@localhost:55432/pawlocal_stage3_verify"
+python tests/e2e_local_server.py
+```
+
+The helper listens on `127.0.0.1:18001` for the API and `127.0.0.1:18002` for its issuer by default. In a second terminal, run from `frontend/`:
+
+```powershell
+npm run test:e2e:backend
+```
+
+The dedicated Vite test configuration aliases only the test build to `HttpPlaceService` and proxies requests to the real API. It obtains a token from the local issuer, then covers anonymous rejection, place discovery and detail, contribution, favourite, report, and reloading saved/reportable state in a fresh browser context. The demo-member control only reveals mock-stage form UI; it does not authenticate API requests. The production service factory remains unchanged, including the Stage 2 observability wrapper when that workstream is integrated.
+
+The harness and browser test are implemented and pass static checks. The authenticated browser-to-PostgreSQL run remains unverified in this worktree: this host cannot complete a PostgreSQL handshake through its published Docker port, the Docker helper could not install Python because container DNS failed, and the cached Python images lacked SQLAlchemy. Keep this acceptance item open until the documented command passes against the dedicated database.
