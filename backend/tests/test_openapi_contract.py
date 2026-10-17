@@ -47,3 +47,15 @@ def test_runtime_openapi_matches_query_and_extra_field_validation():
     assert response["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/Error"
     }
+
+
+def test_openapi_documents_review_rating_and_nonblank_content_rules():
+    specification = yaml.safe_load(
+        (Path(__file__).parents[2] / "openapi.yaml").read_text(encoding="utf-8")
+    )
+    schemas = specification["components"]["schemas"]
+    contribution = schemas["ContributionInput"]
+    assert contribution["properties"]["body"]["pattern"] == r"\S"
+    assert contribution["allOf"][0]["then"]["required"] == ["place_id", "rating"]
+    assert contribution["allOf"][1]["then"]["properties"]["rating"] == {"type": "null"}
+    assert schemas["ReportInput"]["properties"]["reason"]["pattern"] == r"\S"

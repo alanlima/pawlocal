@@ -91,6 +91,14 @@ class ContributionRecord(Base):
             "length(body) BETWEEN 1 AND 5000", name="ck_contributions_body_length"
         ),
         CheckConstraint(
+            "length(trim(body)) >= 1", name="ck_contributions_body_nonblank"
+        ),
+        CheckConstraint(
+            "(kind = 'review' AND place_id IS NOT NULL AND rating IS NOT NULL) OR "
+            "(kind <> 'review' AND rating IS NULL)",
+            name="ck_contributions_review_fields",
+        ),
+        CheckConstraint(
             "rating IS NULL OR (rating >= 1 AND rating <= 5)",
             name="ck_contributions_rating",
         ),
@@ -145,6 +153,7 @@ class ReportRecord(Base):
         CheckConstraint(
             "length(reason) BETWEEN 1 AND 2000", name="ck_reports_reason_length"
         ),
+        CheckConstraint("length(trim(reason)) >= 1", name="ck_reports_reason_nonblank"),
         CheckConstraint(
             "(target_type = 'place' AND target_place_id IS NOT NULL "
             "AND target_contribution_id IS NULL) OR "

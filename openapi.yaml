@@ -224,7 +224,22 @@ components:
         kind: { type: string, enum: [review, location_suggestion, tip, correction] }
         place_id: { type: [string, 'null'], format: uuid }
         rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
-        body: { type: string, minLength: 1, maxLength: 5000 }
+        body: { type: string, minLength: 1, maxLength: 5000, pattern: '\S' }
+      allOf:
+        - if:
+            properties: { kind: { const: review } }
+            required: [kind]
+          then:
+            required: [place_id, rating]
+            properties:
+              place_id: { type: string, format: uuid }
+              rating: { type: integer, minimum: 1, maximum: 5 }
+        - if:
+            properties: { kind: { enum: [location_suggestion, tip, correction] } }
+            required: [kind]
+          then:
+            properties:
+              rating: { type: 'null' }
     Contribution:
       allOf:
         - $ref: '#/components/schemas/ContributionInput'
@@ -259,7 +274,7 @@ components:
       properties:
         target_type: { type: string, enum: [place, contribution] }
         target_id: { type: string, format: uuid }
-        reason: { type: string, minLength: 1, maxLength: 2000 }
+        reason: { type: string, minLength: 1, maxLength: 2000, pattern: '\S' }
     Error:
       type: object
       required: [code, message]

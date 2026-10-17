@@ -108,7 +108,7 @@ export class HttpPlaceService implements PlaceService {
       body: JSON.stringify({
         kind: input.kind,
         place_id: input.placeId ?? null,
-        rating: input.rating ?? null,
+        ...(input.kind === 'review' ? { rating: input.rating } : {}),
         body: input.body,
       }),
     })

@@ -21,12 +21,18 @@ class SqlAlchemyPlaceRepository:
     ) -> tuple[list[Place], int]:
         statement = select(PlaceRecord).where(PlaceRecord.is_published.is_(True))
         if query:
-            pattern = f"%{query.strip()}%"
+            escaped_query = (
+                query.strip()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped_query}%"
             statement = statement.where(
                 or_(
-                    PlaceRecord.name.ilike(pattern),
-                    PlaceRecord.area.ilike(pattern),
-                    PlaceRecord.category.ilike(pattern),
+                    PlaceRecord.name.ilike(pattern, escape="\\"),
+                    PlaceRecord.area.ilike(pattern, escape="\\"),
+                    PlaceRecord.category.ilike(pattern, escape="\\"),
                 )
             )
         if area:

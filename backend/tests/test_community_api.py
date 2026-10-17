@@ -123,6 +123,69 @@ def test_contribution_submission_duplicate_review_and_public_projection(
     with session_factory() as session:
         record = session.query(ContributionRecord).one()
         assert record.contributor_subject == "verified-user-subject"
+        place = session.get(PlaceRecord, PLACE_ID)
+        assert place.average_rating == 5
+
+
+def test_review_fields_and_non_review_rating_are_validated(client, session_factory):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client)
+
+    missing_place = app.post(
+        "/api/v1/contributions",
+        json={"kind": "review", "rating": 4, "body": "No place"},
+    )
+    missing_rating = app.post(
+        "/api/v1/contributions",
+        json={"kind": "review", "place_id": str(PLACE_ID), "body": "No rating"},
+    )
+    tip_rating = app.post(
+        "/api/v1/contributions",
+        json={"kind": "tip", "rating": 4, "body": "Tips cannot be rated"},
+    )
+    whitespace_body = app.post(
+        "/api/v1/contributions",
+        json={"kind": "tip", "body": " \t\n "},
+    )
+
+    assert all(
+        response.status_code == 400
+        for response in (missing_place, missing_rating, tip_rating, whitespace_body)
+    )
+    with session_factory() as session:
+        assert session.query(ContributionRecord).count() == 0
+        assert session.get(PlaceRecord, PLACE_ID).average_rating is None
+
+
+def test_accepted_reviews_update_average_rating(client, session_factory):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client, "reviewer-one")
+    first = app.post(
+        "/api/v1/contributions",
+        json={
+            "kind": "review",
+            "place_id": str(PLACE_ID),
+            "rating": 4,
+            "body": "A four star review",
+        },
+    )
+    authenticate(client, "reviewer-two")
+    second = app.post(
+        "/api/v1/contributions",
+        json={
+            "kind": "review",
+            "place_id": str(PLACE_ID),
+            "rating": 5,
+            "body": "A five star review",
+        },
+    )
+
+    assert first.status_code == second.status_code == 201
+    with session_factory() as session:
+        place = session.get(PlaceRecord, PLACE_ID)
+        assert place.average_rating == 4.5
 
 
 def test_contribution_validation_rejects_client_identity_and_bad_values(client):
@@ -168,6 +231,15 @@ def test_reports_are_accepted_without_echoing_reporter_identity(
     assert accepted.status_code == 202
     assert accepted.content == b""
     assert missing.status_code == 400
+    blank = app.post(
+        "/api/v1/reports",
+        json={
+            "target_type": "place",
+            "target_id": str(PLACE_ID),
+            "reason": " \t\n ",
+        },
+    )
+    assert blank.status_code == 400
     with session_factory() as session:
         report = session.query(ReportRecord).one()
         assert report.reporter_subject == "verified-user-subject"

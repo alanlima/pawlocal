@@ -1,6 +1,6 @@
 # PawLocal frontend
 
-Responsive React + TypeScript + Vite + Tailwind CSS discovery experience for Stage 1. The app currently uses demo seed records and a mock service; dog access and facility facts remain unknown until verified.
+Responsive React + TypeScript + Vite + Tailwind CSS discovery experience. The app uses `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`; otherwise it uses the typed HTTP adapter at `VITE_API_BASE_URL` (default `/api/v1`). Vite proxies `/api/v1` to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`) during local development. Dog access and facility facts remain unknown until verified.
 
 No fixture currently has verified access or facility facts, so facility filters intentionally return no matches until verified details are available. Sample ratings and counts are marked as demo data.
 
