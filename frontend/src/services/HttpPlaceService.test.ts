@@ -120,9 +120,11 @@ describe('HttpPlaceService', () => {
   })
 
   it('attaches an access token provided by the host session to API requests', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
-    )
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input
+      void _init
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetchMock)
     window.pawLocalAuth = { getAccessToken: async () => 'short-lived-cognito-token' }
 
@@ -134,9 +136,11 @@ describe('HttpPlaceService', () => {
   })
 
   it('requests a fresh synchronous host token for each protected request', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
-    )
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input
+      void _init
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    })
     const tokenProvider = vi
       .fn()
       .mockReturnValueOnce('first-token')
@@ -157,7 +161,11 @@ describe('HttpPlaceService', () => {
   })
 
   it('sends protected requests without Authorization when the host session is absent', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }))
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
+      void _input
+      void _init
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     await new HttpPlaceService().listFavourites()
