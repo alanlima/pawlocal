@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: PawLocal API
   version: 0.1.0
-  description: Human-approved API contract for Stage 3 implementation as of 2026-10-18. See docs/decisions.md DEC-002 for identity and reportable-contribution decisions.
+  description: Human-approved API contract for Stage 3 implementation as of 2026-10-18. See docs/decisions.md DEC-002 for identity/reportable-contribution decisions and DEC-003 for discovery taxonomy.
 servers:
   - url: /api/v1
 paths:
@@ -16,6 +16,7 @@ paths:
           schema: { type: string, maxLength: 120 }
         - name: area
           in: query
+          description: Exact curated human-readable South East Queensland area label, such as Brisbane City, Brisbane North, Gold Coast, Moreton Bay, or Sunshine Coast. Labels are not geospatial boundaries.
           schema: { type: string }
         - name: category
           in: query
@@ -25,7 +26,7 @@ paths:
           description: Repeat the parameter to require multiple facilities.
           style: form
           explode: true
-          schema: { type: array, items: { type: string } }
+          schema: { type: array, items: { $ref: '#/components/schemas/Facility' } }
         - name: page
           in: query
           schema: { type: integer, minimum: 1, default: 1 }
@@ -162,6 +163,9 @@ components:
         with an ID token or a client-supplied user ID. Pool issuer, app-client ID and resource
         audience are external configuration; no AWS resource provisioning is part of the contract.
   schemas:
+    Facility:
+      type: string
+      enum: [Fenced, Off-leash area, Drinking water, Shade, Picnic tables, Accessible paths]
     PlaceCategory:
       type: string
       enum: [dog_park, beach, walk, hiking_area, cafe]
@@ -172,7 +176,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         category: { $ref: '#/components/schemas/PlaceCategory' }
-        area: { type: string }
+        area: { type: string, description: Curated human-readable area label; exact-match filter, not a geospatial boundary. }
         average_rating: { type: [number, 'null'], minimum: 1, maximum: 5 }
     Place:
       allOf:
@@ -182,7 +186,7 @@ components:
             description: { type: [string, 'null'] }
             address: { type: [string, 'null'] }
             dog_access_rules: { type: [string, 'null'], description: Unknown when unverified; never infer rules. }
-            facilities: { type: array, items: { type: string } }
+            facilities: { type: array, items: { $ref: '#/components/schemas/Facility' } }
             source_updated_at: { type: [string, 'null'], format: date-time }
     PlacePage:
       type: object

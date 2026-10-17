@@ -22,6 +22,8 @@ Use PostgreSQL for runtime persistence. Keep the backend runnable locally throug
 
 ## API and frontend integration
 
+Use the approved MVP discovery taxonomy in `product-spec.md` (DEC-003): categories are `dog_park`, `beach`, `walk`, `hiking_area`, and `cafe`; facilities are `Fenced`, `Off-leash area`, `Drinking water`, `Shade`, `Picnic tables`, and `Accessible paths`; area filters match curated human-readable labels exactly. Current UI area examples are `Brisbane City`, `Brisbane North`, `Gold Coast`, `Moreton Bay`, and `Sunshine Coast`; the list is not exhaustive, and area labels do not define geospatial boundaries. Keep unverified access/facility facts unknown; the broader freshness and verification policy remains open.
+
 Implement the approved OpenAPI operations: `GET /places` with q, area, category, repeated facilities, and pagination; `GET /places/{place_id}`; `GET/PUT/DELETE /me/favourites`; `POST /contributions`; and `POST /reports`. Preserve response/error semantics and snake_case wire fields expected by `frontend/src/services/HttpPlaceService.ts`. Preserve the existing `PlaceService` boundary: UI components must not construct requests. Replace the mock adapter with the HTTP adapter through the service factory only when the backend is ready.
 
 The human-approved contract adds unauthenticated, paginated `GET /contributions/reportable` for already-published contributions. Return only the public fields needed by the report dialog (`id`, `kind`, `body`, `place_id`, `rating`, `created_at`); never return reporter or contributor identity. Implement the HTTP adapter and contract tests against `openapi.yaml`.
