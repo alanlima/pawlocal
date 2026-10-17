@@ -38,6 +38,8 @@ Invoke-WebRequest http://localhost:3200/ready -UseBasicParsing
 Invoke-WebRequest http://localhost:3000/api/health -UseBasicParsing
 ```
 
+Compose checks Collector readiness at `http://127.0.0.1:13133/` and Tempo readiness at `http://127.0.0.1:3200/ready`. Their upstream images do not include HTTP client tools, so the local images add a static BusyBox probe for these healthchecks.
+
 The Collector accepts browser OTLP/HTTP only from `http://localhost:5173` and `http://127.0.0.1:5173`; its published receiver port is bound to loopback. Browser exports use the local endpoint `http://localhost:4318`. There are no credentials in browser requests.
 
 ### Walkthrough and synthetic failures

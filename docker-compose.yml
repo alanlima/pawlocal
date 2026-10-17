@@ -22,7 +22,10 @@ services:
       start_period: 15s
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.136.0
+    build:
+      context: .
+      dockerfile: observability/healthcheck-images/otel-collector.Dockerfile
+    image: pawlocal-stage2/otel-collector:0.136.0
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./observability/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
@@ -34,10 +37,11 @@ services:
       - loki
       - tempo
     healthcheck:
-      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otelcol-contrib/config.yaml"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   prometheus:
     image: prom/prometheus:v3.5.0
@@ -72,7 +76,10 @@ services:
       retries: 3
 
   tempo:
-    image: grafana/tempo:2.8.2
+    build:
+      context: .
+      dockerfile: observability/healthcheck-images/tempo.Dockerfile
+    image: pawlocal-stage2/tempo:2.8.2
     command: ["-config.file=/etc/tempo/config.yaml"]
     volumes:
       - ./observability/tempo/config.yaml:/etc/tempo/config.yaml:ro
@@ -80,10 +87,11 @@ services:
     ports:
       - "127.0.0.1:3200:3200"
     healthcheck:
-      test: ["CMD", "/tempo", "-version"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3200/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   grafana:
     image: grafana/grafana:12.1.0
