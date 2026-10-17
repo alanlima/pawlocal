@@ -8,6 +8,7 @@ import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import jwt
@@ -62,7 +63,7 @@ issuer_app = FastAPI()
 
 
 @issuer_app.get("/.well-known/jwks.json")
-def jwks() -> dict[str, list[dict[str, str]]]:
+def jwks() -> dict[str, list[dict[str, Any]]]:
     return {"keys": [jwk]}
 
 

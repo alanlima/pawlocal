@@ -32,7 +32,7 @@ Write rate limits are per subject and per API process. This is suitable for loca
 With the backend virtual environment and dependencies installed, set `PAWLOCAL_E2E_DATABASE_URL` to a disposable PostgreSQL database whose name contains a `_test`, `_e2e`, or `_verify` segment. Explicitly opt into migration and fixture reset with `PAWLOCAL_E2E_ALLOW_RESET=true`, then run from `backend/`:
 
 ```powershell
-$env:PAWLOCAL_E2E_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@localhost:55432/pawlocal_stage3_verify"
+$env:PAWLOCAL_E2E_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@host.docker.internal:55432/pawlocal_stage3_verify"
 $env:PAWLOCAL_E2E_ALLOW_RESET = "true"
 python tests/e2e_local_server.py
 ```
@@ -47,4 +47,4 @@ npm run test:e2e:backend
 
 The dedicated Vite test configuration aliases only the test build to `HttpPlaceService` and proxies requests to the real API. It obtains a token from the local issuer, then covers anonymous rejection, place discovery and detail, contribution, favourite, report, and reloading saved/reportable state in a fresh browser context. The demo-member control only reveals mock-stage form UI; it does not authenticate API requests. The production service factory remains unchanged, including the Stage 2 observability wrapper when that workstream is integrated.
 
-The harness and browser test are implemented and pass static checks. The authenticated browser-to-PostgreSQL run remains unverified in this worktree: this host cannot complete a PostgreSQL handshake through its published Docker port, the Docker helper could not install Python because container DNS failed, and the cached Python images lacked SQLAlchemy. Keep this acceptance item open until the documented command passes against the dedicated database.
+Verified on 2026-10-18: the opt-in PostgreSQL repository test passed, and `npm run test:e2e:backend` passed the anonymous rejection, real JWT validation, discovery/detail/share, contribution, favourite, report, and fresh-browser-context persistence flow against PostgreSQL. A second API process connected to the same database and read back the saved favourite and reportable contribution. The E2E harness records were then removed; reports, favourites, contributions, and the synthetic place each had zero rows remaining. This verifies API-process restart persistence, but the PostgreSQL container itself was not restarted, so database-restart persistence remains unverified.

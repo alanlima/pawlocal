@@ -38,7 +38,7 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   // This UI control only opens the mock-stage contribution form. The request
   // itself is authenticated by the real, short-lived token above and verified
   // by the backend's normal issuer/JWKS/exp/client_id checks.
-  await page.getByRole('button', { name: 'Add a place' }).click()
+  await page.getByRole('button', { name: /Suggest an update/ }).click()
   await page.getByRole('button', { name: 'Continue as demo member' }).click()
   await page.getByLabel('What would you like to share?').selectOption('tip')
   const contributionText = `Browser API persistence ${Date.now()}`
