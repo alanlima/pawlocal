@@ -92,4 +92,95 @@ describe('HttpPlaceService', () => {
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
+
+  it('loads reportable contributions across pages and maps only public fields', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'contribution-1',
+                kind: 'review',
+                body: 'A useful public review',
+                place_id: 'place-1',
+                rating: 4,
+                created_at: '2026-10-18T00:00:00Z',
+                contributor_id: 'private-user-id',
+              },
+            ],
+            page: 1,
+            page_size: 100,
+            total: 2,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'contribution-2',
+                kind: 'tip',
+                body: 'Bring water',
+                place_id: null,
+                rating: null,
+                created_at: '2026-10-18T00:01:00Z',
+              },
+            ],
+            page: 2,
+            page_size: 100,
+            total: 2,
+          }),
+          { status: 200 },
+        ),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const contributions = await new HttpPlaceService().listReportableContributions()
+
+    expect(contributions).toEqual([
+      {
+        id: 'contribution-1',
+        kind: 'review',
+        body: 'A useful public review',
+        placeId: 'place-1',
+        rating: 4,
+        createdAt: '2026-10-18T00:00:00Z',
+      },
+      {
+        id: 'contribution-2',
+        kind: 'tip',
+        body: 'Bring water',
+        placeId: undefined,
+        rating: undefined,
+        createdAt: '2026-10-18T00:01:00Z',
+      },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/contributions/reportable?page=1')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/contributions/reportable?page=2')
+  })
+
+  it('returns an empty list when no contributions are reportable', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [], page: 1, page_size: 100, total: 0 }), {
+        status: 200,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(new HttpPlaceService().listReportableContributions()).resolves.toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('propagates reportable-contribution HTTP errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('unavailable', { status: 503 })))
+
+    await expect(new HttpPlaceService().listReportableContributions()).rejects.toThrow(
+      'PawLocal API error (503)',
+    )
+  })
 })

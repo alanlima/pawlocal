@@ -1,4 +1,10 @@
-import type { ContributionInput, Place, PlaceQuery, ReportInput } from '../types/place'
+import type {
+  Contribution,
+  ContributionInput,
+  Place,
+  PlaceQuery,
+  ReportInput,
+} from '../types/place'
 import type { PlaceService } from './PlaceService'
 
 type PlaceWire = {
@@ -14,6 +20,11 @@ type PlaceWire = {
   source_updated_at?: string | null
 }
 type ContributionWire = { id: string; created_at: string }
+type ReportableContributionWire = Pick<Contribution, 'id' | 'kind' | 'body'> & {
+  place_id: string | null
+  rating: number | null
+  created_at: string
+}
 const fromWire = (wire: PlaceWire): Place => ({
   id: wire.id,
   name: wire.name,
@@ -103,9 +114,31 @@ export class HttpPlaceService implements PlaceService {
     })
     return { ...input, id: wire.id, createdAt: wire.created_at }
   }
-  /** OpenAPI currently has contribution submission but no listing operation; the HTTP adapter cannot offer report targets yet. */
-  async listReportableContributions() {
-    return []
+  async listReportableContributions(): Promise<Contribution[]> {
+    const contributions: Contribution[] = []
+    const pageSize = 100
+    let pageNumber = 1
+    let total = Number.POSITIVE_INFINITY
+    while (contributions.length < total) {
+      const page = await this.request<{
+        items: ReportableContributionWire[]
+        total: number
+      }>(`/contributions/reportable?page=${pageNumber}&page_size=${pageSize}`)
+      total = page.total
+      if (page.items.length === 0) break
+      contributions.push(
+        ...page.items.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          body: item.body,
+          placeId: item.place_id ?? undefined,
+          rating: item.rating ?? undefined,
+          createdAt: item.created_at,
+        })),
+      )
+      pageNumber += 1
+    }
+    return contributions
   }
   async submitReport(input: ReportInput) {
     await this.request<void>('/reports', {

@@ -22,6 +22,10 @@ The project has started **Stage 1: Frontend with mock API**. See [frontend setup
 
 React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Hosting is undecided. Do not provision paid resources without explicit cost approval.
 
+## Backend development
+
+Stage 3 backend setup, migration, API, and test instructions are in [backend/README.md](backend/README.md). Protected API operations validate Cognito access tokens; no Cognito or other AWS resources are provisioned in this stage.
+
 ## Development
 
 Run the frontend from the repository root with `cd frontend`, `npm install`, then `npm run dev`. See [frontend README](frontend/README.md) for tests and the future HTTP adapter seam. Stage 1 ends at its human review gate; observability and backend work are not included here.
