@@ -194,7 +194,7 @@ All implementation work must be traceable.
 10. Review and address Pull Request comments.
 11. Merge only after required approvals.
 
-Labels support triage; they do not represent approval, completion, or authorization to bypass a project gate.
+Labels support triage. They do not represent approval or completion, replace verification of an issue's acceptance criteria, or authorize bypassing a project gate.
 
 Do not commit implementation directly to `main`.
 
