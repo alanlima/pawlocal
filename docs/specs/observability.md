@@ -1,6 +1,6 @@
 # Stage 2 and Stage 3.1 — Local observability
 
-**Status:** Proposed for human approval before either Stage 2, Stage 3, or Stage 3.1 implementation starts.
+**Status:** Approved for implementation on 2026-10-18. Stage 2 must pass its review gate before Stage 3.1 starts and before Stage 3 is complete.
 
 ## Workstream relationship
 

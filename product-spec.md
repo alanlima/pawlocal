@@ -60,12 +60,27 @@ Dog owners in South East Queensland have difficulty finding current, reliable in
 
 Any feature not listed above, including payments, bookings, messaging, advertising, native mobile apps, recommendations/personalization, or automated publication of AI content.
 
+## Approved MVP discovery taxonomy
+
+Use the current frontend vocabulary as the approved MVP taxonomy for Stage 3 filters and persistence:
+
+- **Place categories:** `dog_park`, `beach`, `walk`, `hiking_area`, `cafe`.
+- **Facilities:** `Fenced`, `Off-leash area`, `Drinking water`, `Shade`, `Picnic tables`, `Accessible paths`.
+- **Area labels:** Use curated, human-readable South East Queensland labels. The current UI examples are `Brisbane City`, `Brisbane North`, `Gold Coast`, `Moreton Bay`, and `Sunshine Coast`; this list is not exhaustive. Filter by exact label; labels do not define precise geographic boundaries, and the API must not infer coordinates or radius membership from them.
+- **Unknown facts:** Store unverified access rules and facilities as unknown/absent; do not infer them. A broader freshness and verification policy remains open.
+
+Stage 3 must use these values consistently across API validation, persistence and frontend adapters. See `docs/decisions.md` DEC-003 and `openapi.yaml`.
+
 ## Decisions still needed before implementation
 
-- Exact location vocabulary and geographic boundaries for filters.
-- Place/facility taxonomy and freshness/verification policy.
-- Account provider and identity lifecycle.
+- Broader freshness and verification policy for place data.
+- Identity lifecycle beyond the Stage 3 authentication integration (signup/sign-in UX, recovery, account deletion and retention, and social federation). Stage 3 does not add deletion, retention, or federation behavior without a separate decision.
 - Moderation roles and report resolution process.
 - Rating/review revision and removal behavior.
 - Permitted source policy and AI-draft operator workflow.
+
+## Approved Stage 3 decisions
+
+- **Identity provider:** Use an Amazon Cognito User Pool as the OIDC issuer for Stage 3 protected API operations. The API accepts user-pool access tokens and validates them as specified in `docs/specs/backend-api-persistence.md` and `openapi.yaml`. No Cognito pool or other AWS resource is provisioned as part of Stage 3.
+- **Reportable contributions:** The report dialog uses the public, paginated `GET /contributions/reportable` operation for already-published contributions. The response contains only public fields needed to identify the report target and does not include contributor or reporter identity. See `docs/decisions.md` DEC-002.
 

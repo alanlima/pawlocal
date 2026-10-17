@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** Stage 0 proposal; no runtime components are implemented.
+**Status:** Stage 0 foundations were approved on 2026-10-17. Stage 1 frontend is implemented; the Stage 2/3 specifications were approved on 2026-10-18. Stage 2/3 implementation and Stage 3.1 integration follow the gates below.
 
 ## System shape
 
@@ -26,7 +26,8 @@ Search → API → database → place details
 - FastAPI route handlers handle HTTP concerns only. Application use cases coordinate domain behavior. Domain rules do not depend on FastAPI or SQLAlchemy.
 - SQLAlchemy repositories and Alembic migrations live in infrastructure. PostgreSQL is introduced in Stage 3.
 - `openapi.yaml` is the shared contract. Contract changes must be reflected in client types, backend schemas, tests and docs.
-- Observability configuration is introduced in Stage 2, before persistent backend implementation, and must pass its human review gate.
+- Stage 2 local frontend/observability and Stage 3 backend/persistence may start in parallel after their specifications are human-approved and both issues are open. They must use separate branches and Git worktrees because both may edit root Compose configuration.
+- Stage 2's monitoring review gate must pass before Stage 3 is considered complete and before Stage 3.1 starts. Stage 3.1 adds browser-to-API-to-database tracing and structured backend logs and reconciles the two Compose stacks; it may proceed in its own coordinated worktree while Stage 3 continues. Stage 3 cannot be marked complete until Stage 3.1 integration and independent review evidence are complete.
 - Hosting choice remains open. Terraform is documentation/scaffolding only until cost review and explicit approval.
 
 ## Security and data integrity
@@ -35,5 +36,5 @@ Public reads require no account. Write operations require authentication and bac
 
 ## Open decisions
 
-Authentication provider and token lifecycle, geographic taxonomy, moderation operations, source provenance schema, and low-cost deployment target require review before their respective implementation stages.
+Geographic taxonomy, moderation operations, source provenance schema, and low-cost deployment target require review before their respective implementation stages. Stage 3 authentication and reportable-contribution API decisions are recorded in `docs/decisions.md` and specified in `openapi.yaml`; they do not authorize provisioning AWS resources.
 

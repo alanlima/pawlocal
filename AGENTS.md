@@ -132,7 +132,7 @@ Implementation must happen in the following order.
 - Add unit, integration and end-to-end tests.
 - Work in its own branch and worktree, separate from Stage 2.
 
-**Gate:** Confirm working frontend-to-backend-to-database persistence. Stage 2's review gate must pass before Stage 3 is complete.
+**Gate:** Confirm working frontend-to-backend-to-database persistence. Stage 2's review gate must pass, and Stage 3.1 cross-layer tracing/logging plus combined Compose integration must be completed and reviewed before Stage 3 is complete.
 
 ### Stage 3.1 — Cross-layer instrumentation and Compose integration
 - Begin only after Stage 2 is complete and reviewed; may proceed while Stage 3 continues.
