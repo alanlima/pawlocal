@@ -2,16 +2,25 @@ import { expect, test } from '@playwright/test'
 
 test('search, open a stable detail URL, and share the place', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.addInitScript(() => {
+    const nativeSetTimeout = window.setTimeout.bind(window)
+    window.setTimeout = (handler, delay, ...args) =>
+      nativeSetTimeout(handler, delay === 180 ? 1500 : delay, ...args)
+  })
   await page.goto('/')
   await expect(page.getByText('Finding your places…')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'View Nudgee Beach Dog Off-Leash Area' })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'View Nudgee Beach Dog Off-Leash Area' }),
+  ).toBeVisible()
   await page.getByRole('button', { name: 'View Nudgee Beach Dog Off-Leash Area' }).click()
   await expect(page.getByRole('heading', { name: 'Nudgee Beach Dog Off-Leash Area' })).toBeVisible()
   await expect(page.getByText('Dog access details are unconfirmed')).toBeVisible()
   await expect(page).toHaveURL(/\/places\/0d8a22c2-4316-4dd3-b25b-0baa110a1ae1$/)
   await page.getByRole('button', { name: 'Share this place' }).click()
   await expect(page.getByRole('status')).toContainText('Link copied')
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('/places/0d8a22c2-4316-4dd3-b25b-0baa110a1ae1')
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+    '/places/0d8a22c2-4316-4dd3-b25b-0baa110a1ae1',
+  )
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Nudgee Beach Dog Off-Leash Area' })).toBeVisible()
 })
@@ -32,7 +41,10 @@ test('demo member can submit a review and a location suggestion', async ({ page 
   await expect(page.getByText(/visitor mode/i)).not.toBeVisible()
   await page.getByLabel('What would you like to share?').selectOption('review')
   await page.getByRole('button', { name: 'Rate 4 stars' }).click()
-  await expect(page.getByRole('button', { name: 'Rate 4 stars' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Rate 4 stars' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
   await page.getByLabel('Your note').fill('A thoughtful demo review.')
   await page.getByRole('button', { name: 'Share with PawLocal' }).click()
   await expect(page.getByRole('status')).toContainText('Thanks for helping the PawLocal community!')
@@ -43,7 +55,9 @@ test('demo member can submit a review and a location suggestion', async ({ page 
   await expect(page.getByRole('status')).toContainText('Thanks for helping the PawLocal community!')
 })
 
-test('contribution dialog contains keyboard focus and returns focus to its trigger', async ({ page }) => {
+test('contribution dialog contains keyboard focus and returns focus to its trigger', async ({
+  page,
+}) => {
   await page.goto('/')
   const trigger = page.getByRole('button', { name: 'Add a place' })
   await trigger.click()
@@ -57,7 +71,9 @@ test('contribution dialog contains keyboard focus and returns focus to its trigg
   await expect(trigger).toBeFocused()
 })
 
-test('submitted demo contributions are visible report targets and switching to place report preserves the form', async ({ page }) => {
+test('submitted demo contributions are visible report targets and switching to place report preserves the form', async ({
+  page,
+}) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Add a place' }).click()
   const dialog = page.getByRole('dialog')
@@ -75,12 +91,19 @@ test('submitted demo contributions are visible report targets and switching to p
   await targetType.selectOption('contribution')
   const contributionPicker = reportDialog.getByLabel('Choose a community contribution')
   await expect(contributionPicker).toContainText('Unique demo contribution to report')
-  const contributionId = await contributionPicker.evaluate((select: HTMLSelectElement) => [...select.options].find((option) => option.text.includes('Unique demo contribution to report'))?.value ?? '')
+  const contributionId = await contributionPicker.evaluate(
+    (select: HTMLSelectElement) =>
+      [...select.options].find((option) =>
+        option.text.includes('Unique demo contribution to report'),
+      )?.value ?? '',
+  )
   await contributionPicker.selectOption(contributionId)
   await expect(reportDialog.getByRole('note')).toContainText('DEMO ONLY')
   await targetType.selectOption('place')
   await expect(reportDialog.getByLabel('What should our community team check?')).toBeVisible()
-  await reportDialog.getByLabel('What should our community team check?').fill('Please check this listing.')
+  await reportDialog
+    .getByLabel('What should our community team check?')
+    .fill('Please check this listing.')
   await reportDialog.getByRole('button', { name: 'Send report' }).click()
   await expect(page.getByRole('status')).toContainText('Your report has been sent')
 })

@@ -5,7 +5,10 @@ import App from './App'
 import { placeService } from '../services'
 import { demoPlaces } from '../data/demo-places'
 
-afterEach(() => { cleanup(); window.history.pushState({}, '', '/') })
+afterEach(() => {
+  cleanup()
+  window.history.pushState({}, '', '/')
+})
 
 describe('PawLocal journeys', () => {
   it('discovers places and opens a stable detail URL with unknown access called out', async () => {
@@ -37,7 +40,9 @@ describe('PawLocal journeys', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Sign in to save favourites.')
     await user.click(screen.getByRole('button', { name: /Sign in/ }))
     await user.click(screen.getByRole('button', { name: 'Save New Farm Park' }))
-    expect(await screen.findByRole('button', { name: 'Remove New Farm Park from saved places' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('button', { name: 'Remove New Farm Park from saved places' }),
+    ).toBeInTheDocument()
   })
 
   it('opens and validates the contribution form', async () => {
@@ -53,7 +58,9 @@ describe('PawLocal journeys', () => {
     await user.type(note, 'A helpful local tip')
     await user.click(within(dialog).getByRole('button', { name: /Share with PawLocal/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.getByRole('status')).toHaveTextContent('Thanks for helping the PawLocal community!')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Thanks for helping the PawLocal community!',
+    )
   })
 
   it('shows an API error state and recovers on retry', async () => {
@@ -67,14 +74,22 @@ describe('PawLocal journeys', () => {
 
   it('shows provided access and facilities, and renders stars to the supplied rating', async () => {
     window.history.pushState({}, '', `/places/${demoPlaces[0].id}`)
-    vi.spyOn(placeService, 'getPlace').mockResolvedValueOnce({ ...demoPlaces[0], dogAccessRules: 'Test fixture access note', facilities: ['Shade'], averageRating: 4.1, reviewCount: null })
+    vi.spyOn(placeService, 'getPlace').mockResolvedValueOnce({
+      ...demoPlaces[0],
+      dogAccessRules: 'Test fixture access note',
+      facilities: ['Shade'],
+      averageRating: 4.1,
+      reviewCount: null,
+    })
     render(<App />)
     expect(await screen.findByText('Test fixture access note')).toBeInTheDocument()
     expect(screen.getByText('Shade')).toBeInTheDocument()
     expect(screen.queryByText('Facility details are unknown')).not.toBeInTheDocument()
     expect(screen.queryByText('Dog access details are unconfirmed')).not.toBeInTheDocument()
     expect(screen.getByRole('img', { name: '4.1 out of 5 stars' })).toHaveTextContent('★★★★★')
-    expect(screen.getByRole('img', { name: '4.1 out of 5 stars' }).firstElementChild).toHaveStyle({ width: '82%' })
+    expect(screen.getByRole('img', { name: '4.1 out of 5 stars' }).firstElementChild).toHaveStyle({
+      width: '82%',
+    })
     expect(screen.getByText('Review count not provided')).toBeInTheDocument()
   })
 
@@ -86,16 +101,33 @@ describe('PawLocal journeys', () => {
     await user.click(await screen.findByRole('button', { name: /Report a community contribution/ }))
     const dialog = screen.getByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Continue as demo member' }))
-    await user.selectOptions(within(dialog).getByLabelText('What are you reporting?'), 'contribution')
+    await user.selectOptions(
+      within(dialog).getByLabelText('What are you reporting?'),
+      'contribution',
+    )
     await screen.findByLabelText('Choose a community contribution')
-    await user.selectOptions(within(dialog).getByLabelText('Choose a community contribution'), '00000000-0000-4000-8000-000000000099')
+    await user.selectOptions(
+      within(dialog).getByLabelText('Choose a community contribution'),
+      '00000000-0000-4000-8000-000000000099',
+    )
     expect(within(dialog).getByRole('note')).toHaveTextContent('DEMO ONLY')
     await user.selectOptions(within(dialog).getByLabelText('What are you reporting?'), 'place')
-    expect(within(dialog).queryByLabelText('Choose a community contribution')).not.toBeInTheDocument()
+    expect(
+      within(dialog).queryByLabelText('Choose a community contribution'),
+    ).not.toBeInTheDocument()
     expect(within(dialog).getByLabelText('What should our community team check?')).toBeVisible()
-    await user.type(within(dialog).getByLabelText('What should our community team check?'), 'Please review this contribution.')
+    await user.type(
+      within(dialog).getByLabelText('What should our community team check?'),
+      'Please review this contribution.',
+    )
     await user.click(within(dialog).getByRole('button', { name: 'Send report' }))
-    await waitFor(() => expect(report).toHaveBeenCalledWith({ targetType: 'place', targetId: demoPlaces.find((place) => place.name === 'New Farm Park')?.id, reason: 'Please review this contribution.' }))
+    await waitFor(() =>
+      expect(report).toHaveBeenCalledWith({
+        targetType: 'place',
+        targetId: demoPlaces.find((place) => place.name === 'New Farm Park')?.id,
+        reason: 'Please review this contribution.',
+      }),
+    )
   })
 
   it('keeps contribution text and shows a helpful message when submit fails', async () => {
