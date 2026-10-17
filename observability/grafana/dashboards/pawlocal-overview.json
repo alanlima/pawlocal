@@ -61,7 +61,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "id": 6,
       "options": { "dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
-      "targets": [{ "expr": "{service_name=\"pawlocal-frontend\"} | json | line_format \"{{.event}} outcome={{.outcome}} trace={{.traceId}}\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=\"pawlocal-frontend\"} | json", "refId": "A" }],
       "title": "Frontend outcomes and correlated trace IDs",
       "type": "logs"
     }
