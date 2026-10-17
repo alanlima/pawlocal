@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-The project has started **Stage 1: Frontend with mock API**. See [frontend setup and adapter notes](frontend/README.md). The application uses demo seed records only; place access and facility details are not represented as verified facts.
+**Stage 2 (local frontend and observability) and Stage 3 (backend and persistence) are underway in parallel** in isolated worktrees. Stage 2 review remains a gate before Stage 3.1 and before Stage 3 can be considered complete. The frontend still uses demo seed records; place access and facility details are not represented as verified facts. See [frontend and local observability setup](frontend/README.md).
 
 ## Project documentation
 
@@ -24,5 +24,5 @@ React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreS
 
 ## Development
 
-Run the frontend from the repository root with `cd frontend`, `npm install`, then `npm run dev`. See [frontend README](frontend/README.md) for tests and the future HTTP adapter seam. Stage 1 ends at its human review gate; observability and backend work are not included here.
+For the local frontend and observability stack, run `docker compose up --build -d` from the repository root. The Compose project is namespaced `pawlocal-stage2` to keep it separate from the parallel Stage 3 stack. Open PawLocal at <http://localhost:5173> and Grafana at <http://localhost:3000>. See [frontend README](frontend/README.md) for all published host ports, health checks, privacy notes, telemetry controls, synthetic-failure walkthrough, shutdown, tests and the Stage 3 HTTP adapter seam. All services bind to localhost; no hosted telemetry or cloud resources are configured.
 
