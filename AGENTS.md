@@ -184,14 +184,17 @@ All implementation work must be traceable.
 
 1. Create or reference an existing GitHub Issue.
 2. Confirm the issue includes context and acceptance criteria.
-3. Create a branch linked to the issue.
-4. Implement only the approved scope.
-5. Add or update relevant tests.
-6. Run applicable checks.
-7. Open a Pull Request linking the issue.
-8. Record implementation details, decisions and verification evidence.
-9. Review and address Pull Request comments.
-10. Merge only after required approvals.
+3. Apply labels so issues are easy to identify and triage: at least one project-stage label (for example, `stage-0` or `stage-1`) and one work-type label (such as `bug`, `enhancement`, `documentation`, or `review`). Add a priority label when one is established. Use `deferred` for work intentionally postponed to a later stage; remove it when that work is resumed.
+4. Create a branch linked to the issue.
+5. Implement only the approved scope.
+6. Add or update relevant tests.
+7. Run applicable checks.
+8. Open a Pull Request linking the issue.
+9. Record implementation details, decisions and verification evidence.
+10. Review and address Pull Request comments.
+11. Merge only after required approvals.
+
+Labels support triage; they do not represent approval, completion, or authorization to bypass a project gate.
 
 Do not commit implementation directly to `main`.
 
