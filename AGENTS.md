@@ -114,13 +114,14 @@ Implementation must happen in the following order.
 
 **Gate:** Stop for human review and approval before continuing.
 
-### Stage 2 — Observability
+### Stage 2 — Local frontend and observability
 - Configure OpenTelemetry, Grafana, Loki, Tempo and Prometheus.
-- Instrument important frontend user journeys.
-- Implement correlated telemetry where supported.
+- Add the frontend and local observability stack to the root Docker Compose setup.
+- Keep the local telemetry toggle enabled by default; verify the app works with telemetry disabled.
 - Demonstrate synthetic failure scenarios.
+- Run in a dedicated branch and worktree.
 
-**Gate:** Monitoring infrastructure and dashboards must be reviewed before backend implementation.
+**Gate:** Monitoring infrastructure, dashboards, privacy, and synthetic-failure checks must be reviewed before Stage 2 is complete and before Stage 3.1 begins. Stage 3 backend implementation may proceed in parallel after both workstream specs are approved and its issue is open.
 
 ### Stage 3 — Backend and persistence
 - Implement FastAPI using clean modular architecture.
@@ -129,8 +130,17 @@ Implementation must happen in the following order.
 - Implement APIs against the approved OpenAPI contract.
 - Replace frontend mock adapters with HTTP adapters.
 - Add unit, integration and end-to-end tests.
+- Work in its own branch and worktree, separate from Stage 2.
 
-**Gate:** Confirm working frontend-to-backend-to-database persistence.
+**Gate:** Confirm working frontend-to-backend-to-database persistence. Stage 2's review gate must pass before Stage 3 is complete.
+
+### Stage 3.1 — Cross-layer instrumentation and Compose integration
+- Begin only after Stage 2 is complete and reviewed; may proceed while Stage 3 continues.
+- Extend trace context across browser, API and database; add concise structured backend logs.
+- Reconcile Stage 2 and Stage 3 root Compose changes and verify all services together.
+- Use a dedicated branch and worktree coordinated with Stage 3.
+
+**Gate:** Review cross-layer trace/log privacy, synthetic failure evidence, and the combined Compose stack before completing Stage 3.1.
 
 ### Stage 4 — Production readiness
 - Validate complete Docker Compose startup.

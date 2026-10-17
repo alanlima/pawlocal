@@ -19,8 +19,11 @@
 ## Gates
 
 - Stage 0 docs and plan require human review before Stage 1.
-- Stage 1 requires human approval before observability work.
-- Stage 2 dashboards and failure demonstrations require review before Stage 3.
+- Stage 2 and Stage 3 specifications require human approval before either implementation workstream begins. Each workstream also needs an open GitHub issue with scope and acceptance criteria.
+- Stage 2 and Stage 3 may run in parallel in separate branches and worktrees. Keep their working directories isolated even though both may edit root Compose configuration.
+- Stage 2 dashboards, privacy checks, and synthetic failure demonstrations require review before Stage 2 completes and before Stage 3.1 starts. Stage 3 implementation may continue during this gate.
+- Stage 3.1 starts only after Stage 2 is complete and reviewed. It uses its own worktree coordinated with Stage 3, can proceed while Stage 3 continues, and reconciles/verifies the combined Compose stack.
+- Stage 3 cannot be marked complete until Stage 2's gate is satisfied and required Stage 3.1 integration evidence is available.
 - Full frontend/API/database persistence is required before Stage 4.
 - Billable cloud resources require explicit human cost approval before provisioning.
 
