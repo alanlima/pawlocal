@@ -6,6 +6,9 @@ import type {
   ReportInput,
 } from '../types/place'
 import type { PlaceService } from './PlaceService'
+import { getAccessToken } from '../auth/authSession'
+
+type AccessTokenProvider = () => string | null | Promise<string | null>
 
 type PlaceWire = {
   id: string
@@ -43,13 +46,16 @@ const fromWire = (wire: PlaceWire): Place => ({
 /** HTTP adapter seam. Map API wire names here; feature components stay adapter agnostic. */
 export class HttpPlaceService implements PlaceService {
   constructor(
-    private readonly baseUrl = '/api/v1',
-    private readonly token?: () => string | null,
-  ) {}
+    baseUrl = '/api/v1',
+    private readonly token: AccessTokenProvider = getAccessToken,
+  ) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '')
+  }
+  private readonly baseUrl: string
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
-    const token = this.token?.()
+    const token = await this.token()
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)

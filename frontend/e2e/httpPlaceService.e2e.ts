@@ -13,3 +13,4 @@ export const placeService: PlaceService = new HttpPlaceService(
   '/api/v1',
   () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
 )
+export const isMockBackend = false

@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HttpPlaceService } from './HttpPlaceService'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  delete window.pawLocalAuth
+})
 
 describe('HttpPlaceService', () => {
   it('follows the OpenAPI pagination until all results are loaded and ignores undefined review counts', async () => {
@@ -114,6 +117,52 @@ describe('HttpPlaceService', () => {
     const reviewPayload = JSON.parse(fetchMock.mock.calls[1][1]?.body as string)
     expect(tipPayload).not.toHaveProperty('rating')
     expect(reviewPayload.rating).toBe(4)
+  })
+
+  it('attaches an access token provided by the host session to API requests', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    window.pawLocalAuth = { getAccessToken: async () => 'short-lived-cognito-token' }
+
+    await new HttpPlaceService().listFavourites()
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe(
+      'Bearer short-lived-cognito-token',
+    )
+  })
+
+  it('requests a fresh synchronous host token for each protected request', async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(JSON.stringify([]), { status: 200 })),
+    )
+    const tokenProvider = vi
+      .fn()
+      .mockReturnValueOnce('first-token')
+      .mockReturnValueOnce('next-token')
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new HttpPlaceService('/api/v1', tokenProvider)
+
+    await service.listFavourites()
+    await service.listFavourites()
+
+    expect(tokenProvider).toHaveBeenCalledTimes(2)
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe(
+      'Bearer first-token',
+    )
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Authorization')).toBe(
+      'Bearer next-token',
+    )
+  })
+
+  it('sends protected requests without Authorization when the host session is absent', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await new HttpPlaceService().listFavourites()
+
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has('Authorization')).toBe(false)
   })
 
   it('loads reportable contributions across pages and maps only public fields', async () => {

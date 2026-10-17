@@ -15,4 +15,5 @@ const service: PlaceService =
     ? new MockPlaceService()
     : new HttpPlaceService(apiBaseUrl || '/api/v1')
 
+export const isMockBackend = configuredMockToggle === 'true'
 export const placeService: PlaceService = observePlaceService(service)
