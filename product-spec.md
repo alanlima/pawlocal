@@ -64,8 +64,13 @@ Any feature not listed above, including payments, bookings, messaging, advertisi
 
 - Exact location vocabulary and geographic boundaries for filters.
 - Place/facility taxonomy and freshness/verification policy.
-- Account provider and identity lifecycle.
+- Identity lifecycle beyond the Stage 3 authentication integration (signup/sign-in UX, recovery, account deletion and retention, and social federation). Stage 3 does not add deletion, retention, or federation behavior without a separate decision.
 - Moderation roles and report resolution process.
 - Rating/review revision and removal behavior.
 - Permitted source policy and AI-draft operator workflow.
+
+## Approved Stage 3 decisions
+
+- **Identity provider:** Use an Amazon Cognito User Pool as the OIDC issuer for Stage 3 protected API operations. The API accepts user-pool access tokens and validates them as specified in `docs/specs/backend-api-persistence.md` and `openapi.yaml`. No Cognito pool or other AWS resource is provisioned as part of Stage 3.
+- **Reportable contributions:** The report dialog uses the public, paginated `GET /contributions/reportable` operation for already-published contributions. The response contains only public fields needed to identify the report target and does not include contributor or reporter identity. See `docs/decisions.md` DEC-002.
 
