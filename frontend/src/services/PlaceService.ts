@@ -1,4 +1,10 @@
-import type { Contribution, ContributionInput, Place, PlaceQuery, ReportInput } from '../types/place'
+import type {
+  Contribution,
+  ContributionInput,
+  Place,
+  PlaceQuery,
+  ReportInput,
+} from '../types/place'
 
 export interface PlaceService {
   listPlaces(query: PlaceQuery, signal?: AbortSignal): Promise<Place[]>

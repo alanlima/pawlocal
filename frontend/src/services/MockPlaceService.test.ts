@@ -6,7 +6,11 @@ describe('MockPlaceService', () => {
   beforeEach(() => localStorage.clear())
 
   it('filters records by text, category and area', async () => {
-    const places = await service.listPlaces({ q: 'foreshore', category: 'walk', area: 'Moreton Bay' })
+    const places = await service.listPlaces({
+      q: 'foreshore',
+      category: 'walk',
+      area: 'Moreton Bay',
+    })
     expect(places.map((place) => place.name)).toEqual(['Redcliffe Foreshore'])
   })
 
@@ -28,7 +32,12 @@ describe('MockPlaceService', () => {
     const initial = await service.listReportableContributions()
     expect(initial[0].demoOnly).toBe(true)
     expect(initial[0].body).toContain('not community data')
-    const submitted = await service.submitContribution({ kind: 'tip', body: 'A user-entered demo note.' })
-    expect((await service.listReportableContributions()).map((item) => item.id)).toContain(submitted.id)
+    const submitted = await service.submitContribution({
+      kind: 'tip',
+      body: 'A user-entered demo note.',
+    })
+    expect((await service.listReportableContributions()).map((item) => item.id)).toContain(
+      submitted.id,
+    )
   })
 })
