@@ -19,7 +19,10 @@ export default mergeConfig(
     },
     server: {
       proxy: {
-        '/api/v1': { target: 'http://127.0.0.1:18001', changeOrigin: true },
+        '/api/v1': {
+          target: process.env.PAWLOCAL_API_PROXY_TARGET ?? 'http://127.0.0.1:18001',
+          changeOrigin: true,
+        },
       },
     },
   }),
