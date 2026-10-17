@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** Stage 0 proposal; no runtime components are implemented.
+**Status:** Approved for Stage 1 implementation on 2026-10-17; later-stage details remain subject to their review gates.
 
 ## System shape
 

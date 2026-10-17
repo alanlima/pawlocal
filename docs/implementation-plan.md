@@ -1,6 +1,6 @@
 # Stage 0 implementation plan and issue proposals
 
-The checkout has no configured GitHub remote, commits or connected PawLocal repository. These are **issue-ready proposals**, not created GitHub Issues. Before implementation, connect the correct repository, create/reuse an issue with the criteria below, and create a linked branch. Do not commit implementation to `main`.
+Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). The initial repository commit is pushed. Stage 0 was approved for Stage 1 on 2026-10-17; the implementation issues are tracked in GitHub. Do not commit implementation to `main`.
 
 ## Staged plan
 
