@@ -1,6 +1,6 @@
 # PawLocal product specification
 
-**Status:** Draft for Stage 0 review  
+**Status:** Approved for Stage 1 implementation on 2026-10-17; unresolved design decisions remain open for their relevant later stages.  
 **Scope:** MVP only; future scope requires explicit approval.
 
 ## Problem and audience
