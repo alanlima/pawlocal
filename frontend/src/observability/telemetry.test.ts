@@ -71,11 +71,18 @@ describe('frontend telemetry', () => {
       requests.find((request) => request.path.includes('/v1/traces'))!.body,
     )
     const spans = traceBody.resourceSpans.flatMap(
-      (resourceSpan: { scopeSpans: { spans: { name: string; traceId: string }[] }[] }) =>
-        resourceSpan.scopeSpans.flatMap((scopeSpan) => scopeSpan.spans),
+      (resourceSpan: {
+        scopeSpans: {
+          spans: { name: string; traceId: string; spanId: string; parentSpanId?: string }[]
+        }[]
+      }) => resourceSpan.scopeSpans.flatMap((scopeSpan) => scopeSpan.spans),
     )
     const searchSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.search')
     const detailSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.detail')
+    const contributionSpan = spans.find(
+      (span: { name: string }) => span.name === 'pawlocal.contribution',
+    )
+    const reportSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.report')
     expect(
       spans.filter((span: { name: string }) => span.name === 'pawlocal.contribution'),
     ).toHaveLength(1)
@@ -90,6 +97,10 @@ describe('frontend telemetry', () => {
         ),
     )
     expect(searchSpan.traceId).toBe(detailSpan.traceId)
+    expect(contributionSpan.traceId).toBe(searchSpan.traceId)
+    expect(contributionSpan.parentSpanId).toBe(searchSpan.spanId)
+    expect(reportSpan.traceId).toBe(searchSpan.traceId)
+    expect(reportSpan.parentSpanId).toBe(searchSpan.spanId)
     expect(cancelledSpan.status.code).not.toBe(2)
     expect(posts.join('\n')).toContain('search_cancelled')
     expect(posts.join('\n')).not.toContain('search_error')

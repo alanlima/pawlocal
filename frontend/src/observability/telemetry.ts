@@ -106,7 +106,11 @@ export async function recordOperation<T>(
     {
       attributes: { 'pawlocal.operation': operation, ...safeAttributes },
     },
-    operation === 'detail' || operation === 'share' || operation === 'favourite'
+    operation === 'detail' ||
+      operation === 'share' ||
+      operation === 'favourite' ||
+      operation === 'contribution' ||
+      operation === 'report'
       ? (discoveryContext ?? otelContext.active())
       : otelContext.active(),
   )
