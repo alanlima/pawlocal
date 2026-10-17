@@ -64,7 +64,10 @@ services:
       retries: 10
 
   loki:
-    image: grafana/loki:3.5.3
+    build:
+      context: .
+      dockerfile: observability/healthcheck-images/loki.Dockerfile
+    image: pawlocal-stage2/loki:3.5.3
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
       - ./observability/loki/config.yaml:/etc/loki/config.yaml:ro
@@ -72,10 +75,11 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     healthcheck:
-      test: ["CMD", "/usr/bin/loki", "-verify-config", "-config.file=/etc/loki/config.yaml"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
 
   tempo:
     build:
