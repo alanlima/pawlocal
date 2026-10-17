@@ -6,8 +6,8 @@ Record accepted decisions with date, status, context, decision and consequences.
 
 - **Status:** Approved 2026-10-18.
 - **Context:** The human approved the updated Stage 2 and Stage 3 specifications in PR #14. The Codex review identified conflicts with the architecture, implementation plan, and this decision record; this entry makes the approved sequencing consistent across those canonical documents. See [PR #14 review comment](https://github.com/alanlima/pawlocal/pull/14#discussion_r4304401902).
-- **Decision:** Complete Foundations and Stage 1 in order. After human approval of both workstream specifications and with both issues open, Stage 2 local frontend/observability and Stage 3 backend/persistence may proceed in parallel in separate branches and Git worktrees. Stage 2 review remains a prerequisite to Stage 3 completion and Stage 3.1 start. After Stage 2 review, Stage 3.1 may proceed in its own coordinated worktree while Stage 3 continues.
-- **Consequence:** Stage 2 and Stage 3 can be implemented concurrently without sharing working directories. Stage 3.1 integrates their Compose changes and verifies the combined stack. No stage gate or required review is waived.
+- **Decision:** Complete Foundations and Stage 1 in order. After human approval of both workstream specifications and with both issues open, Stage 2 local frontend/observability and Stage 3 backend/persistence may proceed in parallel in separate branches and Git worktrees. Stage 2 review is required before Stage 3.1 starts. After that review, Stage 3.1 may proceed in its own coordinated worktree while Stage 3 continues. Stage 3 cannot be marked complete until the Stage 2 review gate passes and Stage 3.1 cross-layer instrumentation, combined Compose integration, and review evidence are complete.
+- **Consequence:** Stage 2 and Stage 3 can be implemented concurrently without sharing working directories. Stage 3.1 integrates their Compose changes and verifies the combined stack. No stage gate or required review is waived; Stage 3 completion remains dependent on Stage 3.1 evidence.
 
 ## DEC-002 — Stage 3 identity token validation and reportable contributions
 

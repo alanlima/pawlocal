@@ -6,7 +6,7 @@
 
 Stage 3 is owned by the Backend Engineer and may run in parallel with Stage 2 after both specifications are approved and the Stage 3 issue is open. Use a dedicated branch and Git worktree, separate from Stage 2; do not share a working directory. Stage 2 and Stage 3 may both change root `docker-compose.yml`. Keep those changes isolated for later integration.
 
-Stage 2's monitoring review gate must pass before Stage 3 is considered complete. Stage 3 implementation does not need to wait for Stage 2 completion. Stage 3.1 begins only after Stage 2 is complete and reviewed, and may proceed while Stage 3 continues. Stage 3.1 gets its own branch/worktree coordinated with the Stage 3 branch and owns end-to-end tracing/logging plus reconciliation and verification of the combined Compose stack. Stage 3 must preserve the frontend service boundary and provide the API/database behavior Stage 3.1 instruments.
+Stage 2's monitoring review gate must pass before Stage 3 is considered complete. Stage 3 implementation does not need to wait for Stage 2 completion. Stage 3.1 begins only after Stage 2 is complete and reviewed, and may proceed while Stage 3 continues. Stage 3.1 gets its own branch/worktree coordinated with the Stage 3 branch and owns end-to-end tracing/logging plus reconciliation and verification of the combined Compose stack. Stage 3 cannot be marked complete until Stage 3.1 integration work and its independent review are complete.
 
 ## Goal and scope
 
@@ -47,7 +47,7 @@ Community contributions follow the approved immediate-publication policy after v
 - [ ] Unit tests cover domain/use cases; API tests cover schemas/auth/errors; PostgreSQL integration tests cover repositories, constraints, and migrations.
 - [ ] End-to-end tests demonstrate browser discovery → detail/share and authenticated contribution/report/favourite journeys against API and database.
 - [ ] README/setup docs describe local startup, migration, test, reset, and teardown commands. The PR links this issue and reports verification evidence and checks actually run.
-- [ ] Stage 2 review gate is satisfied before Stage 3 is marked complete; Stage 3.1 owns cross-layer tracing/logging and combined Compose verification.
+- [ ] Stage 2 review gate has passed, and Stage 3.1 cross-layer tracing/logging plus combined Compose integration have been completed and reviewed before Stage 3 is marked complete.
 
 ## Out of scope and gate
 

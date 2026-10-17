@@ -9,7 +9,7 @@ Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). Stage 0 w
 | 0 Foundations | Review product requirements, API, architecture, agent workflow and backlog; resolve open decisions; establish repository conventions. | Human review of Stage 0 docs and plan. |
 | 1 Frontend with mock API | Responsive accessible React app, typed services, realistic mock data and MVP journeys/tests. | Stop for human review before Stage 2. |
 | 2 Local frontend and observability | Dockerized frontend, local OpenTelemetry, Grafana, Prometheus, Loki, Tempo, user-journey instrumentation and synthetic failures. | Use a dedicated branch/worktree. Review monitoring, dashboards, privacy and failure evidence before Stage 3.1 starts and before Stage 3 is complete. |
-| 3 Backend and persistence | FastAPI, modular domain/use cases, PostgreSQL, SQLAlchemy/Alembic, auth/contributions and HTTP adapter. | May start in parallel with Stage 2 in a separate branch/worktree. Demonstrate frontend-to-backend-to-database persistence; do not complete until the Stage 2 review gate passes. |
+| 3 Backend and persistence | FastAPI, modular domain/use cases, PostgreSQL, SQLAlchemy/Alembic, auth/contributions and HTTP adapter. | May start in parallel with Stage 2 in a separate branch/worktree. Demonstrate frontend-to-backend-to-database persistence; do not complete until the Stage 2 review gate passes and Stage 3.1 cross-layer instrumentation and Compose integration are completed and reviewed. |
 | 3.1 Cross-layer instrumentation and Compose integration | Extend traces/logs through browser, API and database; reconcile and verify Stage 2/3 Compose services. | Start after Stage 2 review; use a coordinated separate worktree and may proceed while Stage 3 continues. |
 | 4 Production readiness | Compose startup, CI/CD, costed hosting evaluation, approved deployment, user-impact alerts and controlled incident response. | Explicit approval before billable infrastructure. |
 | 5 Submission | Rubric evidence, reproducibility, docs, demo and peer reviews. | Verify against the current course rubric. |
@@ -56,6 +56,7 @@ Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). Stage 0 w
 - Validation, authorization, rate limits and duplicate review protection are enforced server-side.
 - HTTP frontend adapter replaces mock adapter behind the same interface; tests cover unit/integration/E2E behavior.
 - Demonstrate full frontend-to-API-to-database persistence and update contract/docs.
+- Complete and review Stage 3.1 correlated tracing/logging and combined Compose integration evidence before marking Stage 3 complete.
 - Use a dedicated branch and worktree, separate from Stage 2.
 - Obtain Stage 2 review before Stage 3 is marked complete.
 
