@@ -1,0 +1,65 @@
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node.js, Vite and frontend test output
+node_modules/
+frontend/dist/
+frontend/coverage/
+coverage/
+.vite/
+playwright-report/
+test-results/
+
+# Local databases, uploads and logs
+*.sqlite
+*.sqlite3
+*.db
+uploads/
+logs/
+*.log
+
+# Local observability data and generated dashboards
+observability/data/
+observability/**/data/
+
+# Terraform local state and generated working files
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl
+
+# Editor and operating system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

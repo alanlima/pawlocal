@@ -1,0 +1,222 @@
+openapi: 3.1.0
+info:
+  title: PawLocal API
+  version: 0.1.0
+  description: Draft Stage 0 contract for the PawLocal MVP. Review before implementation.
+servers:
+  - url: /api/v1
+paths:
+  /places:
+    get:
+      operationId: listPlaces
+      summary: Search published places
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: area
+          in: query
+          schema: { type: string }
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/PlaceCategory' }
+        - name: facilities
+          in: query
+          description: Repeat the parameter to require multiple facilities.
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Matching published places
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlacePage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /places/{place_id}:
+    parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getPlace
+      summary: Get a published place
+      responses:
+        '200':
+          description: Place details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Place' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /me/favourites:
+    get:
+      operationId: listFavourites
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Current user's favourites
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PlaceSummary' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: addFavourite
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlaceReference' }
+      responses:
+        '204': { description: Favourite saved (idempotent) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /me/favourites/{place_id}:
+    parameters:
+      - name: place_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      operationId: removeFavourite
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Favourite removed (idempotent) }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /contributions:
+    post:
+      operationId: submitContribution
+      summary: Submit a review, suggestion, tip or correction
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContributionInput' }
+      responses:
+        '201':
+          description: Contribution accepted and published subject to validation and moderation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Contribution' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Duplicate rating/review or conflicting contribution }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /reports:
+    post:
+      operationId: submitReport
+      summary: Report a place or contribution
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportInput' }
+      responses:
+        '202': { description: Report accepted for moderation }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Placeholder contract; identity provider and token lifecycle require a Stage 0 decision.
+  schemas:
+    PlaceCategory:
+      type: string
+      enum: [dog_park, beach, walk, hiking_area, cafe]
+    PlaceSummary:
+      type: object
+      required: [id, name, category, area]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        category: { $ref: '#/components/schemas/PlaceCategory' }
+        area: { type: string }
+        average_rating: { type: [number, 'null'], minimum: 1, maximum: 5 }
+    Place:
+      allOf:
+        - $ref: '#/components/schemas/PlaceSummary'
+        - type: object
+          properties:
+            description: { type: [string, 'null'] }
+            address: { type: [string, 'null'] }
+            dog_access_rules: { type: [string, 'null'], description: Unknown when unverified; never infer rules. }
+            facilities: { type: array, items: { type: string } }
+            source_updated_at: { type: [string, 'null'], format: date-time }
+    PlacePage:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/PlaceSummary' } }
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+    PlaceReference:
+      type: object
+      required: [place_id]
+      properties:
+        place_id: { type: string, format: uuid }
+    ContributionInput:
+      type: object
+      required: [kind, body]
+      properties:
+        kind: { type: string, enum: [review, location_suggestion, tip, correction] }
+        place_id: { type: [string, 'null'], format: uuid }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        body: { type: string, minLength: 1, maxLength: 5000 }
+    Contribution:
+      allOf:
+        - $ref: '#/components/schemas/ContributionInput'
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+    ReportInput:
+      type: object
+      required: [target_type, target_id, reason]
+      properties:
+        target_type: { type: string, enum: [place, contribution] }
+        target_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 1, maxLength: 2000 }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Request rate limit exceeded
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

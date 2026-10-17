@@ -1,0 +1,349 @@
+# PawLocal - Agent Instructions
+
+## 1. Project overview
+
+**PawLocal** is a free, community-powered web application for discovering dog-friendly places across South East Queensland, from the Gold Coast through Brisbane and Moreton Bay to the Sunshine Coast.
+
+### Problem
+Information about dog-friendly locations is scattered, incomplete or outdated. Dog owners struggle to find reliable details about fencing, off-leash rules, shade, drinking water, access restrictions and nearby cafes.
+
+### Solution
+Build a searchable, community-maintained directory where visitors discover places and registered users contribute information.
+
+### Core MVP capabilities
+- Browse dog parks, beaches, walks, hiking areas and pet-friendly cafes.
+- Search and filter by location, category and facilities.
+- View detailed place information.
+- Share individual places through permanent public URLs.
+- Registered users can save favourites, submit ratings and reviews, suggest locations, and publish tips or corrections.
+- Users can report inaccurate or inappropriate content.
+- AI can generate listing drafts from permitted public sources, but these require human approval before publishing.
+
+Community contributions publish immediately, subject to validation, abuse protection and reporting.
+
+### Future scope
+
+**Do not implement future features without explicit approval.**
+
+---
+
+## 2. Technical stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React, TypeScript, Vite |
+| Styling | Tailwind CSS |
+| Backend | Python, FastAPI, Pydantic |
+| Database | PostgreSQL, SQLAlchemy 2, Alembic |
+| API contract | OpenAPI |
+| Tests | Vitest, React Testing Library, Playwright, pytest |
+| Containerisation | Docker Compose |
+| Observability | OpenTelemetry, Grafana, Prometheus, Loki, Tempo |
+| Infrastructure | AWS, Terraform |
+| CI/CD | GitHub Actions |
+| Agent orchestration | AWS Labs CLI Agent Orchestrator (CAO) |
+
+Cloud hosting resources are not finalised. Cost approval is mandatory before provisioning AWS infrastructure.
+
+---
+
+## 3. Repository structure
+
+Follow the DataTalksClub AI Dev Tools Zoomcamp conventions.
+
+```text
+pawlocal/
+├── README.md
+├── AGENTS.md
+├── product-spec.md
+├── openapi.yaml
+├── docker-compose.yml
+├── .env.example
+├── frontend/
+├── backend/
+├── tests/
+├── docs/
+│   ├── architecture.md
+│   ├── agent-workflow.md
+│   ├── model-policy.md
+│   ├── decisions.md
+│   ├── testing.md
+│   └── ai-usage-report.md
+├── agents/
+│   ├── profiles/
+│   │   ├── orchestrator.md
+│   │   ├── frontend-engineer.md
+│   │   ├── backend-engineer.md
+│   │   ├── platform-engineer.md
+│   │   └── reviewer.md
+│   └── README.md
+├── observability/
+│   ├── grafana/
+│   ├── prometheus/
+│   ├── loki/
+│   └── tempo/
+├── infra/
+│   └── terraform/
+├── security/
+├── ops/
+└── .github/
+    └── workflows/
+```
+
+Maintain the agreed structure. Propose architectural changes through a documented decision before implementation.
+
+---
+
+## 4. Development stages
+
+Implementation must happen in the following order.
+
+### Stage 0 — Foundations
+- Finalise product specifications and acceptance criteria.
+- Configure CAO agents and their responsibilities.
+- Establish repository conventions.
+- Create GitHub Issues covering implementation tasks.
+- Prepare the OpenAPI contract and architectural documentation.
+
+### Stage 1 — Frontend with mock API
+- Build a responsive React application.
+- Centralise backend calls behind typed service interfaces.
+- Implement mock services and realistic sample data.
+- Implement all approved MVP user journeys.
+- Write frontend and component tests.
+
+**Gate:** Stop for human review and approval before continuing.
+
+### Stage 2 — Observability
+- Configure OpenTelemetry, Grafana, Loki, Tempo and Prometheus.
+- Instrument important frontend user journeys.
+- Implement correlated telemetry where supported.
+- Demonstrate synthetic failure scenarios.
+
+**Gate:** Monitoring infrastructure and dashboards must be reviewed before backend implementation.
+
+### Stage 3 — Backend and persistence
+- Implement FastAPI using clean modular architecture.
+- Create PostgreSQL models and Alembic migrations.
+- Integrate authentication and contribution workflows.
+- Implement APIs against the approved OpenAPI contract.
+- Replace frontend mock adapters with HTTP adapters.
+- Add unit, integration and end-to-end tests.
+
+**Gate:** Confirm working frontend-to-backend-to-database persistence.
+
+### Stage 4 — Production readiness
+- Validate complete Docker Compose startup.
+- Implement CI/CD.
+- Evaluate AWS hosting alternatives and running costs.
+- Obtain human approval before provisioning billable resources.
+- Deploy development and production environments.
+- Implement user-impact alerts and an automated incident responder.
+- Demonstrate rollback and controlled recovery.
+
+### Stage 5 — Submission
+- Verify each Zoomcamp scoring criterion.
+- Prepare README, architecture diagrams and demonstration evidence.
+- Ensure the application is reproducible.
+- Complete the required peer reviews.
+
+---
+
+## 5. Agent team
+
+CAO is responsible for orchestrating specialised agents.
+
+### Orchestrator
+Owns planning, task coordination, delegation, integration review and acceptance gates.
+
+The orchestrator must not silently bypass review or expand the project scope.
+
+### Frontend Engineer
+Owns React, TypeScript, UI components, mock services, client-side behaviour and frontend tests.
+
+### Backend Engineer
+Owns FastAPI, database integration, application services, API contracts, authentication and backend tests.
+
+### Platform Engineer
+Owns Docker, observability, CI/CD, AWS and Terraform.
+
+Infrastructure provisioning requires explicit human approval.
+
+### Reviewer
+Independently evaluates implementation against requirements, code quality, tests, security and acceptance criteria.
+
+Review does not automatically authorise merging.
+
+Each agent should read its relevant profile under `agents/profiles/` and the appropriate project documentation.
+
+---
+
+## 6. GitHub workflow — mandatory
+
+All implementation work must be traceable.
+
+1. Create or reference an existing GitHub Issue.
+2. Confirm the issue includes context and acceptance criteria.
+3. Create a branch linked to the issue.
+4. Implement only the approved scope.
+5. Add or update relevant tests.
+6. Run applicable checks.
+7. Open a Pull Request linking the issue.
+8. Record implementation details, decisions and verification evidence.
+9. Review and address Pull Request comments.
+10. Merge only after required approvals.
+
+Do not commit implementation directly to `main`.
+
+Do not close an issue simply because code has been written. Verify its acceptance criteria first.
+
+---
+
+## 7. Architecture and coding standards
+
+### General
+- Prefer simple, maintainable solutions.
+- Follow SOLID principles where they improve clarity.
+- Use clear naming and explicit dependencies.
+- Avoid unnecessary abstraction and premature microservices.
+- Keep configuration externalised.
+- Never hardcode credentials or secrets.
+- Preserve separation between domain logic and infrastructure.
+
+### Frontend
+- Use feature-based modules.
+- Components must not directly construct backend requests.
+- Centralise API access behind typed service interfaces.
+- Keep mock and HTTP adapters interchangeable.
+- Include loading, error and empty states.
+- Ensure responsive and accessible UI.
+- Reuse place-card components across discovery, favourites and sharing.
+
+### Backend
+Use clear boundaries between:
+- API and HTTP concerns.
+- Application use cases.
+- Domain entities and business rules.
+- Infrastructure and persistence implementations.
+
+Keep FastAPI route handlers thin.
+
+Use SQLAlchemy repositories, Alembic migrations and Pydantic schemas.
+
+Avoid business logic directly inside HTTP handlers or database models.
+
+### API
+`openapi.yaml` represents the agreed API contract.
+
+Changes to contracts must be reflected in frontend types, backend implementation, tests and documentation.
+
+---
+
+## 8. Security and data integrity
+
+- Anonymous visitors may browse public information.
+- Authentication is required for contributions and favourites.
+- Enforce authorisation on backend endpoints.
+- Validate user submissions and apply rate limiting.
+- Prevent duplicate or abusive ratings and reviews.
+- Community reports must support moderation.
+- AI-generated listing drafts require human verification.
+- Never invent locations, facilities or dog-access rules.
+- Avoid exposing personal information in logs or traces.
+- Use least-privilege access for agents and cloud resources.
+
+---
+
+## 9. Observability requirements
+
+Monitoring is a core architectural requirement, not a final-stage addition.
+
+Instrument the place-discovery journey:
+
+**Search → API → database → place details**
+
+Collect:
+- Structured logs.
+- Correlated traces.
+- Latency and error metrics.
+- User-impact indicators.
+
+Telemetry must be inspectable through Grafana or an equivalent supported interface.
+
+Alerting should focus on failures affecting actual user journeys.
+
+The incident responder must demonstrate controlled, auditable remediation, with recovery verification.
+
+Do not give incident agents unrestricted production permissions.
+
+---
+
+## 10. Cost management
+
+PawLocal must remain inexpensive to operate at low traffic.
+
+Before deploying AWS infrastructure:
+- Compare suitable hosting alternatives.
+- Calculate estimated idle and low-traffic monthly costs.
+- Include database, networking, logging, monitoring and backup costs.
+- Avoid unnecessary always-on resources.
+- Review NAT Gateway, load balancer and other fixed costs.
+- Establish AWS budget notifications.
+- Document infrastructure teardown procedures.
+
+**Never execute `terraform apply` against billable infrastructure without explicit human approval.**
+
+For future AI features, enforce usage quotas, model budgets, request limits and a fallback to conventional search.
+
+---
+
+## 11. Documentation and context management
+
+Use the following hierarchy:
+
+1. **`AGENTS.md`** — global project instructions.
+2. **`product-spec.md`** — functional requirements and acceptance criteria.
+3. **`openapi.yaml`** — API contract.
+4. **`docs/architecture.md`** — technical boundaries and design.
+5. **`docs/agent-workflow.md`** — coordination, handoffs and approvals.
+6. **`docs/model-policy.md`** — model selection, escalation and cost considerations.
+7. **`docs/decisions.md`** — approved architectural and product decisions.
+8. **GitHub Issues and PRs** — implementation status and evidence.
+
+CAO persistent memory supplements these documents but does not replace them.
+
+If instructions conflict, do not silently select one. Identify the conflict and request a decision.
+
+---
+
+## 12. Definition of Done
+
+A task is complete only when:
+
+- The approved acceptance criteria are satisfied.
+- Relevant tests exist and pass.
+- Code follows established architecture.
+- API contracts and documentation are updated where applicable.
+- Security and telemetry impacts have been considered.
+- A GitHub Pull Request provides implementation evidence.
+- Required review comments are addressed.
+- Appropriate approval has been obtained.
+
+---
+
+## 13. Initial instruction to orchestrator
+
+On first launch:
+
+1. Read this `AGENTS.md`.
+2. Inspect the repository and existing documentation.
+3. Identify missing foundational files.
+4. Review the official Zoomcamp final-project requirements.
+5. Prepare a concise implementation plan aligned with the established development stages.
+6. Create or propose GitHub Issues with acceptance criteria.
+7. Confirm agent responsibilities and handoff conventions.
+8. Begin with Stage 0 only.
+
+Do not start frontend implementation until the foundational specifications and implementation plan have been reviewed.
+
+Do not introduce future-scope features or billable infrastructure without approval.
