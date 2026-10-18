@@ -100,7 +100,7 @@ Local signal data is stored in Docker volumes. `docker compose down -v` also del
 
 ### Trace propagation contract
 
-The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. `HttpPlaceService` injects `traceparent` and `tracestate` into API requests, so the backend server span and SQLAlchemy database spans join the browser trace. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
+The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. `HttpPlaceService` sends trace context with API requests; the backend accepts `traceparent` for parent correlation and discards inbound `tracestate` before exporting spans. This lets backend and SQLAlchemy spans join the browser trace without trusting caller-supplied trace state. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
 
 ## Run locally
 
