@@ -4,8 +4,16 @@ on:
   pull_request:
     paths:
       - "frontend/**"
+      - "openapi.yaml"
+      - "package.json"
+      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "yarn.lock"
       - ".github/workflows/frontend-deploy.yml"
       - ".github/workflows/frontend-production-deploy.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  workflow_call:
 
 permissions:
   contents: read

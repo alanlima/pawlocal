@@ -1,0 +1,81 @@
+name: Compose CI
+
+on:
+  pull_request:
+    paths:
+      - "docker-compose.yml"
+      - "docker-compose.yaml"
+      - "compose.yml"
+      - "compose.yaml"
+      - ".dockerignore"
+      - "Dockerfile"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - ".env.example"
+      - "observability/**"
+      - "openapi.yaml"
+      - ".github/workflows/compose-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches:
+      - main
+    paths:
+      - "docker-compose.yml"
+      - "docker-compose.yaml"
+      - "compose.yml"
+      - "compose.yaml"
+      - ".dockerignore"
+      - "Dockerfile"
+      - "frontend/Dockerfile"
+      - "frontend/.dockerignore"
+      - "backend/Dockerfile"
+      - "backend/.dockerignore"
+      - ".env.example"
+      - "observability/**"
+      - "openapi.yaml"
+      - ".github/workflows/compose-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-compose-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: Compose validation and readiness smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure local-only Compose environment
+        run: cp .env.example .env
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build the full stack with its declared host-network entitlement
+        run: |
+          docker compose build --print > "${RUNNER_TEMP}/pawlocal-bake.json"
+          docker buildx bake --allow network.host --file "${RUNNER_TEMP}/pawlocal-bake.json"
+
+      - name: Start the full stack and wait for health checks
+        run: docker compose up --detach --wait --wait-timeout 300
+
+      - name: Smoke-check frontend, API, and Grafana
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:5173/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8000/health
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/health > /dev/null
+
+      - name: Stop stack and remove CI volumes
+        if: always()
+        run: docker compose down --volumes --remove-orphans
