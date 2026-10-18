@@ -32,7 +32,11 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      PAWLOCAL_DATABASE_URL: postgresql+psycopg://pawlocal:${PAWLOCAL_POSTGRES_PASSWORD:?Set PAWLOCAL_POSTGRES_PASSWORD in your local .env}@postgres:5432/pawlocal
+      PAWLOCAL_DATABASE_HOST: postgres
+      PAWLOCAL_DATABASE_PORT: 5432
+      PAWLOCAL_DATABASE_NAME: pawlocal
+      PAWLOCAL_DATABASE_USER: pawlocal
+      PAWLOCAL_DATABASE_PASSWORD: ${PAWLOCAL_POSTGRES_PASSWORD:?Set PAWLOCAL_POSTGRES_PASSWORD in your local .env}
       PAWLOCAL_TELEMETRY_ENABLED: ${PAWLOCAL_TELEMETRY_ENABLED:-true}
       PAWLOCAL_OTLP_ENDPOINT: http://otel-collector:4318
       PAWLOCAL_DEMO_FAULTS_ENABLED: ${PAWLOCAL_DEMO_FAULTS_ENABLED:-true}

@@ -12,7 +12,7 @@ py -m venv .venv
 python -m pip install -e '.[test]'
 ```
 
-Set `PAWLOCAL_DATABASE_URL` to a PostgreSQL URL in the shell or root `.env`. The default is a local PostgreSQL socket/localhost connection using the current operating-system user. To enable protected writes, configure `PAWLOCAL_COGNITO_ISSUER` and `PAWLOCAL_COGNITO_APP_CLIENT_ID`; configure `PAWLOCAL_COGNITO_RESOURCE_AUDIENCE` and `PAWLOCAL_COGNITO_REQUIRE_RESOURCE_AUDIENCE=true` when Cognito resource binding is enabled. The API accepts signed access tokens only. Stage 3 does not provision Cognito resources. Apply migrations and run the API:
+Set `PAWLOCAL_DATABASE_URL` to a PostgreSQL URL in the shell or root `.env` for local development. The default is a local PostgreSQL socket/localhost connection using the current operating-system user. Root Compose passes host, port, database, user and password as separate settings; the backend uses SQLAlchemy `URL.create` so URL-special characters in the password remain valid. To enable protected writes, configure `PAWLOCAL_COGNITO_ISSUER` and `PAWLOCAL_COGNITO_APP_CLIENT_ID`; configure `PAWLOCAL_COGNITO_RESOURCE_AUDIENCE` and `PAWLOCAL_COGNITO_REQUIRE_RESOURCE_AUDIENCE=true` when Cognito resource binding is enabled. The API accepts signed access tokens only. Stage 3 does not provision Cognito resources. Apply migrations and run the API:
 
 ```powershell
 alembic -c alembic.ini upgrade head
