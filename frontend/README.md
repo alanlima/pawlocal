@@ -93,7 +93,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. The header's **Demo mode** control switches between visitor and demo-member states so contribution and favourite flows can be exercised without a real identity provider. Mock favourites persist in this browser's local storage; submitted contributions and reports are simulated only. Mock contributions remain available during the session as report targets. The initial report-target example is explicitly synthetic and is not community data or verified place information.
+Open the local URL printed by Vite. The header's **Demo mode** control switches between visitor and demo-member states only when `VITE_USE_MOCK_BACKEND=true`. Mock favourites persist in this browser's local storage; submitted contributions and reports are simulated only. Mock contributions remain available during the session as report targets. The initial report-target example is explicitly synthetic and is not community data or verified place information.
 
 ## Checks
 
@@ -105,7 +105,7 @@ npm run test:e2e
 npm run test:e2e:backend
 ```
 
-`test:e2e:backend` expects the isolated PostgreSQL-backed API and ephemeral JWKS issuer from `backend/README.md` to be running on ports 18001 and 18002. It uses a separate Vite config and HTTP-service alias; the regular app factory and mock-mode tests are unchanged.
+`test:e2e:backend` expects the isolated PostgreSQL-backed API and ephemeral JWKS issuer from `backend/README.md` to be running on ports 18001 and 18002. It uses a separate Vite config and HTTP-service alias.
 
 ## Format and lint frontend TypeScript
 
@@ -115,4 +115,18 @@ From the `frontend` directory, run `npm run format` to format the React/TypeScri
 
 Feature components import the shared `placeService` instance from `src/services`. The `PlaceService` contract is in `src/services/PlaceService.ts`. `HttpPlaceService` calls the `/api/v1` endpoints in the root `openapi.yaml` and maps API snake_case fields to the frontend's camelCase domain type. `MockPlaceService` remains available for the mock demonstration.
 
-The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. Set `VITE_USE_MOCK_BACKEND=true` to explicitly select the mock adapter. When it is false or unset, the app selects the HTTP adapter; root Compose sets it to false and proxies `/api/v1` to the `backend` service. HTTP writes use the backend's configured identity provider and are not authenticated by the frontend demo mode.
+The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. The service factory selects `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`; false or unset selects `HttpPlaceService`, using `VITE_API_BASE_URL` or the same-origin `/api/v1` default. Root Compose sets mock mode to false and proxies `/api/v1` to the `backend` service. HTTP failures stay visible and never fall back to mock data.
+
+### Host authentication integration
+
+The frontend does not implement sign-in screens or provision an identity provider. A host application may inject the current Cognito session before the PawLocal app loads using this browser contract:
+
+```ts
+window.pawLocalAuth = {
+  getAccessToken: () => cognitoSession.getAccessToken(), // sync or Promise<string | null>
+  signIn: () => startHostSignIn(), // optional
+  signOut: () => endHostSession(), // optional
+}
+```
+
+`getAccessToken()` is called for every HTTP request; return the current short-lived Cognito **access token**, or `null` when signed out. The adapter adds it as a Bearer token for protected API calls and does not persist or display it. The host owns the sign-in/sign-out UX and token refresh. If no provider or sign-in action is configured, the HTTP-mode UI reports that authentication is unavailable and does not simulate a signed-in user. Mock demo-member mode is only a local mock behavior and does not authenticate HTTP requests. Authenticated browser flows remain unverified until a host supplies a configured Cognito session.

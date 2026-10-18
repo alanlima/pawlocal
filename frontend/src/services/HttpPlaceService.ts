@@ -6,7 +6,10 @@ import type {
   ReportInput,
 } from '../types/place'
 import type { PlaceService } from './PlaceService'
+import { getAccessToken } from '../auth/authSession'
 import { injectCurrentTraceContext } from '../observability/telemetry'
+
+type AccessTokenProvider = () => string | null | Promise<string | null>
 
 type PlaceWire = {
   id: string
@@ -44,13 +47,16 @@ const fromWire = (wire: PlaceWire): Place => ({
 /** HTTP adapter seam. Map API wire names here; feature components stay adapter agnostic. */
 export class HttpPlaceService implements PlaceService {
   constructor(
-    private readonly baseUrl = '/api/v1',
-    private readonly token?: () => string | null,
-  ) {}
+    baseUrl = '/api/v1',
+    private readonly token: AccessTokenProvider = getAccessToken,
+  ) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '')
+  }
+  private readonly baseUrl: string
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
-    const token = this.token?.()
+    const token = await this.token()
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const propagatedHeaders = injectCurrentTraceContext(Object.fromEntries(headers.entries()))
     for (const [name, value] of Object.entries(propagatedHeaders)) headers.set(name, value)

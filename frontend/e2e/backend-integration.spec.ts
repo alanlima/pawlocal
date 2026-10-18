@@ -18,6 +18,7 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.addInitScript((token) => {
     window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
+    window.pawLocalAuth = { getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null }
   }, accessToken)
 
   const authenticatedRead = page.waitForRequest(

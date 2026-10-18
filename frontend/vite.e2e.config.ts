@@ -5,9 +5,9 @@ import baseConfig from './vite.config'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
-export default mergeConfig(
-  baseConfig,
-  defineConfig({
+export default defineConfig(async (configEnv) => {
+  const base = typeof baseConfig === 'function' ? await baseConfig(configEnv) : baseConfig
+  return mergeConfig(base, {
     mode: 'e2e',
     resolve: {
       alias: [
@@ -25,5 +25,5 @@ export default mergeConfig(
         },
       },
     },
-  }),
-)
+  })
+})

@@ -8,10 +8,11 @@ declare global {
   }
 }
 
-// This module is aliased only by vite.e2e.config.ts. Production keeps its
-// Stage 2-wrapped mock factory and never reads a browser-injected token.
+// This module is aliased only by vite.e2e.config.ts. The test helper supplies
+// an isolated issuer token and keeps the real API calls under frontend spans.
 const httpPlaceService: PlaceService = new HttpPlaceService(
   '/api/v1',
   () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
 )
 export const placeService: PlaceService = observePlaceService(httpPlaceService)
+export const isMockBackend = false

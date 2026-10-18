@@ -14,7 +14,8 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { placeService } from '../services'
+import { isMockBackend, placeService } from '../services'
+import { getAccessToken, getAuthSession } from '../auth/authSession'
 import { useDiscovery } from '../features/discovery/useDiscovery'
 import { ContributionDialog } from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
@@ -58,6 +59,18 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false)
   const [view, setView] = useState<'explore' | 'favourites'>('explore')
   const dialogTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!isMockBackend) {
+      let current = true
+      void getAccessToken().then((token) => {
+        if (current) setSignedIn(Boolean(token))
+      })
+      return () => {
+        current = false
+      }
+    }
+  }, [])
 
   useEffect(() => {
     void placeService
@@ -135,6 +148,40 @@ export default function App() {
       setFavourites(await placeService.listFavourites())
     } catch {
       setNotice('We couldn’t update your saved places. Please try again.')
+    }
+  }
+  const toggleSignIn = async () => {
+    if (isMockBackend) {
+      setSignedIn((current) => !current)
+      setNotice(signedIn ? 'You are viewing as a visitor.' : 'You are signed in as a demo member.')
+      return
+    }
+
+    const authSession = getAuthSession()
+    if (!authSession) {
+      setNotice('Authentication is not configured in this environment.')
+      return
+    }
+    try {
+      if (signedIn) {
+        if (!authSession.signOut) {
+          setNotice('Sign-out is managed by your identity provider.')
+          return
+        }
+        await authSession.signOut()
+        setSignedIn(false)
+        setFavourites([])
+        setNotice('You are viewing as a visitor.')
+        return
+      }
+      if (!authSession.signIn) {
+        setNotice('Sign-in is not configured in this environment.')
+        return
+      }
+      await authSession.signIn()
+      setSignedIn(Boolean(await getAccessToken()))
+    } catch {
+      setNotice('Your identity provider could not complete sign-in. Please try again.')
     }
   }
   const openPlace = async (place: Place) => {
@@ -230,18 +277,11 @@ export default function App() {
         </nav>
         <div className="header-actions">
           <span className="demo-label">
-            <span /> Demo mode
+            <span /> {isMockBackend ? 'Demo mode' : 'Community directory'}
           </span>
-          <button
-            className="signin-button"
-            onClick={() => {
-              setSignedIn(!signedIn)
-              setNotice(
-                signedIn ? 'You are viewing as a visitor.' : 'You are signed in as a demo member.',
-              )
-            }}
-          >
-            {signedIn ? 'Demo member' : 'Sign in'} <ChevronDown size={15} />
+          <button className="signin-button" onClick={() => void toggleSignIn()}>
+            {signedIn ? (isMockBackend ? 'Demo member' : 'Sign out') : 'Sign in'}{' '}
+            <ChevronDown size={15} />
           </button>
         </div>
         <button
