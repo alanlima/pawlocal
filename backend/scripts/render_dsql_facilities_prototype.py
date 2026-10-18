@@ -41,6 +41,11 @@ def render_sql() -> str:
     return render_schema_sql() + "\n" + render_query_sql()
 
 
+def normalize_sql(sql: str) -> str:
+    """Remove dialect formatter trailing spaces for clean checked-in artifacts."""
+    return "\n".join(line.rstrip() for line in sql.splitlines()) + "\n"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -63,4 +68,4 @@ if __name__ == "__main__":
         if args.query_only
         else render_sql()
     )
-    print(rendered, end="")
+    print(normalize_sql(rendered), end="")
