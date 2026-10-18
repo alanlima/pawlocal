@@ -97,7 +97,9 @@ test('uses consistent artwork icons and keeps mobile hero decorations out of the
 
 test('demo member can submit a review and a location suggestion', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Add a place' }).click()
+  await page.getByRole('button', { name: 'View New Farm Park' }).click()
+  await expect(page.getByRole('heading', { name: 'New Farm Park' })).toBeVisible()
+  await page.getByRole('button', { name: 'Write a review' }).click()
   await page.getByRole('button', { name: 'Continue as demo member' }).click()
   await expect(page.getByRole('button', { name: 'Demo member' })).toBeVisible()
   await expect(page.getByText(/visitor mode/i)).not.toBeVisible()
@@ -110,6 +112,9 @@ test('demo member can submit a review and a location suggestion', async ({ page 
   await page.getByLabel('Your note').fill('A thoughtful demo review.')
   await page.getByRole('button', { name: 'Share with PawLocal' }).click()
   await expect(page.getByRole('status')).toContainText('Thanks for helping the PawLocal community!')
+
+  await page.getByRole('button', { name: 'All places' }).click()
+  await expect(page.getByLabel('Search places or areas')).toBeVisible()
   await page.getByRole('button', { name: 'Add a place' }).click()
   await page.getByLabel('What would you like to share?').selectOption('location_suggestion')
   await page.getByLabel('Your note').fill('A new place to verify in demo mode.')

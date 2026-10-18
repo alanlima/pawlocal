@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "frontend/**"
+      - "backend/**"
+      - "observability/**"
+      - "infra/terraform/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - "openapi.yaml"
+      - "README.md"
+      - "docs/testing.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "frontend/**"
+      - "backend/**"
+      - "observability/**"
+      - "infra/terraform/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - "openapi.yaml"
+      - "README.md"
+      - "docs/testing.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VITE_USE_MOCK_BACKEND: "true"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format and lint
+        run: npm run check
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend browser tests
+        run: npm run test:e2e
+
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: pawlocal
+          POSTGRES_PASSWORD: pawlocal-ci-password
+          POSTGRES_DB: pawlocal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pawlocal -d pawlocal_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PAWLOCAL_DATABASE_URL: postgresql+psycopg://pawlocal:pawlocal-ci-password@localhost:5432/pawlocal_test
+      PAWLOCAL_TEST_DATABASE_URL: postgresql+psycopg://pawlocal:pawlocal-ci-password@localhost:5432/pawlocal_test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and test dependencies
+        run: python -m pip install -e ".[test]"
+
+      - name: Lint Python code
+        run: ruff check .
+
+      - name: Apply migrations to the disposable CI database
+        run: alembic -c alembic.ini upgrade head
+
+      - name: Run backend unit and PostgreSQL integration tests
+        run: pytest
+
+  compose:
+    name: Compose validation and readiness smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure local-only Compose environment
+        run: cp .env.example .env
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build and start the full stack
+        run: docker compose up --build --detach --wait --wait-timeout 300
+
+      - name: Smoke-check frontend, API, and Grafana
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:5173/ > /dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8000/health
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/health > /dev/null
+
+      - name: Stop stack and remove CI volumes
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  terraform:
+    name: Terraform format and validation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize providers without configuring the backend
+        run: terraform init -backend=false -input=false
+
+      - name: Validate Terraform configuration
+        run: terraform validate -no-color
