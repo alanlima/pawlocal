@@ -17,20 +17,16 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   }
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.addInitScript((token) => {
-    window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
+    window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = null
     window.pawLocalAuth = {
       getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
-      signIn: async () => undefined,
+      signIn: async () => {
+        window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
+      },
     }
   }, accessToken)
 
-  const authenticatedRead = page.waitForRequest(
-    (apiRequest) =>
-      apiRequest.url().includes('/api/v1/me/favourites') &&
-      apiRequest.headers()['authorization'] === `Bearer ${accessToken}`,
-  )
   await page.goto('/')
-  await authenticatedRead
   const card = page.getByRole('button', { name: 'View Synthetic Stage 3 E2E Dog Park' })
   await expect(card).toBeVisible()
   await card.click()
@@ -42,7 +38,13 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   // The E2E host sign-in callback completes the real HTTP-mode auth flow; the
   // API request is then verified by issuer/JWKS/exp/client_id checks.
   await page.getByRole('button', { name: /Suggest an update/ }).click()
+  const authenticatedRead = page.waitForRequest(
+    (apiRequest) =>
+      apiRequest.url().includes('/api/v1/me/favourites') &&
+      apiRequest.headers()['authorization'] === `Bearer ${accessToken}`,
+  )
   await page.getByRole('button', { name: 'Sign in' }).click()
+  await authenticatedRead
   await page.getByLabel('What would you like to share?').selectOption('tip')
   const contributionText = `Browser API persistence ${Date.now()}`
   await page.getByLabel('Your note').fill(contributionText)
