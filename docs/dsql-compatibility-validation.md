@@ -1,6 +1,6 @@
 # Aurora DSQL compatibility review
 
-**Review date:** 2026-10-18  
+**Review date:** 2026-10-18
 **Status:** Static review of the current PawLocal repository and AWS documentation. No DSQL cluster was provisioned or queried. A live compatibility and cost test is still required before selecting DSQL.
 
 ## Scope inspected
@@ -35,7 +35,7 @@ No command below creates a cluster. First get an explicit, separate approval for
 2. Convert the facilities storage and query strategy, then generate migrations using the AWS DSQL dialect. Inspect all SQL emitted by the migration tool and lint generated SQL with [AWS `dsql-lint`](https://github.com/awslabs/aurora-dsql-tools/tree/main/dsql-lint).
 3. On the disposable cluster, run (a) Alembic upgrade from empty, (b) upgrade from the previous migration revision with representative legacy rows, then (c) the `test_postgres_repositories_constraints_and_records_survive_new_sessions` journey from `backend/tests/test_postgres_integration.py`, adapted to the DSQL engine/credentials. Confirm fixtures clean up after themselves.
 4. Extend that journey with concurrent duplicate review submissions, concurrent rating writes, retry exhaustion, a cold/new connection after token refresh, and a replaceable-VM reconnect. Record errors/SQLSTATEs without logging SQL bind values, tokens, user subjects, or contribution bodies.
-5. Seed representative place and contribution volumes. Exercise combined text/area/category/facility filters, ordering, exact counts and page boundaries. Capture elapsed time, query plans/`EXPLAIN ANALYZE` DPU estimate and CloudWatch `ComputeDPU`, `ReadDPU`, and `WriteDPU`. Extrapolate from measured query mix and measured storage to monthly price; do not multiply API request count by a guessed DPU factor.
+5. Seed representative place and contribution volumes. Exercise combined text/area/category/facility filters, ordering, exact counts and page boundaries. Capture elapsed time, query plans and the directional statement estimate from `EXPLAIN ANALYZE VERBOSE`, plus CloudWatch `ComputeDPU`, `ReadDPU`, and `WriteDPU` and transaction totals. AWS's statement estimate is not billing-grade; reconcile measured workload totals with CloudWatch and billing before extrapolating a monthly price. Do not multiply API request count by a guessed DPU factor.
 6. Test AWS Backup retention and a restore drill, then record the achieved RPO/RTO. Record the exact account free-tier interpretation and Sydney rate-card version.
 
 **Evidence still required:** an actual clean migration, upgrade migration, repository journey, conflict/retry result, token refresh/new connection, query DPU sample, and backup restore. None is claimed complete in this static review. Until the test is separately authorized and run, keep DSQL provisional and keep provisioning/cost approval open.
