@@ -2,6 +2,8 @@ import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { ArrowUpRight, Star, X } from 'lucide-react'
 import type { Contribution, ContributionKind } from '../../types/place'
 
+export type ReportableContributionsStatus = 'idle' | 'loading' | 'error' | 'success'
+
 type Props = {
   dialog: 'contribute' | 'report' | null
   hasSelectedPlace: boolean
@@ -18,8 +20,10 @@ type Props = {
   reportTargetId: string
   reportPlaceId: string
   reportableContributions: Contribution[]
+  reportableContributionsStatus: ReportableContributionsStatus
   setReportTargetType: (value: 'place' | 'contribution') => void
   setReportTargetId: (value: string) => void
+  onRetryReportableContributions: () => void
   onClose: () => void
   onSignIn: () => void
   onSubmit: () => void
@@ -41,8 +45,10 @@ export function ContributionDialog({
   reportTargetId,
   reportPlaceId,
   reportableContributions,
+  reportableContributionsStatus,
   setReportTargetType,
   setReportTargetId,
+  onRetryReportableContributions,
   onClose,
   onSignIn,
   onSubmit,
@@ -141,9 +147,7 @@ export function ContributionDialog({
                 onChange={(event) => {
                   const type = event.target.value as 'place' | 'contribution'
                   setReportTargetType(type)
-                  setReportTargetId(
-                    type === 'place' ? reportPlaceId : (reportableContributions[0]?.id ?? ''),
-                  )
+                  setReportTargetId(type === 'place' ? reportPlaceId : '')
                 }}
               >
                 <option value="place">A place listing</option>
@@ -151,7 +155,23 @@ export function ContributionDialog({
               </select>
             </label>
             {reportTargetType === 'contribution' &&
-              (reportableContributions.length ? (
+              (reportableContributionsStatus === 'idle' ||
+              reportableContributionsStatus === 'loading' ? (
+                <p className="modal-note" role="status">
+                  Loading published contributions…
+                </p>
+              ) : reportableContributionsStatus === 'error' ? (
+                <div className="modal-note" role="alert">
+                  <p>We couldn’t load published contributions. Please try again.</p>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={onRetryReportableContributions}
+                  >
+                    Try again
+                  </button>
+                </div>
+              ) : reportableContributions.length ? (
                 <>
                   <label className="form-label">
                     Choose a community contribution
