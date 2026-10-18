@@ -6,7 +6,7 @@ No fixture currently has verified access or facility facts, so facility filters 
 
 ## Local frontend and observability stack
 
-From the repository root, start the frontend, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana with:
+From the repository root, start the frontend, FastAPI backend, PostgreSQL, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana with:
 
 ```powershell
 docker compose up --build -d
@@ -24,17 +24,19 @@ docker compose up --build -d
 
 These override values make PawLocal available at <http://localhost:5174> and Grafana at <http://localhost:3001>. The Collector permits OTLP browser requests from `http://localhost:5174` for this run.
 
-With default ports, the app is at <http://localhost:5173> and Grafana is at <http://localhost:3000>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo and the Collector health endpoint are also host-reachable on localhost ports 9090, 3100, 3200 and 13133. Compose binds every published port to loopback.
+With default ports, the app is at <http://localhost:5173>, Grafana is at <http://localhost:3000>, and the API health check is at <http://localhost:8000/health>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo, the Collector health endpoint and PostgreSQL are also host-reachable on localhost ports 9090, 3100, 3200, 13133 and 55432. Compose binds every published port to loopback. The frontend uses the HTTP adapter with the Vite proxy to `backend:8000`; set `VITE_USE_MOCK_BACKEND=true` only when running the mock-only frontend without the backend service.
 
 | Service | Host address | Purpose |
 |---|---|---|
 | Frontend (default) | `localhost:5173` | Vite development UI |
+| FastAPI backend | `localhost:8000` | API health and local synthetic-failure requests |
+| PostgreSQL | `localhost:55432` | Local persistence |
 | Collector OTLP/HTTP | `localhost:4318` | Browser traces, metrics and logs |
 | Collector health | `localhost:13133` | Collector readiness |
 | Grafana (default) | `localhost:3000` | Dashboards, logs and Tempo traces |
 | Prometheus | `localhost:9090` | Scraped frontend metrics |
-| Loki | `localhost:3100` | Structured frontend logs |
-| Tempo | `localhost:3200` | Frontend traces |
+| Loki | `localhost:3100` | Structured frontend and backend logs |
+| Tempo | `localhost:3200` | Correlated browser, API and database traces |
 
 ### Health and status checks
 
@@ -57,10 +59,27 @@ The Collector accepts browser OTLP/HTTP only from the origin in `PAWLOCAL_FRONTE
 
 1. Open PawLocal, search for a matching area or place, then open a result.
 2. In Grafana's PawLocal dashboard, inspect search/detail outcomes, latency and frontend logs. Open a log's trace ID to view its trace in Tempo. A successful search, a search with no results, and a failed search have distinct bounded outcomes.
-3. Exercise **Share this place**, save a favourite in demo-member mode, submit a demo contribution and send a report to emit bounded action outcome counters/logs.
-4. To inject a deterministic search error, open `http://localhost:<frontend-port>/?demoFault=search-error` (default port `5173`; `5174` in the example above), then search or change a filter. The UI shows its existing error state; Grafana records `search/error` and `PAWLOCAL_OPERATION_FAILED`. For a bounded delay instead, use `?demoFault=search-delay`. Reload without the query parameter to restore normal mock behavior.
+3. Root Compose runs the HTTP adapter against the backend. Protected actions require a host-provided `window.pawLocalAuth` session; Compose does not provide demo-member sign-in. The mock-only walkthrough below is separate from Compose.
+4. To exercise the frontend's deterministic mock search failure, start a standalone Vite server with mock mode and development faults explicitly enabled. In PowerShell, run from the repository root:
 
-Fault controls are available only in the Vite development server when `VITE_DEMO_FAULTS=true`; the production build removes their code. Do not put search text or personal data in issue/PR telemetry screenshots. Telemetry records operation, outcome, duration and small fixed categories only; it excludes query text, place IDs, contribution/report payloads, names, email addresses and credentials. Error text from exceptions is not exported.
+   ```powershell
+   $env:VITE_USE_MOCK_BACKEND = 'true'
+   $env:VITE_DEMO_FAULTS = 'true'
+   $env:VITE_TELEMETRY_ENABLED = 'false'
+   Push-Location frontend
+   npm run dev -- --host 127.0.0.1 --port 5178
+   ```
+
+   Open <http://127.0.0.1:5178/?demoFault=search-error> and search or change a filter. The existing search error state appears. Use `?demoFault=search-delay` to exercise the bounded delay. Reload without the query parameter to restore normal mock behavior. Stop Vite with `Ctrl+C`, then clear the shell settings:
+
+   ```powershell
+   Pop-Location
+   Remove-Item Env:VITE_USE_MOCK_BACKEND, Env:VITE_DEMO_FAULTS, Env:VITE_TELEMETRY_ENABLED
+   ```
+
+   This standalone mock walkthrough does not call the Compose API or send telemetry to Grafana. To demonstrate a correlated API failure in root Compose, enable `PAWLOCAL_DEMO_FAULTS_ENABLED=true` for the backend and call `GET /api/v1/places` with `X-PawLocal-Demo-Failure: api` or `database`; the API returns a bounded 503 error code and exports the corresponding trace/log.
+
+Frontend `demoFault` controls are available only in a Vite development server using `VITE_USE_MOCK_BACKEND=true` and `VITE_DEMO_FAULTS=true`; the production build removes their code. They exercise only mock search. The separate backend fault header is available only when `PAWLOCAL_DEMO_FAULTS_ENABLED=true`. Do not put search text or personal data in issue/PR telemetry screenshots. Telemetry records operation, outcome, duration and small fixed categories only; it excludes query text, place IDs, contribution/report payloads, names, email addresses and credentials. Error text from exceptions is not exported.
 
 ### Telemetry toggle and shutdown
 
@@ -81,7 +100,7 @@ Local signal data is stored in Docker volumes. `docker compose down -v` also del
 
 ### Trace propagation contract
 
-The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. The Stage 3 HTTP adapter can call `injectCurrentTraceContext(headers)` from `src/observability/telemetry.ts` to add `traceparent` and `tracestate` to a request. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
+The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. `HttpPlaceService` sends trace context with API requests; the backend accepts `traceparent` for parent correlation and discards inbound `tracestate` before exporting spans. This lets backend and SQLAlchemy spans join the browser trace without trusting caller-supplied trace state. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
 
 ## Run locally
 
@@ -109,11 +128,11 @@ npm run test:e2e:backend
 
 From the `frontend` directory, run `npm run format` to format the React/TypeScript source under `src` and the TypeScript end-to-end tests under `e2e`. Prettier wraps code at 100 characters. To check formatting without changing files, run `npm run format:check`. Run `npm run lint` for TypeScript and React Hooks lint rules, or `npm run check` to run both checks together.
 
-## Replace the mock API later
+## Frontend service mode
 
-Feature components import the shared `placeService` instance from `src/services`. The `PlaceService` contract is in `src/services/PlaceService.ts`. `MockPlaceService` provides current Stage 1 behavior; `HttpPlaceService` is the adapter seam for the `/api/v1` endpoints in the root `openapi.yaml` and maps API snake_case fields to the frontend's camelCase domain type.
+Feature components import the shared `placeService` instance from `src/services`. The `PlaceService` contract is in `src/services/PlaceService.ts`. `HttpPlaceService` calls the `/api/v1` endpoints in the root `openapi.yaml` and maps API snake_case fields to the frontend's camelCase domain type. `MockPlaceService` remains available for the mock demonstration.
 
-The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. The service factory selects `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`; false or unset selects `HttpPlaceService`, using `VITE_API_BASE_URL` or the same-origin `/api/v1` default. HTTP failures stay visible and never fall back to mock data.
+The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. The service factory selects `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`; false or unset selects `HttpPlaceService`, using `VITE_API_BASE_URL` or the same-origin `/api/v1` default. Root Compose sets mock mode to false and proxies `/api/v1` to the `backend` service. HTTP failures stay visible and never fall back to mock data.
 
 ### Host authentication integration
 

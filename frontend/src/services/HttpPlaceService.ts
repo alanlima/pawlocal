@@ -5,7 +5,7 @@ import type {
   PlaceQuery,
   ReportInput,
 } from '../types/place'
-import type { PlaceService } from './PlaceService'
+import type { PlaceService, PlaceServiceRequestContext } from './PlaceService'
 import { getAccessToken } from '../auth/authSession'
 
 type AccessTokenProvider = () => string | null | Promise<string | null>
@@ -55,19 +55,26 @@ export class HttpPlaceService implements PlaceService {
   private async request<T>(
     path: string,
     init: RequestInit = {},
+    context?: PlaceServiceRequestContext,
     requiresAuthentication = false,
   ): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
     const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
+    if (context?.traceparent) headers.set('traceparent', context.traceparent)
+    if (context?.tracestate) headers.set('tracestate', context.tracestate)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
     return response.status === 204 || response.status === 202
       ? (undefined as T)
       : (response.json() as Promise<T>)
   }
-  async listPlaces(query: PlaceQuery, signal?: AbortSignal): Promise<Place[]> {
+  async listPlaces(
+    query: PlaceQuery,
+    signal?: AbortSignal,
+    context?: PlaceServiceRequestContext,
+  ): Promise<Place[]> {
     const results: PlaceWire[] = []
     const pageSize = 100
     let pageNumber = 1
@@ -80,9 +87,13 @@ export class HttpPlaceService implements PlaceService {
       if (query.area) params.set('area', query.area)
       if (query.category) params.set('category', query.category)
       query.facilities?.forEach((facility) => params.append('facilities', facility))
-      const page = await this.request<{ items: PlaceWire[]; total: number }>(`/places?${params}`, {
-        signal,
-      })
+      const page = await this.request<{ items: PlaceWire[]; total: number }>(
+        `/places?${params}`,
+        {
+          signal,
+        },
+        context,
+      )
       total = page.total
       if (page.items.length === 0) break
       results.push(...page.items)
@@ -90,22 +101,22 @@ export class HttpPlaceService implements PlaceService {
     }
     return results.map(fromWire)
   }
-  getPlace(id: string) {
-    return this.request<PlaceWire>(`/places/${id}`)
+  getPlace(id: string, context?: PlaceServiceRequestContext) {
+    return this.request<PlaceWire>(`/places/${id}`, {}, context)
       .then(fromWire)
       .catch((error: unknown) => {
         if (error instanceof Error && error.message.includes('(404)')) return null
         throw error
       })
   }
-  async listFavourites() {
-    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, true)
+  async listFavourites(context?: PlaceServiceRequestContext) {
+    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, context, true)
     return places.map((place) => place.id)
   }
-  async toggleFavourite(placeId: string) {
-    const favourites = await this.listFavourites()
+  async toggleFavourite(placeId: string, context?: PlaceServiceRequestContext) {
+    const favourites = await this.listFavourites(context)
     if (favourites.includes(placeId))
-      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, true)
+      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, context, true)
     else
       await this.request<void>(
         '/me/favourites',
@@ -113,10 +124,11 @@ export class HttpPlaceService implements PlaceService {
           method: 'PUT',
           body: JSON.stringify({ place_id: placeId }),
         },
+        context,
         true,
       )
   }
-  async submitContribution(input: ContributionInput) {
+  async submitContribution(input: ContributionInput, context?: PlaceServiceRequestContext) {
     const wire = await this.request<ContributionWire>(
       '/contributions',
       {
@@ -128,6 +140,7 @@ export class HttpPlaceService implements PlaceService {
           body: input.body,
         }),
       },
+      context,
       true,
     )
     return { ...input, id: wire.id, createdAt: wire.created_at }
@@ -158,7 +171,7 @@ export class HttpPlaceService implements PlaceService {
     }
     return contributions
   }
-  async submitReport(input: ReportInput) {
+  async submitReport(input: ReportInput, context?: PlaceServiceRequestContext) {
     await this.request<void>(
       '/reports',
       {
@@ -169,6 +182,7 @@ export class HttpPlaceService implements PlaceService {
           reason: input.reason,
         }),
       },
+      context,
       true,
     )
   }

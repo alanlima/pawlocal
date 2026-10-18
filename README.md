@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-**Stage 2 (local frontend and observability) and Stage 3 (backend and persistence) are underway in parallel** in isolated worktrees. Stage 2 review remains a gate before Stage 3.1 and before Stage 3 can be considered complete. The frontend still uses demo seed records; place access and facility details are not represented as verified facts. See [frontend and local observability setup](frontend/README.md).
+**Stage 2 (local frontend and observability) is complete and reviewed. Stage 3 (backend and persistence) and Stage 3.1 (cross-layer tracing and Compose integration) are underway in isolated worktrees.** Stage 3 cannot be marked complete until Stage 3.1 integration and review pass. Mock data is selected only when `VITE_USE_MOCK_BACKEND=true`; the combined Compose stack selects the HTTP adapter. Place access and facility details are not represented as verified facts. See [local development setup](frontend/README.md).
 
 ## Project documentation
 
@@ -34,5 +34,5 @@ HTTP-mode authentication is a host integration seam, not a PawLocal sign-in flow
 
 ## Development
 
-For the local frontend and observability stack, run `docker compose up --build -d` from the repository root. The Compose project is namespaced `pawlocal-stage2` to keep it separate from the parallel Stage 3 stack. Open PawLocal at <http://localhost:5173> and Grafana at <http://localhost:3000>. See [frontend README](frontend/README.md) for all published host ports, health checks, privacy notes, telemetry controls, synthetic-failure walkthrough, shutdown, tests and the Stage 3 HTTP adapter seam. All services bind to localhost; no hosted telemetry or cloud resources are configured.
+For the combined local frontend, API, PostgreSQL and observability stack, first copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell). The example contains a clearly local-only PostgreSQL password placeholder; keep `.env` out of version control and replace the placeholder for your local environment. Compose requires `PAWLOCAL_POSTGRES_PASSWORD` and has no built-in credential fallback. Then run `docker compose up --build -d` from the repository root. Open PawLocal at <http://localhost:5173>, Grafana at <http://localhost:3000>, and the API health endpoint at <http://localhost:8000/health>. See [frontend README](frontend/README.md) and [backend README](backend/README.md) for ports, health checks, privacy, synthetic failures, shutdown, migrations and tests. All published services bind to localhost; telemetry remains local and no cloud resources are configured.
 
