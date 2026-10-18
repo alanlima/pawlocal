@@ -167,6 +167,9 @@ CAO is responsible for orchestrating specialised agents.
 Owns planning, task coordination, delegation, integration review and acceptance gates.
 
 The orchestrator must not silently bypass review or expand the project scope.
+Before creating or editing a GitHub issue or PR, the orchestrator must review the rendered description for readability, formatting, accurate scope/status/evidence, and irrelevant template sections. Follow `docs/issue-pr-descriptions.md`.
+
+Merge pull requests with GitHub's squash method so each PR adds one commit to `main`. The repository should allow squash merging and disable merge commits and rebase merging to enforce this history policy. Do not rewrite existing history as part of this policy.
 
 ### Frontend Engineer
 Owns React, TypeScript, UI components, mock services, client-side behaviour and frontend tests.

@@ -16,6 +16,12 @@
 4. Review contract and documentation impacts alongside code. Keep changes within the approved stage.
 5. Report checks actually run; do not claim unrun checks. Do not merge without required approval.
 
+## GitHub descriptions and merge history
+
+Before creating or editing a GitHub issue or pull request, the orchestrator reviews the rendered description for heading/list formatting, concise and non-duplicated text, accurate scope and status, and evidence that supports each claim. Remove unused template prompts so small issues and PRs stay concise. Use the reusable structures and review checklist in [`issue-pr-descriptions.md`](issue-pr-descriptions.md).
+
+Merge every pull request using **Squash and merge**. This keeps each PR's change as one commit on `main`; do not use merge commits or rebase-and-merge. Enforce this under GitHub repository settings by enabling squash merging and disabling merge commits and rebase merging. Do not rewrite existing commit history.
+
 ## Gates
 
 - Stage 0 docs and plan require human review before Stage 1.
