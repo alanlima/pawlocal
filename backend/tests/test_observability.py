@@ -188,6 +188,47 @@ def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
         engine.dispose()
 
 
+def test_application_failure_sets_only_stable_error_code(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal import observability
+    from pawlocal.application.places import PlaceQueries
+
+    class BrokenRepository:
+        def search(self, **_filters):
+            sentinel = "application-private-sentinel"
+            raise OperationalError(
+                f"SELECT '{sentinel}'",
+                {"value": sentinel},
+                RuntimeError(sentinel),
+            )
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(observability.trace, "get_tracer", provider.get_tracer)
+
+    with pytest.raises(OperationalError):
+        PlaceQueries(BrokenRepository()).search()
+
+    span = next(span for span in exporter.get_finished_spans() if span.name == "places.search")
+    assert span.status.status_code.name == "ERROR"
+    assert span.attributes["error.code"] == "application_operation_failed"
+    error_attributes = {
+        key
+        for key in span.attributes
+        if key.startswith(("error.", "exception."))
+    }
+    assert error_attributes == {"error.code"}
+    assert not span.events
+    encoded = span.to_json()
+    assert "application-private-sentinel" not in encoded
+    assert "exception.message" not in encoded
+    assert "exception.stacktrace" not in encoded
+    assert "exception.type" not in encoded
+    assert "event.exception" not in encoded
+
+
 def test_structured_formatter_omits_unapproved_fields():
     record = logging.LogRecord(
         "pawlocal.api", logging.INFO, "api.py", 1, "API request completed", (), None

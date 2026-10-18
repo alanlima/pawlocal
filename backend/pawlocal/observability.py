@@ -3,6 +3,8 @@
 import json
 import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from opentelemetry import trace
@@ -13,7 +15,7 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from pawlocal.config import settings
@@ -141,6 +143,22 @@ def create_api_span(name: str, context):
         record_exception=False,
         set_status_on_exception=False,
     )
+
+
+@contextmanager
+def application_span(name: str, attributes: dict[str, Any]) -> Iterator[Span]:
+    """Create a safe application span and mark failures without recording exceptions."""
+    with trace.get_tracer("pawlocal.application").start_as_current_span(
+        name,
+        attributes=attributes,
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        try:
+            yield span
+        except Exception:
+            mark_failed(span, "application_operation_failed")
+            raise
 
 
 def mark_failed(span, stable_code: str) -> None:

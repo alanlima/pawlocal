@@ -9,7 +9,7 @@ services:
     environment:
       VITE_TELEMETRY_ENABLED: ${PAWLOCAL_TELEMETRY_ENABLED:-true}
       VITE_OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
-      VITE_DEMO_FAULTS: ${PAWLOCAL_DEMO_FAULTS:-true}
+      VITE_DEMO_FAULTS: "false"
       VITE_USE_MOCK_BACKEND: "false"
       VITE_API_BASE_URL: /api/v1
       VITE_API_PROXY_TARGET: http://backend:8000
