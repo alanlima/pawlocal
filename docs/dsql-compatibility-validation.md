@@ -2,7 +2,7 @@
 
 **Review date:** 2026-10-19
 
-**Status:** Backend compatibility changes are present in the current uncommitted worktree. They have offline/unit-test evidence only. The PR CI run and all live DSQL checks remain pending. Aurora DSQL is not runtime-integrated or confirmed compatible, and remains a preferred candidate rather than a validated provider. The current app-hosting direction is Lightsail; the owner still needs to choose and approve a secure AWS identity/credential path from that host to DSQL.
+**Status:** The backend compatibility changes are included in PR #61 at head `38b228a90ab8ca3565be9b61f4bd99194c92cd41` (branch `43-fullstack-mvp`). GitHub reports successful backend and frontend checks in the [full-stack release workflow](https://github.com/alanlima/pawlocal/actions/runs/39177787007), plus successful [workflow validation](https://github.com/alanlima/pawlocal/actions/runs/39177787004) and GitGuardian checks. The separate Backend CI and frontend PR checks are cancelled; release publication and development deployment are skipped. This is CI evidence for the code at that PR head, not evidence of a DSQL cluster migration or runtime. Aurora DSQL remains a preferred candidate, not a validated runtime provider. No DSQL cluster/resources exist for this validation, and there is no application DSQL engine or credential integration. The current app-hosting direction is Lightsail; the owner still needs to choose and approve a secure AWS identity/credential path from that host to DSQL.
 
 ## Scope and release boundaries
 
@@ -22,13 +22,13 @@ Backup, HA, restore, RPO/RTO, and recovery are excluded from this release and de
 | Legacy cloud data            | No PostgreSQL-to-DSQL import/backfill sequence is implemented.                                                                                                                                                                                                                                                                                           | The DSQL baseline is suitable only for an empty initial cloud database. Existing PostgreSQL data migration is still required if the deployment starts with non-empty legacy data.            |
 | Runtime engine and IAM       | The application still builds its PostgreSQL psycopg engine. No DSQL engine configuration, token provider, token refresh, host identity integration, or runtime environment variables have been added. Static AWS keys and environment-supplied auth tokens are not accepted.                                                                             | No DSQL connection or runtime credential behavior is validated. The owner must decide how the chosen host obtains short-lived AWS credentials before runtime integration can proceed.        |
 | OCC behavior                 | Review submissions have a bounded retry around the complete transaction for selected DSQL conflict codes; PostgreSQL behavior remains single-attempt.                                                                                                                                                                                                    | Unit tests simulate retryable and non-retryable errors. No DSQL OCC response, concurrent transaction, or retry-exhaustion scenario was observed live.                                        |
-| CI checks                    | Backend CI is changed to install the optional DSQL tools and lint the checked-in baseline plus generated application search/count SQL.                                                                                                                                                                                                                   | Workflow changes are uncommitted. The PR CI run has not occurred; local lint success is not CI evidence.                                                                                     |
+| CI checks                    | Backend CI is changed to install the optional DSQL tools and lint the checked-in baseline plus generated application search/count SQL.                                                                                                                                                                                                                   | Full-stack workflow backend/frontend checks, workflow validation, and GitGuardian passed on PR #61 head `38b228a`; standalone Backend CI and frontend PR checks are cancelled. Image publication and development deployment are skipped. This does not validate DSQL runtime behavior. |
 
 The current DSQL baseline deliberately does not replay PostgreSQL migrations `0001`-`0007`. Those revisions include a persisted PostgreSQL array, synchronous index creation, PostgreSQL-specific `unnest`/regex/CTAS operations, and multi-statement or mixed DDL/DML transformations. A separate baseline avoids applying those operations to DSQL, but it does not migrate existing records.
 
 ## Evidence status
 
-The current worktree has these local results:
+Local offline evidence recorded for this implementation:
 
 - Backend test suite: **79 passed, 2 skipped**.
 - DSQL-focused tests: **21 passed**.
@@ -38,11 +38,11 @@ The current worktree has these local results:
 - PostgreSQL Alembic offline SQL generation: passed.
 - Offline Alembic invocation with an Aurora DSQL URL: rejected before any revision SQL was emitted.
 
-These results are uncommitted and have not run in PR CI. Lint, compilation, offline migration generation, and fake-engine/catalog tests do not establish that DSQL accepts or executes the statements, that indexes become valid, or that queries have acceptable behavior or cost. No live DSQL compatibility claim is made.
+The implementation at PR #61 head `38b228a` also has successful GitHub checks for the backend and frontend in the full-stack release workflow, workflow validation, and GitGuardian. The standalone Backend CI and frontend PR checks were cancelled. The immutable-image publication and development deployment jobs were skipped. The docs-only status update is not yet reflected in that head's checks. Passing CI, lint, compilation, offline migration generation, and fake-engine/catalog tests do not establish that DSQL accepts or executes the statements, that indexes become valid, or that queries have acceptable behavior or cost. No DSQL cluster or other DSQL resources were created or available for validation. No live DSQL compatibility claim is made.
 
 ## Remaining decisions and validation
 
-The owner needs to select and approve the Lightsail-to-DSQL identity/credential path. The backend currently has no DSQL engine or runtime token integration, so runtime validation must wait for that decision. Do not add static credentials or silently change the database provider.
+The owner needs to select and approve the Lightsail-to-DSQL identity/credential path. The backend currently has no DSQL engine or runtime token integration, and no DSQL resources exist for testing, so runtime validation must wait for both the identity decision and an authorized DSQL test environment. Do not add static credentials or silently change the database provider.
 
 After runtime identity is approved and a DSQL test environment is authorized, the remaining DSQL validation is:
 

@@ -27,6 +27,9 @@ jobs:
     outputs:
       release_run_id: ${{ steps.validate.outputs.release_run_id }}
       manifest_digest: ${{ steps.validate.outputs.manifest_digest }}
+      database_provider: ${{ steps.validate.outputs.database_provider }}
+      migration_runner: ${{ steps.validate.outputs.migration_runner }}
+      migration_id: ${{ steps.validate.outputs.migration_id }}
     steps:
       - name: Check out main history
         uses: actions/checkout@v4
@@ -73,24 +76,46 @@ jobs:
               per_page: 100,
             })
             let verified
+            let verifiedSelection
             for (const deployment of deployments.data) {
               if (Number(deployment.payload?.workflow_run_id) !== run.id) continue
               const statuses = await github.rest.repos.listDeploymentStatuses({
                 ...context.repo,
                 deployment_id: deployment.id,
-                per_page: 10,
+                per_page: 100,
               })
-              const success = statuses.data.find(status => status.state === 'success')
-              if (success && deployment.payload?.telemetry_enabled === false &&
+              const latestStatus = statuses.data.reduce((latest, status) =>
+                !latest || Date.parse(status.created_at) > Date.parse(latest.created_at) ? status : latest, null)
+              if (!latestStatus || latestStatus.state !== 'success') continue
+              let successPayload
+              try {
+                successPayload = typeof latestStatus.payload === 'string'
+                  ? JSON.parse(latestStatus.payload)
+                  : (latestStatus.payload || {})
+              } catch {
+                continue
+              }
+              const provider = successPayload.database_provider
+              const selectedChain = deployment.payload?.migration_chains?.[provider]
+              if (successPayload.telemetry_enabled === false &&
+                  ['postgresql', 'aurora_dsql'].includes(provider) &&
+                  selectedChain && successPayload.migration_runner === selectedChain.runner &&
+                  successPayload.migration_id === selectedChain.migration_id &&
+                  /^sha256:[0-9a-f]{64}$/.test(successPayload.backend_image_digest || '') &&
                   /^sha256:[0-9a-f]{64}$/.test(deployment.payload?.backend_image_digest || '') &&
+                  successPayload.backend_image_digest === deployment.payload.backend_image_digest &&
                   /^sha256:[0-9a-f]{64}$/.test(deployment.payload?.release_manifest_digest || '')) {
                 verified = deployment
+                verifiedSelection = successPayload
                 break
               }
             }
             if (!verified) throw new Error('No successful development deployment record matches this release run and backend digest')
             core.setOutput('release_run_id', run.id)
             core.setOutput('manifest_digest', verified.payload.release_manifest_digest)
+            core.setOutput('database_provider', verifiedSelection.database_provider)
+            core.setOutput('migration_runner', verifiedSelection.migration_runner)
+            core.setOutput('migration_id', verifiedSelection.migration_id)
             core.info(`Validated ${commit}, workflow run ${run.id}, development deployment ${verified.id}`)
 
   deploy-production:
@@ -101,6 +126,10 @@ jobs:
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+      PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+      PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
+      PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
+      PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
       PAWLOCAL_TELEMETRY_ENABLED: "false"
     permissions:
       actions: read
@@ -130,11 +159,9 @@ jobs:
         run: |
           actual_digest="sha256:$(sha256sum release/release-manifest.json | cut -d ' ' -f 1)"
           test "$actual_digest" = "$EXPECTED_MANIFEST_DIGEST"
-          jq -e --arg commit "$RELEASE_COMMIT" \
-            '.commit == $commit and .telemetry_enabled == false and
-             (.backend_image as $image | .backend_image_digest as $digest |
-              ($digest | test("^sha256:[0-9a-f]{64}$")) and $image == ($image | split("@")[0]) + "@" + $digest)' \
-            release/release-manifest.json > /dev/null
+          python ops/validate-release-metadata.py --manifest release/release-manifest.json
+          jq -e --arg commit "$RELEASE_COMMIT" '.commit == $commit' release/release-manifest.json > /dev/null
+          test "$PAWLOCAL_DATABASE_PROVIDER" = "$PAWLOCAL_EXPECTED_DATABASE_PROVIDER"
 
       - name: Require the environment-specific OIDC role
         run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN"
@@ -214,7 +241,7 @@ jobs:
                 production_frontend_digest: process.env.FRONTEND_DIGEST,
                 source_release_manifest_digest: process.env.SOURCE_MANIFEST_DIGEST,
                 production_release_manifest_digest: process.env.PRODUCTION_MANIFEST_DIGEST,
-                migration_head: value.migration_head,
+                migration_chains: value.migration_chains,
                 telemetry_enabled: false,
               },
             })
@@ -234,6 +261,10 @@ jobs:
           FRONTEND_ARCHIVE: release/frontend-production.tar.gz
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
+          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
+          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
         run: bash ops/run-deployment-adapter.sh deploy --environment production --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
 
       - name: Verify production release through the environment adapter
@@ -242,7 +273,25 @@ jobs:
           EVIDENCE_FILE: release/production-verification.json
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
+          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
+          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
         run: bash ops/run-deployment-adapter.sh verify --environment production --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+
+      - name: Validate production deployment evidence and selected migration chain
+        env:
+          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
+          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
+          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
+        run: |
+          python ops/validate-release-metadata.py \
+            --manifest release/production-release-manifest.json \
+            --evidence release/production-verification.json \
+            --environment production \
+            --database-provider "$PAWLOCAL_EXPECTED_DATABASE_PROVIDER" \
+            --migration-runner "$PAWLOCAL_EXPECTED_MIGRATION_RUNNER" \
+            --migration-id "$PAWLOCAL_EXPECTED_MIGRATION_ID"
 
       - name: Upload production deployment evidence
         if: success()
@@ -265,6 +314,8 @@ jobs:
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
         with:
           script: |
+            const fs = require('fs')
+            const evidence = JSON.parse(fs.readFileSync('release/production-verification.json', 'utf8'))
             await github.rest.repos.createDeploymentStatus({
               ...context.repo,
               deployment_id: Number(process.env.DEPLOYMENT_ID),
@@ -273,6 +324,13 @@ jobs:
               log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               description: 'Production health, release verification, and evidence upload passed',
               environment_url: process.env.PAWLOCAL_PUBLIC_BASE_URL,
+              payload: JSON.stringify({
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                backend_image_digest: evidence.backend_image_digest,
+                telemetry_enabled: evidence.telemetry_enabled,
+              }),
             })
 
       - name: Mark production deployment failed

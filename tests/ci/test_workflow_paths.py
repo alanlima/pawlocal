@@ -143,6 +143,34 @@ class WorkflowPathTests(unittest.TestCase):
             with self.subTest(workflow=workflow):
                 self.assertIn("  workflow_call:", (WORKFLOWS / workflow).read_text())
 
+    def test_component_workflow_concurrency_uses_caller_workflow_identity(self) -> None:
+        for workflow in ("frontend-deploy.yml", "backend-ci.yml"):
+            with self.subTest(workflow=workflow):
+                text = (WORKFLOWS / workflow).read_text()
+                self.assertIn("github.workflow", text)
+                self.assertIn("github.event.pull_request.number || github.ref", text)
+                self.assertNotIn("github.run_id", text)
+
+    def test_release_schema_and_validator_changes_trigger_workflow_validation(self) -> None:
+        for path in (
+            "ops/release-manifest.schema.json",
+            "ops/deployment-evidence.schema.json",
+            "ops/validate-release-metadata.py",
+            "tests/ci/test_release_metadata.py",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(matches("workflow-validation.yml", path))
+
+    def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
+        workflow = (WORKFLOWS / "deploy-production.yml").read_text()
+        self.assertIn("statuses.data.reduce((latest, status)", workflow)
+        self.assertIn("latestStatus.state !== 'success'", workflow)
+        self.assertNotIn("statuses.data.find(status => status.state === 'success')", workflow)
+        self.assertIn("deployment.payload?.migration_chains?.[provider]", workflow)
+        self.assertIn("successPayload.migration_runner === selectedChain.runner", workflow)
+        self.assertIn("successPayload.migration_id === selectedChain.migration_id", workflow)
+        self.assertIn("successPayload.backend_image_digest === deployment.payload.backend_image_digest", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

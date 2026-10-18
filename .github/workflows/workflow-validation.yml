@@ -6,6 +6,7 @@ on:
       - ".github/workflows/**"
       - "scripts/ci/**"
       - "tests/ci/**"
+      - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
   push:
@@ -15,6 +16,7 @@ on:
       - ".github/workflows/**"
       - "scripts/ci/**"
       - "tests/ci/**"
+      - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_call:

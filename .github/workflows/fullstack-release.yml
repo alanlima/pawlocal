@@ -96,20 +96,34 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Read the Alembic migration head
+      - name: Read provider-specific migration identifiers
         id: migration
         working-directory: backend
         run: |
           python -m pip install --quiet 'alembic>=1.13,<2'
           python - <<'PY' >> "$GITHUB_OUTPUT"
+          import ast
+          from pathlib import Path
           from alembic.config import Config
           from alembic.script import ScriptDirectory
 
           script = ScriptDirectory.from_config(Config("alembic.ini"))
-          heads = ",".join(script.get_heads())
-          if not heads:
-              raise SystemExit("No Alembic migration head was found")
-          print(f"head={heads}")
+          heads = script.get_heads()
+          if len(heads) != 1:
+              raise SystemExit(f"Expected one Alembic head, found {heads}")
+          dsql_tree = ast.parse(Path("pawlocal/dsql_migrations.py").read_text(encoding="utf-8"))
+          dsql_revision = None
+          for statement in dsql_tree.body:
+              if isinstance(statement, ast.Assign) and any(
+                  isinstance(target, ast.Name) and target.id == "BASELINE_REVISION"
+                  for target in statement.targets
+              ):
+                  dsql_revision = ast.literal_eval(statement.value)
+                  break
+          if not dsql_revision:
+              raise SystemExit("No Aurora DSQL baseline revision was found")
+          print(f"postgresql_migration_id={heads[0]}")
+          print(f"aurora_dsql_migration_id={dsql_revision}")
           PY
         env:
           PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -118,16 +132,19 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.image }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
-          MIGRATION_HEAD: ${{ steps.migration.outputs.head }}
+          POSTGRESQL_MIGRATION_ID: ${{ steps.migration.outputs.postgresql_migration_id }}
+          AURORA_DSQL_MIGRATION_ID: ${{ steps.migration.outputs.aurora_dsql_migration_id }}
         run: |
           mkdir -p release
           jq -n \
             --arg commit "${GITHUB_SHA}" \
             --arg image "${IMAGE}@${IMAGE_DIGEST}" \
             --arg image_digest "${IMAGE_DIGEST}" \
-            --arg migration_head "${MIGRATION_HEAD}" \
-            '{schema_version:1,commit:$commit,backend_image:$image,backend_image_digest:$image_digest,migration_head:$migration_head,telemetry_enabled:false}' \
+            --arg postgresql_migration_id "${POSTGRESQL_MIGRATION_ID}" \
+            --arg aurora_dsql_migration_id "${AURORA_DSQL_MIGRATION_ID}" \
+            '{schema_version:2,commit:$commit,backend_image:$image,backend_image_digest:$image_digest,migration_chains:{postgresql:{runner:"alembic",migration_id:$postgresql_migration_id},aurora_dsql:{runner:"dsql_baseline",migration_id:$aurora_dsql_migration_id}},telemetry_enabled:false}' \
             > release/backend-release.json
+          python ops/validate-release-metadata.py --manifest release/backend-release.json
 
       - name: Upload backend release metadata
         uses: actions/upload-artifact@v4
@@ -146,6 +163,7 @@ jobs:
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+      PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
       PAWLOCAL_TELEMETRY_ENABLED: "false"
     permissions:
       actions: read
@@ -165,11 +183,8 @@ jobs:
 
       - name: Validate backend image reference and telemetry setting
         run: |
-          jq -e --arg commit "$GITHUB_SHA" \
-            '.commit == $commit and .telemetry_enabled == false and
-             (.backend_image as $image | .backend_image_digest as $digest |
-              ($digest | test("^sha256:[0-9a-f]{64}$")) and $image == ($image | split("@")[0]) + "@" + $digest)' \
-            release/backend-release.json > /dev/null
+          python ops/validate-release-metadata.py --manifest release/backend-release.json
+          test -n "$PAWLOCAL_DATABASE_PROVIDER"
 
       - name: Require the environment-specific OIDC role
         run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN"
@@ -219,6 +234,7 @@ jobs:
           manifest_digest="sha256:$(sha256sum release/release-manifest.json | cut -d ' ' -f 1)"
           echo "frontend_digest=$frontend_digest" >> "$GITHUB_OUTPUT"
           echo "manifest_digest=$manifest_digest" >> "$GITHUB_OUTPUT"
+          python ops/validate-release-metadata.py --manifest release/release-manifest.json
 
       - name: Create development deployment record
         id: deployment
@@ -247,7 +263,7 @@ jobs:
                 backend_image_digest: value.backend_image_digest,
                 frontend_artifact_digest: value.frontend.artifact_digest,
                 release_manifest_digest: actualDigest,
-                migration_head: value.migration_head,
+                migration_chains: value.migration_chains,
                 telemetry_enabled: value.telemetry_enabled,
               },
             })
@@ -267,6 +283,7 @@ jobs:
           FRONTEND_ARCHIVE: release/frontend-development.tar.gz
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
         run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
 
       - name: Verify development release through the selected adapter
@@ -275,7 +292,13 @@ jobs:
           EVIDENCE_FILE: release/development-verification.json
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
         run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+
+      - name: Validate development deployment evidence and selected migration chain
+        env:
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+        run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider "$PAWLOCAL_DATABASE_PROVIDER"
 
       - name: Upload verified development release metadata
         if: success()
@@ -299,12 +322,15 @@ jobs:
           script: |
             const fs = require('fs')
             const deployment = JSON.parse(fs.readFileSync('release/release-manifest.json', 'utf8'))
+            const evidence = JSON.parse(fs.readFileSync('release/development-verification.json', 'utf8'))
             await core.summary.addHeading('Development deployment verified')
               .addCodeBlock(JSON.stringify({
                 commit: deployment.commit,
                 backend_image: deployment.backend_image,
                 frontend_artifact_digest: deployment.frontend.artifact_digest,
-                migration_head: deployment.migration_head,
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
                 telemetry_enabled: deployment.telemetry_enabled,
               }, null, 2), 'json').write()
             await github.rest.repos.createDeploymentStatus({
@@ -315,6 +341,13 @@ jobs:
               log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               description: 'Development health, release verification, and evidence upload passed',
               environment_url: process.env.PAWLOCAL_PUBLIC_BASE_URL,
+              payload: JSON.stringify({
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                backend_image_digest: deployment.backend_image_digest,
+                telemetry_enabled: evidence.telemetry_enabled,
+              }),
             })
 
       - name: Mark development deployment failed

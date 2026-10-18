@@ -23,6 +23,8 @@ The API health endpoint is `http://127.0.0.1:8000/health`; OpenAPI docs are at `
 
 ## Aurora DSQL compatibility status
 
+As checked on 2026-10-19, PR #61 head `38b228a90ab8ca3565be9b61f4bd99194c92cd41` has passing backend and frontend checks in the [full-stack release workflow](https://github.com/alanlima/pawlocal/actions/runs/39177787007), [workflow validation](https://github.com/alanlima/pawlocal/actions/runs/39177787004), and GitGuardian checks. The standalone Backend CI and frontend PR checks are cancelled; image publication and development deployment are skipped. These results cover CI/offline compatibility checks only. No DSQL cluster or other DSQL resources are available or were created, and no DSQL migration, runtime connection, IAM token refresh, or live OCC behavior has been verified.
+
 Place facilities are represented by the normalized `place_facilities` relation in the current ORM and migration `0007`; search uses one correlated `EXISTS` predicate per selected facility. This removes the prior PostgreSQL array/`ANY` query dependency. The representative SQL generated from the application query compiles with AWS's SQLAlchemy DSQL dialect and passes `dsql-lint` (offline SQL evidence only).
 
 The PostgreSQL/Alembic history remains the local and PostgreSQL path. Migrations `0001` through `0006` create PostgreSQL arrays, synchronous indexes, and contain PostgreSQL-specific backfill/quarantine SQL. Migration `0007` normalizes facilities for PostgreSQL and intentionally fails closed on the DSQL dialect because it migrates from that legacy array schema. Do not point the Alembic chain at DSQL.
