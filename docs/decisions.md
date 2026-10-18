@@ -26,9 +26,9 @@ Record accepted decisions with date, status, context, decision and consequences.
 ## DRAFT-002 — No full-application hosting selection yet
 
 - **Status:** Open.
-- **Context:** The static frontend hosting choice is recorded in DEC-004; the backend and hosted observability destination and full-system cost estimate remain undecided.
-- **Decision needed:** Compare appropriate full-application hosting choices and low-traffic costs during Stage 4 planning.
-- **Consequence:** Do not imply that the API/database/observability production host has been chosen.
+- **Context:** The static frontend hosting choice is recorded in DEC-004; the backend and hosted observability destination and full-system cost estimate remain undecided. A dated comparison is available in the [Stage 4 hosting proposal](stage4-hosting-options.md) and [Issue #41](https://github.com/alanlima/pawlocal/issues/41).
+- **Decision needed:** Select a hosting option after reviewing production database availability, recovery objectives, telemetry/data-residency limits, and the monthly cost envelope in the proposal.
+- **Consequence:** Do not imply that the API/database/observability production host has been chosen or provision billable resources. Issue #43 remains gated on an approved choice and explicit cost approval.
 
 ## DEC-004 — Static frontend AWS delivery
 
