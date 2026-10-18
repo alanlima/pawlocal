@@ -1,8 +1,9 @@
-"""Enforce review fields and reject blank contribution/report text."""
+"""Quarantine invalid legacy content and enforce contribution/report checks."""
 
 from collections.abc import Sequence
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "0006_contribution_validation"
 down_revision: str | None = "0005_report_target_foreign_keys"
@@ -54,13 +55,7 @@ def upgrade() -> None:
         "DELETE FROM contributions AS c WHERE c.id IN "
         "(SELECT id FROM contribution_quarantine)"
     )
-    op.execute(
-        "UPDATE places AS p SET average_rating = ("
-        "SELECT AVG(c.rating)::double precision FROM contributions AS c "
-        "WHERE c.kind = 'review' AND c.is_published IS TRUE AND c.place_id = p.id) "
-        "WHERE p.id IN (SELECT place_id FROM contribution_quarantine "
-        "WHERE kind = 'review' AND place_id IS NOT NULL)"
-    )
+    _recompute_place_average_ratings()
     op.create_check_constraint(
         "ck_contributions_body_nonblank",
         "contributions",
@@ -80,6 +75,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # A newer review may have occupied the unique (author, place) key after
+    # the legacy row was quarantined. Fail before DDL or data changes so the
+    # operator can resolve the conflict and retry without losing either row.
+    collision = op.get_bind().execute(
+        text(
+            "SELECT archived.id, archived.contributor_subject, archived.place_id "
+            "FROM contribution_quarantine AS archived "
+            "JOIN contributions AS active "
+            "ON active.kind = 'review' "
+            "AND active.contributor_subject = archived.contributor_subject "
+            "AND active.place_id = archived.place_id "
+            "WHERE archived.kind = 'review' AND archived.place_id IS NOT NULL "
+            "LIMIT 1"
+        )
+    ).first()
+    if collision is not None:
+        raise RuntimeError(
+            "Cannot downgrade 0006: quarantined review "
+            f"{collision.id} conflicts with an active review for the same author/place "
+            f"({collision.contributor_subject}, {collision.place_id}). Resolve the "
+            "conflict before retrying the downgrade."
+        )
+
     op.drop_constraint("ck_reports_reason_nonblank", "reports", type_="check")
     op.drop_constraint("ck_contributions_review_fields", "contributions", type_="check")
     op.drop_constraint("ck_contributions_body_nonblank", "contributions", type_="check")
@@ -95,12 +113,15 @@ def downgrade() -> None:
         "SELECT id, target_type, target_place_id, target_contribution_id, reporter_subject, reason, status, created_at "
         "FROM report_quarantine ORDER BY quarantined_at, id"
     )
+    _recompute_place_average_ratings()
+    op.drop_table("report_quarantine")
+    op.drop_table("contribution_quarantine")
+
+
+def _recompute_place_average_ratings() -> None:
+    """Treat place ratings as a projection of all currently published reviews."""
     op.execute(
         "UPDATE places AS p SET average_rating = ("
         "SELECT AVG(c.rating)::double precision FROM contributions AS c "
-        "WHERE c.kind = 'review' AND c.is_published IS TRUE AND c.place_id = p.id) "
-        "WHERE p.id IN (SELECT place_id FROM contribution_quarantine "
-        "WHERE kind = 'review' AND place_id IS NOT NULL)"
+        "WHERE c.kind = 'review' AND c.is_published IS TRUE AND c.place_id = p.id)"
     )
-    op.drop_table("report_quarantine")
-    op.drop_table("contribution_quarantine")
