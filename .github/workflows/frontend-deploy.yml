@@ -1,0 +1,90 @@
+name: Frontend checks and deployment
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-deploy.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      VITE_USE_MOCK_BACKEND: "true"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Format and lint
+        run: npm run check
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Build mock-backed frontend
+        run: npm run build
+
+      - name: Upload built frontend
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-frontend
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download built frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-frontend
+          path: dist/
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Publish frontend to S3
+        env:
+          SITE_BUCKET: ${{ vars.FRONTEND_BUCKET }}
+        run: aws s3 sync dist/ "s3://${SITE_BUCKET}/" --delete
+
+      - name: Invalidate CloudFront cache
+        env:
+          DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
+        run: aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*"

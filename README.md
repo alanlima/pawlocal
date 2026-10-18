@@ -16,11 +16,12 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 - [Model policy](docs/model-policy.md)
 - [Decisions](docs/decisions.md)
 - [Testing approach](docs/testing.md)
+- [AWS frontend deployment runbook](docs/deployment-aws-frontend.md)
 - [AI usage report](docs/ai-usage-report.md)
 
 ## Planned stack
 
-React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Hosting is undecided. Do not provision paid resources without explicit cost approval.
+React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Issue #23 prepares an AWS static frontend deployment; hosting for the API and observability remains undecided. Do not provision paid resources without explicit cost approval.
 
 ## Backend development
 

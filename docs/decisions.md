@@ -23,12 +23,19 @@ Record accepted decisions with date, status, context, decision and consequences.
 - **Decision:** Use place categories `dog_park`, `beach`, `walk`, `hiking_area`, and `cafe`; facilities `Fenced`, `Off-leash area`, `Drinking water`, `Shade`, `Picnic tables`, and `Accessible paths`; and curated, human-readable South East Queensland area labels. Current UI examples are `Brisbane City`, `Brisbane North`, `Gold Coast`, `Moreton Bay`, and `Sunshine Coast`, but the list is not exhaustive. Filter areas by exact label; they are not precise geospatial boundaries. Unknown or unverified access/facility facts remain absent/unknown and must never be inferred.
 - **Consequences:** Stage 3 API, persistence and adapters must use the category/facility enums and exact-match area-label semantics. The broader freshness and verification policy remains open. See the approved [product taxonomy](../product-spec.md#approved-mvp-discovery-taxonomy) and `openapi.yaml`.
 
-## DRAFT-002 — No hosting selection yet
+## DRAFT-002 — No full-application hosting selection yet
 
 - **Status:** Open.
-- **Context:** Cloud resources and cost approval are not finalized.
-- **Decision needed:** Compare appropriate hosting choices and low-traffic costs during Stage 4 planning.
-- **Consequence:** Do not provision billable resources or imply a chosen production host.
+- **Context:** The static frontend hosting choice is recorded in DEC-004; the backend and hosted observability destination and full-system cost estimate remain undecided.
+- **Decision needed:** Compare appropriate full-application hosting choices and low-traffic costs during Stage 4 planning.
+- **Consequence:** Do not imply that the API/database/observability production host has been chosen.
+
+## DEC-004 — Static frontend AWS delivery
+
+- **Status:** Approved 2026-10-18 for the initial Stage 4 frontend release.
+- **Context:** PawLocal can publish a mock-backed React/Vite bundle without deploying the API or database. The public repository must remain reusable and contain no owner-specific DNS name, hosted-zone ID, AWS account ID, or credentials.
+- **Decision:** Serve the static frontend from a private S3 bucket through CloudFront with OAC, HTTPS via an existing ACM wildcard certificate supplied as an input, SPA route fallback, and Route 53 alias records for the parameterized `pawlocal.<domain>` hostname. The build sets `VITE_USE_MOCK_BACKEND=true`. Store Terraform state in the pre-existing, versioned and encrypted state bucket under key `pawlocal/terraform.tfstate`; inject the bucket name through local backend configuration. GitHub Actions deploys on `main` pushes that change `frontend/**` and authenticates with a branch-restricted OIDC role.
+- **Consequences:** Review CloudFront/data-transfer and S3 costs before apply. This decision covers only the static frontend; it does not select hosting for the backend, database, or observability. See [the deployment runbook](deployment-aws-frontend.md).
 
 ## Open product decisions
 
