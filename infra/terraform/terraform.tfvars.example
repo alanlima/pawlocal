@@ -6,3 +6,7 @@ github_repository    = "owner/repository"
 github_owner_id      = "123456"
 github_repository_id = "1234567890"
 environment          = "production"
+
+# Keep false to use the account's existing shared GitHub Actions OIDC provider.
+# Set true only when the account does not already have that provider.
+manage_github_oidc_provider = false
