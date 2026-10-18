@@ -16,7 +16,7 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
 
     engine = create_engine(database_url, pool_pre_ping=True)
     schema = f"pawlocal_migration_{uuid4().hex}"
-    place_id = uuid4()
+    place_id, empty_place_id = uuid4(), uuid4()
     valid_id, blank_body_id, missing_place_id, missing_rating_id, stray_rating_id = (
         uuid4(),
         uuid4(),
@@ -24,6 +24,7 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
         uuid4(),
         uuid4(),
     )
+    unpublished_id, post_upgrade_review_id = uuid4(), uuid4()
     blank_report_id, linked_report_id, valid_report_id = uuid4(), uuid4(), uuid4()
     contribution_columns = (
         "id, kind, place_id, rating, body, contributor_subject, is_published, created_at"
@@ -42,11 +43,14 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
             command.upgrade(config, "0005_report_target_foreign_keys")
             connection.execute(
                 text(
-                    "INSERT INTO places (id, name, category, area, facilities) "
+                    "INSERT INTO places "
+                    "(id, name, category, area, facilities, average_rating) "
                     "VALUES (:id, 'Migration fixture', 'dog_park', 'Brisbane City', "
-                    "ARRAY['Shade']::varchar(80)[])"
+                    "ARRAY['Shade']::varchar(80)[], 3.0), "
+                    "(:empty_id, 'Empty review fixture', 'dog_park', 'Brisbane City', "
+                    "ARRAY['Shade']::varchar(80)[], 4.25)"
                 ),
-                {"id": place_id},
+                {"id": place_id, "empty_id": empty_place_id},
             )
             contributions = [
                 (valid_id, "review", place_id, 5, "valid legacy review", True),
@@ -54,6 +58,7 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 (missing_place_id, "review", None, 4, "review without place", False),
                 (missing_rating_id, "review", place_id, None, "review without rating", True),
                 (stray_rating_id, "tip", None, 3, "tip with rating", False),
+                (unpublished_id, "review", place_id, 1, "unpublished review", False),
             ]
             for index, contribution in enumerate(contributions):
                 connection.execute(
@@ -107,10 +112,6 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
             original_reports = connection.execute(
                 text(f"SELECT {report_columns} FROM reports ORDER BY id")
             ).all()
-            connection.execute(
-                text("UPDATE places SET average_rating = 3.0 WHERE id = :id"),
-                {"id": place_id},
-            )
             connection.commit()
 
             command.upgrade(config, "head")
@@ -118,7 +119,9 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
             ).all()
             assert active_contributions == [
-                row for row in original_contributions if row.id == valid_id
+                row
+                for row in original_contributions
+                if row.id in {valid_id, unpublished_id}
             ]
             quarantined = connection.execute(
                 text(
@@ -135,7 +138,7 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
             assert [tuple(row[:8]) for row in quarantined] == [
                 tuple(row)
                 for row in original_contributions
-                if row.id != valid_id
+                if row.id not in {valid_id, unpublished_id}
             ]
             reasons = {row.id: row.quarantine_reason for row in quarantined}
             assert reasons[blank_body_id] == "body is blank or whitespace-only"
@@ -146,6 +149,10 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 text("SELECT average_rating FROM places WHERE id = :id"),
                 {"id": place_id},
             ).scalar_one() == 5.0
+            assert connection.execute(
+                text("SELECT average_rating FROM places WHERE id = :id"),
+                {"id": empty_place_id},
+            ).scalar_one() is None
             with pytest.raises(IntegrityError):
                 connection.execute(
                     text(
@@ -188,6 +195,77 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
             assert report_reasons[blank_report_id] == "reason is blank or whitespace-only"
             assert report_reasons[linked_report_id] == "report targets a quarantined contribution"
 
+            connection.execute(
+                text(
+                    "INSERT INTO contributions "
+                    "(id, kind, place_id, rating, body, contributor_subject) "
+                    "VALUES (:id, 'review', :place_id, 4, 'new review', 'legacy-user-1')"
+                ),
+                {"id": post_upgrade_review_id, "place_id": place_id},
+            )
+            connection.commit()
+            with pytest.raises(RuntimeError, match="same author/place"):
+                command.downgrade(config, "0005_report_target_foreign_keys")
+            assert connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one() == "0006_contribution_validation"
+            assert connection.execute(
+                text("SELECT COUNT(*) FROM contribution_quarantine")
+            ).scalar_one() == 4
+            failed_quarantine = connection.execute(
+                text(
+                    f"SELECT {contribution_columns}, quarantine_reason "
+                    "FROM contribution_quarantine ORDER BY id"
+                )
+            ).all()
+            assert [tuple(row[:8]) for row in failed_quarantine] == [
+                tuple(row)
+                for row in original_contributions
+                if row.id not in {valid_id, unpublished_id}
+            ]
+            assert {row.id for row in failed_quarantine} == {
+                blank_body_id,
+                missing_place_id,
+                missing_rating_id,
+                stray_rating_id,
+            }
+            assert connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM pg_constraint "
+                    "WHERE conrelid = 'contributions'::regclass "
+                    "AND conname = 'ck_contributions_review_fields'"
+                )
+            ).scalar_one() == 1
+            assert connection.execute(
+                text(f"SELECT {report_columns} FROM reports ORDER BY id")
+            ).all() == [row for row in original_reports if row.id == valid_report_id]
+            assert connection.execute(
+                text(
+                    "SELECT id FROM contributions WHERE id = :id"
+                ),
+                {"id": post_upgrade_review_id},
+            ).scalar_one() == post_upgrade_review_id
+            assert set(
+                connection.execute(
+                    text("SELECT id FROM contributions")
+                ).scalars()
+            ) == {valid_id, unpublished_id, post_upgrade_review_id}
+            assert [tuple(row[:8]) for row in connection.execute(
+                text(
+                    f"SELECT {report_columns}, quarantine_reason "
+                    "FROM report_quarantine ORDER BY id"
+                )
+            ).all()] == [
+                tuple(row)
+                for row in original_reports
+                if row.id != valid_report_id
+            ]
+            connection.execute(
+                text("DELETE FROM contributions WHERE id = :id"),
+                {"id": post_upgrade_review_id},
+            )
+            connection.commit()
+
             command.downgrade(config, "0005_report_target_foreign_keys")
             restored_contributions = connection.execute(
                 text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
@@ -201,6 +279,10 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 text("SELECT average_rating FROM places WHERE id = :id"),
                 {"id": place_id},
             ).scalar_one() == 3.0
+            assert connection.execute(
+                text("SELECT average_rating FROM places WHERE id = :id"),
+                {"id": empty_place_id},
+            ).scalar_one() is None
             connection.commit()
     finally:
         with engine.begin() as connection:
