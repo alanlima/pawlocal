@@ -13,6 +13,16 @@ afterEach(() => {
 })
 
 describe('PawLocal journeys', () => {
+  it('keeps the build identity in the footer on discovery and place-detail pages', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByRole('contentinfo')).toHaveTextContent('BUILD local')
+
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    expect(await screen.findByRole('heading', { name: 'New Farm Park' })).toBeVisible()
+    expect(screen.getByRole('contentinfo')).toHaveTextContent('BUILD local')
+  })
+
   it('discovers places and opens a stable detail URL with unknown access called out', async () => {
     const user = userEvent.setup()
     render(<App />)

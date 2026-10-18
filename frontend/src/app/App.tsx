@@ -25,6 +25,7 @@ import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
 import { PlaceDetail } from '../features/place/PlaceDetail'
 import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
 import { recordOperation } from '../observability/telemetry'
+import { buildIdentity } from './buildIdentity'
 
 const categories: { id: PlaceCategory | ''; label: string; icon: string }[] = [
   { id: '', label: 'All places', icon: '✳' },
@@ -557,16 +558,17 @@ export default function App() {
                 Share a place <ArrowUpRight size={16} />
               </button>
             </div>
-            <footer>
-              <a className="footer-brand" href="/" onClick={(event) => event.preventDefault()}>
-                <PawPrint size={15} /> pawlocal.
-              </a>
-              <span>A little more outside, together.</span>
-              <span>South East Queensland, Australia</span>
-            </footer>
           </main>
         </>
       )}
+      <footer className="app-footer">
+        <a className="footer-brand" href="/" onClick={(event) => event.preventDefault()}>
+          <PawPrint size={15} /> pawlocal.
+        </a>
+        <span className="footer-tagline">A little more outside, together.</span>
+        <span className="footer-location">South East Queensland, Australia</span>
+        <span className="build-identity">{buildIdentity}</span>
+      </footer>
       <ContributionDialog
         dialog={dialog}
         hasSelectedPlace={selected !== null}
