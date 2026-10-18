@@ -135,7 +135,11 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
 
 def create_api_span(name: str, context):
     return trace.get_tracer("pawlocal.api").start_as_current_span(
-        name, context=context, kind=SpanKind.SERVER
+        name,
+        context=context,
+        kind=SpanKind.SERVER,
+        record_exception=False,
+        set_status_on_exception=False,
     )
 
 
@@ -150,5 +154,7 @@ def synthetic_database_failure(span) -> None:
         "db.connection",
         kind=SpanKind.CLIENT,
         attributes={"db.system": "postgresql", "pawlocal.synthetic": True},
+        record_exception=False,
+        set_status_on_exception=False,
     ) as database_span:
         mark_failed(database_span, "synthetic_database_unavailable")

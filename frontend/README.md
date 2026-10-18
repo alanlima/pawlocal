@@ -59,10 +59,27 @@ The Collector accepts browser OTLP/HTTP only from the origin in `PAWLOCAL_FRONTE
 
 1. Open PawLocal, search for a matching area or place, then open a result.
 2. In Grafana's PawLocal dashboard, inspect search/detail outcomes, latency and frontend logs. Open a log's trace ID to view its trace in Tempo. A successful search, a search with no results, and a failed search have distinct bounded outcomes.
-3. Exercise **Share this place**, save a favourite in demo-member mode, submit a demo contribution and send a report to emit bounded action outcome counters/logs.
-4. To inject a deterministic search error, open `http://localhost:<frontend-port>/?demoFault=search-error` (default port `5173`; `5174` in the example above), then search or change a filter. The UI shows its existing error state; Grafana records `search/error` and `PAWLOCAL_OPERATION_FAILED`. For a bounded delay instead, use `?demoFault=search-delay`. Reload without the query parameter to restore normal mock behavior.
+3. Root Compose runs the HTTP adapter against the backend. Protected actions require a host-provided `window.pawLocalAuth` session; Compose does not provide demo-member sign-in. The mock-only walkthrough below is separate from Compose.
+4. To exercise the frontend's deterministic mock search failure, start a standalone Vite server with mock mode and development faults explicitly enabled. In PowerShell, run from the repository root:
 
-Fault controls are available only in the Vite development server when `VITE_DEMO_FAULTS=true`; the production build removes their code. Do not put search text or personal data in issue/PR telemetry screenshots. Telemetry records operation, outcome, duration and small fixed categories only; it excludes query text, place IDs, contribution/report payloads, names, email addresses and credentials. Error text from exceptions is not exported.
+   ```powershell
+   $env:VITE_USE_MOCK_BACKEND = 'true'
+   $env:VITE_DEMO_FAULTS = 'true'
+   $env:VITE_TELEMETRY_ENABLED = 'false'
+   Push-Location frontend
+   npm run dev -- --host 127.0.0.1 --port 5178
+   ```
+
+   Open <http://127.0.0.1:5178/?demoFault=search-error> and search or change a filter. The existing search error state appears. Use `?demoFault=search-delay` to exercise the bounded delay. Reload without the query parameter to restore normal mock behavior. Stop Vite with `Ctrl+C`, then clear the shell settings:
+
+   ```powershell
+   Pop-Location
+   Remove-Item Env:VITE_USE_MOCK_BACKEND, Env:VITE_DEMO_FAULTS, Env:VITE_TELEMETRY_ENABLED
+   ```
+
+   This standalone mock walkthrough does not call the Compose API or send telemetry to Grafana. To demonstrate a correlated API failure in root Compose, enable `PAWLOCAL_DEMO_FAULTS_ENABLED=true` for the backend and call `GET /api/v1/places` with `X-PawLocal-Demo-Failure: api` or `database`; the API returns a bounded 503 error code and exports the corresponding trace/log.
+
+Frontend `demoFault` controls are available only in a Vite development server using `VITE_USE_MOCK_BACKEND=true` and `VITE_DEMO_FAULTS=true`; the production build removes their code. They exercise only mock search. The separate backend fault header is available only when `PAWLOCAL_DEMO_FAULTS_ENABLED=true`. Do not put search text or personal data in issue/PR telemetry screenshots. Telemetry records operation, outcome, duration and small fixed categories only; it excludes query text, place IDs, contribution/report payloads, names, email addresses and credentials. Error text from exceptions is not exported.
 
 ### Telemetry toggle and shutdown
 

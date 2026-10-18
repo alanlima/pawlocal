@@ -2,9 +2,12 @@ import io
 import json
 import logging
 
+import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 
 from pawlocal.config import settings
 from pawlocal.observability import _SafeJsonFormatter
@@ -41,7 +44,12 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     spans = exporter.get_finished_spans()
     api_span = next(span for span in spans if span.kind.name == "SERVER")
     application_span = next(span for span in spans if span.name == "places.search")
-    database_span = next(span for span in spans if span.name == "db.query")
+    database_span = next(
+        span
+        for span in spans
+        if span.name == "db.query"
+        and span.context.trace_id == api_span.context.trace_id
+    )
     assert f"{api_span.context.trace_id:032x}" == "11111111111111111111111111111111"
     assert api_span.parent.span_id == int("2222222222222222", 16)
     assert application_span.parent.span_id == api_span.context.span_id
@@ -52,6 +60,52 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     assert {line["severity"] for line in lines} == {"DEBUG", "INFO"}
     assert all(line["trace_id"] == "1" * 32 for line in lines)
     assert "private-search-term" not in captured.getvalue()
+
+
+def test_detail_request_context_parents_api_application_and_database(client, monkeypatch):
+    from uuid import UUID
+
+    from pawlocal import observability
+    from pawlocal.infrastructure.models import PlaceRecord
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(observability.trace, "get_tracer", provider.get_tracer)
+    place_id = UUID("00000000-0000-4000-8000-000000000992")
+    with client[1]() as session:
+        session.add(
+            PlaceRecord(
+                id=place_id,
+                name="Synthetic Trace Fixture",
+                category="dog_park",
+                area="Brisbane",
+                facilities=[],
+                is_published=True,
+            )
+        )
+        session.commit()
+
+    response = client[0].get(
+        f"/api/v1/places/{place_id}",
+        headers={
+            "traceparent": "00-77777777777777777777777777777777-8888888888888888-01"
+        },
+    )
+    assert response.status_code == 200
+    spans = exporter.get_finished_spans()
+    api_span = next(span for span in spans if span.kind.name == "SERVER")
+    application_span = next(span for span in spans if span.name == "places.get")
+    database_span = next(
+        span
+        for span in spans
+        if span.name == "db.query"
+        and span.context.trace_id == api_span.context.trace_id
+    )
+    assert f"{api_span.context.trace_id:032x}" == "7" * 32
+    assert api_span.parent.span_id == int("8888888888888888", 16)
+    assert application_span.parent.span_id == api_span.context.span_id
+    assert database_span.parent.span_id == application_span.context.span_id
 
 
 def test_synthetic_database_failure_is_correlated_and_bounded(client, monkeypatch):
@@ -105,6 +159,33 @@ def test_synthetic_api_failure_is_a_safe_correlated_error(client, monkeypatch):
     )
     assert api_span.status.status_code.name == "ERROR"
     assert api_span.attributes["error.code"] == "synthetic_api_unavailable"
+
+
+def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
+    from pawlocal import observability
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(observability.trace, "get_tracer", provider.get_tracer)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    sentinel = "privacy-sentinel-user-value"
+    try:
+        with engine.connect() as connection, pytest.raises(OperationalError):
+            connection.exec_driver_sql(f"SELECT * FROM {sentinel}")
+        spans = exporter.get_finished_spans()
+        database_span = next(span for span in spans if span.name == "db.query")
+        assert database_span.status.status_code.name == "ERROR"
+        assert database_span.attributes["error.code"] == "database_operation_failed"
+        encoded = "\n".join(span.to_json() for span in spans)
+        assert sentinel not in encoded
+        assert "exception.message" not in encoded
+        assert "exception.stacktrace" not in encoded
+        assert "exception.type" not in encoded
+        assert "event.exception" not in encoded
+        assert all(not span.events for span in spans)
+    finally:
+        engine.dispose()
 
 
 def test_structured_formatter_omits_unapproved_fields():

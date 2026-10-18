@@ -1,6 +1,6 @@
 import type { Attributes } from '@opentelemetry/api'
 import type { PlaceService } from './PlaceService'
-import { recordDemoAction, recordOperation } from '../observability/telemetry'
+import { recordDemoAction, recordOperation, traceContextForSpan } from '../observability/telemetry'
 
 const allowedCategories = new Set(['dog_park', 'beach', 'walk', 'hiking_area', 'cafe'])
 
@@ -9,7 +9,7 @@ export function observePlaceService(service: PlaceService): PlaceService {
     listPlaces: (query, signal) =>
       recordOperation(
         'search',
-        () => service.listPlaces(query, signal),
+        (span) => service.listPlaces(query, signal, traceContextForSpan(span)),
         (places) => (places.length ? 'success' : 'empty'),
         {
           ...(allowedCategories.has(query.category ?? '') ? { category: query.category } : {}),
@@ -18,16 +18,19 @@ export function observePlaceService(service: PlaceService): PlaceService {
     getPlace: (id) =>
       recordOperation(
         'detail',
-        () => service.getPlace(id),
+        (span) => service.getPlace(id, traceContextForSpan(span)),
         (place) => (place ? 'success' : 'not_found'),
       ),
     listFavourites: () => service.listFavourites(),
-    toggleFavourite: (id) => recordOperation('favourite', () => service.toggleFavourite(id)),
+    toggleFavourite: (id) =>
+      recordOperation('favourite', (span) =>
+        service.toggleFavourite(id, traceContextForSpan(span)),
+      ),
     submitContribution: async (input) => {
       try {
         const result = await recordOperation(
           'contribution',
-          () => service.submitContribution(input),
+          (span) => service.submitContribution(input, traceContextForSpan(span)),
           undefined,
           { kind: input.kind },
         )
@@ -41,9 +44,14 @@ export function observePlaceService(service: PlaceService): PlaceService {
     listReportableContributions: () => service.listReportableContributions(),
     submitReport: async (input) => {
       try {
-        await recordOperation('report', () => service.submitReport(input), undefined, {
-          target_type: input.targetType,
-        })
+        await recordOperation(
+          'report',
+          (span) => service.submitReport(input, traceContextForSpan(span)),
+          undefined,
+          {
+            target_type: input.targetType,
+          },
+        )
         recordDemoAction('report', 'success', input.targetType)
       } catch (error) {
         recordDemoAction('report', 'error', input.targetType)

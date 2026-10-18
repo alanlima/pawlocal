@@ -10,7 +10,8 @@ class PlaceQueries:
 
     def search(self, **filters) -> tuple[list[Place], int]:
         with trace.get_tracer("pawlocal.application").start_as_current_span(
-            "places.search", attributes={"pawlocal.operation": "search"}
+            "places.search", attributes={"pawlocal.operation": "search"},
+            record_exception=False, set_status_on_exception=False,
         ) as span:
             places, total = self.repository.search(**filters)
             span.set_attribute("pawlocal.outcome", "success" if places else "empty")
@@ -18,7 +19,8 @@ class PlaceQueries:
 
     def get(self, place_id) -> Place | None:
         with trace.get_tracer("pawlocal.application").start_as_current_span(
-            "places.get", attributes={"pawlocal.operation": "detail"}
+            "places.get", attributes={"pawlocal.operation": "detail"},
+            record_exception=False, set_status_on_exception=False,
         ) as span:
             place = self.repository.get_published(place_id)
             span.set_attribute("pawlocal.outcome", "success" if place else "not_found")
@@ -33,5 +35,6 @@ class ReportableContributionQueries:
         with trace.get_tracer("pawlocal.application").start_as_current_span(
             "contributions.reportable",
             attributes={"pawlocal.operation": "reportable_list"},
+            record_exception=False, set_status_on_exception=False,
         ):
             return self.repository.list_reportable(page=page, page_size=page_size)

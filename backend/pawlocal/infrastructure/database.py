@@ -26,6 +26,8 @@ def _start_query_span(conn, _cursor, statement, _parameters, _context, _many):
         "db.query",
         kind=SpanKind.CLIENT,
         attributes={"db.system": conn.dialect.name, "db.operation.name": "query"},
+        record_exception=False,
+        set_status_on_exception=False,
     )
     span = manager.__enter__()
     conn.info.setdefault("pawlocal_query_spans", []).append((manager, span))

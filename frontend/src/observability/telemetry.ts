@@ -158,14 +158,18 @@ export function recordDemoAction(
   actionCounter?.add(1, { operation: action, outcome, ...attrs })
 }
 
-export function injectCurrentTraceContext(headers: Record<string, string>) {
-  if (!isEnabled() || !discoveryContext) return headers
-  new W3CTraceContextPropagator().inject(discoveryContext, headers, {
+export function traceContextForSpan(span: Span | undefined) {
+  if (!isEnabled() || !span) return undefined
+  const headers: Record<string, string> = {}
+  new W3CTraceContextPropagator().inject(trace.setSpan(otelContext.active(), span), headers, {
     set: (carrier, key, value) => {
       carrier[key] = String(value)
     },
   })
-  return headers
+  return {
+    traceparent: headers.traceparent,
+    ...(headers.tracestate ? { tracestate: headers.tracestate } : {}),
+  }
 }
 
 function writeSafeLog(span: Span, operation: Operation, outcome: Outcome, errorCode?: string) {
