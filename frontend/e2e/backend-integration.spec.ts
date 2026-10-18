@@ -43,7 +43,7 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
       apiRequest.url().includes('/api/v1/me/favourites') &&
       apiRequest.headers()['authorization'] === `Bearer ${accessToken}`,
   )
-  await page.getByRole('button', { name: 'Sign in' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Sign in' }).click()
   await authenticatedRead
   await page.getByLabel('What would you like to share?').selectOption('tip')
   const contributionText = `Browser API persistence ${Date.now()}`
