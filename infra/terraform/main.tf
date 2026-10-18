@@ -13,12 +13,12 @@ locals {
   github_repo         = split("/", var.github_repository)[1]
   github_oidc_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:ref:refs/heads/main"
   common_tags = {
-    CostCenter  = "personal"
-    Environment = var.environment
-    ManagedBy   = "Terraform"
-    Project     = "PawLocal"
-    Component   = "frontend"
-    Workload    = "static-site"
+    costcenter  = "personal"
+    environment = var.environment
+    managedby   = "terraform"
+    project     = "pawlocal"
+    component   = "frontend"
+    workload    = "static-site"
   }
 }
 
