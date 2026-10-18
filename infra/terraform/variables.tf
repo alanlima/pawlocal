@@ -66,3 +66,9 @@ variable "github_repository_id" {
     error_message = "github_repository_id must be the numeric immutable GitHub repository ID."
   }
 }
+
+variable "manage_github_oidc_provider" {
+  description = "Create the account-wide GitHub Actions OIDC provider only when the AWS account does not already have one. Leave false to use the existing shared provider."
+  type        = bool
+  default     = false
+}

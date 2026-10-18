@@ -17,7 +17,9 @@ permissions:
 
 concurrency:
   group: pawlocal-frontend-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded pull request checks may be canceled, but an S3 publish or cache
+  # invalidation on main must finish before the next deployment starts.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   frontend:

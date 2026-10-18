@@ -15,7 +15,7 @@ Taggable AWS resources receive common Terraform provider default tags: `costcent
 - Terraform 1.10 or later and AWS CLI credentials with permission to manage the resources declared in `infra/terraform/`.
 - The existing, versioned and encrypted S3 bucket reserved for Terraform state. Supply its name locally; the backend key is `pawlocal/terraform.tfstate` in `ap-southeast-2`. S3 lock files are enabled.
 - A public Route 53 hosted zone, the ARN of an issued ACM certificate in `us-east-1` covering `pawlocal.<configured-domain>`, and approval of estimated AWS costs before `apply`.
-- A GitHub Actions OIDC provider and IAM deploy role are created by Terraform. The role trusts only the configured repository and deployment branch and can write the site bucket and invalidate this distribution. It cannot change infrastructure or Route 53.
+- The account's GitHub Actions OIDC provider and a scoped IAM deploy role are used by Terraform. By default, Terraform looks up the existing account-wide provider. Set `manage_github_oidc_provider=true` only when the account has no provider and this deployment is explicitly meant to create it. The role trusts only the configured repository and `main` branch and can write the site bucket and invalidate this distribution; it cannot change infrastructure or Route 53.
 
 ## Initialize and review Terraform
 
@@ -37,7 +37,11 @@ terraform validate
 terraform plan -out=pawlocal.tfplan
 ```
 
-Review the plan, including CloudFront distribution, S3 bucket, OIDC provider/role, and Route 53 aliases. Only run `terraform apply pawlocal.tfplan` after explicit cost approval. The state bucket must already exist; this stack never creates or deletes it.
+Review the plan, including CloudFront distribution, S3 bucket, OIDC provider/role, and Route 53 aliases. With the default `manage_github_oidc_provider=false`, the provider is data-only and must already exist; the plan must not create, replace, or destroy it. Set the flag to `true` only when creating the account-wide provider is needed and approved. Only run `terraform apply pawlocal.tfplan` after explicit cost approval. The state bucket must already exist; this stack never creates or deletes it.
+
+### Migrating an existing Terraform state
+
+Older state may contain `aws_iam_openid_connect_provider.github`. Back up the remote state and confirm the provider URL and ARN in AWS before changing the ownership mode. If Terraform already manages this provider and should continue to, set `manage_github_oidc_provider=true`; the resource address moves to index `[0]` and remains managed. If the provider should be treated as shared/external, first remove only its Terraform state binding with `terraform state rm aws_iam_openid_connect_provider.github`, then keep the flag `false` and run `terraform plan` again. `state rm` does not delete the AWS provider. Review the resulting plan and verify the OIDC provider has no create, replace, or destroy action before any apply. Do not apply a plan that proposes removal of this shared provider.
 
 ## Configure GitHub Actions
 
@@ -61,13 +65,13 @@ No long-lived AWS access key is used. Only the deployment job has `id-token: wri
 
 For the first publish after the infrastructure apply, run **Frontend checks and deployment** manually from the GitHub Actions tab with `main` selected.
 
-Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
+Main-branch deployments are serialized and never cancel an in-progress S3 sync or CloudFront invalidation. Pull request checks for a superseded branch can be canceled. Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
 
 ## Cost and cleanup
 
 ### Estimate (USD/month)
 
-The draft plan creates one private S3 site bucket, one CloudFront distribution, two Route 53 aliases in the existing public hosted zone, and an IAM OIDC provider/role. There is no always-on compute, NAT gateway, new hosted zone, WAF configuration, logging, or new certificate.
+The draft plan creates one private S3 site bucket, one CloudFront distribution, two Route 53 aliases in the existing public hosted zone, and an IAM deploy role. It uses the account's existing OIDC provider by default; creating the provider is optional and controlled by `manage_github_oidc_provider`. There is no always-on compute, NAT gateway, new hosted zone, WAF configuration, logging, or new certificate.
 
 | Scenario | Estimated incremental monthly cost | Assumptions |
 | --- | ---: | --- |
