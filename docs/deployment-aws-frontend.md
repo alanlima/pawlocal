@@ -1,0 +1,79 @@
+# AWS deployment: mock-backed frontend
+
+This runbook describes the first PawLocal release: a static React/Vite frontend using seeded mock data. It does not deploy the API, database, or hosted observability stack.
+
+## Architecture
+
+The build output in `frontend/dist/` is stored in a private S3 bucket. CloudFront serves it through Origin Access Control (OAC), redirects HTTP requests to HTTPS, and returns `index.html` for SPA paths. Route 53 A and AAAA alias records map `pawlocal.<configured-domain>` to the distribution. The existing ACM wildcard certificate is supplied by ARN; ACM certificates used by CloudFront must be in `us-east-1`. Terraform does not request or validate a new certificate.
+
+The root domain, certificate ARN, repository identity, and AWS region are supplied as local Terraform inputs. Terraform looks up the matching public Route 53 hosted zone from the root domain. Do not commit real `terraform.tfvars`, backend configuration, account identifiers, credentials, or other account-specific values. The tracked `terraform.tfvars.example` contains placeholders only. The backend bucket name is supplied to `terraform init` from the operator's local environment; only the state key is fixed in this repository.
+
+## Prerequisites
+
+- Terraform 1.10 or later and AWS CLI credentials with permission to manage the resources declared in `infra/terraform/`.
+- The existing, versioned and encrypted S3 bucket reserved for Terraform state. Supply its name locally; the backend key is `pawlocal/terraform.tfstate` in `ap-southeast-2`. S3 lock files are enabled.
+- A public Route 53 hosted zone, the ARN of an issued ACM certificate in `us-east-1` covering `pawlocal.<configured-domain>`, and approval of estimated AWS costs before `apply`.
+- A GitHub Actions OIDC provider and IAM deploy role are created by Terraform. The role trusts only the configured repository and deployment branch and can write the site bucket and invalidate this distribution. It cannot change infrastructure or Route 53.
+
+## Initialize and review Terraform
+
+From the repository root in PowerShell:
+
+```powershell
+Copy-Item infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
+# Edit the ignored local file with the domain, certificate ARN, and repository.
+$env:PAWLOCAL_TF_STATE_BUCKET = "<existing Terraform state bucket name>"
+Set-Location infra/terraform
+terraform init `
+  -backend-config="bucket=$env:PAWLOCAL_TF_STATE_BUCKET" `
+  -backend-config="key=pawlocal/terraform.tfstate" `
+  -backend-config="region=ap-southeast-2" `
+  -backend-config="encrypt=true" `
+  -backend-config="use_lockfile=true"
+terraform fmt -check
+terraform validate
+terraform plan -out=pawlocal.tfplan
+```
+
+Review the plan, including CloudFront distribution, S3 bucket, OIDC provider/role, and Route 53 aliases. Only run `terraform apply pawlocal.tfplan` after explicit cost approval. The state bucket must already exist; this stack never creates or deletes it.
+
+## Configure GitHub Actions
+
+After applying Terraform, set these repository Actions **variables** (not secrets):
+
+| Variable | Value |
+| --- | --- |
+| `AWS_ROLE_ARN` | Terraform output `github_deploy_role_arn` |
+| `AWS_REGION` | Terraform input `aws_region` |
+| `FRONTEND_BUCKET` | Terraform output `site_bucket_name` |
+| `FRONTEND_DISTRIBUTION_ID` | Terraform output `cloudfront_distribution_id` |
+
+No long-lived AWS access key is used. Only the deployment job has `id-token: write`; GitHub OIDC trusts the configured repository's `main` branch. The workflow runs format/lint, unit tests, and a production build with `VITE_USE_MOCK_BACKEND=true` on pull requests and pushes that change `frontend/**`. A push to `main` publishes the built assets and invalidates CloudFront. `workflow_dispatch` on `main` supports the initial publish after infrastructure is applied and later manual republishing. Changes outside the frontend do not trigger automatic deployment.
+
+## Verify and operate
+
+- Visit the Terraform `site_url` output over HTTPS after CloudFront reports `Deployed` and DNS has propagated.
+- Reload a nested place URL directly to verify SPA fallback.
+- Confirm the frontend displays seeded demo data and has no backend dependency.
+- Inspect GitHub Actions logs for the build, S3 sync, and invalidation result. Do not print credentials or Terraform variable values in logs.
+
+For the first publish after the infrastructure apply, run **Frontend checks and deployment** manually from the GitHub Actions tab with `main` selected.
+
+Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
+
+## Cost and cleanup
+
+### Estimate (USD/month)
+
+The draft plan creates one private S3 site bucket, one CloudFront distribution, two Route 53 aliases in the existing public hosted zone, and an IAM OIDC provider/role. There is no always-on compute, NAT gateway, new hosted zone, WAF configuration, logging, or new certificate.
+
+| Scenario | Estimated incremental monthly cost | Assumptions |
+| --- | ---: | --- |
+| Idle | About $0.00001 | One 208 KB build stored in S3 Standard in Sydney; the backend state bucket and Route 53 zone already exist. |
+| Light traffic | About $0.005 | 10,000 S3 GETs (a conservative cache-miss estimate), 3 S3 PUTs, and the same 208 KB bundle. CloudFront viewer traffic remains within the account's shared free allowance of 1 TB and 10 million HTTP(S) requests/month. |
+
+The S3 estimate uses the current AWS Price List for Asia Pacific (Sydney): $0.025/GB-month for first-tier Standard storage, $0.00000044 per GET, and $0.0000055 per PUT. The current CloudFront pay-as-you-go page lists 1 TB of data transfer and 10 million HTTP(S) requests per month in its always-free tier. Those allowances are shared across the AWS account, so other distributions may consume them. If exceeded, CloudFront charges vary by viewer geography; Australia/New Zealand is currently $0.114/GB for the next 9 TB and HTTPS requests are $0.0125 per 10,000. Route 53 alias A/AAAA queries to CloudFront do not incur query charges; the existing hosted-zone charge continues independently. The estimate excludes taxes, changes in AWS prices, and usage outside these assumptions.
+
+Sources: [CloudFront pay-as-you-go pricing](https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/), [S3 pricing](https://aws.amazon.com/s3/pricing/), [Route 53 pricing](https://aws.amazon.com/route53/pricing/). Re-check current prices and account-level usage before apply; the project already has a monthly AWS budget, and a budget limit does not prevent charges.
+
+To remove this deployment, first disable/remove the GitHub deployment workflow or role variables, then run `terraform destroy` from this directory after reviewing the plan. The site bucket is not force-emptied, so remove its objects intentionally before destroying it. The pre-existing Terraform state bucket and its `pawlocal/terraform.tfstate` object are outside this stack and must be preserved unless the project owner separately requests state removal.

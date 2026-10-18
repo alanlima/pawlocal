@@ -28,7 +28,11 @@ Search → API → database → place details
 - `openapi.yaml` is the shared contract. Contract changes must be reflected in client types, backend schemas, tests and docs.
 - Stage 2 local frontend/observability and Stage 3 backend/persistence may start in parallel after their specifications are human-approved and both issues are open. They must use separate branches and Git worktrees because both may edit root Compose configuration.
 - Stage 2's monitoring review gate must pass before Stage 3 is considered complete and before Stage 3.1 starts. Stage 3.1 adds browser-to-API-to-database tracing and structured backend logs and reconciles the two Compose stacks; it may proceed in its own coordinated worktree while Stage 3 continues. Stage 3 cannot be marked complete until Stage 3.1 integration and independent review evidence are complete.
-- Hosting choice remains open. Terraform is documentation/scaffolding only until cost review and explicit approval.
+- Backend and hosted observability hosting remain open. The Stage 4 frontend-only AWS release uses a private S3 origin with CloudFront, a parameterized Route 53 hostname, and an existing ACM wildcard certificate; see [the deployment runbook](deployment-aws-frontend.md) and DEC-004. Terraform changes remain subject to review and explicit cost approval before apply.
+
+## Stage 4 initial frontend release
+
+The release deploys the React/Vite static bundle with `VITE_USE_MOCK_BACKEND=true`. CloudFront provides HTTPS using an existing ACM certificate in `us-east-1`, serves a private S3 origin through OAC, and falls back to the SPA entry point for client routes. Route 53 A/AAAA alias records map the configured `pawlocal.<domain>` name to CloudFront. GitHub Actions uses short-lived OIDC credentials to publish frontend assets after merges to `main` that change `frontend/**`; this deployment role cannot change infrastructure or DNS. This release does not deploy or expose the API, database, or hosted observability components.
 
 ## Security and data integrity
 
