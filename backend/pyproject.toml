@@ -22,6 +22,10 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["httpx>=0.27,<1", "pytest>=8.3,<9", "PyYAML>=6.0,<7", "ruff>=0.8,<1"]
+dsql-prototype = [
+  "aurora-dsql-sqlalchemy[psycopg]==1.3.0",
+  "dsql-lint==0.2.20",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
