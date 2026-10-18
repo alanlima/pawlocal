@@ -43,6 +43,15 @@ Review the plan, including CloudFront distribution, S3 bucket, OIDC provider/rol
 
 Older state may contain `aws_iam_openid_connect_provider.github`. Back up the remote state and confirm the provider URL and ARN in AWS before changing the ownership mode. If Terraform already manages this provider and should continue to, set `manage_github_oidc_provider=true`; the resource address moves to index `[0]` and remains managed. If the provider should be treated as shared/external, first remove only its Terraform state binding with `terraform state rm aws_iam_openid_connect_provider.github`, then keep the flag `false` and run `terraform plan` again. `state rm` does not delete the AWS provider. Review the resulting plan and verify the OIDC provider has no create, replace, or destroy action before any apply. Do not apply a plan that proposes removal of this shared provider.
 
+#### Read-only migration verification
+
+On 2026-10-18, Terraform 1.14.3 with the locked AWS provider planned both ownership paths against the existing deployment state and live AWS resources. No plan was applied.
+
+- With `manage_github_oidc_provider=true`, Terraform recognized the move from `aws_iam_openid_connect_provider.github` to `aws_iam_openid_connect_provider.github[0]`. The plan reported **0 to add, 0 to change, 0 to destroy**; the deployment role also had no action.
+- For the shared/external mode, the remote state was pulled to a disposable local copy. The provider binding was removed from that local copy only, then a plan with `manage_github_oidc_provider=false` reported **no changes**. The existing provider was read as a data source and the deployment role had no action.
+
+The state pull, temporary local backend, and local state removal did not write to the remote state or mutate AWS resources. Repeat these checks against the target account and state immediately before a real ownership migration; do not infer that another environment's state has the same ownership.
+
 ## Configure GitHub Actions
 
 After applying Terraform, set these repository Actions **variables** (not secrets):
@@ -54,7 +63,7 @@ After applying Terraform, set these repository Actions **variables** (not secret
 | `FRONTEND_BUCKET` | Terraform output `site_bucket_name` |
 | `FRONTEND_DISTRIBUTION_ID` | Terraform output `cloudfront_distribution_id` |
 
-No long-lived AWS access key is used. Only the deployment job has `id-token: write`; GitHub OIDC trusts the configured repository's `main` branch. The workflow runs format/lint, unit tests, and a production build with `VITE_USE_MOCK_BACKEND=true` on pull requests and pushes that change `frontend/**`. A push to `main` publishes the built assets and invalidates CloudFront. `workflow_dispatch` on `main` supports the initial publish after infrastructure is applied and later manual republishing. Changes outside the frontend do not trigger automatic deployment.
+No long-lived AWS access key is used. Only the production deployment job has `id-token: write`; GitHub OIDC trusts the configured repository's `main` branch. The pull request workflow runs format/lint, unit tests, and a production build with `VITE_USE_MOCK_BACKEND=true` when `frontend/**` or its workflow changes. Superseded pull request checks are canceled per PR. The separate production deployment workflow runs the same checks and build on `main` pushes that change `frontend/**`, then publishes the built assets and invalidates CloudFront. It can also be run manually from `main` for the initial publish after infrastructure is applied and later republishing. Changes outside the frontend and deployment workflow do not trigger automatic deployment.
 
 ## Verify and operate
 
@@ -63,9 +72,9 @@ No long-lived AWS access key is used. Only the deployment job has `id-token: wri
 - Confirm the frontend displays seeded demo data and has no backend dependency.
 - Inspect GitHub Actions logs for the build, S3 sync, and invalidation result. Do not print credentials or Terraform variable values in logs.
 
-For the first publish after the infrastructure apply, run **Frontend checks and deployment** manually from the GitHub Actions tab with `main` selected.
+For the first publish after the infrastructure apply, run **Frontend production deployment** manually from the GitHub Actions tab with `main` selected.
 
-Main-branch deployments are serialized and never cancel an in-progress S3 sync or CloudFront invalidation. Pull request checks for a superseded branch can be canceled. Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
+Main-branch deployment workflow runs share a production concurrency group with `queue: max`, so up to 100 pending deployments wait in order and an active S3 sync or CloudFront invalidation is not canceled. This queue is separate from pull request checks, which cancel superseded runs. GitHub documents that pending-run order is based on when a run starts waiting on the concurrency group, not strictly on dispatch time, and cancels runs beyond the 100-run queue limit. Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
 
 ## Cost and cleanup
 
