@@ -75,13 +75,13 @@ Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). Stage 0 w
 - Docker Compose starts the approved local stack reproducibly; CI runs relevant checks.
 - Compare hosting alternatives and estimate idle/low-traffic monthly costs, including database, network, telemetry and backups.
 - Validate Aurora DSQL against the actual models, repositories and Alembic migrations; compare PostgreSQL alternatives if material incompatibilities remain.
-- Define dev-to-prod promotion of the same tested image, separate credentials/data, recovery objectives, restore evidence and hosted telemetry/data-residency limits.
+- Define dev-to-prod promotion of the same tested image and separate credentials/data. Keep hosted telemetry disabled for the initial release; hosted telemetry provider, data residency, dashboards and alerts are deferred to Issue #59. Backup, HA, RPO/RTO, restore, and recovery/rollback planning are excluded from the MVP and deferred to Issue #44 after both environments are deployed. Preserve migration compatibility with the currently deployed application during each rollout.
 - For Issue #43, implement PR checks followed by automatic dev deployment after successful main CI, then a separate `workflow_dispatch` production promotion of a validated release verified in dev. Validate main ancestry, required CI and successful dev verification; promote the same backend image by immutable digest. Do not automatically deploy production on main merges.
 - Separate GitHub `development` and `production` environments and frontend/API/database endpoints, secrets and deployment credentials. Use `pawlocal-dev.<domain>` for development and `pawlocal.<domain>` for production. Keep Vite public configuration environment-safe and never place secrets in browser assets.
-- Serialize production deployment (`cancel-in-progress: false`), use least-privilege short-lived credentials/OIDC where supported, record commit/image/frontend/migration identifiers and results, run health/smoke checks, retain the prior release, and document a manual rollback compatible with database migrations.
-- Keep this CI/CD policy design-only until #41 hosting, compatibility, recovery and cost decisions pass and explicit cost/provisioning approval is recorded. The existing mock-backed static production deployment is a separate release and is not evidence that the full-stack policy is implemented.
-- Document budget alerts, teardown and recovery procedures.
-- Instrument and alert on user-impact failures; incident remediation is bounded, logged and recovery-verified.
+- Serialize production deployment (`cancel-in-progress: false`), use least-privilege short-lived credentials/OIDC where supported, record commit/image/frontend/migration identifiers and results, run health/smoke checks, and ensure migrations remain compatible with the currently deployed application. Recovery/rollback procedures are deferred to Issue #44.
+- Issue #43's approved MVP budget and Lightsail hosting direction are recorded in DRAFT-002; deployment remains gated on DSQL compatibility/runtime credentials and explicit provisioning approval. The existing mock-backed static production deployment is separate and does not demonstrate the full-stack policy.
+- Document budget alerts and teardown procedures. Do not add backup/restore or recovery guarantees to the MVP; review them under Issue #44 after cloud deployment.
+- Keep hosted telemetry and user-impact alerts disabled for the MVP; evaluate them under Issue #59 after the full-stack deployment. Existing local observability requirements and completed Stage 2/3.1 gates remain unchanged.
 - Any billable provisioning has explicit human approval before execution.
 
 ### P5 — Prepare and verify final submission
