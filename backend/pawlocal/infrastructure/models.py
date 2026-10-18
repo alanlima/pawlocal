@@ -91,8 +91,13 @@ class ContributionRecord(Base):
             "length(body) BETWEEN 1 AND 5000", name="ck_contributions_body_length"
         ),
         CheckConstraint(
-            "length(trim(body)) >= 1", name="ck_contributions_body_nonblank"
-        ),
+            "body ~ '[^[:space:]]'", name="ck_contributions_body_nonblank"
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "length(trim(body, char(9) || char(10) || char(11) || char(12) || "
+            "char(13) || ' ')) >= 1",
+            name="ck_contributions_body_nonblank",
+        ).ddl_if(dialect="sqlite"),
         CheckConstraint(
             "(kind = 'review' AND place_id IS NOT NULL AND rating IS NOT NULL) OR "
             "(kind <> 'review' AND rating IS NULL)",
@@ -153,7 +158,14 @@ class ReportRecord(Base):
         CheckConstraint(
             "length(reason) BETWEEN 1 AND 2000", name="ck_reports_reason_length"
         ),
-        CheckConstraint("length(trim(reason)) >= 1", name="ck_reports_reason_nonblank"),
+        CheckConstraint(
+            "reason ~ '[^[:space:]]'", name="ck_reports_reason_nonblank"
+        ).ddl_if(dialect="postgresql"),
+        CheckConstraint(
+            "length(trim(reason, char(9) || char(10) || char(11) || char(12) || "
+            "char(13) || ' ')) >= 1",
+            name="ck_reports_reason_nonblank",
+        ).ddl_if(dialect="sqlite"),
         CheckConstraint(
             "(target_type = 'place' AND target_place_id IS NOT NULL "
             "AND target_contribution_id IS NULL) OR "
