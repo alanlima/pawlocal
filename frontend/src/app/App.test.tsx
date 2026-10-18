@@ -3,10 +3,12 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { placeService } from '../services'
+import { demoContributions } from '../data/demo-contributions'
 import { demoPlaces } from '../data/demo-places'
 
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   window.history.pushState({}, '', '/')
 })
 
@@ -193,6 +195,7 @@ describe('PawLocal journeys', () => {
 
   it('can select a visible demo contribution, then restore place reporting with the place ID', async () => {
     const user = userEvent.setup()
+    const listReportableContributions = vi.spyOn(placeService, 'listReportableContributions')
     const report = vi.spyOn(placeService, 'submitReport').mockResolvedValueOnce(undefined)
     render(<App />)
     await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
@@ -203,6 +206,7 @@ describe('PawLocal journeys', () => {
       within(dialog).getByLabelText('What are you reporting?'),
       'contribution',
     )
+    await waitFor(() => expect(listReportableContributions).toHaveBeenCalledOnce())
     await screen.findByLabelText('Choose a community contribution')
     await user.selectOptions(
       within(dialog).getByLabelText('Choose a community contribution'),
@@ -226,6 +230,78 @@ describe('PawLocal journeys', () => {
         reason: 'Please review this contribution.',
       }),
     )
+  })
+
+  it('shows a loading state while reportable contributions are pending', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(placeService, 'listReportableContributions').mockImplementation(
+      () => new Promise(() => {}),
+    )
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: /Report a community contribution/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    await user.selectOptions(dialog.getByLabelText('What are you reporting?'), 'contribution')
+
+    expect(await dialog.findByRole('status')).toHaveTextContent('Loading published contributions…')
+    expect(
+      dialog.queryByText('No published community contributions are available to report yet.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows a retryable error when reportable contributions fail to load', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(placeService, 'listReportableContributions').mockRejectedValueOnce(
+      new Error('offline'),
+    )
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: /Report a community contribution/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    await user.selectOptions(dialog.getByLabelText('What are you reporting?'), 'contribution')
+
+    expect(await dialog.findByRole('alert')).toHaveTextContent(
+      'We couldn’t load published contributions. Please try again.',
+    )
+    expect(
+      dialog.queryByText('No published community contributions are available to report yet.'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('retries a failed reportable contribution request and displays returned targets', async () => {
+    const user = userEvent.setup()
+    const listReportableContributions = vi
+      .spyOn(placeService, 'listReportableContributions')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(demoContributions)
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: /Report a community contribution/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    await user.selectOptions(dialog.getByLabelText('What are you reporting?'), 'contribution')
+    await dialog.findByRole('alert')
+    await user.click(dialog.getByRole('button', { name: 'Try again' }))
+
+    const picker = await dialog.findByLabelText('Choose a community contribution')
+    expect(picker).toHaveValue(demoContributions[0].id)
+    expect(picker).toHaveTextContent(demoContributions[0].body)
+    expect(listReportableContributions).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows a valid empty result after reportable contributions load successfully', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(placeService, 'listReportableContributions').mockResolvedValueOnce([])
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: /Report a community contribution/ }))
+    const dialog = within(screen.getByRole('dialog'))
+    await user.selectOptions(dialog.getByLabelText('What are you reporting?'), 'contribution')
+
+    expect(await dialog.findByRole('status')).toHaveTextContent(
+      'No published community contributions are available to report yet.',
+    )
+    expect(dialog.queryByRole('alert')).not.toBeInTheDocument()
+    expect(dialog.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
   })
 
   it('keeps contribution text and shows a helpful message when submit fails', async () => {

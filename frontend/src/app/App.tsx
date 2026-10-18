@@ -17,7 +17,10 @@ import {
 import { isMockBackend, placeService } from '../services'
 import { getAccessToken, getAuthSession } from '../auth/authSession'
 import { useDiscovery } from '../features/discovery/useDiscovery'
-import { ContributionDialog } from '../features/community/ContributionDialog'
+import {
+  ContributionDialog,
+  type ReportableContributionsStatus,
+} from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
 import { PlaceDetail } from '../features/place/PlaceDetail'
 import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
@@ -55,6 +58,9 @@ export default function App() {
   const [reportTargetType, setReportTargetType] = useState<'place' | 'contribution'>('place')
   const [reportTargetId, setReportTargetId] = useState('')
   const [reportableContributions, setReportableContributions] = useState<Contribution[]>([])
+  const [reportableContributionsStatus, setReportableContributionsStatus] =
+    useState<ReportableContributionsStatus>('idle')
+  const [reportableRequest, setReportableRequest] = useState(0)
   const [notice, setNotice] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [view, setView] = useState<'explore' | 'favourites'>('explore')
@@ -111,15 +117,19 @@ export default function App() {
       .then((items) => {
         if (!current) return
         setReportableContributions(items)
-        setReportTargetId((targetId) => targetId || items[0]?.id || '')
+        setReportTargetId(items[0]?.id ?? '')
+        setReportableContributionsStatus('success')
       })
       .catch(() => {
-        if (current) setReportableContributions([])
+        if (current) {
+          setReportableContributions([])
+          setReportableContributionsStatus('error')
+        }
       })
     return () => {
       current = false
     }
-  }, [dialog, reportTargetType])
+  }, [dialog, reportTargetType, reportableRequest])
 
   const visiblePlaces = useMemo(
     () =>
@@ -138,12 +148,27 @@ export default function App() {
     if (type === 'report') {
       setReportTargetType(targetType)
       setReportTargetId(targetType === 'place' ? (selected?.id ?? places[0]?.id ?? '') : '')
+      setReportableContributions([])
+      setReportableContributionsStatus(targetType === 'contribution' ? 'loading' : 'idle')
     }
     setDialog(type)
   }
   const closeDialog = () => {
     setDialog(null)
+    setReportableContributions([])
+    setReportableContributionsStatus('idle')
     setTimeout(() => dialogTriggerRef.current?.focus(), 0)
+  }
+  const changeReportTargetType = (type: 'place' | 'contribution') => {
+    if (type === reportTargetType) return
+    setReportTargetType(type)
+    setReportTargetId(type === 'place' ? (selected?.id ?? places[0]?.id ?? '') : '')
+    setReportableContributions([])
+    setReportableContributionsStatus(type === 'contribution' ? 'loading' : 'idle')
+  }
+  const retryReportableContributions = () => {
+    setReportableContributionsStatus('loading')
+    setReportableRequest((request) => request + 1)
   }
   const toggleFacility = (facility: Facility) =>
     updateQuery({
@@ -558,8 +583,10 @@ export default function App() {
         reportTargetId={reportTargetId}
         reportPlaceId={selected?.id ?? places[0]?.id ?? ''}
         reportableContributions={reportableContributions}
-        setReportTargetType={setReportTargetType}
+        reportableContributionsStatus={reportableContributionsStatus}
+        setReportTargetType={changeReportTargetType}
         setReportTargetId={setReportTargetId}
+        onRetryReportableContributions={retryReportableContributions}
         onClose={closeDialog}
         onSignIn={() => void toggleSignIn()}
         onSubmit={() => void submit()}
