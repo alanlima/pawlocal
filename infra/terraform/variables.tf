@@ -4,6 +4,17 @@ variable "aws_region" {
   default     = "ap-southeast-2"
 }
 
+variable "environment" {
+  description = "Environment tag applied to taggable AWS resources."
+  type        = string
+  default     = "production"
+
+  validation {
+    condition     = contains(["development", "staging", "production"], var.environment)
+    error_message = "environment must be development, staging, or production."
+  }
+}
+
 variable "domain_name" {
   description = "Root DNS domain with an existing public Route 53 hosted zone, without a trailing dot."
   type        = string
@@ -33,5 +44,25 @@ variable "github_repository" {
   validation {
     condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
     error_message = "github_repository must use owner/repository format."
+  }
+}
+
+variable "github_owner_id" {
+  description = "Immutable GitHub owner ID used in the repository's OIDC subject claim."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_owner_id))
+    error_message = "github_owner_id must be the numeric immutable GitHub owner ID."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Immutable GitHub repository ID used in the OIDC subject claim."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "github_repository_id must be the numeric immutable GitHub repository ID."
   }
 }
