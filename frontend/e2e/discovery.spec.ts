@@ -58,6 +58,26 @@ test('search with no matches shows the empty state and can be cleared', async ({
   await expect(page.getByText('New Farm Park')).toBeVisible()
 })
 
+test('always shows build identity in the footer on desktop and mobile routes', async ({ page }) => {
+  await page.goto('/')
+  const footer = page.getByRole('contentinfo')
+  await expect(footer).toContainText('BUILD local')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+
+  await page.getByRole('button', { name: 'View New Farm Park' }).click()
+  await expect(page.getByRole('heading', { name: 'New Farm Park' })).toBeVisible()
+  await expect(page.getByRole('contentinfo')).toContainText('BUILD local')
+
+  await page.setViewportSize({ width: 375, height: 812 })
+  const mobileFooter = page.getByRole('contentinfo')
+  await expect(mobileFooter).toContainText('BUILD local')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+})
+
 test('demo member can submit a review and a location suggestion', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Add a place' }).click()
