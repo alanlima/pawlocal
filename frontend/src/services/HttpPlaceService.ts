@@ -56,10 +56,11 @@ export class HttpPlaceService implements PlaceService {
     path: string,
     init: RequestInit = {},
     context?: PlaceServiceRequestContext,
+    requiresAuthentication = false,
   ): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
-    const token = await this.token()
+    const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
     if (context?.traceparent) headers.set('traceparent', context.traceparent)
     if (context?.tracestate) headers.set('tracestate', context.tracestate)
@@ -109,13 +110,13 @@ export class HttpPlaceService implements PlaceService {
       })
   }
   async listFavourites(context?: PlaceServiceRequestContext) {
-    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, context)
+    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, context, true)
     return places.map((place) => place.id)
   }
   async toggleFavourite(placeId: string, context?: PlaceServiceRequestContext) {
     const favourites = await this.listFavourites(context)
     if (favourites.includes(placeId))
-      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, context)
+      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, context, true)
     else
       await this.request<void>(
         '/me/favourites',
@@ -124,6 +125,7 @@ export class HttpPlaceService implements PlaceService {
           body: JSON.stringify({ place_id: placeId }),
         },
         context,
+        true,
       )
   }
   async submitContribution(input: ContributionInput, context?: PlaceServiceRequestContext) {
@@ -139,6 +141,7 @@ export class HttpPlaceService implements PlaceService {
         }),
       },
       context,
+      true,
     )
     return { ...input, id: wire.id, createdAt: wire.created_at }
   }
@@ -180,6 +183,7 @@ export class HttpPlaceService implements PlaceService {
         }),
       },
       context,
+      true,
     )
   }
 }

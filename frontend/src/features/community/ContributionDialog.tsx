@@ -4,6 +4,7 @@ import type { Contribution, ContributionKind } from '../../types/place'
 
 type Props = {
   dialog: 'contribute' | 'report' | null
+  hasSelectedPlace: boolean
   signedIn: boolean
   isMockBackend: boolean
   kind: ContributionKind
@@ -26,6 +27,7 @@ type Props = {
 
 export function ContributionDialog({
   dialog,
+  hasSelectedPlace,
   signedIn,
   isMockBackend,
   kind,
@@ -187,7 +189,7 @@ export function ContributionDialog({
               value={kind}
               onChange={(event) => setKind(event.target.value as ContributionKind)}
             >
-              <option value="review">A review</option>
+              {hasSelectedPlace && <option value="review">A review</option>}
               <option value="location_suggestion">Suggest a place</option>
               <option value="tip">A useful tip</option>
               <option value="correction">A correction</option>

@@ -9,6 +9,7 @@ describe('ContributionDialog authentication actions', () => {
     render(
       <ContributionDialog
         dialog="contribute"
+        hasSelectedPlace
         signedIn={false}
         isMockBackend={false}
         kind="review"
