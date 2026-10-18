@@ -6,7 +6,13 @@ No fixture currently has verified access or facility facts, so facility filters 
 
 ## Local frontend and observability stack
 
-From the repository root, start the frontend, FastAPI backend, PostgreSQL, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana with:
+Before the first start, copy the example environment file and replace its local-only PostgreSQL password placeholder with a password for your local environment. In PowerShell, run this from the repository root:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Keep `.env` out of version control. Compose requires `PAWLOCAL_POSTGRES_PASSWORD` and has no built-in password fallback. Then start the frontend, FastAPI backend, PostgreSQL, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana from the repository root:
 
 ```powershell
 docker compose up --build -d
