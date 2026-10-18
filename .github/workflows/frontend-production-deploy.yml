@@ -1,7 +1,6 @@
-name: Frontend production deployment
+name: Deprecated mock-backed frontend deployment (disabled)
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
@@ -15,83 +14,15 @@ on:
       - ".github/workflows/frontend-production-deploy.yml"
       - '!**/*.md'
       - '!**/*.mdx'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: pawlocal-frontend-production-deploy
-  queue: max
-
+# Keep the retired workflow name and trigger paths so old links remain intelligible.
+# This no-op job must not publish the mock-backed bundle to the production site.
 jobs:
-  frontend:
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+  disabled:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    env:
-      VITE_USE_MOCK_BACKEND: "true"
-      VITE_APP_COMMIT: ${{ github.sha }}
     steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Format and lint
-        run: npm run check
-
-      - name: Run unit tests
-        run: npm test
-
-      - name: Set frontend build timestamp
-        run: echo "VITE_APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
-
-      - name: Build mock-backed frontend
-        run: npm run build
-
-      - name: Upload built frontend
-        uses: actions/upload-artifact@v4
-        with:
-          name: pawlocal-frontend
-          path: frontend/dist/
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy:
-    needs: frontend
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Download built frontend
-        uses: actions/download-artifact@v4
-        with:
-          name: pawlocal-frontend
-          path: dist/
-
-      - name: Configure AWS credentials with GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Publish frontend to S3
-        env:
-          SITE_BUCKET: ${{ vars.FRONTEND_BUCKET }}
-        run: aws s3 sync dist/ "s3://${SITE_BUCKET}/" --delete
-
-      - name: Invalidate CloudFront cache
-        env:
-          DISTRIBUTION_ID: ${{ vars.FRONTEND_DISTRIBUTION_ID }}
-        run: aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*"
+      - run: echo "This mock-backed production deployment is retired. Use the full-stack release workflows."

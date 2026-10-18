@@ -1,5 +1,8 @@
+from random import uniform
+from time import sleep
+
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from pawlocal.application.errors import DuplicateReviewError
@@ -11,6 +14,19 @@ from pawlocal.infrastructure.models import (
     ReportRecord,
 )
 from pawlocal.infrastructure.places import SqlAlchemyPlaceRepository
+
+_DSQL_RETRYABLE_SQLSTATES = {"40001", "OC000", "OC001"}
+_MAX_DSQL_REVIEW_ATTEMPTS = 3
+
+
+def _dsql_conflict_code(error: DBAPIError) -> str | None:
+    """Return a database conflict code without formatting sensitive DB errors."""
+    original = error.orig
+    code = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    if code is None:
+        diagnostic = getattr(original, "diag", None)
+        code = getattr(diagnostic, "sqlstate", None)
+    return code
 
 
 class CommunityRepository:
@@ -49,6 +65,35 @@ class CommunityRepository:
         self.session.commit()
 
     def submit_contribution(self, subject: str, values: dict):
+        if values["kind"] == "review":
+            return self._submit_review_with_retry(subject, values)
+        return self._submit_contribution_once(subject, values)
+
+    def _submit_review_with_retry(self, subject: str, values: dict):
+        is_dsql = self.session.get_bind().dialect.name == "auroradsql"
+        attempts = _MAX_DSQL_REVIEW_ATTEMPTS if is_dsql else 1
+        for attempt in range(attempts):
+            try:
+                return self._submit_contribution_once(subject, values)
+            except IntegrityError as exc:
+                # A uniqueness violation is a business conflict, not a transient
+                # OCC failure. Do not hide unrelated integrity errors.
+                self.session.rollback()
+                if values.get("place_id"):
+                    raise DuplicateReviewError from exc
+                raise
+            except DBAPIError as exc:
+                code = _dsql_conflict_code(exc)
+                self.session.rollback()
+                if not is_dsql or code not in _DSQL_RETRYABLE_SQLSTATES:
+                    raise
+                if attempt + 1 == attempts:
+                    raise
+                # Bounded exponential jitter reduces repeated collisions between
+                # requests that failed together without growing latency much.
+                sleep(uniform(0, 0.01 * (2**attempt)))
+
+    def _submit_contribution_once(self, subject: str, values: dict):
         place_id = values.get("place_id")
         place_record = None
         if place_id and values["kind"] == "review":

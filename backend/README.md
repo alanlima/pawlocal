@@ -21,6 +21,28 @@ uvicorn pawlocal.main:app --reload
 
 The API health endpoint is `http://127.0.0.1:8000/health`; OpenAPI docs are at `/docs`. Run backend tests with `pytest` from this directory. API/repository tests use isolated SQLite fixtures and do not require approved production place data.
 
+## Aurora DSQL compatibility status
+
+Place facilities are represented by the normalized `place_facilities` relation in the current ORM and migration `0007`; search uses one correlated `EXISTS` predicate per selected facility. This removes the prior PostgreSQL array/`ANY` query dependency. The representative SQL generated from the application query compiles with AWS's SQLAlchemy DSQL dialect and passes `dsql-lint` (offline SQL evidence only).
+
+The PostgreSQL/Alembic history remains the local and PostgreSQL path. Migrations `0001` through `0006` create PostgreSQL arrays, synchronous indexes, and contain PostgreSQL-specific backfill/quarantine SQL. Migration `0007` normalizes facilities for PostgreSQL and intentionally fails closed on the DSQL dialect because it migrates from that legacy array schema. Do not point the Alembic chain at DSQL.
+
+For clean DSQL installs, `pawlocal.dsql_migrations.apply_dsql_baseline(engine)` applies the separate `migrations/dsql/0001_initial` baseline. It executes one DDL statement per transaction, waits for asynchronous index jobs, then verifies each index's catalog validity and requested definition before continuing. When `IF NOT EXISTS` returns no job ID after an interrupted run, the runner performs the same catalog verification and fails closed if the index is missing, invalid, or different. It records the baseline revision only after all schema work succeeds. `execute_bounded_dml_batches` is available for future single-row migration changes and caps each transaction below DSQL's 3,000-row DML limit. This is a clean-install schema path only; it does not migrate existing PostgreSQL data.
+
+| Concern | PostgreSQL/Alembic | DSQL clean-install baseline |
+|---|---|---|
+| Facilities | `0001`-`0006` use a PostgreSQL `varchar[]`; `0007` converts data to `place_facilities` with `unnest` | Starts directly with normalized `place_facilities`; no array conversion |
+| Search | ORM query filters normalized facility rows with correlated `EXISTS`; avoids `ANY` and array containment | Same ORM query; AWS dialect SQL compiles offline and rendered search/count SQL passes `dsql-lint` |
+| Indexes | Alembic emits synchronous `CREATE INDEX` | Each index is `CREATE INDEX ASYNC`; runner waits for its job before proceeding |
+| DDL / DML | Existing history includes migration `0005` mixed DDL and backfill and `0006` quarantine/backfill and cleanup | One DDL per transaction; version ledger and bounded row-by-row DML are separate transactions |
+| Existing data | Existing PostgreSQL rows are converted by `0007` | Import/backfill from PostgreSQL is not implemented; this path initializes a new empty database |
+
+The PostgreSQL history therefore cannot be replayed on DSQL; use the separate baseline only for a new DSQL database. No live DSQL cluster has validated the baseline, generated query plans, or runtime OCC behavior.
+
+Offline evidence: the DSQL baseline statements pass `dsql-lint`, and unit tests exercise transaction separation, async-index wait ordering, ledger behavior, and DML batching. These checks do not prove a live DSQL migration or query plan. The application still has no selected runtime credential source or engine wiring for DSQL, so do not configure the service to use it yet.
+
+Runtime IAM credentials are also unresolved for the selected Lightsail application host. The AWS DSQL connector obtains short-lived database tokens from AWS credentials, but no approved credential source is configured for a Lightsail VM. The backend does not accept static AWS keys or DSQL auth tokens in its environment. Use only PostgreSQL locally; no live Aurora DSQL connection, migration, token refresh, OCC, or DPU behavior is claimed verified. The owner must select a secure runtime credential path before that implementation and live validation can proceed.
+
 ## Local tracing, logs and synthetic failures
 
 The combined root Compose stack sets `PAWLOCAL_TELEMETRY_ENABLED=true` and exports API spans and structured logs to the local Collector at `PAWLOCAL_OTLP_ENDPOINT` (`http://otel-collector:4318`). Outside Compose, telemetry and demo faults default to disabled. API spans accept W3C `traceparent` for correlation and deliberately discard inbound `tracestate`; database spans record only the database system and a generic query operation, never SQL or bind values. Structured API logs contain fixed event codes, route templates, status, duration, and trace/span IDs. Health probes are excluded to keep local logs useful.

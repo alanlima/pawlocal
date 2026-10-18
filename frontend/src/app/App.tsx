@@ -76,9 +76,13 @@ export default function App() {
   useEffect(() => {
     if (!isMockBackend) {
       let current = true
-      void getAccessToken().then((token) => {
-        if (current) setSignedIn(Boolean(token))
-      })
+      void getAccessToken()
+        .then((token) => {
+          if (current) setSignedIn(Boolean(token))
+        })
+        .catch(() => {
+          if (current) setSignedIn(false)
+        })
       return () => {
         current = false
       }
@@ -202,7 +206,13 @@ export default function App() {
       return
     }
 
-    const authSession = getAuthSession()
+    let authSession: ReturnType<typeof getAuthSession>
+    try {
+      authSession = getAuthSession()
+    } catch {
+      setNotice('Authentication configuration is invalid in this environment.')
+      return
+    }
     if (!authSession) {
       setNotice('Authentication is not configured in this environment.')
       return

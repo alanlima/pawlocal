@@ -15,6 +15,10 @@ export default defineConfig(async (configEnv) => {
           find: /^\.\.\/services$/,
           replacement: path.resolve(here, 'e2e/httpPlaceService.e2e.ts'),
         },
+        {
+          find: /^\.\.\/auth\/authSession$/,
+          replacement: path.resolve(here, 'e2e/authSession.e2e.ts'),
+        },
       ],
     },
     server: {

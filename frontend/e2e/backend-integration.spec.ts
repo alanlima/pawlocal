@@ -18,12 +18,7 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.addInitScript((token) => {
     window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = null
-    window.pawLocalAuth = {
-      getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
-      signIn: async () => {
-        window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
-      },
-    }
+    window.__PAWLOCAL_E2E_SIGN_IN_TOKEN__ = token
   }, accessToken)
 
   await page.goto('/')
@@ -35,8 +30,8 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   await page.getByRole('button', { name: 'Share this place' }).click()
   await expect(page.getByRole('status')).toContainText('Link copied')
 
-  // The E2E host sign-in callback completes the real HTTP-mode auth flow; the
-  // API request is then verified by issuer/JWKS/exp/client_id checks.
+  // The test-only auth adapter supplies the ephemeral issuer token; the API
+  // request is verified by issuer/JWKS/exp/client_id checks.
   await page.getByRole('button', { name: /Suggest an update/ }).click()
   const authenticatedRead = page.waitForRequest(
     (apiRequest) =>
@@ -83,10 +78,6 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   const freshContext = await browser.newContext()
   await freshContext.addInitScript((token) => {
     window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
-    window.pawLocalAuth = {
-      getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
-      signIn: async () => undefined,
-    }
   }, accessToken)
   const freshPage = await freshContext.newPage()
   await freshPage.goto('/')

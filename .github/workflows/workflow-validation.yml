@@ -49,7 +49,7 @@ jobs:
           echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
 
       - name: Lint workflow syntax and security
-        run: actionlint -ignore 'unexpected key "queue"'
+        run: actionlint
 
       - name: Verify workflow trigger path cases
         run: python -m unittest discover -s tests/ci -v

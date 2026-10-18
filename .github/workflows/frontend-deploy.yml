@@ -11,6 +11,8 @@ on:
       - "yarn.lock"
       - ".github/workflows/frontend-deploy.yml"
       - ".github/workflows/frontend-production-deploy.yml"
+      - ".github/workflows/fullstack-release.yml"
+      - ".github/workflows/deploy-production.yml"
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_call:
@@ -29,7 +31,14 @@ jobs:
       run:
         working-directory: frontend
     env:
-      VITE_USE_MOCK_BACKEND: "true"
+      VITE_RELEASE_ENV: development
+      VITE_USE_MOCK_BACKEND: "false"
+      VITE_TELEMETRY_ENABLED: "false"
+      VITE_API_BASE_URL: /api/v1
+      VITE_COGNITO_DOMAIN: https://auth.example.invalid
+      VITE_COGNITO_CLIENT_ID: ci-public-client
+      VITE_COGNITO_REDIRECT_URI: https://pawlocal-dev.example.invalid/auth/callback
+      VITE_COGNITO_LOGOUT_URI: https://pawlocal-dev.example.invalid/
       VITE_APP_COMMIT: ${{ github.sha }}
     steps:
       - name: Check out source

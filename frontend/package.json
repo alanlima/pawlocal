@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "node scripts/validate-release-config.mjs",
     "build": "tsc -b && vite build",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/validate-release-config.test.mjs",
+    "validate:release-config": "node scripts/validate-release-config.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\" \"scripts/**/*.mjs\"",
     "lint": "eslint src e2e vite.config.ts vite.e2e.config.ts playwright.config.ts playwright.backend.config.ts --ext .ts,.tsx",
     "check": "npm run format:check && npm run lint",
     "test:e2e:backend": "playwright test --config playwright.backend.config.ts"
