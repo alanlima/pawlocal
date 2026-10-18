@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-**Stage 2 (local frontend and observability) is complete and reviewed. Stage 3 (backend and persistence) and Stage 3.1 (cross-layer tracing and Compose integration) are underway in isolated worktrees.** Stage 3 cannot be marked complete until Stage 3.1 integration and review pass. Mock data is selected only when `VITE_USE_MOCK_BACKEND=true`; the combined Compose stack selects the HTTP adapter. Place access and facility details are not represented as verified facts. See [local development setup](frontend/README.md).
+**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress.** The current AWS release serves a static, mock-backed frontend; hosting for the API, database, and hosted observability remains undecided. CI validates frontend and backend changes, the combined local Compose stack, and Terraform configuration without provisioning cloud resources. Production alerting, incident response, and a controlled rollback/recovery demonstration remain Stage 4 work. Mock data is selected only when `VITE_USE_MOCK_BACKEND=true`; the combined Compose stack selects the HTTP adapter. Place access and facility details are not represented as verified facts. See [local development setup](frontend/README.md).
 
 ## Project documentation
 
@@ -21,7 +21,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Planned stack
 
-React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Issue #23 prepares an AWS static frontend deployment; hosting for the API and observability remains undecided. Do not provision paid resources without explicit cost approval.
+React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. The AWS static frontend deployment is documented in the [deployment runbook](docs/deployment-aws-frontend.md); hosting for the API and observability remains undecided. Do not provision paid resources without explicit cost approval.
 
 ## Backend development
 
@@ -35,5 +35,5 @@ HTTP-mode authentication is a host integration seam, not a PawLocal sign-in flow
 
 ## Development
 
-For the combined local frontend, API, PostgreSQL and observability stack, first copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell). The example contains a clearly local-only PostgreSQL password placeholder; keep `.env` out of version control and replace the placeholder for your local environment. Compose requires `PAWLOCAL_POSTGRES_PASSWORD` and has no built-in credential fallback. Then run `docker compose up --build -d` from the repository root. Open PawLocal at <http://localhost:5173>, Grafana at <http://localhost:3000>, and the API health endpoint at <http://localhost:8000/health>. See [frontend README](frontend/README.md) and [backend README](backend/README.md) for ports, health checks, privacy, synthetic failures, shutdown, migrations and tests. All published services bind to localhost; telemetry remains local and no cloud resources are configured.
+For the combined local frontend, API, PostgreSQL and observability stack, first copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell). The example contains a clearly local-only PostgreSQL password placeholder; keep `.env` out of version control and replace the placeholder for your local environment. Compose requires `PAWLOCAL_POSTGRES_PASSWORD` and has no built-in credential fallback. Then run `docker compose up --build -d` from the repository root. Open PawLocal at <http://localhost:5173>, Grafana at <http://localhost:3000>, and the API health endpoint at <http://localhost:8000/health>. See [frontend README](frontend/README.md) and [backend README](backend/README.md) for ports, health checks, privacy, synthetic failures, shutdown, migrations and tests. All local Compose services bind to localhost; running the local stack requires no cloud resources.
 
