@@ -66,7 +66,9 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     assert "private-search-term" not in captured.getvalue()
 
 
-def test_detail_request_context_parents_api_application_and_database(client, monkeypatch):
+def test_detail_request_context_parents_api_application_and_database(
+    client, monkeypatch
+):
     from uuid import UUID
 
     from pawlocal import observability
@@ -165,6 +167,46 @@ def test_synthetic_api_failure_is_a_safe_correlated_error(client, monkeypatch):
     assert api_span.attributes["error.code"] == "synthetic_api_unavailable"
 
 
+def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypatch):
+    from pawlocal import observability
+    from pawlocal.api import routes
+    from pawlocal.main import app
+
+    class BrokenQueries:
+        def search(self, **_filters):
+            raise RuntimeError("private backend failure detail")
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(observability.trace, "get_tracer", provider.get_tracer)
+    app.dependency_overrides[routes.get_place_queries] = lambda: BrokenQueries()
+
+    api_logger = logging.getLogger("pawlocal.api")
+    captured = io.StringIO()
+    handler = logging.StreamHandler(captured)
+    handler.setFormatter(_SafeJsonFormatter())
+    api_logger.addHandler(handler)
+    try:
+        response = client[0].get("/api/v1/places")
+    finally:
+        api_logger.removeHandler(handler)
+
+    assert response.status_code == 500
+    span = next(
+        span for span in exporter.get_finished_spans() if span.kind.name == "SERVER"
+    )
+    assert span.status.status_code.name == "ERROR"
+    assert span.attributes["error.code"] == "unhandled_api_error"
+    completed_log = next(
+        json.loads(line)
+        for line in captured.getvalue().splitlines()
+        if "API request completed" in line
+    )
+    assert completed_log["error_code"] == "unhandled_api_error"
+    assert "private backend failure detail" not in captured.getvalue()
+
+
 def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
     from pawlocal import observability
 
@@ -215,13 +257,13 @@ def test_application_failure_sets_only_stable_error_code(monkeypatch):
     with pytest.raises(OperationalError):
         PlaceQueries(BrokenRepository()).search()
 
-    span = next(span for span in exporter.get_finished_spans() if span.name == "places.search")
+    span = next(
+        span for span in exporter.get_finished_spans() if span.name == "places.search"
+    )
     assert span.status.status_code.name == "ERROR"
     assert span.attributes["error.code"] == "application_operation_failed"
     error_attributes = {
-        key
-        for key in span.attributes
-        if key.startswith(("error.", "exception."))
+        key for key in span.attributes if key.startswith(("error.", "exception."))
     }
     assert error_attributes == {"error.code"}
     assert not span.events

@@ -84,10 +84,12 @@ async def trace_and_log_request(request: Request, call_next):
                 content={"code": code, "message": "Service temporarily unavailable"},
             )
 
+        error_code = None
         try:
             response = await call_next(request)
         except Exception:  # noqa: BLE001 - return a generic response without exception details
-            mark_failed(span, "unhandled_api_error")
+            error_code = "unhandled_api_error"
+            mark_failed(span, error_code)
             response = JSONResponse(
                 status_code=500,
                 content={
@@ -103,7 +105,8 @@ async def trace_and_log_request(request: Request, call_next):
         span.set_attribute("http.route", operation)
         span.set_attribute("http.response.status_code", status_code)
         if status_code >= 500:
-            mark_failed(span, "api_request_failed")
+            error_code = error_code or "api_request_failed"
+            mark_failed(span, error_code)
         duration_ms = round((perf_counter() - started) * 1000, 2)
         level = (
             logging.ERROR
@@ -121,7 +124,7 @@ async def trace_and_log_request(request: Request, call_next):
             outcome=outcome,
             http_status=status_code,
             duration_ms=duration_ms,
-            error_code="api_request_failed" if status_code >= 500 else None,
+            error_code=error_code if status_code >= 500 else None,
         )
         return response
 
