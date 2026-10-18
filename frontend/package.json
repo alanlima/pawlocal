@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "prebuild": "node scripts/validate-release-config.mjs",
     "build": "tsc -b && vite build",
-    "test": "vitest run && node --test scripts/validate-release-config.test.mjs",
+    "test": "node scripts/run-tests.mjs",
     "validate:release-config": "node scripts/validate-release-config.mjs",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
