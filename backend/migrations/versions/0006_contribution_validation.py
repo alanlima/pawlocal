@@ -54,6 +54,13 @@ def upgrade() -> None:
         "DELETE FROM contributions AS c WHERE c.id IN "
         "(SELECT id FROM contribution_quarantine)"
     )
+    op.execute(
+        "UPDATE places AS p SET average_rating = ("
+        "SELECT AVG(c.rating)::double precision FROM contributions AS c "
+        "WHERE c.kind = 'review' AND c.is_published IS TRUE AND c.place_id = p.id) "
+        "WHERE p.id IN (SELECT place_id FROM contribution_quarantine "
+        "WHERE kind = 'review' AND place_id IS NOT NULL)"
+    )
     op.create_check_constraint(
         "ck_contributions_body_nonblank",
         "contributions",
@@ -87,6 +94,13 @@ def downgrade() -> None:
         "(id, target_type, target_place_id, target_contribution_id, reporter_subject, reason, status, created_at) "
         "SELECT id, target_type, target_place_id, target_contribution_id, reporter_subject, reason, status, created_at "
         "FROM report_quarantine ORDER BY quarantined_at, id"
+    )
+    op.execute(
+        "UPDATE places AS p SET average_rating = ("
+        "SELECT AVG(c.rating)::double precision FROM contributions AS c "
+        "WHERE c.kind = 'review' AND c.is_published IS TRUE AND c.place_id = p.id) "
+        "WHERE p.id IN (SELECT place_id FROM contribution_quarantine "
+        "WHERE kind = 'review' AND place_id IS NOT NULL)"
     )
     op.drop_table("report_quarantine")
     op.drop_table("contribution_quarantine")

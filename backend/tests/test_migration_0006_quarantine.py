@@ -5,6 +5,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 
 
 @pytest.mark.integration
@@ -24,6 +25,13 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
         uuid4(),
     )
     blank_report_id, linked_report_id, valid_report_id = uuid4(), uuid4(), uuid4()
+    contribution_columns = (
+        "id, kind, place_id, rating, body, contributor_subject, is_published, created_at"
+    )
+    report_columns = (
+        "id, target_type, reporter_subject, reason, status, created_at, "
+        "target_place_id, target_contribution_id"
+    )
     try:
         with engine.begin() as connection:
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -41,67 +49,81 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 {"id": place_id},
             )
             contributions = [
-                (valid_id, "review", place_id, 5, "valid legacy review"),
-                (blank_body_id, "tip", None, None, " \t\n "),
-                (missing_place_id, "review", None, 4, "review without place"),
-                (missing_rating_id, "review", place_id, None, "review without rating"),
-                (stray_rating_id, "tip", None, 3, "tip with rating"),
+                (valid_id, "review", place_id, 5, "valid legacy review", True),
+                (blank_body_id, "review", place_id, 1, " \t\n ", True),
+                (missing_place_id, "review", None, 4, "review without place", False),
+                (missing_rating_id, "review", place_id, None, "review without rating", True),
+                (stray_rating_id, "tip", None, 3, "tip with rating", False),
             ]
-            for contribution in contributions:
+            for index, contribution in enumerate(contributions):
                 connection.execute(
                     text(
                         "INSERT INTO contributions "
-                        "(id, kind, place_id, rating, body, contributor_subject) "
-                        "VALUES (:id, :kind, :place_id, :rating, :body, 'legacy-user')"
+                        "(id, kind, place_id, rating, body, contributor_subject, "
+                        "is_published, created_at) "
+                        "VALUES (:id, :kind, :place_id, :rating, :body, :subject, "
+                        ":is_published, :created_at)"
                     ),
-                    dict(
-                        zip(
-                            ("id", "kind", "place_id", "rating", "body"),
-                            contribution,
-                            strict=True,
-                        )
-                    ),
+                    {
+                        **dict(
+                            zip(
+                                ("id", "kind", "place_id", "rating", "body", "is_published"),
+                                contribution,
+                                strict=True,
+                            )
+                        ),
+                        "subject": f"legacy-user-{index}",
+                        "created_at": f"2026-10-18 12:00:0{index}+00:00",
+                    },
                 )
             reports = [
-                (blank_report_id, "place", place_id, None, " \t\n "),
-                (linked_report_id, "contribution", None, blank_body_id, "legacy report"),
-                (valid_report_id, "place", place_id, None, "valid report"),
+                (blank_report_id, "place", place_id, None, " \t\n ", "closed"),
+                (linked_report_id, "contribution", None, blank_body_id, "legacy report", "pending"),
+                (valid_report_id, "place", place_id, None, "valid report", "reviewed"),
             ]
-            for report in reports:
+            for index, report in enumerate(reports):
                 connection.execute(
                     text(
                         "INSERT INTO reports "
                         "(id, target_type, reporter_subject, reason, target_place_id, "
-                        "target_contribution_id) "
+                        "target_contribution_id, status, created_at) "
                         "VALUES (:id, :target_type, 'legacy-reporter', :reason, "
-                        ":target_place_id, :target_contribution_id)"
+                        ":target_place_id, :target_contribution_id, :status, :created_at)"
                     ),
-                    dict(
-                        zip(
-                            (
-                                "id",
-                                "target_type",
-                                "target_place_id",
-                                "target_contribution_id",
-                                "reason",
-                            ),
-                            report,
-                            strict=True,
-                        )
-                    ),
+                    {
+                        **dict(
+                            zip(
+                                ("id", "target_type", "target_place_id", "target_contribution_id", "reason", "status"),
+                                report,
+                                strict=True,
+                            )
+                        ),
+                        "created_at": f"2026-10-18 13:00:0{index}+00:00",
+                    },
                 )
+            original_contributions = connection.execute(
+                text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
+            ).all()
+            original_reports = connection.execute(
+                text(f"SELECT {report_columns} FROM reports ORDER BY id")
+            ).all()
+            connection.execute(
+                text("UPDATE places SET average_rating = 3.0 WHERE id = :id"),
+                {"id": place_id},
+            )
             connection.commit()
 
             command.upgrade(config, "head")
             active_contributions = connection.execute(
-                text("SELECT id, body FROM contributions ORDER BY id")
+                text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
             ).all()
-            assert active_contributions == [(valid_id, "valid legacy review")]
+            assert active_contributions == [
+                row for row in original_contributions if row.id == valid_id
+            ]
             quarantined = connection.execute(
                 text(
-                    "SELECT id, kind, place_id, rating, body, contributor_subject, "
-                    "is_published, quarantine_reason FROM contribution_quarantine "
-                    "ORDER BY id"
+                    f"SELECT {contribution_columns}, quarantine_reason "
+                    "FROM contribution_quarantine ORDER BY id"
                 )
             ).all()
             assert {row.id for row in quarantined} == {
@@ -110,44 +132,75 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
                 missing_rating_id,
                 stray_rating_id,
             }
-            assert all(row.contributor_subject == "legacy-user" for row in quarantined)
-            assert next(row for row in quarantined if row.id == blank_body_id).body == " \t\n "
+            assert [tuple(row[:8]) for row in quarantined] == [
+                tuple(row)
+                for row in original_contributions
+                if row.id != valid_id
+            ]
+            reasons = {row.id: row.quarantine_reason for row in quarantined}
+            assert reasons[blank_body_id] == "body is blank or whitespace-only"
+            assert reasons[missing_place_id] == "review is missing place_id or rating"
+            assert reasons[missing_rating_id] == "review is missing place_id or rating"
+            assert reasons[stray_rating_id] == "non-review contribution has a rating"
             assert connection.execute(
-                text("SELECT id FROM reports ORDER BY id")
-            ).scalars().all() == [valid_report_id]
+                text("SELECT average_rating FROM places WHERE id = :id"),
+                {"id": place_id},
+            ).scalar_one() == 5.0
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        "INSERT INTO contributions "
+                        "(id, kind, body, contributor_subject) "
+                        "VALUES (:id, 'tip', ' \t\n ', 'whitespace-check')"
+                    ),
+                    {"id": uuid4()},
+                )
+            connection.rollback()
+            with pytest.raises(IntegrityError):
+                connection.execute(
+                    text(
+                        "INSERT INTO reports "
+                        "(id, target_type, target_place_id, reporter_subject, reason) "
+                        "VALUES (:id, 'place', :place_id, 'whitespace-check', ' \t\n ')"
+                    ),
+                    {"id": uuid4(), "place_id": place_id},
+                )
+            connection.rollback()
+            assert connection.execute(
+                text(f"SELECT {report_columns} FROM reports ORDER BY id")
+            ).all() == [row for row in original_reports if row.id == valid_report_id]
             quarantined_reports = connection.execute(
                 text(
-                    "SELECT id, reason, target_contribution_id, reporter_subject, "
-                    "quarantine_reason FROM report_quarantine ORDER BY id"
+                    f"SELECT {report_columns}, quarantine_reason "
+                    "FROM report_quarantine ORDER BY id"
                 )
             ).all()
             assert {row.id for row in quarantined_reports} == {
                 blank_report_id,
                 linked_report_id,
             }
-            linked = next(row for row in quarantined_reports if row.id == linked_report_id)
-            assert linked.target_contribution_id == blank_body_id
-            assert linked.reporter_subject == "legacy-reporter"
+            assert [tuple(row[:8]) for row in quarantined_reports] == [
+                tuple(row)
+                for row in original_reports
+                if row.id != valid_report_id
+            ]
+            report_reasons = {row.id: row.quarantine_reason for row in quarantined_reports}
+            assert report_reasons[blank_report_id] == "reason is blank or whitespace-only"
+            assert report_reasons[linked_report_id] == "report targets a quarantined contribution"
 
             command.downgrade(config, "0005_report_target_foreign_keys")
             restored_contributions = connection.execute(
-                text("SELECT id, body FROM contributions ORDER BY id")
+                text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
             ).all()
-            assert {row.id for row in restored_contributions} == {
-                valid_id,
-                blank_body_id,
-                missing_place_id,
-                missing_rating_id,
-                stray_rating_id,
-            }
+            assert restored_contributions == original_contributions
             restored_reports = connection.execute(
-                text("SELECT id FROM reports ORDER BY id")
-            ).scalars().all()
-            assert set(restored_reports) == {
-                blank_report_id,
-                linked_report_id,
-                valid_report_id,
-            }
+                text(f"SELECT {report_columns} FROM reports ORDER BY id")
+            ).all()
+            assert restored_reports == original_reports
+            assert connection.execute(
+                text("SELECT average_rating FROM places WHERE id = :id"),
+                {"id": place_id},
+            ).scalar_one() == 3.0
             connection.commit()
     finally:
         with engine.begin() as connection:
