@@ -5,8 +5,6 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      entitlements:
-        - network.host
       network: host
     environment:
       VITE_TELEMETRY_ENABLED: ${PAWLOCAL_TELEMETRY_ENABLED:-true}

@@ -133,8 +133,13 @@ jobs:
       - name: Validate Compose configuration
         run: docker compose config --quiet
 
-      - name: Build and start the full stack
-        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Build the full stack with its declared host-network entitlement
+        run: |
+          docker compose build --print > "${RUNNER_TEMP}/pawlocal-bake.json"
+          docker buildx bake --allow network.host --file "${RUNNER_TEMP}/pawlocal-bake.json"
+
+      - name: Start the full stack and wait for health checks
+        run: docker compose up --detach --wait --wait-timeout 300
 
       - name: Smoke-check frontend, API, and Grafana
         run: |
