@@ -1,62 +1,71 @@
 # Stage 4 hosting and cost proposal
 
-**Status:** Proposal for human review; no hosting choice or spending is approved.
-**Pricing checked:** 2026-10-18. Prices are USD before tax.
+**Status:** Human direction recorded 2026-10-18; technical validation and cost approval remain open. No resources are provisioned or approved for spending.
+**Pricing checked:** 2026-10-18. Prices are USD before tax; Sydney/Australia regions are used where published.
 
-## Workload assumptions
+## Direction under review
 
-- Two separate, always-available environments: development and production.
-- Each environment handles about 10,000 API requests and 10 GB of API egress per month, with 1 GB of PostgreSQL data.
-- The frontend remains on the existing static AWS S3/CloudFront deployment. Its incremental estimate is tracked separately in [Issue #25](https://github.com/alanlima/pawlocal/issues/25).
-- GitHub Actions builds and deploys application images. New registry charges, domain costs, taxes, provider credits, and account-specific discounts are excluded.
-- The managed-platform options use one 512 MiB OpenTelemetry Collector per environment and one shared Grafana Cloud Free account. This assumes usage stays below the listed free allowances and does not price a secure browser telemetry relay.
-- Costs are illustrative monthly list-price estimates. API memory, telemetry volume/cardinality, database recovery requirements, and actual data transfer have not been measured.
+- **Application host:** AWS Lightsail. Run FastAPI as a Docker container on a Linux instance, keep Docker Compose for local development, and keep the existing S3/CloudFront frontend.
+- **Database candidate:** Aurora DSQL in `ap-southeast-2` is preferred for investigation only. It is not yet a PostgreSQL drop-in for PawLocal; compatibility blockers and the required validation are in [the DSQL compatibility note](dsql-compatibility-validation.md).
+- **Environments:** separate development and production data, credentials, configuration, deployment targets, and clusters. Promote the same tested application image from development to production.
+- **Not selected:** DynamoDB and Lambda. Conventional PostgreSQL alternatives must be compared if DSQL's material compatibility issues cannot be resolved.
+- This direction authorizes documentation and investigation only. It does not approve a spend envelope, provisioning, `terraform apply`, or production migration. DRAFT-002 remains open.
 
-## Estimated monthly costs
+## Workload and estimate assumptions
 
-| Option | Development | Production | Both environments | Operating model |
+- Two always-available application environments, each with 10,000 API requests, 10 GB outbound API data transfer, and 1 GB of logical database storage per month.
+- The mock-backed frontend stays on the existing static AWS S3/CloudFront deployment; its separate estimate is tracked in [Issue #25](https://github.com/alanlima/pawlocal/issues/25).
+- Lightsail sizing below is a comparison starting point only: 1 GB for development and 2 GB for production, each running the API container and a lightweight collector. Neither has been measured; choose sizes after capturing memory/CPU under representative loads.
+- Grafana Cloud Free is assumed to remain within its shared account limits. Both environments share one AWS account's DSQL free allowance; do not count it twice.
+- The DSQL cost model uses AWS Price List data for `ap-southeast-2`, effective 2026-07-01: $0.000009/DPU ($9 per million) and $0.36/GB-month, plus the published monthly allowance of 100,000 DPUs and 1 GB-month of storage per AWS account/management account. Request counts are not a proxy for DPU usage. Captured price list version: [`20260911124522/ap-southeast-2`](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/20260911124522/ap-southeast-2/index.json).
+- GitHub Actions build minutes/registry, independent availability probes, Lightsail backup storage/restore, DSQL backup/restore, support, tax, AUD conversion, and measured DPU consumption are unknown or account-dependent; they are not silently priced at zero.
+
+## Current monthly estimate
+
+The AWS subtotal below is a provisional floor for the selected direction under the stated free-tier assumption, not a price ceiling or spending recommendation.
+
+| Environment | Lightsail application VM | DSQL storage allocation | DSQL activity | Grafana Cloud | Provisional subtotal |
+| --- | ---: | ---: | --- | ---: | ---: |
+| Development | $7.00 (1 GB) | $0.18 (illustrative half of one billed GB-month) | First 100k DPUs shared by both environments are free; overage unmeasured | $0 if within shared Free limits | **$7.18 + its share of DPU overage and unpriced items** |
+| Production | $12.00 (2 GB) | $0.18 (illustrative half of one billed GB-month) | Shared allowance; overage unmeasured | $0 if within shared Free limits | **$12.18 + its share of DPU overage and unpriced items** |
+| **Both environments** | **$19.00** | **$0.36** (2 GB-month total less 1 GB free) | **TBD from measured workload** | **$0 conditional on shared limits** | **$19.36 + DPU overage, backup/restore, external monitoring, build/registry, and other unpriced items** |
+
+The $19.36 figure assumes 2 GB total average DSQL storage, 100,000 or fewer combined monthly DPUs, and the Grafana account remaining within its shared allowance. Each additional DPU is $0.000009 at the published Sydney list rate; additional DSQL storage is $0.36/GB-month. Obtain a measured sample-query DPU result and updated AWS pricing-calculator estimate before deciding a monthly envelope. The Lightsail instances include local SSD and transfer allowance; 10 GB/environment is within the published instance data-transfer allowance. Re-check the [Aurora DSQL price list](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/region_index.json) and captured version before approval.
+
+The previous $24 development / $44 production Lightsail sizes and approximately $71 combined estimate assumed a local PostgreSQL server and the full self-hosted observability stack. They are withdrawn for this revised architecture.
+
+## Alternatives retained for comparison
+
+| Option | Development | Production | Both environments | Recovery and operations |
 | --- | ---: | ---: | ---: | --- |
-| DigitalOcean App Platform + Managed PostgreSQL + Grafana Cloud | $17.00 | $30.15 | **$47.15** | Low-operations managed app and database; fixed services remain billed while idle. |
-| Fly Machines + Managed Postgres + Grafana Cloud | $42.97 with API stopped; $47.06 running | $42.97 with API stopped; $51.45 running | **$85.94 idle**; about **$99.31** with both APIs running full time and 20 GB total egress | API machines can stop/start; managed database and collectors remain provisioned. |
-| AWS Lightsail Linux with the existing Compose stack | $24 compute | $44 compute | **About $71** including an illustrative $3 for 60 GB of snapshots | Self-managed API, PostgreSQL, and current observability stack on one VM per environment. |
+| **AWS Lightsail + Aurora DSQL + Grafana Cloud Free** | $7.18 provisional priced subtotal, plus shared DPU overage and unknowns | $12.18 provisional priced subtotal, plus shared DPU overage and unknowns | **$19.36 provisional priced floor**, subject to the assumptions above | Self-managed VM/container patching and recovery; DSQL is multi-AZ managed, but app hosting remains one VM/environment. DSQL compatibility, backup/restore and IAM from Lightsail need validation. |
+| DigitalOcean App Platform + Managed PostgreSQL + Grafana Cloud | About $17 at full runtime under the documented small-app plans | About $30 for full runtime and one small database node | About $47 full runtime; **at least about $292** if production requires an Advanced Edition primary plus standby | Low-ops app/database. New Standard Edition clusters cannot add standby nodes for new accounts from 2026-10-15 (all accounts from 2026-11-30); HA Advanced starts at $130/node. App Platform Scale to Zero may reduce eligible inactive web-service compute but adds cold-start behavior; verify account/plan eligibility and do not assume it. |
+| Fly Machines + Managed Postgres + Grafana Cloud | $38 Basic DB + storage + collector + stopped/running Sydney app Machine | $38 Basic DB + storage + collector + stopped/running Sydney app Machine | **At least $76 + $0.56 assumed DB storage**, plus two collectors, app Machines/rootfs and traffic | Managed Postgres starts at $38/cluster plus $0.28/GB-month storage; each cluster includes HA/backups. Compute varies by Machine size and Sydney region. The prior $85.94/$99.31 total is withdrawn because it used an older, unverified machine/collector estimate. |
 
-### DigitalOcean
+DigitalOcean and Fly are evaluated alternatives, not selected targets. DigitalOcean's prior $92.90 HA scenario used Standard standbys that are no longer available for new accounts and will be unavailable to all accounts after 2026-11-30. At current Advanced pricing, two $130 database nodes plus the $32 app/collector/development subtotal makes the two-environment total about $292 before any additional costs. DigitalOcean App Platform's official documentation also describes Scale to Zero/Inactivity Sleep; actual availability, minimums and cold-start impact remain account/configuration-specific. Fly's minimum database/storage subtotal is priced, but its full Sydney app/collector estimate needs region-specific Machine sizing.
 
-- Development: $5 App Platform API (512 MiB), $5 collector (512 MiB), and $7 development PostgreSQL database (512 MiB), totaling $17.
-- Production: $10 API (1 GiB), $5 collector (512 MiB), and $15.15 for the smallest listed standard managed PostgreSQL node (1 GiB RAM, minimum 10 GiB disk), totaling $30.15.
-- The estimate assumes 10 GB of egress per environment is within the pooled app allowance. The production database is a single node. A two-node HA database at the 2 GiB tier is about $60.90/month for the database alone, raising the combined two-environment estimate to about $92.90/month.
-- App Platform lists Sydney availability. App services do not scale to zero. Managed PostgreSQL backups and restore-to-new-cluster behavior need a recovery drill; development databases have a separate backup caveat.
+Fly's summary is a lower-bound component estimate, not a completed full-app estimate. Its pricing is in USD, with Sydney Machine rates and data transfer varying by region. Refresh the exact Sydney development and production sizing with the provider calculator if Fly returns to consideration.
 
-### Fly.io
+## DSQL compatibility and integration gate
 
-- Development with the API stopped: $38 Managed Postgres, $0.28 for 1 GB database storage, $4.39 for the always-on collector, and $0.30 for 2 GB stopped-machine root storage, totaling about $42.97. With the 512 MiB API running for the full month, the estimate is $47.06.
-- Production with the API stopped has the same $42.97 baseline. With the 1 GiB API running for the full month, the estimate is $51.45.
-- With both APIs running for the full 730-hour month, the API compute adds $13.17. Assuming 20 GB total egress at $0.04/GB adds $0.80, for about $99.31 across both environments.
-- Managed Postgres includes high availability, automated backups, and connection pooling. Validate database operational responsibilities and maintenance controls. The managed database remains a fixed cost even while API machines stop.
+The current backend has not been validated against Aurora DSQL. Repository inspection found that the persisted PostgreSQL `ARRAY` facilities column and emitted Alembic index DDL require changes or a DSQL-specific migration path. The current SQLAlchemy engine also uses the standard psycopg dialect; AWS's SQLAlchemy DSQL dialect/connector and IAM token lifecycle are not configured. See the matrix and gated runbook in [dsql-compatibility-validation.md](dsql-compatibility-validation.md).
 
-### AWS Lightsail
+Before confirming DSQL, inspect the actual schema, repositories and migrations; adapt where needed; then run a clean migration, an upgrade migration, and the existing repository integration journey against a separately approved DSQL test cluster. The validation must cover search filters/count/pagination, favourites idempotency, duplicate review rejection, contribution/report persistence, referential integrity, rating aggregation, concurrent writes/conflict retries, connection refresh, and measured query DPUs. Local PostgreSQL passing is not evidence of DSQL compatibility. No DSQL cluster was created or queried for this proposal because no resource/cost approval was granted.
 
-- Development: a $24 Linux VM (4 GB RAM) sized for the current Compose stack.
-- Production: a $44 Linux VM (8 GB RAM) sized for the same stack.
-- Illustrative snapshot storage is 60 GB total at $0.05/GB-month ($3). This does not include an off-host PostgreSQL backup target, request charges, or external monitoring.
-- The existing Compose Prometheus/Loki/Tempo/Grafana stack can remain, but a VM failure also removes local monitoring. Both environments are single-VM failure domains and require more patching and backup operations.
+If these compatibility blockers are material, compare RDS for PostgreSQL and encrypted Lightsail managed PostgreSQL on Sydney pricing, database HA, backup/restore, connectivity, and the existing application's PostgreSQL fit before changing the human's preferred direction.
 
-## Comparison and current proposal
+## Deployment, data and observability boundaries
 
-DigitalOcean is the lowest-operations candidate if a single-node production database meets the recovery and availability requirements. If production database HA is required, its monthly estimate nearly doubles to about $92.90 across both environments. Fly has a higher fixed database baseline but includes database HA and backups, and its API compute can stop when unused. Lightsail has a low predictable VM price and preserves the current Compose stack, with greater self-management and recovery responsibility.
+- Treat Lightsail instances and containers as replaceable. Keep application state out of the VM filesystem; store uploads in external object storage if/when uploads exist. The current MVP has no uploaded media implementation.
+- DSQL data is external to the VM. Separate the dev/prod database endpoints, users/roles and access policies. Define backup retention and complete a restore drill with explicit RPO/RTO before production.
+- Lightsail's standard IAM guidance describes EC2 instance profiles for EC2 apps; Lightsail does not expose that EC2 attachment workflow. Do not assume the app can obtain an instance role automatically. Select and validate a short-lived credential/role-assumption design before using DSQL from the VM; never bake static access keys into an image.
+- Run Grafana Cloud Free for hosted dashboards/alerts and a lightweight Alloy or OpenTelemetry Collector per environment. Validate combined dev/prod quotas, account region/data residency, labels/cardinality, pipeline failure/no-data alerts, and a secure browser telemetry relay with no private ingestion token in browser code.
+- Hosted alert delivery must reach an authenticated receiver that persists and deduplicates incidents before queueing any agent work. A webhook by itself does not launch an agent. Agent hosting and model usage are separate, unpriced follow-up work.
+- Build and deploy the same immutable image from dev to prod. Identify the registry, GitHub Actions minutes, deploy credentials and rollback path before implementation; current estimate assumes existing CI capacity and does not assert that registry/build cost is zero.
 
-No option is selected. Before approving one, decide whether production needs database HA, set recovery point/time objectives, validate API memory and telemetry volume, and review a provider-calculator estimate plus a tested backup/restore and user-journey alert path. DRAFT-002 remains open until those choices and an explicit cost envelope are approved.
+## Sources checked 2026-10-18
 
-## Telemetry and unknown costs
-
-Grafana Cloud Free currently lists up to 10,000 metric series, 50 GB each of logs and traces, and 14-day retention. The estimate assumes both managed-platform environments fit within those shared account limits. Confirm the Australia region, user/incident-management quotas, data residency, browser telemetry relay design, cardinality, and retention before relying on it for production alerts.
-
-For Lightsail, persistent Prometheus/Loki/Tempo storage, off-host database backups, backup restore time, and monitoring from outside the VM are unpriced. Across all options, taxes/AUD conversion, measured resource usage, availability targets, deployment registry charges, and support-plan costs may change totals.
-
-## Official pricing and operations sources
-
-- [DigitalOcean App Platform pricing](https://docs.digitalocean.com/products/app-platform/details/pricing/) and [regional availability](https://docs.digitalocean.com/products/app-platform/details/availability/).
-- [DigitalOcean Managed PostgreSQL pricing](https://www.digitalocean.com/pricing/managed-databases), [PostgreSQL regions](https://docs.digitalocean.com/products/databases/postgresql/details/availability/), and [restoring from backups](https://docs.digitalocean.com/products/databases/postgresql/how-to/restore-from-backups/).
-- [Fly.io pricing](https://fly.io/pricing/), [regions](https://docs.fly.io/reference/regions), [Managed Postgres features](https://fly.io/docs/mpg/), and [machine autostop/autostart](https://fly.io/docs/reference/fly-proxy-autostop-autostart/).
-- [AWS Lightsail pricing](https://aws.amazon.com/lightsail/pricing/), [bundle details](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-bundles.html), and [snapshot pricing](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-snapshots.html).
-- [Grafana Cloud plans](https://grafana.com/get/) and [regional availability](https://grafana.com/docs/grafana-cloud/platform/security-and-account-management/account-management/regional-availability/).
+- [AWS Lightsail Linux instance bundle prices](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-bundles.html), [snapshot pricing](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-snapshots.html), and [Lightsail IAM guidance](https://docs.aws.amazon.com/lightsail/latest/userguide/security_iam.html).
+- [AWS Aurora DSQL pricing](https://aws.amazon.com/rds/aurora/dsql/pricing/), [Sydney region availability](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/what-is-aurora-dsql.html), [AWS DSQL IAM authentication](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/authentication-authorization.html), [SQL compatibility](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with.html), and [concurrency behavior](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-concurrency-control.html).
+- [AWS DSQL SQLAlchemy adapter](https://github.com/awslabs/aurora-dsql-orms/tree/main/python/sqlalchemy), [DigitalOcean App Platform pricing](https://docs.digitalocean.com/products/app-platform/details/pricing/), [DigitalOcean PostgreSQL pricing](https://docs.digitalocean.com/products/databases/postgresql/details/pricing/), and [Scale to Zero documentation](https://docs.digitalocean.com/products/app-platform/how-to/scale-app/).
+- [Fly Machine pricing](https://fly.io/docs/about/pricing/), [Fly Managed Postgres pricing](https://fly.io/mpg), and [Grafana Cloud Free plan](https://grafana.com/get/).

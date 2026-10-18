@@ -2,6 +2,8 @@
 
 This runbook describes the first PawLocal release: a static React/Vite frontend using seeded mock data. It does not deploy the API, database, or hosted observability stack.
 
+The separately reviewed Stage 4 backend-hosting direction and its still-open database compatibility, recovery, and cost gates are documented in the [hosting proposal](stage4-hosting-options.md). They do not expand this frontend deployment.
+
 ## Architecture
 
 The build output in `frontend/dist/` is stored in a private S3 bucket. CloudFront serves it through Origin Access Control (OAC), redirects HTTP requests to HTTPS, and returns `index.html` for SPA paths. Route 53 A and AAAA alias records map `pawlocal.<configured-domain>` to the distribution. The existing ACM wildcard certificate is supplied by ARN; ACM certificates used by CloudFront must be in `us-east-1`. Terraform does not request or validate a new certificate.

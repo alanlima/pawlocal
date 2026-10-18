@@ -11,7 +11,7 @@ Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). Stage 0 w
 | 2 Local frontend and observability | Dockerized frontend, local OpenTelemetry, Grafana, Prometheus, Loki, Tempo, user-journey instrumentation and synthetic failures. | Use a dedicated branch/worktree. Review monitoring, dashboards, privacy and failure evidence before Stage 3.1 starts and before Stage 3 is complete. |
 | 3 Backend and persistence | FastAPI, modular domain/use cases, PostgreSQL, SQLAlchemy/Alembic, auth/contributions and HTTP adapter. | May start in parallel with Stage 2 in a separate branch/worktree. Demonstrate frontend-to-backend-to-database persistence; do not complete until the Stage 2 review gate passes and Stage 3.1 cross-layer instrumentation and Compose integration are completed and reviewed. |
 | 3.1 Cross-layer instrumentation and Compose integration | Extend traces/logs through browser, API and database; reconcile and verify Stage 2/3 Compose services. | Start after Stage 2 review; use a coordinated separate worktree and may proceed while Stage 3 continues. |
-| 4 Production readiness | Compose startup, CI/CD, costed hosting evaluation, approved deployment, user-impact alerts and controlled incident response. | Explicit approval before billable infrastructure. |
+| 4 Production readiness | Compose startup, CI/CD, a costed hosting proposal, backend deployment design, user-impact alerts and controlled incident response. Current human direction is Lightsail for the API and Aurora DSQL as a conditional database candidate; compatibility, recovery and cost gates remain open. | No billable infrastructure until compatibility evidence, a reviewed cost envelope and explicit provisioning approval. |
 | 5 Submission | Rubric evidence, reproducibility, docs, demo and peer reviews. | Verify against the current course rubric. |
 
 ## Proposed issues
@@ -74,6 +74,8 @@ Repository: [alanlima/pawlocal](https://github.com/alanlima/pawlocal). Stage 0 w
 **Acceptance criteria:**
 - Docker Compose starts the approved local stack reproducibly; CI runs relevant checks.
 - Compare hosting alternatives and estimate idle/low-traffic monthly costs, including database, network, telemetry and backups.
+- Validate Aurora DSQL against the actual models, repositories and Alembic migrations; compare PostgreSQL alternatives if material incompatibilities remain.
+- Define dev-to-prod promotion of the same tested image, separate credentials/data, recovery objectives, restore evidence and hosted telemetry/data-residency limits.
 - Document budget alerts, teardown and recovery procedures.
 - Instrument and alert on user-impact failures; incident remediation is bounded, logged and recovery-verified.
 - Any billable provisioning has explicit human approval before execution.
