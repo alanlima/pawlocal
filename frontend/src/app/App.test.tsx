@@ -20,6 +20,53 @@ describe('PawLocal journeys', () => {
     expect(window.location.pathname).toBe('/places/0d8a22c2-4316-4dd3-b25b-0baa110a1ae1')
   })
 
+  it('ignores a detail response after navigating back to discovery', async () => {
+    const user = userEvent.setup()
+    let resolvePlace!: (place: (typeof demoPlaces)[number] | null) => void
+    vi.spyOn(placeService, 'getPlace').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePlace = resolve
+        }),
+    )
+    render(<App />)
+    const place = demoPlaces.find((item) => item.name === 'New Farm Park')!
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    expect(window.location.pathname).toBe(`/places/${place.id}`)
+
+    window.history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    resolvePlace(place)
+
+    await waitFor(() => expect(screen.getByLabelText('Search places or areas')).toBeVisible())
+    expect(screen.queryByRole('heading', { name: 'New Farm Park' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe('/')
+  })
+
+  it('keeps the newer place when an earlier detail response resolves last', async () => {
+    const user = userEvent.setup()
+    let resolveFirst!: (place: (typeof demoPlaces)[number] | null) => void
+    const first = demoPlaces.find((item) => item.name === 'New Farm Park')!
+    const second = demoPlaces.find((item) => item.name === 'Nudgee Beach Dog Off-Leash Area')!
+    vi.spyOn(placeService, 'getPlace')
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          }),
+      )
+      .mockResolvedValueOnce(second)
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: `View ${first.name}` }))
+    await user.click(screen.getByRole('button', { name: `View ${second.name}` }))
+    expect(await screen.findByRole('heading', { name: second.name })).toBeVisible()
+    resolveFirst(first)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: second.name })).toBeVisible())
+    expect(screen.queryByRole('heading', { name: first.name })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe(`/places/${second.id}`)
+  })
+
   it('filters by category and shows a clear empty state', async () => {
     const user = userEvent.setup()
     render(<App />)

@@ -25,6 +25,31 @@ test('search, open a stable detail URL, and share the place', async ({ page, con
   await expect(page.getByRole('heading', { name: 'Nudgee Beach Dog Off-Leash Area' })).toBeVisible()
 })
 
+test('browser back from a place detail returns to discovery with the matching URL', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'View New Farm Park' }).click()
+  await expect(page.getByRole('heading', { name: 'New Farm Park' })).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL('/')
+  await expect(page.getByLabel('Search places or areas')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'New Farm Park' })).not.toBeVisible()
+})
+
+test('rapid navigation between place details keeps the rendered detail aligned with the URL', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'View New Farm Park' }).click()
+  await expect(page.getByRole('heading', { name: 'New Farm Park' })).toBeVisible()
+  await page.getByRole('button', { name: 'All places' }).click()
+  await expect(page).toHaveURL('/')
+  await page.getByRole('button', { name: 'View Nudgee Beach Dog Off-Leash Area' }).click()
+  await expect(page.getByRole('heading', { name: 'Nudgee Beach Dog Off-Leash Area' })).toBeVisible()
+  await expect(page).toHaveURL(/\/places\/0d8a22c2-4316-4dd3-b25b-0baa110a1ae1$/)
+})
+
 test('search with no matches shows the empty state and can be cleared', async ({ page }) => {
   await page.goto('/')
   await page.getByLabel('Search places or areas').fill('a place that is not in demo data')

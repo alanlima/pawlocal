@@ -59,6 +59,7 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false)
   const [view, setView] = useState<'explore' | 'favourites'>('explore')
   const dialogTriggerRef = useRef<HTMLElement | null>(null)
+  const placeRequestId = useRef(0)
 
   useEffect(() => {
     if (!isMockBackend) {
@@ -78,8 +79,21 @@ export default function App() {
       .then(setFavourites)
       .catch(() => setFavourites([]))
     const resolveRoute = async () => {
+      const requestId = ++placeRequestId.current
       const match = window.location.pathname.match(/^\/places\/([^/]+)\/?$/)
-      setSelected(match ? await placeService.getPlace(match[1]) : null)
+      if (!match) {
+        setSelected(null)
+        return
+      }
+      try {
+        const place = await placeService.getPlace(match[1])
+        const currentPlaceId = window.location.pathname.match(/^\/places\/([^/]+)\/?$/)?.[1]
+        if (requestId === placeRequestId.current && currentPlaceId === match[1]) {
+          setSelected(place)
+        }
+      } catch {
+        if (requestId === placeRequestId.current) setSelected(null)
+      }
     }
     const onPopState = () => {
       void resolveRoute()
@@ -197,9 +211,19 @@ export default function App() {
   }
   const openPlace = async (place: Place) => {
     window.history.pushState({}, '', `/places/${place.id}`)
-    setSelected(await placeService.getPlace(place.id))
+    const requestId = ++placeRequestId.current
+    try {
+      const result = await placeService.getPlace(place.id)
+      const currentPlaceId = window.location.pathname.match(/^\/places\/([^/]+)\/?$/)?.[1]
+      if (requestId === placeRequestId.current && currentPlaceId === place.id) {
+        setSelected(result)
+      }
+    } catch {
+      if (requestId === placeRequestId.current) setSelected(null)
+    }
   }
   const closePlace = () => {
+    ++placeRequestId.current
     window.history.pushState({}, '', '/')
     setSelected(null)
   }
