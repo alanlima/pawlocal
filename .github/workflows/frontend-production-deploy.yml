@@ -7,7 +7,14 @@ on:
       - main
     paths:
       - "frontend/**"
+      - "openapi.yaml"
+      - "package.json"
+      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "yarn.lock"
       - ".github/workflows/frontend-production-deploy.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
 
 permissions:
   contents: read

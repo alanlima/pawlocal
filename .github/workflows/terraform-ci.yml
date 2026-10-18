@@ -1,0 +1,51 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-terraform-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    name: Terraform format and validation
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize providers without configuring the backend
+        run: terraform init -backend=false -input=false
+
+      - name: Validate Terraform configuration
+        run: terraform validate -no-color

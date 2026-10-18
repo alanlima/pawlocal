@@ -1,0 +1,55 @@
+name: Workflow validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/ci/**"
+      - "tests/ci/**"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "scripts/ci/**"
+      - "tests/ci/**"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-workflow-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Workflow syntax, security, and path tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned actionlint release
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/actionlint.tar.gz"
+          curl --fail --location --silent --show-error \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" -C "${RUNNER_TEMP}" actionlint
+          echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+
+      - name: Lint workflow syntax and security
+        run: actionlint -ignore 'unexpected key "queue"'
+
+      - name: Verify workflow trigger path cases
+        run: python -m unittest discover -s tests/ci -v

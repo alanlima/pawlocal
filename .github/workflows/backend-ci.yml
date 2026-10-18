@@ -1,0 +1,82 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "openapi.yaml"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "poetry.lock"
+      - "uv.lock"
+      - ".github/workflows/backend-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "openapi.yaml"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "poetry.lock"
+      - "uv.lock"
+      - ".github/workflows/backend-ci.yml"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-backend-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_USER: pawlocal
+          POSTGRES_PASSWORD: pawlocal-ci-password
+          POSTGRES_DB: pawlocal_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pawlocal -d pawlocal_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PAWLOCAL_DATABASE_URL: postgresql+psycopg://pawlocal:pawlocal-ci-password@localhost:5432/pawlocal_test
+      PAWLOCAL_TEST_DATABASE_URL: postgresql+psycopg://pawlocal:pawlocal-ci-password@localhost:5432/pawlocal_test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and test dependencies
+        run: python -m pip install -e ".[test]"
+
+      - name: Lint Python code
+        run: ruff check .
+
+      - name: Apply migrations to the disposable CI database
+        run: alembic -c alembic.ini upgrade head
+
+      - name: Run backend unit and PostgreSQL integration tests
+        run: pytest
