@@ -34,6 +34,8 @@ Search → API → database → place details
 
 The release deploys the React/Vite static bundle with `VITE_USE_MOCK_BACKEND=true`. CloudFront provides HTTPS using an existing ACM certificate in `us-east-1`, serves a private S3 origin through OAC, and falls back to the SPA entry point for client routes. Route 53 A/AAAA alias records map the configured `pawlocal.<domain>` name to CloudFront. GitHub Actions uses short-lived OIDC credentials to publish frontend assets after merges to `main` that change `frontend/**`; this deployment role cannot change infrastructure or DNS. This release does not deploy or expose the API, database, or hosted observability components.
 
+Issue #43 proposes a later full-stack release flow: PR checks, automatic deployment to a separate development environment after successful main CI, then manual production promotion of the same verified release. Development uses `pawlocal-dev.<domain>` and production `pawlocal.<domain>`. This is a desired design, not the behavior of the existing mock-backed frontend workflow. Do not point existing workflows at new targets or credentials until the full-stack hosting, compatibility, recovery, cost, and explicit provisioning gates pass. See [DEC-004 and DRAFT-002](decisions.md) and the [Stage 4 plan](implementation-plan.md).
+
 ## Security and data integrity
 
 Public reads require no account. Write operations require authentication and backend authorization, validation and rate limits. Personal data must be minimized and excluded from telemetry. AI-produced data stays a draft until a human verifies source and factual claims.

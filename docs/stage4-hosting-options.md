@@ -11,6 +11,14 @@
 - **Not selected:** DynamoDB and Lambda. Conventional PostgreSQL alternatives must be compared if DSQL's material compatibility issues cannot be resolved.
 - This direction authorizes documentation and investigation only. It does not approve a spend envelope, provisioning, `terraform apply`, or production migration. DRAFT-002 remains open.
 
+## Issue #43 release policy (design only)
+
+The requested full-stack CI/CD design is: run relevant tests/checks on pull requests; after merge to `main` and successful CI, publish a release and automatically deploy it to development; require a separate `workflow_dispatch` action to promote a release commit already verified in development to production. A merge to `main` must not automatically deploy the full-stack production release. The production workflow must validate main-branch ancestry, required CI, and successful development verification; promote the same backend image by immutable digest; serialize production deployment without canceling an active rollout; and retain deployment evidence and a documented manual rollback path.
+
+Use separate GitHub `development` and `production` environments, frontend/API/database targets, data, secrets, and least-privilege deployment identities; use short-lived OIDC credentials where supported. Development hostname convention: `pawlocal-dev.<domain>`. Production: `pawlocal.<domain>`. Vite currently bakes configuration into the frontend build, so select public runtime configuration or a controlled environment-specific build from the same tested commit. Never include secrets in browser assets.
+
+This is a documented target state, not an implemented workflow or an approved architecture/spend decision. The existing mock-backed static frontend remains on its current production workflow. Issue #43 acceptance must not be reported complete until the hosting/compatibility/recovery/cost decisions are approved, targets and credentials are configured, and CI/dev/prod and rollback evidence exists. The convention does not authorize DNS, certificates, new resources, deployment, or spending.
+
 ## Workload and estimate assumptions
 
 - Two always-available application environments, each with 10,000 API requests, 10 GB outbound API data transfer, and 1 GB of logical database storage per month.
