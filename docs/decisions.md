@@ -23,12 +23,13 @@ Record accepted decisions with date, status, context, decision and consequences.
 - **Decision:** Use place categories `dog_park`, `beach`, `walk`, `hiking_area`, and `cafe`; facilities `Fenced`, `Off-leash area`, `Drinking water`, `Shade`, `Picnic tables`, and `Accessible paths`; and curated, human-readable South East Queensland area labels. Current UI examples are `Brisbane City`, `Brisbane North`, `Gold Coast`, `Moreton Bay`, and `Sunshine Coast`, but the list is not exhaustive. Filter areas by exact label; they are not precise geospatial boundaries. Unknown or unverified access/facility facts remain absent/unknown and must never be inferred.
 - **Consequences:** Stage 3 API, persistence and adapters must use the category/facility enums and exact-match area-label semantics. The broader freshness and verification policy remains open. See the approved [product taxonomy](../product-spec.md#approved-mvp-discovery-taxonomy) and `openapi.yaml`.
 
-## DRAFT-002 — No full-application hosting selection yet
+## DRAFT-002 — Stage 4 hosting direction pending validation and cost approval
 
-- **Status:** Open.
-- **Context:** The static frontend hosting choice is recorded in DEC-004; the backend and hosted observability destination and full-system cost estimate remain undecided.
-- **Decision needed:** Compare appropriate full-application hosting choices and low-traffic costs during Stage 4 planning.
-- **Consequence:** Do not imply that the API/database/observability production host has been chosen.
+- **Status:** Open; human direction recorded 2026-10-18. This is not a final architecture approval or spend approval.
+- **Context:** The static frontend hosting choice is recorded in DEC-004. In the review outcome on [Issue #41](https://github.com/alanlima/pawlocal/issues/41), the human selected AWS Lightsail as the application-hosting direction, requested investigation of Aurora DSQL as the preferred cloud database candidate, separate dev/prod environments, and promotion of one tested artifact. Local Docker Compose continues to use its PostgreSQL service by default. The updated [Stage 4 hosting proposal](stage4-hosting-options.md) and [DSQL compatibility review](dsql-compatibility-validation.md) record costs and material compatibility blockers.
+- **Direction under review:** Run FastAPI as a normal container on Lightsail and keep Compose/PostgreSQL as the local workflow. Cloud deployments target Aurora DSQL in Sydney after compatibility and cost gates; cloud development opts into DSQL only through explicit environment-specific configuration. Do not silently redirect local Compose to DSQL. DSQL is not a PostgreSQL drop-in. Exclude DynamoDB and Lambda from this decision. Existing S3/CloudFront frontend remains the baseline.
+- **Decision still needed:** Complete the DSQL compatibility, credentials, backup/restore, sample-query cost and RPO/RTO checks. If material issues remain, compare RDS for PostgreSQL and encrypted Lightsail managed PostgreSQL before changing this direction. Confirm hosted telemetry/data residency, external monitoring, and a concrete monthly spending envelope.
+- **Consequence:** Documenting this direction and investigating DSQL is authorized. No resource provisioning, `terraform apply`, production migration, or spend envelope is approved. Keep issue #43 gated until compatibility is demonstrated and explicit cost/provisioning approval is obtained.
 
 ## DEC-004 — Static frontend AWS delivery
 
