@@ -3,16 +3,21 @@ import {
   ArrowUpRight,
   Check,
   ChevronDown,
+  Coffee,
   Compass,
+  Footprints,
   Heart,
   MapPin,
   Menu,
+  Mountain,
   PawPrint,
   Plus,
   Search,
   SlidersHorizontal,
   Sparkles,
+  TreePine,
   X,
+  Waves,
 } from 'lucide-react'
 import { isMockBackend, placeService } from '../services'
 import { getAccessToken, getAuthSession } from '../auth/authSession'
@@ -27,13 +32,13 @@ import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } f
 import { recordOperation } from '../observability/telemetry'
 import { buildIdentity } from './buildIdentity'
 
-const categories: { id: PlaceCategory | ''; label: string; icon: string }[] = [
-  { id: '', label: 'All places', icon: '✳' },
-  { id: 'dog_park', label: 'Dog parks', icon: '◉' },
-  { id: 'beach', label: 'Beaches', icon: '⌁' },
-  { id: 'walk', label: 'Walks', icon: '↗' },
-  { id: 'hiking_area', label: 'Hiking', icon: '△' },
-  { id: 'cafe', label: 'Cafés', icon: '⌂' },
+const categories: { id: PlaceCategory | ''; label: string; icon: typeof PawPrint }[] = [
+  { id: '', label: 'All places', icon: PawPrint },
+  { id: 'dog_park', label: 'Dog parks', icon: TreePine },
+  { id: 'beach', label: 'Beaches', icon: Waves },
+  { id: 'walk', label: 'Walks', icon: Footprints },
+  { id: 'hiking_area', label: 'Hiking', icon: Mountain },
+  { id: 'cafe', label: 'Cafés', icon: Coffee },
 ]
 const areas = ['Brisbane City', 'Brisbane North', 'Gold Coast', 'Moreton Bay', 'Sunshine Coast']
 const facilities: Facility[] = [
@@ -430,7 +435,7 @@ export default function App() {
               <span>THE OUTSIDE</span>
             </div>
             <div className="hero-doodle" aria-hidden="true">
-              ✳
+              <Sparkles />
             </div>
           </section>
 
@@ -460,7 +465,9 @@ export default function App() {
                   aria-pressed={query.category === item.id}
                   onClick={() => updateQuery({ ...query, category: item.id })}
                 >
-                  <span className="category-icon">{item.icon}</span>
+                  <span className="category-icon" aria-hidden="true">
+                    <item.icon size={14} />
+                  </span>
                   {item.label}
                 </button>
               ))}
