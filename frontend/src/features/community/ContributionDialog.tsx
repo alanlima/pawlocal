@@ -5,7 +5,7 @@ import type { Contribution, ContributionKind } from '../../types/place'
 type Props = {
   dialog: 'contribute' | 'report' | null
   signedIn: boolean
-  setSignedIn: (value: boolean) => void
+  isMockBackend: boolean
   kind: ContributionKind
   setKind: (value: ContributionKind) => void
   rating: number
@@ -20,14 +20,14 @@ type Props = {
   setReportTargetType: (value: 'place' | 'contribution') => void
   setReportTargetId: (value: string) => void
   onClose: () => void
+  onSignIn: () => void
   onSubmit: () => void
-  onNotice: (message: string) => void
 }
 
 export function ContributionDialog({
   dialog,
   signedIn,
-  setSignedIn,
+  isMockBackend,
   kind,
   setKind,
   rating,
@@ -42,8 +42,8 @@ export function ContributionDialog({
   setReportTargetType,
   setReportTargetId,
   onClose,
+  onSignIn,
   onSubmit,
-  onNotice,
 }: Props) {
   const dialogRef = useRef<HTMLElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
@@ -114,16 +114,19 @@ export function ContributionDialog({
         </h2>
         {!signedIn && (
           <div className="modal-note flex flex-col gap-2">
-            <span>You’re in visitor mode. Demo contributions require a member state.</span>
+            <span>
+              {isMockBackend
+                ? 'You’re in visitor mode. Demo contributions require a member state.'
+                : 'You’re in visitor mode. Sign in with your identity provider to contribute.'}
+            </span>
             <button
               className="inline-flex items-center rounded border border-stone-300 bg-white px-3 py-2 text-sm text-green-800"
               onClick={() => {
                 focusNoteAfterSignIn.current = true
-                setSignedIn(true)
-                onNotice('You are signed in as a demo member.')
+                onSignIn()
               }}
             >
-              Continue as demo member
+              {isMockBackend ? 'Continue as demo member' : 'Sign in'}
             </button>
           </div>
         )}

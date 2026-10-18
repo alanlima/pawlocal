@@ -241,13 +241,31 @@ components:
             properties:
               rating: { type: 'null' }
     Contribution:
+      type: object
+      additionalProperties: false
+      required: [id, kind, body, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [review, location_suggestion, tip, correction] }
+        place_id: { type: [string, 'null'], format: uuid }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        body: { type: string, minLength: 1, maxLength: 5000, pattern: '\S' }
+        created_at: { type: string, format: date-time }
       allOf:
-        - $ref: '#/components/schemas/ContributionInput'
-        - type: object
-          required: [id, created_at]
-          properties:
-            id: { type: string, format: uuid }
-            created_at: { type: string, format: date-time }
+        - if:
+            properties: { kind: { const: review } }
+            required: [kind]
+          then:
+            required: [place_id, rating]
+            properties:
+              place_id: { type: string, format: uuid }
+              rating: { type: integer, minimum: 1, maximum: 5 }
+        - if:
+            properties: { kind: { enum: [location_suggestion, tip, correction] } }
+            required: [kind]
+          then:
+            properties:
+              rating: { type: 'null' }
     ReportableContribution:
       type: object
       description: Published public contribution fields only; contributor and reporter identity are excluded.

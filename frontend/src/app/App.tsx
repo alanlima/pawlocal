@@ -179,7 +179,18 @@ export default function App() {
         return
       }
       await authSession.signIn()
-      setSignedIn(Boolean(await getAccessToken()))
+      if (!(await getAccessToken())) {
+        setSignedIn(false)
+        setNotice('Sign-in did not provide an access token. Please try again.')
+        return
+      }
+      setSignedIn(true)
+      try {
+        setFavourites(await placeService.listFavourites())
+      } catch {
+        setFavourites([])
+        setNotice('You are signed in, but saved places could not be loaded.')
+      }
     } catch {
       setNotice('Your identity provider could not complete sign-in. Please try again.')
     }
@@ -505,7 +516,7 @@ export default function App() {
       <ContributionDialog
         dialog={dialog}
         signedIn={signedIn}
-        setSignedIn={setSignedIn}
+        isMockBackend={isMockBackend}
         kind={kind}
         setKind={setKind}
         rating={rating}
@@ -520,8 +531,8 @@ export default function App() {
         setReportTargetType={setReportTargetType}
         setReportTargetId={setReportTargetId}
         onClose={closeDialog}
+        onSignIn={() => void toggleSignIn()}
         onSubmit={() => void submit()}
-        onNotice={setNotice}
       />
       {notice && (
         <div className="toast" role="status">

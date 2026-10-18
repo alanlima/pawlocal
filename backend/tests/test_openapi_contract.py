@@ -59,3 +59,16 @@ def test_openapi_documents_review_rating_and_nonblank_content_rules():
     assert contribution["allOf"][0]["then"]["required"] == ["place_id", "rating"]
     assert contribution["allOf"][1]["then"]["properties"]["rating"] == {"type": "null"}
     assert schemas["ReportInput"]["properties"]["reason"]["pattern"] == r"\S"
+
+
+def test_contribution_response_schema_allows_response_fields_and_closes_the_object():
+    specification = yaml.safe_load(
+        (Path(__file__).parents[2] / "openapi.yaml").read_text(encoding="utf-8")
+    )
+    contribution = specification["components"]["schemas"]["Contribution"]
+
+    assert contribution["type"] == "object"
+    assert contribution["additionalProperties"] is False
+    assert {"id", "kind", "body", "created_at"} <= contribution["properties"].keys()
+    assert {"id", "kind", "body", "created_at"} <= set(contribution["required"])
+    assert "$ref" not in str(contribution)
