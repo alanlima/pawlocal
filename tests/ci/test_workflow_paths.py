@@ -144,11 +144,15 @@ class WorkflowPathTests(unittest.TestCase):
                 self.assertIn("  workflow_call:", (WORKFLOWS / workflow).read_text())
 
     def test_component_workflow_concurrency_uses_caller_workflow_identity(self) -> None:
-        for workflow in ("frontend-deploy.yml", "backend-ci.yml"):
+        for workflow, component in (
+            ("frontend-deploy.yml", "pawlocal-frontend-"),
+            ("backend-ci.yml", "pawlocal-backend-"),
+        ):
             with self.subTest(workflow=workflow):
                 text = (WORKFLOWS / workflow).read_text()
                 self.assertIn("github.workflow", text)
                 self.assertIn("github.event.pull_request.number || github.ref", text)
+                self.assertIn(component, text)
                 self.assertNotIn("github.run_id", text)
 
     def test_release_schema_and_validator_changes_trigger_workflow_validation(self) -> None:

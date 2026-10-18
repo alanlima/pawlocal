@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ format('{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
+  group: ${{ format('pawlocal-frontend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
   cancel-in-progress: true
 
 jobs:
