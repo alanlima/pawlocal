@@ -246,6 +246,9 @@ jobs:
       - workflow-validation
     runs-on: ubuntu-latest
     steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
       - name: Accept successful checks and intentionally skipped components
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
