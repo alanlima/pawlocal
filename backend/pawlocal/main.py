@@ -27,7 +27,18 @@ async def lifespan(_app: FastAPI):
     shutdown_observability()
 
 
-app = FastAPI(title="PawLocal API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="PawLocal API",
+    version="0.1.0",
+    lifespan=lifespan,
+    telemetry={
+        "tracing": False,
+        "metrics": False,
+        "logs": False,
+        "operation_spans": False,
+        "auto_configure": False,
+    },
+)
 app.include_router(router, prefix=settings.api_prefix)
 
 

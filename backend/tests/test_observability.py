@@ -46,6 +46,8 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     assert api_span.parent.span_id == int("2222222222222222", 16)
     assert application_span.parent.span_id == api_span.context.span_id
     assert database_span.parent.span_id == application_span.context.span_id
+    assert all("url.query" not in span.attributes for span in spans)
+    assert "private-search-term" not in "\n".join(span.to_json() for span in spans)
     lines = [json.loads(line) for line in captured.getvalue().splitlines()]
     assert {line["severity"] for line in lines} == {"DEBUG", "INFO"}
     assert all(line["trace_id"] == "1" * 32 for line in lines)
@@ -117,3 +119,12 @@ def test_structured_formatter_omits_unapproved_fields():
     assert "api.request.completed" in encoded
     assert "private text" not in encoded
     assert "private-token" not in encoded
+
+
+def test_backend_demo_faults_use_the_explicit_backend_setting(monkeypatch):
+    from pawlocal.config import Settings
+
+    monkeypatch.setenv("PAWLOCAL_DEMO_FAULTS_ENABLED", "true")
+    monkeypatch.setenv("PAWLOCAL_DEMO_FAULTS", "false")
+
+    assert Settings().demo_faults_enabled is True

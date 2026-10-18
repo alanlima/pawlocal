@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:http'
 
 let server: Server | undefined
-let requests: { path: string; body: string }[] = []
+let requests: { path: string; body: string; headers: Record<string, string | undefined> }[] = []
 
 afterEach(() => {
   server?.close()
@@ -21,9 +21,20 @@ describe('frontend telemetry', () => {
       let body = ''
       request.on('data', (chunk: Buffer) => (body += chunk.toString()))
       request.on('end', () => {
-        requests.push({ path: request.url ?? '', body })
+        const path = request.url ?? ''
+        const headers = Object.fromEntries(
+          Object.entries(request.headers).map(([name, value]) => [
+            name,
+            Array.isArray(value) ? value.join(',') : value,
+          ]),
+        )
+        requests.push({ path, body, headers })
         response.writeHead(200, { 'content-type': 'application/json' })
-        response.end('{"partialSuccess":{}}')
+        response.end(
+          path.startsWith('/api/v1')
+            ? '{"items":[],"page":1,"page_size":100,"total":0}'
+            : '{"partialSuccess":{}}',
+        )
       })
     })
     await new Promise<void>((resolve) => server?.listen(0, '127.0.0.1', resolve))
@@ -38,10 +49,14 @@ describe('frontend telemetry', () => {
       recordOperation,
       shutdownTelemetry,
     } = await import('./telemetry')
+    const { HttpPlaceService } = await import('../services/HttpPlaceService')
     const results = await recordOperation(
       'search',
       async () => [{ id: 'private-place-name', query: 'private search text' }],
       (items) => (items.length ? 'success' : 'empty'),
+    )
+    await recordOperation('search', () =>
+      new HttpPlaceService(`http://127.0.0.1:${address.port}/api/v1`).listPlaces({}),
     )
     await recordOperation('detail', async () => ({ id: 'private-place-name' }))
     await recordOperation('contribution', async () => ({ id: 'private-contribution' }), undefined, {
@@ -67,6 +82,8 @@ describe('frontend telemetry', () => {
     expect(posts.some((body) => body.includes('search_success'))).toBe(true)
     expect(posts.join('\n')).not.toContain('private search text')
     expect(posts.join('\n')).not.toContain('private-place-name')
+    const apiRequest = requests.find((request) => request.path.startsWith('/api/v1/places?'))
+    expect(apiRequest?.headers.traceparent).toMatch(/^00-[a-f0-9]{32}-[a-f0-9]{16}-01$/)
     const traceBody = JSON.parse(
       requests.find((request) => request.path.includes('/v1/traces'))!.body,
     )
@@ -77,8 +94,11 @@ describe('frontend telemetry', () => {
         }[]
       }) => resourceSpan.scopeSpans.flatMap((scopeSpan) => scopeSpan.spans),
     )
-    const searchSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.search')
+    const searchSpans = spans.filter((span: { name: string }) => span.name === 'pawlocal.search')
     const detailSpan = spans.find((span: { name: string }) => span.name === 'pawlocal.detail')
+    const searchSpan = searchSpans.find(
+      (span: { traceId: string }) => span.traceId === detailSpan.traceId,
+    )
     const contributionSpan = spans.find(
       (span: { name: string }) => span.name === 'pawlocal.contribution',
     )
@@ -97,6 +117,9 @@ describe('frontend telemetry', () => {
         ),
     )
     expect(searchSpan.traceId).toBe(detailSpan.traceId)
+    expect(detailSpan.parentSpanId).toBe(searchSpan.spanId)
+    expect(apiRequest?.headers.traceparent).toContain(searchSpan.traceId)
+    expect(apiRequest?.headers.traceparent).toContain(searchSpan.spanId)
     expect(contributionSpan.traceId).toBe(searchSpan.traceId)
     expect(contributionSpan.parentSpanId).toBe(searchSpan.spanId)
     expect(reportSpan.traceId).toBe(searchSpan.traceId)

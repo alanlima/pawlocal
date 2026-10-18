@@ -6,7 +6,7 @@ No fixture currently has verified access or facility facts, so facility filters 
 
 ## Local frontend and observability stack
 
-From the repository root, start the frontend, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana with:
+From the repository root, start the frontend, FastAPI backend, PostgreSQL, OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana with:
 
 ```powershell
 docker compose up --build -d
@@ -24,17 +24,19 @@ docker compose up --build -d
 
 These override values make PawLocal available at <http://localhost:5174> and Grafana at <http://localhost:3001>. The Collector permits OTLP browser requests from `http://localhost:5174` for this run.
 
-With default ports, the app is at <http://localhost:5173> and Grafana is at <http://localhost:3000>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo and the Collector health endpoint are also host-reachable on localhost ports 9090, 3100, 3200 and 13133. Compose binds every published port to loopback.
+With default ports, the app is at <http://localhost:5173>, Grafana is at <http://localhost:3000>, and the API health check is at <http://localhost:8000/health>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo, the Collector health endpoint and PostgreSQL are also host-reachable on localhost ports 9090, 3100, 3200, 13133 and 55432. Compose binds every published port to loopback. The frontend uses the HTTP adapter with the Vite proxy to `backend:8000`; set `VITE_USE_MOCK_BACKEND=true` only when running the mock-only frontend without the backend service.
 
 | Service | Host address | Purpose |
 |---|---|---|
 | Frontend (default) | `localhost:5173` | Vite development UI |
+| FastAPI backend | `localhost:8000` | API health and local synthetic-failure requests |
+| PostgreSQL | `localhost:55432` | Local persistence |
 | Collector OTLP/HTTP | `localhost:4318` | Browser traces, metrics and logs |
 | Collector health | `localhost:13133` | Collector readiness |
 | Grafana (default) | `localhost:3000` | Dashboards, logs and Tempo traces |
 | Prometheus | `localhost:9090` | Scraped frontend metrics |
-| Loki | `localhost:3100` | Structured frontend logs |
-| Tempo | `localhost:3200` | Frontend traces |
+| Loki | `localhost:3100` | Structured frontend and backend logs |
+| Tempo | `localhost:3200` | Correlated browser, API and database traces |
 
 ### Health and status checks
 
@@ -81,7 +83,7 @@ Local signal data is stored in Docker volumes. `docker compose down -v` also del
 
 ### Trace propagation contract
 
-The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. The Stage 3 HTTP adapter can call `injectCurrentTraceContext(headers)` from `src/observability/telemetry.ts` to add `traceparent` and `tracestate` to a request. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
+The frontend creates spans for bounded operations and uses W3C Trace Context. A place detail or demo action is a child of the latest search span when available. `HttpPlaceService` injects `traceparent` and `tracestate` into API requests, so the backend server span and SQLAlchemy database spans join the browser trace. Do not add query values, IDs, credentials or contribution fields to span attributes or metric labels.
 
 ## Run locally
 
@@ -109,8 +111,8 @@ npm run test:e2e:backend
 
 From the `frontend` directory, run `npm run format` to format the React/TypeScript source under `src` and the TypeScript end-to-end tests under `e2e`. Prettier wraps code at 100 characters. To check formatting without changing files, run `npm run format:check`. Run `npm run lint` for TypeScript and React Hooks lint rules, or `npm run check` to run both checks together.
 
-## Replace the mock API later
+## Frontend service mode
 
-Feature components import the shared `placeService` instance from `src/services`. The `PlaceService` contract is in `src/services/PlaceService.ts`. `MockPlaceService` provides current Stage 1 behavior; `HttpPlaceService` is the adapter seam for the `/api/v1` endpoints in the root `openapi.yaml` and maps API snake_case fields to the frontend's camelCase domain type.
+Feature components import the shared `placeService` instance from `src/services`. The `PlaceService` contract is in `src/services/PlaceService.ts`. `HttpPlaceService` calls the `/api/v1` endpoints in the root `openapi.yaml` and maps API snake_case fields to the frontend's camelCase domain type. `MockPlaceService` remains available for the mock demonstration.
 
-The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. The Stage 3 service factory remains on the mock adapter until the complete API and authentication flows are ready. HTTP writes use the backend's configured identity provider and are not authenticated by the frontend demo mode.
+The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. Set `VITE_USE_MOCK_BACKEND=true` to explicitly select the mock adapter. When it is false or unset, the app selects the HTTP adapter; root Compose sets it to false and proxies `/api/v1` to the `backend` service. HTTP writes use the backend's configured identity provider and are not authenticated by the frontend demo mode.

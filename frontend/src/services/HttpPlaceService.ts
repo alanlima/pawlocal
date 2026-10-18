@@ -6,6 +6,7 @@ import type {
   ReportInput,
 } from '../types/place'
 import type { PlaceService } from './PlaceService'
+import { injectCurrentTraceContext } from '../observability/telemetry'
 
 type PlaceWire = {
   id: string
@@ -51,6 +52,8 @@ export class HttpPlaceService implements PlaceService {
     headers.set('Content-Type', 'application/json')
     const token = this.token?.()
     if (token) headers.set('Authorization', `Bearer ${token}`)
+    const propagatedHeaders = injectCurrentTraceContext(Object.fromEntries(headers.entries()))
+    for (const [name, value] of Object.entries(propagatedHeaders)) headers.set(name, value)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
     return response.status === 204 || response.status === 202
