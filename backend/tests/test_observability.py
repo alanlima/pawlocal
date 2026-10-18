@@ -275,6 +275,53 @@ def test_application_failure_sets_only_stable_error_code(monkeypatch):
     assert "event.exception" not in encoded
 
 
+@pytest.mark.parametrize(
+    ("operation", "expected_code"),
+    [
+        ("add_favourite", "favourite_place_unavailable"),
+        ("contribute", "contribution_place_unavailable"),
+        ("report", "report_target_unavailable"),
+    ],
+)
+def test_rejected_community_operations_mark_bounded_error_outcomes(
+    monkeypatch, operation, expected_code
+):
+    from pawlocal import observability
+    from pawlocal.application.community import CommunityCommands
+
+    class RejectedRepository:
+        def add_favourite(self, _subject, _place_id):
+            return False
+
+        def submit_contribution(self, _subject, _values):
+            return None
+
+        def submit_report(self, _subject, _values):
+            return False
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(observability.trace, "get_tracer", provider.get_tracer)
+    commands = CommunityCommands(RejectedRepository())
+
+    if operation == "add_favourite":
+        result = commands.add_favourite("private-subject", "private-place-id")
+    else:
+        values = {"kind": "tip", "target_type": "place"}
+        result = getattr(commands, operation)("private-subject", values)
+
+    assert result is (None if operation == "contribute" else False)
+    span = exporter.get_finished_spans()[0]
+    assert span.status.status_code.name == "ERROR"
+    assert span.status.description == expected_code
+    assert span.attributes["pawlocal.outcome"] == "rejected"
+    assert span.attributes["error.code"] == expected_code
+    assert "private-subject" not in span.to_json()
+    assert "private-place-id" not in span.to_json()
+    assert not span.events
+
+
 def test_structured_formatter_omits_unapproved_fields():
     record = logging.LogRecord(
         "pawlocal.api", logging.INFO, "api.py", 1, "API request completed", (), None

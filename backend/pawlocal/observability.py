@@ -100,9 +100,7 @@ def shutdown_observability() -> None:
 
 def extract_trace_context(headers: Any):
     carrier = {
-        key: headers[key]
-        for key in ("traceparent",)
-        if headers.get(key) is not None
+        key: headers[key] for key in ("traceparent",) if headers.get(key) is not None
     }
     return _propagator.extract(carrier)
 
@@ -163,6 +161,13 @@ def application_span(name: str, attributes: dict[str, Any]) -> Iterator[Span]:
 
 def mark_failed(span, stable_code: str) -> None:
     span.set_status(Status(StatusCode.ERROR, stable_code))
+    span.set_attribute("error.code", stable_code)
+
+
+def mark_rejected(span, stable_code: str) -> None:
+    """Mark an expected domain rejection with bounded, non-sensitive fields."""
+    span.set_status(Status(StatusCode.ERROR, stable_code))
+    span.set_attribute("pawlocal.outcome", "rejected")
     span.set_attribute("error.code", stable_code)
 
 
