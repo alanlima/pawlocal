@@ -7,6 +7,10 @@
 
 Reviewed `backend/pawlocal/infrastructure/models.py`, `places.py`, `community.py`, `contributions.py`, `database.py`, `backend/migrations/versions/0001` through `0006`, `backend/tests/test_postgres_integration.py`, `backend/pyproject.toml`, and `backend/alembic.ini`. The local PostgreSQL integration test is a useful starting journey, but has not been run against DSQL and cannot establish DSQL support.
 
+## Local and cloud database configuration boundary
+
+Docker Compose keeps its PostgreSQL container as the default database for local development and tests. The cloud deployment target is Aurora DSQL only after this document's compatibility and approval gates pass. Do not make a change to the local Compose database URL as part of selecting a cloud database. A cloud development deployment may use Aurora DSQL only when its environment-specific configuration explicitly selects the DSQL adapter/credentials; the current generic `PAWLOCAL_DATABASE_URL` alone does not configure the AWS dialect or IAM token lifecycle. Production and development cloud endpoints and credentials remain isolated.
+
 ## Compatibility matrix
 
 | Requirement | Current PawLocal implementation | DSQL support/evidence | Finding / work before a live test |

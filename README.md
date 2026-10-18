@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress.** The current AWS release serves a static, mock-backed frontend. Human direction is Lightsail for the API and Aurora DSQL as a database candidate pending compatibility, recovery, and cost validation; hosted telemetry is also pending validation. CI validates frontend and backend changes, the combined local Compose stack, and Terraform configuration without provisioning cloud resources. Production alerting, incident response, and a controlled rollback/recovery demonstration remain Stage 4 work. Mock data is selected only when `VITE_USE_MOCK_BACKEND=true`; the combined Compose stack selects the HTTP adapter. Place access and facility details are not represented as verified facts. See [local development setup](frontend/README.md).
+**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress.** The current AWS release serves a static, mock-backed frontend. Human direction is Lightsail for the API and Aurora DSQL as the cloud database target pending compatibility, recovery, and cost validation; local Docker Compose keeps PostgreSQL by default, and cloud development opts into DSQL only through explicit environment configuration. Hosted telemetry is also pending validation. CI validates frontend and backend changes, the combined local Compose stack, and Terraform configuration without provisioning cloud resources. Production alerting, incident response, and a controlled rollback/recovery demonstration remain Stage 4 work. Mock data is selected only when `VITE_USE_MOCK_BACKEND=true`; the combined Compose stack selects the HTTP adapter. Place access and facility details are not represented as verified facts. See [local development setup](frontend/README.md).
 
 ## Project documentation
 
@@ -21,7 +21,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Planned stack
 
-React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. The initial frontend uses AWS S3/CloudFront. Stage 4 human direction is AWS Lightsail for the API and Aurora DSQL as a database candidate pending compatibility, recovery and cost validation; hosted telemetry is also pending validation. Do not provision paid resources without explicit cost approval.
+React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. The initial frontend uses AWS S3/CloudFront. Local Compose uses PostgreSQL; Stage 4 cloud deployments target AWS Lightsail for the API and Aurora DSQL for the database pending compatibility, recovery and cost validation. Cloud development opts into DSQL only with an explicit environment configuration. Hosted telemetry is also pending validation. Do not provision paid resources without explicit cost approval.
 
 ## Backend development
 
