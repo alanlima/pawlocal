@@ -1,3 +1,5 @@
+import importlib.util
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -149,10 +151,14 @@ def test_fixture_conversion_preserves_array_order_and_duplicate_values():
 
 
 def test_generated_dsql_sql_has_no_array_storage_or_operator():
-    from scripts.render_dsql_facilities_prototype import render_sql
+    script = Path(__file__).parents[1] / "scripts" / "render_dsql_facilities_prototype.py"
+    spec = importlib.util.spec_from_file_location("dsql_prototype_renderer", script)
+    assert spec is not None and spec.loader is not None
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
 
     try:
-        sql = render_sql()
+        sql = renderer.render_sql()
     except NoSuchModuleError:
         pytest.skip("install the optional dsql-prototype dependencies")
 
