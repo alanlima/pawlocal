@@ -34,7 +34,8 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
         response = client[0].get(
             "/api/v1/places?q=private-search-term",
             headers={
-                "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+                "traceparent": "00-11111111111111111111111111111111-2222222222222222-01",
+                "tracestate": "vendor=private-tracestate-sentinel",
             },
         )
     finally:
@@ -54,8 +55,11 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     assert api_span.parent.span_id == int("2222222222222222", 16)
     assert application_span.parent.span_id == api_span.context.span_id
     assert database_span.parent.span_id == application_span.context.span_id
+    assert all(not span.context.trace_state.to_header() for span in spans)
     assert all("url.query" not in span.attributes for span in spans)
-    assert "private-search-term" not in "\n".join(span.to_json() for span in spans)
+    exported = "\n".join(span.to_json() for span in spans)
+    assert "private-search-term" not in exported
+    assert "private-tracestate-sentinel" not in exported
     lines = [json.loads(line) for line in captured.getvalue().splitlines()]
     assert {line["severity"] for line in lines} == {"DEBUG", "INFO"}
     assert all(line["trace_id"] == "1" * 32 for line in lines)

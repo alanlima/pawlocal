@@ -101,7 +101,7 @@ def shutdown_observability() -> None:
 def extract_trace_context(headers: Any):
     carrier = {
         key: headers[key]
-        for key in ("traceparent", "tracestate")
+        for key in ("traceparent",)
         if headers.get(key) is not None
     }
     return _propagator.extract(carrier)
