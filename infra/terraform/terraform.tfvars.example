@@ -3,3 +3,6 @@
 domain_name          = "example.com"
 certificate_arn      = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
 github_repository    = "owner/repository"
+github_owner_id      = "123456"
+github_repository_id = "1234567890"
+environment          = "production"
