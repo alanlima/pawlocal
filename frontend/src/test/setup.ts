@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom/vitest'
+import { vi } from 'vitest'
+
+// Component/unit tests use seeded fixtures unless a test explicitly switches service mode.
+vi.stubEnv('VITE_USE_MOCK_BACKEND', 'true')
 
 const values = new Map<string, string>()
 Object.defineProperty(globalThis, 'localStorage', {

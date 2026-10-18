@@ -4,8 +4,9 @@ import type { Contribution, ContributionKind } from '../../types/place'
 
 type Props = {
   dialog: 'contribute' | 'report' | null
+  hasSelectedPlace: boolean
   signedIn: boolean
-  setSignedIn: (value: boolean) => void
+  isMockBackend: boolean
   kind: ContributionKind
   setKind: (value: ContributionKind) => void
   rating: number
@@ -20,14 +21,15 @@ type Props = {
   setReportTargetType: (value: 'place' | 'contribution') => void
   setReportTargetId: (value: string) => void
   onClose: () => void
+  onSignIn: () => void
   onSubmit: () => void
-  onNotice: (message: string) => void
 }
 
 export function ContributionDialog({
   dialog,
+  hasSelectedPlace,
   signedIn,
-  setSignedIn,
+  isMockBackend,
   kind,
   setKind,
   rating,
@@ -42,8 +44,8 @@ export function ContributionDialog({
   setReportTargetType,
   setReportTargetId,
   onClose,
+  onSignIn,
   onSubmit,
-  onNotice,
 }: Props) {
   const dialogRef = useRef<HTMLElement>(null)
   const noteRef = useRef<HTMLTextAreaElement>(null)
@@ -114,16 +116,19 @@ export function ContributionDialog({
         </h2>
         {!signedIn && (
           <div className="modal-note flex flex-col gap-2">
-            <span>You’re in visitor mode. Demo contributions require a member state.</span>
+            <span>
+              {isMockBackend
+                ? 'You’re in visitor mode. Demo contributions require a member state.'
+                : 'You’re in visitor mode. Sign in with your identity provider to contribute.'}
+            </span>
             <button
               className="inline-flex items-center rounded border border-stone-300 bg-white px-3 py-2 text-sm text-green-800"
               onClick={() => {
                 focusNoteAfterSignIn.current = true
-                setSignedIn(true)
-                onNotice('You are signed in as a demo member.')
+                onSignIn()
               }}
             >
-              Continue as demo member
+              {isMockBackend ? 'Continue as demo member' : 'Sign in'}
             </button>
           </div>
         )}
@@ -172,9 +177,7 @@ export function ContributionDialog({
                 </>
               ) : (
                 <p className="modal-note" role="status">
-                  No reportable contributions are available from this API yet. The current OpenAPI
-                  contract supports submitting contributions but does not provide a listing
-                  endpoint.
+                  No published community contributions are available to report yet.
                 </p>
               ))}
           </>
@@ -186,7 +189,7 @@ export function ContributionDialog({
               value={kind}
               onChange={(event) => setKind(event.target.value as ContributionKind)}
             >
-              <option value="review">A review</option>
+              {hasSelectedPlace && <option value="review">A review</option>}
               <option value="location_suggestion">Suggest a place</option>
               <option value="tip">A useful tip</option>
               <option value="correction">A correction</option>

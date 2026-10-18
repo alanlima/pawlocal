@@ -1,0 +1,272 @@
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy.exc import IntegrityError
+
+from pawlocal.api.auth import get_current_subject
+from pawlocal.infrastructure.models import ContributionRecord, PlaceRecord, ReportRecord
+
+PLACE_ID = UUID("00000000-0000-4000-8000-000000000021")
+
+
+def seed_place(session_factory):
+    with session_factory() as session:
+        session.add(
+            PlaceRecord(
+                id=PLACE_ID,
+                name="Test Park",
+                category="dog_park",
+                area="Brisbane City",
+                facilities=[],
+                is_published=True,
+            )
+        )
+        session.commit()
+
+
+def authenticate(client, subject="verified-user-subject"):
+    client[0].app.dependency_overrides[get_current_subject] = lambda: subject
+
+
+def test_anonymous_write_and_favourite_requests_require_authentication(client):
+    app = client[0]
+    favourites = app.get("/api/v1/me/favourites")
+    contribution = app.post(
+        "/api/v1/contributions", json={"kind": "tip", "body": "Bring water"}
+    )
+    report = app.post(
+        "/api/v1/reports",
+        json={
+            "target_type": "place",
+            "target_id": str(PLACE_ID),
+            "reason": "Incorrect",
+        },
+    )
+
+    assert (
+        favourites.status_code == contribution.status_code == report.status_code == 401
+    )
+    assert favourites.json() == {
+        "code": "unauthorized",
+        "message": "Authentication required",
+    }
+
+
+def test_favourites_are_private_unique_and_idempotent(client, session_factory):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client)
+
+    assert app.get("/api/v1/me/favourites").json() == []
+    assert (
+        app.put("/api/v1/me/favourites", json={"place_id": str(PLACE_ID)}).status_code
+        == 204
+    )
+    assert (
+        app.put("/api/v1/me/favourites", json={"place_id": str(PLACE_ID)}).status_code
+        == 204
+    )
+    listed = app.get("/api/v1/me/favourites")
+    assert listed.status_code == 200
+    assert [place["id"] for place in listed.json()] == [str(PLACE_ID)]
+    assert app.delete(f"/api/v1/me/favourites/{PLACE_ID}").status_code == 204
+    assert app.delete(f"/api/v1/me/favourites/{PLACE_ID}").status_code == 204
+    assert app.get("/api/v1/me/favourites").json() == []
+    assert (
+        app.put(
+            "/api/v1/me/favourites",
+            json={"place_id": "00000000-0000-4000-8000-000000000099"},
+        ).status_code
+        == 404
+    )
+
+
+def test_contribution_submission_duplicate_review_and_public_projection(
+    client, session_factory
+):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client)
+    payload = {
+        "kind": "review",
+        "place_id": str(PLACE_ID),
+        "rating": 5,
+        "body": "A useful place review",
+    }
+
+    created = app.post("/api/v1/contributions", json=payload)
+    duplicate = app.post("/api/v1/contributions", json=payload)
+    public = app.get("/api/v1/contributions/reportable")
+
+    assert created.status_code == 201
+    assert set(created.json()) == {
+        "id",
+        "kind",
+        "place_id",
+        "rating",
+        "body",
+        "created_at",
+    }
+    assert duplicate.status_code == 409
+    assert public.status_code == 200
+    assert public.json()["items"][0]["body"] == "A useful place review"
+    assert set(public.json()["items"][0]) == {
+        "id",
+        "kind",
+        "body",
+        "place_id",
+        "rating",
+        "created_at",
+    }
+    assert "verified-user-subject" not in public.text
+    assert "contributor_subject" not in public.text
+    with session_factory() as session:
+        record = session.query(ContributionRecord).one()
+        assert record.contributor_subject == "verified-user-subject"
+        place = session.get(PlaceRecord, PLACE_ID)
+        assert place.average_rating == 5
+
+
+def test_review_fields_and_non_review_rating_are_validated(client, session_factory):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client)
+
+    missing_place = app.post(
+        "/api/v1/contributions",
+        json={"kind": "review", "rating": 4, "body": "No place"},
+    )
+    missing_rating = app.post(
+        "/api/v1/contributions",
+        json={"kind": "review", "place_id": str(PLACE_ID), "body": "No rating"},
+    )
+    tip_rating = app.post(
+        "/api/v1/contributions",
+        json={"kind": "tip", "rating": 4, "body": "Tips cannot be rated"},
+    )
+    whitespace_body = app.post(
+        "/api/v1/contributions",
+        json={"kind": "tip", "body": " \t\n "},
+    )
+
+    assert all(
+        response.status_code == 400
+        for response in (missing_place, missing_rating, tip_rating, whitespace_body)
+    )
+    with session_factory() as session:
+        assert session.query(ContributionRecord).count() == 0
+        assert session.get(PlaceRecord, PLACE_ID).average_rating is None
+
+
+def test_accepted_reviews_update_average_rating(client, session_factory):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client, "reviewer-one")
+    first = app.post(
+        "/api/v1/contributions",
+        json={
+            "kind": "review",
+            "place_id": str(PLACE_ID),
+            "rating": 4,
+            "body": "A four star review",
+        },
+    )
+    authenticate(client, "reviewer-two")
+    second = app.post(
+        "/api/v1/contributions",
+        json={
+            "kind": "review",
+            "place_id": str(PLACE_ID),
+            "rating": 5,
+            "body": "A five star review",
+        },
+    )
+
+    assert first.status_code == second.status_code == 201
+    with session_factory() as session:
+        place = session.get(PlaceRecord, PLACE_ID)
+        assert place.average_rating == 4.5
+
+
+def test_contribution_validation_rejects_client_identity_and_bad_values(client):
+    app = client[0]
+    authenticate(client)
+    extra_identity = app.post(
+        "/api/v1/contributions",
+        json={"kind": "tip", "body": "A tip", "user_id": "attacker-selected"},
+    )
+    bad_rating = app.post(
+        "/api/v1/contributions",
+        json={"kind": "review", "rating": 6, "body": "Out of range"},
+    )
+
+    assert extra_identity.status_code == 400
+    assert bad_rating.status_code == 400
+
+
+def test_reports_are_accepted_without_echoing_reporter_identity(
+    client, session_factory
+):
+    seed_place(session_factory)
+    app = client[0]
+    authenticate(client)
+
+    accepted = app.post(
+        "/api/v1/reports",
+        json={
+            "target_type": "place",
+            "target_id": str(PLACE_ID),
+            "reason": "Access changed",
+        },
+    )
+    missing = app.post(
+        "/api/v1/reports",
+        json={
+            "target_type": "place",
+            "target_id": "00000000-0000-4000-8000-000000000099",
+            "reason": "Unlisted place",
+        },
+    )
+
+    assert accepted.status_code == 202
+    assert accepted.content == b""
+    assert missing.status_code == 400
+    blank = app.post(
+        "/api/v1/reports",
+        json={
+            "target_type": "place",
+            "target_id": str(PLACE_ID),
+            "reason": " \t\n ",
+        },
+    )
+    assert blank.status_code == 400
+    with session_factory() as session:
+        report = session.query(ReportRecord).one()
+        assert report.reporter_subject == "verified-user-subject"
+        assert report.target_place_id == PLACE_ID
+        assert report.target_contribution_id is None
+
+
+@pytest.mark.parametrize(
+    ("target_type", "target_place_id", "target_contribution_id"),
+    [
+        ("place", uuid4(), None),
+        ("contribution", None, uuid4()),
+    ],
+)
+def test_database_rejects_orphan_report_targets(
+    session_factory, target_type, target_place_id, target_contribution_id
+):
+    with session_factory() as session:
+        session.add(
+            ReportRecord(
+                target_type=target_type,
+                target_place_id=target_place_id,
+                target_contribution_id=target_contribution_id,
+                reporter_subject="verified-user-subject",
+                reason="An orphan target must not persist",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()

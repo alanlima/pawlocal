@@ -14,7 +14,8 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
-import { placeService } from '../services'
+import { isMockBackend, placeService } from '../services'
+import { getAccessToken, getAuthSession } from '../auth/authSession'
 import { useDiscovery } from '../features/discovery/useDiscovery'
 import { ContributionDialog } from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
@@ -58,6 +59,18 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false)
   const [view, setView] = useState<'explore' | 'favourites'>('explore')
   const dialogTriggerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    if (!isMockBackend) {
+      let current = true
+      void getAccessToken().then((token) => {
+        if (current) setSignedIn(Boolean(token))
+      })
+      return () => {
+        current = false
+      }
+    }
+  }, [])
 
   useEffect(() => {
     void placeService
@@ -137,6 +150,51 @@ export default function App() {
       setNotice('We couldn’t update your saved places. Please try again.')
     }
   }
+  const toggleSignIn = async () => {
+    if (isMockBackend) {
+      setSignedIn((current) => !current)
+      setNotice(signedIn ? 'You are viewing as a visitor.' : 'You are signed in as a demo member.')
+      return
+    }
+
+    const authSession = getAuthSession()
+    if (!authSession) {
+      setNotice('Authentication is not configured in this environment.')
+      return
+    }
+    try {
+      if (signedIn) {
+        if (!authSession.signOut) {
+          setNotice('Sign-out is managed by your identity provider.')
+          return
+        }
+        await authSession.signOut()
+        setSignedIn(false)
+        setFavourites([])
+        setNotice('You are viewing as a visitor.')
+        return
+      }
+      if (!authSession.signIn) {
+        setNotice('Sign-in is not configured in this environment.')
+        return
+      }
+      await authSession.signIn()
+      if (!(await getAccessToken())) {
+        setSignedIn(false)
+        setNotice('Sign-in did not provide an access token. Please try again.')
+        return
+      }
+      setSignedIn(true)
+      try {
+        setFavourites(await placeService.listFavourites())
+      } catch {
+        setFavourites([])
+        setNotice('You are signed in, but saved places could not be loaded.')
+      }
+    } catch {
+      setNotice('Your identity provider could not complete sign-in. Please try again.')
+    }
+  }
   const openPlace = async (place: Place) => {
     window.history.pushState({}, '', `/places/${place.id}`)
     setSelected(await placeService.getPlace(place.id))
@@ -162,6 +220,11 @@ export default function App() {
       return
     }
     if (!message.trim()) return
+    if (dialog === 'contribute' && kind === 'review' && !selected) {
+      setKind('location_suggestion')
+      setWriteError('Choose a place before submitting a review.')
+      return
+    }
     try {
       if (dialog === 'report')
         await placeService.submitReport({
@@ -230,18 +293,11 @@ export default function App() {
         </nav>
         <div className="header-actions">
           <span className="demo-label">
-            <span /> Demo mode
+            <span /> {isMockBackend ? 'Demo mode' : 'Community directory'}
           </span>
-          <button
-            className="signin-button"
-            onClick={() => {
-              setSignedIn(!signedIn)
-              setNotice(
-                signedIn ? 'You are viewing as a visitor.' : 'You are signed in as a demo member.',
-              )
-            }}
-          >
-            {signedIn ? 'Demo member' : 'Sign in'} <ChevronDown size={15} />
+          <button className="signin-button" onClick={() => void toggleSignIn()}>
+            {signedIn ? (isMockBackend ? 'Demo member' : 'Sign out') : 'Sign in'}{' '}
+            <ChevronDown size={15} />
           </button>
         </div>
         <button
@@ -464,9 +520,10 @@ export default function App() {
       )}
       <ContributionDialog
         dialog={dialog}
+        hasSelectedPlace={selected !== null}
         signedIn={signedIn}
-        setSignedIn={setSignedIn}
-        kind={kind}
+        isMockBackend={isMockBackend}
+        kind={!selected && kind === 'review' ? 'location_suggestion' : kind}
         setKind={setKind}
         rating={rating}
         setRating={setRating}
@@ -480,8 +537,8 @@ export default function App() {
         setReportTargetType={setReportTargetType}
         setReportTargetId={setReportTargetId}
         onClose={closeDialog}
+        onSignIn={() => void toggleSignIn()}
         onSubmit={() => void submit()}
-        onNotice={setNotice}
       />
       {notice && (
         <div className="toast" role="status">

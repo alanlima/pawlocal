@@ -11,8 +11,9 @@
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"e2e/**/*.ts\"",
-    "lint": "eslint src e2e vite.config.ts playwright.config.ts --ext .ts,.tsx",
-    "check": "npm run format:check && npm run lint"
+    "lint": "eslint src e2e vite.config.ts vite.e2e.config.ts playwright.config.ts playwright.backend.config.ts --ext .ts,.tsx",
+    "check": "npm run format:check && npm run lint",
+    "test:e2e:backend": "playwright test --config playwright.backend.config.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "1.9.1",

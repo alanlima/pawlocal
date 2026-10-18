@@ -1,5 +1,14 @@
-import type { ContributionInput, Place, PlaceQuery, ReportInput } from '../types/place'
-import type { PlaceService } from './PlaceService'
+import type {
+  Contribution,
+  ContributionInput,
+  Place,
+  PlaceQuery,
+  ReportInput,
+} from '../types/place'
+import type { PlaceService, PlaceServiceRequestContext } from './PlaceService'
+import { getAccessToken } from '../auth/authSession'
+
+type AccessTokenProvider = () => string | null | Promise<string | null>
 
 type PlaceWire = {
   id: string
@@ -14,6 +23,11 @@ type PlaceWire = {
   source_updated_at?: string | null
 }
 type ContributionWire = { id: string; created_at: string }
+type ReportableContributionWire = Pick<Contribution, 'id' | 'kind' | 'body'> & {
+  place_id: string | null
+  rating: number | null
+  created_at: string
+}
 const fromWire = (wire: PlaceWire): Place => ({
   id: wire.id,
   name: wire.name,
@@ -32,21 +46,35 @@ const fromWire = (wire: PlaceWire): Place => ({
 /** HTTP adapter seam. Map API wire names here; feature components stay adapter agnostic. */
 export class HttpPlaceService implements PlaceService {
   constructor(
-    private readonly baseUrl = '/api/v1',
-    private readonly token?: () => string | null,
-  ) {}
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    baseUrl = '/api/v1',
+    private readonly token: AccessTokenProvider = getAccessToken,
+  ) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '')
+  }
+  private readonly baseUrl: string
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    context?: PlaceServiceRequestContext,
+    requiresAuthentication = false,
+  ): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
-    const token = this.token?.()
+    const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
+    if (context?.traceparent) headers.set('traceparent', context.traceparent)
+    if (context?.tracestate) headers.set('tracestate', context.tracestate)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
     return response.status === 204 || response.status === 202
       ? (undefined as T)
       : (response.json() as Promise<T>)
   }
-  async listPlaces(query: PlaceQuery, signal?: AbortSignal): Promise<Place[]> {
+  async listPlaces(
+    query: PlaceQuery,
+    signal?: AbortSignal,
+    context?: PlaceServiceRequestContext,
+  ): Promise<Place[]> {
     const results: PlaceWire[] = []
     const pageSize = 100
     let pageNumber = 1
@@ -59,9 +87,13 @@ export class HttpPlaceService implements PlaceService {
       if (query.area) params.set('area', query.area)
       if (query.category) params.set('category', query.category)
       query.facilities?.forEach((facility) => params.append('facilities', facility))
-      const page = await this.request<{ items: PlaceWire[]; total: number }>(`/places?${params}`, {
-        signal,
-      })
+      const page = await this.request<{ items: PlaceWire[]; total: number }>(
+        `/places?${params}`,
+        {
+          signal,
+        },
+        context,
+      )
       total = page.total
       if (page.items.length === 0) break
       results.push(...page.items)
@@ -69,52 +101,89 @@ export class HttpPlaceService implements PlaceService {
     }
     return results.map(fromWire)
   }
-  getPlace(id: string) {
-    return this.request<PlaceWire>(`/places/${id}`)
+  getPlace(id: string, context?: PlaceServiceRequestContext) {
+    return this.request<PlaceWire>(`/places/${id}`, {}, context)
       .then(fromWire)
       .catch((error: unknown) => {
         if (error instanceof Error && error.message.includes('(404)')) return null
         throw error
       })
   }
-  async listFavourites() {
-    const places = await this.request<Array<{ id: string }>>('/me/favourites')
+  async listFavourites(context?: PlaceServiceRequestContext) {
+    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, context, true)
     return places.map((place) => place.id)
   }
-  async toggleFavourite(placeId: string) {
-    const favourites = await this.listFavourites()
+  async toggleFavourite(placeId: string, context?: PlaceServiceRequestContext) {
+    const favourites = await this.listFavourites(context)
     if (favourites.includes(placeId))
-      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' })
+      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, context, true)
     else
-      await this.request<void>('/me/favourites', {
-        method: 'PUT',
-        body: JSON.stringify({ place_id: placeId }),
-      })
+      await this.request<void>(
+        '/me/favourites',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ place_id: placeId }),
+        },
+        context,
+        true,
+      )
   }
-  async submitContribution(input: ContributionInput) {
-    const wire = await this.request<ContributionWire>('/contributions', {
-      method: 'POST',
-      body: JSON.stringify({
-        kind: input.kind,
-        place_id: input.placeId ?? null,
-        rating: input.rating ?? null,
-        body: input.body,
-      }),
-    })
+  async submitContribution(input: ContributionInput, context?: PlaceServiceRequestContext) {
+    const wire = await this.request<ContributionWire>(
+      '/contributions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: input.kind,
+          place_id: input.placeId ?? null,
+          ...(input.kind === 'review' ? { rating: input.rating } : {}),
+          body: input.body,
+        }),
+      },
+      context,
+      true,
+    )
     return { ...input, id: wire.id, createdAt: wire.created_at }
   }
-  /** OpenAPI currently has contribution submission but no listing operation; the HTTP adapter cannot offer report targets yet. */
-  async listReportableContributions() {
-    return []
+  async listReportableContributions(): Promise<Contribution[]> {
+    const contributions: Contribution[] = []
+    const pageSize = 100
+    let pageNumber = 1
+    let total = Number.POSITIVE_INFINITY
+    while (contributions.length < total) {
+      const page = await this.request<{
+        items: ReportableContributionWire[]
+        total: number
+      }>(`/contributions/reportable?page=${pageNumber}&page_size=${pageSize}`)
+      total = page.total
+      if (page.items.length === 0) break
+      contributions.push(
+        ...page.items.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          body: item.body,
+          placeId: item.place_id ?? undefined,
+          rating: item.rating ?? undefined,
+          createdAt: item.created_at,
+        })),
+      )
+      pageNumber += 1
+    }
+    return contributions
   }
-  async submitReport(input: ReportInput) {
-    await this.request<void>('/reports', {
-      method: 'POST',
-      body: JSON.stringify({
-        target_type: input.targetType,
-        target_id: input.targetId,
-        reason: input.reason,
-      }),
-    })
+  async submitReport(input: ReportInput, context?: PlaceServiceRequestContext) {
+    await this.request<void>(
+      '/reports',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          target_type: input.targetType,
+          target_id: input.targetId,
+          reason: input.reason,
+        }),
+      },
+      context,
+      true,
+    )
   }
 }

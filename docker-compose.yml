@@ -9,18 +9,75 @@ services:
     environment:
       VITE_TELEMETRY_ENABLED: ${PAWLOCAL_TELEMETRY_ENABLED:-true}
       VITE_OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4318
-      VITE_DEMO_FAULTS: ${PAWLOCAL_DEMO_FAULTS:-true}
+      VITE_DEMO_FAULTS: "false"
+      VITE_USE_MOCK_BACKEND: "false"
+      VITE_API_BASE_URL: /api/v1
+      VITE_API_PROXY_TARGET: http://backend:8000
     ports:
       - "127.0.0.1:${PAWLOCAL_FRONTEND_PORT:-5173}:5173"
     depends_on:
       otel-collector:
         condition: service_started
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 15s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      PAWLOCAL_DATABASE_HOST: postgres
+      PAWLOCAL_DATABASE_PORT: 5432
+      PAWLOCAL_DATABASE_NAME: pawlocal
+      PAWLOCAL_DATABASE_USER: pawlocal
+      PAWLOCAL_DATABASE_PASSWORD: ${PAWLOCAL_POSTGRES_PASSWORD:?Set PAWLOCAL_POSTGRES_PASSWORD in your local .env}
+      PAWLOCAL_TELEMETRY_ENABLED: ${PAWLOCAL_TELEMETRY_ENABLED:-true}
+      PAWLOCAL_OTLP_ENDPOINT: http://otel-collector:4318
+      PAWLOCAL_DEMO_FAULTS_ENABLED: ${PAWLOCAL_DEMO_FAULTS_ENABLED:-true}
+    command:
+      - sh
+      - -c
+      - alembic -c alembic.ini upgrade head && uvicorn pawlocal.main:app --host 0.0.0.0 --port 8000 --no-access-log
+    ports:
+      - "127.0.0.1:${PAWLOCAL_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: pawlocal
+      POSTGRES_PASSWORD: ${PAWLOCAL_POSTGRES_PASSWORD:?Set PAWLOCAL_POSTGRES_PASSWORD in your local .env}
+      POSTGRES_DB: pawlocal
+    ports:
+      - "127.0.0.1:${PAWLOCAL_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
 
   otel-collector:
     build:
@@ -127,6 +184,7 @@ services:
       retries: 10
 
 volumes:
+  postgres-data:
   prometheus-data:
   loki-data:
   tempo-data:
