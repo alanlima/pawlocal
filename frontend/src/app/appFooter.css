@@ -1,0 +1,55 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+footer.app-footer {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  width: min(1200px, 87.6vw);
+  margin: auto auto 0;
+  padding: 24px 0 28px;
+  color: #61725f;
+  font-size: 9px;
+}
+
+.app-footer .footer-tagline,
+.app-footer .footer-location {
+  color: #7b827b;
+}
+
+.app-footer .build-identity {
+  color: #61725f;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+@media (max-width: 650px) {
+  footer.app-footer {
+    grid-template-columns: auto 1fr;
+    gap: 8px 10px;
+    padding: 20px 0 24px;
+    font-size: 8px;
+  }
+
+  .app-footer .footer-tagline {
+    text-align: right;
+  }
+
+  .app-footer .footer-location,
+  .app-footer .build-identity {
+    grid-column: 1 / -1;
+    text-align: right;
+  }
+
+  .app-footer .build-identity {
+    font-size: 8px;
+    white-space: normal;
+  }
+
+  .app-footer .footer-brand {
+    font-size: 10px;
+  }
+}
