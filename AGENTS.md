@@ -145,6 +145,9 @@ Implementation must happen in the following order.
 ### Stage 4 — Production readiness
 - Validate complete Docker Compose startup.
 - Implement CI/CD.
+- Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Production must not deploy automatically on merges to `main`.
+- Keep the existing mock-backed static frontend release distinct from the proposed full-stack release model. Full-stack CI/CD changes remain gated on Issue #41's hosting/compatibility decision and explicit cost/provisioning approval; do not point a workflow at unconfigured targets or credentials.
+- Use `pawlocal-dev.<domain>` for the development site and `pawlocal.<domain>` for production. No domain, DNS, certificate, target, or secret is authorized by this naming convention alone.
 - Evaluate AWS hosting alternatives and running costs.
 - Obtain human approval before provisioning billable resources.
 - Deploy development and production environments.
