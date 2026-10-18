@@ -78,6 +78,23 @@ test('always shows build identity in the footer on desktop and mobile routes', a
   )
 })
 
+test('uses consistent artwork icons and keeps mobile hero decorations out of the footer note', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+
+  const allPlaces = page.getByRole('button', { name: /All places/ })
+  await expect(allPlaces.locator('.category-icon svg')).toBeVisible()
+  await expect(page.locator('.card-art-button .art-graphic svg').first()).toBeVisible()
+  await expect(page.locator('.hero-stamp')).toBeHidden()
+  await expect(page.locator('.hero-doodle')).toBeHidden()
+  await expect(page.locator('.hero-foot-note')).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+})
+
 test('demo member can submit a review and a location suggestion', async ({ page }) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Add a place' }).click()

@@ -1,5 +1,6 @@
 import { ArrowUpRight, Heart, MapPin, Star } from 'lucide-react'
 import type { Place, PlaceCategory } from '../../types/place'
+import { PlaceArtwork } from './PlaceArtwork'
 
 const categoryName: Record<PlaceCategory, string> = {
   dog_park: 'Dog park',
@@ -8,34 +9,17 @@ const categoryName: Record<PlaceCategory, string> = {
   hiking_area: 'Hiking area',
   cafe: 'Dog-friendly café',
 }
-const artClass: Record<string, string> = {
-  sea: 'art-sea',
-  green: 'art-green',
-  sand: 'art-sand',
-  sky: 'art-sky',
-}
-
 type Props = { place: Place; index: number; saved: boolean; onOpen: () => void; onSave: () => void }
 
 export function PlaceCard({ place, index, saved, onOpen, onSave }: Props) {
   return (
     <article className="place-card" style={{ animationDelay: `${index * 55}ms` }}>
-      <button
-        className={`card-art ${artClass[place.accent]}`}
-        onClick={onOpen}
-        aria-label={`View ${place.name}`}
-      >
-        <span className="art-label">{categoryName[place.category]}</span>
-        <span className="art-graphic" aria-hidden="true">
-          {place.accent === 'sea'
-            ? '⌁'
-            : place.accent === 'green'
-              ? '✳'
-              : place.accent === 'sand'
-                ? '◒'
-                : '〰'}
-        </span>
-        <span className="art-coordinates">SEQ · AU</span>
+      <button className="card-art-button" onClick={onOpen} aria-label={`View ${place.name}`}>
+        <PlaceArtwork
+          place={place}
+          categoryLabel={categoryName[place.category]}
+          coordinates="SEQ · AU"
+        />
       </button>
       <button
         className={saved ? 'save-button is-saved' : 'save-button'}

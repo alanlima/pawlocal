@@ -1,5 +1,6 @@
 import { ArrowLeft, ArrowUpRight, Heart, MapPin, Plus, Share2 } from 'lucide-react'
 import type { ContributionKind, Place, PlaceCategory } from '../../types/place'
+import { PlaceArtwork } from './PlaceArtwork'
 
 const categoryName: Record<PlaceCategory, string> = {
   dog_park: 'Dog park',
@@ -8,13 +9,6 @@ const categoryName: Record<PlaceCategory, string> = {
   hiking_area: 'Hiking area',
   cafe: 'Dog-friendly café',
 }
-const artClass: Record<string, string> = {
-  sea: 'art-sea',
-  green: 'art-green',
-  sand: 'art-sand',
-  sky: 'art-sky',
-}
-
 type Props = {
   place: Place
   saved: boolean
@@ -44,13 +38,12 @@ export function PlaceDetail({
       <button className="back-link" onClick={onBack}>
         <ArrowLeft size={17} /> All places
       </button>
-      <div className={`detail-art ${artClass[place.accent]}`}>
-        <span className="art-label">{categoryName[place.category]}</span>
-        <span className="detail-art-mark" aria-hidden="true">
-          {place.accent === 'sea' ? '⌁' : '✳'}
-        </span>
-        <span className="art-coordinates">PAWLOCAL FIELD NOTES · {place.area.toUpperCase()}</span>
-      </div>
+      <PlaceArtwork
+        place={place}
+        categoryLabel={categoryName[place.category]}
+        coordinates={`PAWLOCAL FIELD NOTES · ${place.area.toUpperCase()}`}
+        detail
+      />
       <div className="detail-layout">
         <article className="detail-main">
           <div className="place-area">
