@@ -135,6 +135,37 @@ describe('HttpPlaceService', () => {
     )
   })
 
+  it('attaches a fresh token to favourites and contribution/report writes', async () => {
+    const fetchMock = vi
+      .fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>()
+      .mockImplementation((input, _init) => {
+        void _init
+        const path = String(input)
+        return Promise.resolve(
+          path.endsWith('/me/favourites')
+            ? new Response(JSON.stringify([]), { status: 200 })
+            : path.endsWith('/contributions')
+              ? new Response(JSON.stringify({ id: 'contribution-1', created_at: 'now' }), {
+                  status: 201,
+                })
+              : new Response(null, { status: 202 }),
+        )
+      })
+    const tokenProvider = vi.fn().mockResolvedValue('protected-token')
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new HttpPlaceService('/api/v1', tokenProvider)
+
+    await service.listFavourites()
+    await service.submitContribution({ kind: 'tip', body: 'Bring water' })
+    await service.submitReport({ targetType: 'place', targetId: 'place-1', reason: 'Incorrect' })
+
+    expect(tokenProvider).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer protected-token')
+    }
+  })
+
   it('requests a fresh synchronous host token for each protected request', async () => {
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input
@@ -171,6 +202,59 @@ describe('HttpPlaceService', () => {
     await new HttpPlaceService().listFavourites()
 
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).has('Authorization')).toBe(false)
+  })
+
+  it('does not await a failing token refresh for public reads', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      void _init
+      const url = String(input)
+      if (url.includes('/places?')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 })
+      }
+      if (url.includes('/contributions/reportable')) {
+        return new Response(JSON.stringify({ items: [], total: 0 }), { status: 200 })
+      }
+      return new Response(
+        JSON.stringify({
+          id: 'place-1',
+          name: 'Test Place',
+          category: 'walk',
+          area: 'Brisbane City',
+        }),
+        { status: 200 },
+      )
+    })
+    const tokenProvider = vi.fn().mockRejectedValue(new Error('refresh unavailable'))
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new HttpPlaceService('/api/v1', tokenProvider)
+
+    await expect(service.listPlaces({})).resolves.toEqual([])
+    await expect(service.getPlace('place-1')).resolves.toMatchObject({ id: 'place-1' })
+    await expect(service.listReportableContributions()).resolves.toEqual([])
+
+    expect(tokenProvider).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(
+      fetchMock.mock.calls.every(([, init]) => !new Headers(init?.headers).has('Authorization')),
+    ).toBe(true)
+  })
+
+  it('fails closed when token refresh fails for protected writes', async () => {
+    const fetchMock = vi.fn()
+    const tokenProvider = vi.fn().mockRejectedValue(new Error('refresh unavailable'))
+    vi.stubGlobal('fetch', fetchMock)
+    const service = new HttpPlaceService('/api/v1', tokenProvider)
+
+    await expect(service.listFavourites()).rejects.toThrow('refresh unavailable')
+    await expect(service.submitContribution({ kind: 'tip', body: 'Bring water' })).rejects.toThrow(
+      'refresh unavailable',
+    )
+    await expect(
+      service.submitReport({ targetType: 'place', targetId: 'place-1', reason: 'Incorrect' }),
+    ).rejects.toThrow('refresh unavailable')
+
+    expect(tokenProvider).toHaveBeenCalledTimes(3)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('loads reportable contributions across pages and maps only public fields', async () => {

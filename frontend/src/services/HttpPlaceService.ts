@@ -52,10 +52,14 @@ export class HttpPlaceService implements PlaceService {
     this.baseUrl = baseUrl.replace(/\/+$/, '')
   }
   private readonly baseUrl: string
-  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  private async request<T>(
+    path: string,
+    init: RequestInit = {},
+    requiresAuthentication = false,
+  ): Promise<T> {
     const headers = new Headers(init.headers)
     headers.set('Content-Type', 'application/json')
-    const token = await this.token()
+    const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
@@ -95,29 +99,37 @@ export class HttpPlaceService implements PlaceService {
       })
   }
   async listFavourites() {
-    const places = await this.request<Array<{ id: string }>>('/me/favourites')
+    const places = await this.request<Array<{ id: string }>>('/me/favourites', {}, true)
     return places.map((place) => place.id)
   }
   async toggleFavourite(placeId: string) {
     const favourites = await this.listFavourites()
     if (favourites.includes(placeId))
-      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' })
+      await this.request<void>(`/me/favourites/${placeId}`, { method: 'DELETE' }, true)
     else
-      await this.request<void>('/me/favourites', {
-        method: 'PUT',
-        body: JSON.stringify({ place_id: placeId }),
-      })
+      await this.request<void>(
+        '/me/favourites',
+        {
+          method: 'PUT',
+          body: JSON.stringify({ place_id: placeId }),
+        },
+        true,
+      )
   }
   async submitContribution(input: ContributionInput) {
-    const wire = await this.request<ContributionWire>('/contributions', {
-      method: 'POST',
-      body: JSON.stringify({
-        kind: input.kind,
-        place_id: input.placeId ?? null,
-        ...(input.kind === 'review' ? { rating: input.rating } : {}),
-        body: input.body,
-      }),
-    })
+    const wire = await this.request<ContributionWire>(
+      '/contributions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: input.kind,
+          place_id: input.placeId ?? null,
+          ...(input.kind === 'review' ? { rating: input.rating } : {}),
+          body: input.body,
+        }),
+      },
+      true,
+    )
     return { ...input, id: wire.id, createdAt: wire.created_at }
   }
   async listReportableContributions(): Promise<Contribution[]> {
@@ -147,13 +159,17 @@ export class HttpPlaceService implements PlaceService {
     return contributions
   }
   async submitReport(input: ReportInput) {
-    await this.request<void>('/reports', {
-      method: 'POST',
-      body: JSON.stringify({
-        target_type: input.targetType,
-        target_id: input.targetId,
-        reason: input.reason,
-      }),
-    })
+    await this.request<void>(
+      '/reports',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          target_type: input.targetType,
+          target_id: input.targetId,
+          reason: input.reason,
+        }),
+      },
+      true,
+    )
   }
 }

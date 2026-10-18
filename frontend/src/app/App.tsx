@@ -220,6 +220,11 @@ export default function App() {
       return
     }
     if (!message.trim()) return
+    if (dialog === 'contribute' && kind === 'review' && !selected) {
+      setKind('location_suggestion')
+      setWriteError('Choose a place before submitting a review.')
+      return
+    }
     try {
       if (dialog === 'report')
         await placeService.submitReport({
@@ -515,9 +520,10 @@ export default function App() {
       )}
       <ContributionDialog
         dialog={dialog}
+        hasSelectedPlace={selected !== null}
         signedIn={signedIn}
         isMockBackend={isMockBackend}
-        kind={kind}
+        kind={!selected && kind === 'review' ? 'location_suggestion' : kind}
         setKind={setKind}
         rating={rating}
         setRating={setRating}

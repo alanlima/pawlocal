@@ -63,6 +63,57 @@ describe('PawLocal journeys', () => {
     )
   })
 
+  it('offers only place suggestions from the global Add a place dialog', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText('New Farm Park')
+    await user.click(screen.getByRole('button', { name: 'Add a place' }))
+
+    const dialog = within(screen.getByRole('dialog'))
+    const kind = dialog.getByLabelText('What would you like to share?')
+    expect(within(kind).queryByRole('option', { name: 'A review' })).not.toBeInTheDocument()
+    expect(within(kind).getByRole('option', { name: 'Suggest a place' })).toBeInTheDocument()
+  })
+
+  it('continues to offer reviews from a selected place detail', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: 'Write a review' }))
+
+    const dialog = within(screen.getByRole('dialog'))
+    expect(
+      within(dialog.getByLabelText('What would you like to share?')).getByRole('option', {
+        name: 'A review',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('does not submit a stale review after its selected place disappears', async () => {
+    const user = userEvent.setup()
+    const submitContribution = vi.spyOn(placeService, 'submitContribution')
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'View New Farm Park' }))
+    await user.click(await screen.findByRole('button', { name: 'Write a review' }))
+    const dialog = within(screen.getByRole('dialog'))
+    await user.click(dialog.getByRole('button', { name: 'Continue as demo member' }))
+
+    window.history.pushState({}, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() =>
+      expect(dialog.getByLabelText('What would you like to share?')).toHaveValue(
+        'location_suggestion',
+      ),
+    )
+    await user.type(dialog.getByLabelText('Your note'), 'A review without its place')
+    await user.click(dialog.getByRole('button', { name: /Share with PawLocal/ }))
+
+    expect(await dialog.findByRole('alert')).toHaveTextContent(
+      'Choose a place before submitting a review.',
+    )
+    expect(submitContribution).not.toHaveBeenCalled()
+  })
+
   it('shows an API error state and recovers on retry', async () => {
     const user = userEvent.setup()
     vi.spyOn(placeService, 'listPlaces').mockRejectedValueOnce(new Error('offline'))
