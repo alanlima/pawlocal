@@ -2,31 +2,9 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**"
-      - "frontend/**"
-      - "backend/**"
-      - "observability/**"
-      - "infra/terraform/**"
-      - "docker-compose.yml"
-      - ".env.example"
-      - "openapi.yaml"
-      - "README.md"
-      - "docs/testing.md"
   push:
     branches:
       - main
-    paths:
-      - ".github/workflows/**"
-      - "frontend/**"
-      - "backend/**"
-      - "observability/**"
-      - "infra/terraform/**"
-      - "docker-compose.yml"
-      - ".env.example"
-      - "openapi.yaml"
-      - "README.md"
-      - "docs/testing.md"
   workflow_dispatch:
 
 permissions:
@@ -37,8 +15,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect affected checks
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.paths.outputs.frontend }}
+      backend: ${{ steps.paths.outputs.backend }}
+      compose: ${{ steps.paths.outputs.compose }}
+      terraform: ${{ steps.paths.outputs.terraform }}
+      workflows: ${{ steps.paths.outputs.workflows }}
+    steps:
+      - name: Check out complete history for path comparison
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            python scripts/ci/classify_changed_paths.py --all >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE"
+            head="$PR_HEAD"
+          else
+            base="$PUSH_BEFORE"
+            head="$CURRENT_SHA"
+          fi
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            python scripts/ci/classify_changed_paths.py --all >> "$GITHUB_OUTPUT"
+          else
+            git diff --no-renames --name-only -z "$base" "$head" \
+              | python scripts/ci/classify_changed_paths.py --nul >> "$GITHUB_OUTPUT"
+          fi
+
   frontend:
     name: Frontend checks
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -76,6 +99,8 @@ jobs:
 
   backend:
     name: Backend checks
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -122,6 +147,8 @@ jobs:
 
   compose:
     name: Compose validation and readiness smoke
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -153,6 +180,8 @@ jobs:
 
   terraform:
     name: Terraform format and validation
+    needs: changes
+    if: needs.changes.outputs.terraform == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -175,3 +204,56 @@ jobs:
 
       - name: Validate Terraform configuration
         run: terraform validate -no-color
+
+  workflow-validation:
+    name: Workflow syntax, security, and path tests
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install pinned actionlint release
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/actionlint.tar.gz"
+          curl --fail --location --silent --show-error \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum --check
+          tar -xzf "$archive" -C "${RUNNER_TEMP}" actionlint
+          echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+
+      - name: Lint workflow syntax and security
+        run: actionlint -ignore 'unexpected key "queue"'
+
+      - name: Verify path ownership and workflow trigger cases
+        run: python -m unittest discover -s tests/ci -v
+
+  required-status:
+    name: Required CI status
+    if: always()
+    needs:
+      - changes
+      - frontend
+      - backend
+      - compose
+      - terraform
+      - workflow-validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Accept successful checks and intentionally skipped components
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          COMPOSE_RESULT: ${{ needs.compose.result }}
+          TERRAFORM_RESULT: ${{ needs.terraform.result }}
+          WORKFLOW_RESULT: ${{ needs.workflow-validation.result }}
+        run: |
+          set -euo pipefail
+          python scripts/ci/aggregate_results.py
