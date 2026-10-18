@@ -18,7 +18,10 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.addInitScript((token) => {
     window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
-    window.pawLocalAuth = { getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null }
+    window.pawLocalAuth = {
+      getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
+      signIn: async () => undefined,
+    }
   }, accessToken)
 
   const authenticatedRead = page.waitForRequest(
@@ -36,11 +39,10 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   await page.getByRole('button', { name: 'Share this place' }).click()
   await expect(page.getByRole('status')).toContainText('Link copied')
 
-  // This UI control only opens the mock-stage contribution form. The request
-  // itself is authenticated by the real, short-lived token above and verified
-  // by the backend's normal issuer/JWKS/exp/client_id checks.
+  // The E2E host sign-in callback completes the real HTTP-mode auth flow; the
+  // API request is then verified by issuer/JWKS/exp/client_id checks.
   await page.getByRole('button', { name: /Suggest an update/ }).click()
-  await page.getByRole('button', { name: 'Continue as demo member' }).click()
+  await page.getByRole('button', { name: 'Sign in' }).click()
   await page.getByLabel('What would you like to share?').selectOption('tip')
   const contributionText = `Browser API persistence ${Date.now()}`
   await page.getByLabel('Your note').fill(contributionText)
@@ -79,6 +81,10 @@ test('verified local JWT drives browser writes persisted in PostgreSQL', async (
   const freshContext = await browser.newContext()
   await freshContext.addInitScript((token) => {
     window.__PAWLOCAL_E2E_ACCESS_TOKEN__ = token
+    window.pawLocalAuth = {
+      getAccessToken: () => window.__PAWLOCAL_E2E_ACCESS_TOKEN__ ?? null,
+      signIn: async () => undefined,
+    }
   }, accessToken)
   const freshPage = await freshContext.newPage()
   await freshPage.goto('/')
