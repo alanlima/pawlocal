@@ -1,7 +1,7 @@
 # Stage 4 hosting and cost proposal
 
 **Status:** Human direction recorded 2026-10-18; technical validation and cost approval remain open. No resources are provisioned or approved for spending.
-**Pricing checked:** 2026-10-18. Prices are USD before tax; Sydney/Australia regions are used where published.
+**Pricing checked:** 2026-10-18 against current official AWS pricing and documentation. Prices are USD before tax; Sydney/Australia region behavior is stated where it differs.
 
 ## Direction under review
 
@@ -43,6 +43,30 @@ The $19.36 figure assumes 2 GB total average DSQL storage, 100,000 or fewer comb
 
 The previous $24 development / $44 production Lightsail sizes and approximately $71 combined estimate assumed a local PostgreSQL server and the full self-hosted observability stack. They are withdrawn for this revised architecture.
 
+## PostgreSQL fallback comparison: Lightsail managed databases
+
+Aurora DSQL remains the human-preferred database candidate for investigation. If the documented DSQL compatibility, credential, recovery, or cost blockers prove material, this is a priced Lightsail managed PostgreSQL fallback scenario for comparison, not a decision to switch. It uses the same 1 GB development and 2 GB production Linux application VM sizes as the DSQL estimate, plus separate encrypted 2 GB managed PostgreSQL databases in Sydney.
+
+| Environment | Linux VM (public IPv4) | 2 GB managed PostgreSQL | Environment subtotal |
+| --- | ---: | ---: | ---: |
+| Development, standard DB | $7/month (1 GB) | $30/month (standard) | **$37/month** |
+| Production, standard DB | $12/month (2 GB) | $30/month (standard) | **$42/month** |
+| Production, high-availability DB | $12/month (2 GB) | $60/month (HA) | **$72/month** |
+| **Both environments, standard DBs** | **$19/month** | **$60/month** | **$79/month** |
+| **Both environments, production HA** | **$19/month** | **$90/month** ($30 dev + $60 prod HA) | **$109/month** |
+
+The **$79 and $109 values are priced plan subtotals only**. They are not directly comparable with the DSQL scenario's account-shared free DPU/storage allowance, different workload assumptions, or unpriced items, and they are not evidence that PostgreSQL is cheaper or a preferred direction. Each 2 GB database plan includes 80 GB SSD storage; this is substantially more provisioned storage than the 1 GB logical data/environment assumption used in the cost model, not evidence that the application needs 80 GB. The HA database plan costs twice the standard plan and adds a standby in another Availability Zone; it does not provide application VM or API high availability. Instance plans include local SSD and transfer allowance. The public IPv4 $7 and $12 plans list 2 TB and 3 TB transfer respectively before regional adjustment; Sydney provides half the listed instance transfer allowance (1 TB and 1.5 TB). After the instance allowance, Sydney outbound overage is $0.17/GB. Managed database transfer allowance is 100 GB and is the same across AWS Regions; only database transfer out counts toward its allowance, and excess outbound transfer to the internet is chargeable. Private-IP transfer between Lightsail resources in the same account and region is free, including instance-to-managed-database traffic.
+
+Lightsail managed PostgreSQL automatically retains point-in-time recovery data for seven days; restoring creates a **new** database. Deleting the source database deletes its automatic backup records and removes point-in-time recovery. Manual snapshots remain until deleted and currently cost $0.05/GB-month, so retention beyond seven days and recovery after deletion need an explicit snapshot policy.
+
+Use private database networking: AWS documents that a private Lightsail database is accessible only to Lightsail resources in the same account and region via the internal network. Public mode would allow anyone with its endpoint and credentials to connect and is not assumed here. A GitHub-hosted migration runner is outside that Lightsail private network and cannot directly reach the database; the migration-runner path remains unresolved and must be designed before deployment (for example, an appropriately secured runner executing within the Lightsail account/region). PostgreSQL connections must use TLS with certificate verification (`sslmode=verify-full`) and the appropriate AWS CA bundle; the application must manage the database password as a secret.
+
+The local Compose and CI database currently use PostgreSQL 17.6, while AWS's current Lightsail documentation lists PostgreSQL 12–16, and PostgreSQL 12 is no longer available for new Lightsail databases. Do not treat Lightsail managed PostgreSQL as a drop-in for the current local database. Select an available major version only after review and test the application, generated SQL, clean/upgrade migrations, constraints, and runtime behavior against that exact version. Confirm selected plans and PostgreSQL version availability in `ap-southeast-2` during a future approved design review.
+
+This comparison excludes taxes, currency conversion to AUD, manual snapshot storage, monitoring/collector and Grafana costs, load balancers, DNS/domain/certificate costs, GitHub Actions and image registry, application backups/state recovery, over-quota data transfer, and support. VM and 80 GB database storage fit, the assumed 10 GB/environment outbound workload, and actual DB usage are unmeasured; there is no workload benchmark, high-availability application host, finalized migration runner, complete backup/restore design, or final RPO/RTO. Reprice all items and obtain an explicit cost envelope before any resource approval. No Lightsail database, instance, or other resource was created for this comparison.
+
+AWS sources checked 2026-10-18: [Lightsail pricing](https://aws.amazon.com/lightsail/pricing/) (Linux public-IPv4 bundles; encrypted 2 GB Standard $30 / HA $60 plans and allowances), [Lightsail data-transfer allowance FAQ](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-data-transfer-allowance.html) (Sydney half instance quotas, overage, private-IP transfer, and database transfer rules), [Lightsail database FAQ](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-faq-databases.html) (private mode, same-account/region access, seven-day point-in-time recovery, deletion and restore behavior, manual snapshots, and HA), [supported Lightsail database engines and versions](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-choosing-a-database.html), [PostgreSQL database SSL guidance](https://docs.aws.amazon.com/lightsail/latest/userguide/amazon-lightsail-connecting-to-postgres-database-using-ssl.html), and [Lightsail regions and Availability Zones](https://docs.aws.amazon.com/lightsail/latest/userguide/understanding-regions-and-availability-zones-in-lightsail.html).
+
 ## Alternatives retained for comparison
 
 | Option | Development | Production | Both environments | Recovery and operations |
@@ -63,7 +87,7 @@ Fly's summary is a lower-bound component estimate, not a completed full-app esti
 
 ## Open acceptance evidence
 
-Issue #41's requested provider fit, full low-traffic estimate and DSQL sample-query cost are not complete. The table above records the tooling and telemetry questions still requiring prototypes; the AWS amount is only a priced floor. Close those gaps with an availability-equivalent cost comparison, implementation/rollback estimates, and measured DSQL usage after a separately approved disposable test environment is available. Keep DRAFT-002 and Issue #41 open until the evidence and the separate cost/provisioning approval are recorded.
+Issue #41 is closed, but its requested provider-fit, full low-traffic estimate and DSQL sample-query cost evidence remain incomplete. The table above records tooling and telemetry questions still requiring prototypes; the AWS amount is only a priced floor. Close those gaps with an availability-equivalent cost comparison, implementation/rollback estimates, and measured DSQL usage after a separately approved disposable test environment is available. The Lightsail managed PostgreSQL scenario below is only a priced fallback comparison; it does not change the human-preferred DSQL candidate or DRAFT-002 direction. Compare PostgreSQL alternatives fully only if DSQL blockers are material. Keep DRAFT-002 open until the evidence and separate cost/provisioning approval are recorded.
 
 ## DSQL compatibility and integration gate
 
