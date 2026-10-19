@@ -6,6 +6,9 @@ data "aws_route53_zone" "root" {
 data "aws_caller_identity" "current" {}
 locals {
   environments = var.environment_sizes
+  dsql_runtime_environments = {
+    development = var.environment_sizes.development
+  }
   frontend_environments = {
     development = var.environment_sizes.development
   }
@@ -28,6 +31,14 @@ locals {
   # immutable public GHCR digest, and the environment map contains no secrets.
   backend_images = {
     for environment in keys(local.environments) : environment => lookup(var.backend_image_digests, environment, null)
+  }
+
+  dsql_app_principal_arns = {
+    for environment in keys(local.environments) : environment => (
+      environment == "development"
+      ? aws_iam_role.dsql_runtime[environment].arn
+      : aws_lightsail_container_service.api[environment].principal_arn
+    )
   }
 }
 
@@ -122,6 +133,43 @@ resource "aws_lightsail_container_service" "api" {
   depends_on = [aws_route53_record.api_certificate_validation]
 }
 
+# Lightsail's runtime principal belongs to AWS's Lightsail account. Aurora
+# DSQL does not support cross-account cluster-policy grants, so the service
+# assumes a narrowly scoped PawLocal-account role for development DB access.
+resource "aws_iam_role" "dsql_runtime" {
+  for_each = local.dsql_runtime_environments
+
+  name = "pawlocal-${each.key}-dsql-runtime"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "AllowLightsailContainerService"
+      Effect = "Allow"
+      Principal = {
+        AWS = aws_lightsail_container_service.api[each.key].principal_arn
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+  description = "Refreshable Aurora DSQL connection role for PawLocal ${each.key} Lightsail API."
+}
+
+resource "aws_iam_role_policy" "dsql_runtime" {
+  for_each = local.dsql_runtime_environments
+
+  name = "pawlocal-${each.key}-dsql-connect"
+  role = aws_iam_role.dsql_runtime[each.key].id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ConnectToPawLocalDSQL"
+      Effect   = "Allow"
+      Action   = "dsql:DbConnect"
+      Resource = aws_dsql_cluster.app[each.key].arn
+    }]
+  })
+}
+
 resource "aws_lightsail_container_service_deployment_version" "api" {
   for_each = {
     for environment, config in local.environments : environment => config
@@ -134,7 +182,7 @@ resource "aws_lightsail_container_service_deployment_version" "api" {
   container {
     container_name = "pawlocal-api"
     image          = local.backend_images[each.key]
-    environment = {
+    environment = merge({
       AWS_REGION                     = var.aws_region
       PAWLOCAL_RELEASE_ENVIRONMENT   = each.key
       PAWLOCAL_RELEASE_IMAGE_DIGEST  = split("@", local.backend_images[each.key])[1]
@@ -145,7 +193,9 @@ resource "aws_lightsail_container_service_deployment_version" "api" {
       PAWLOCAL_CORS_ORIGINS          = "[\"https://${each.value.hostname}.${trimsuffix(var.root_domain, ".")}\"]"
       PAWLOCAL_TELEMETRY_ENABLED     = "false"
       OTEL_SDK_DISABLED              = "true"
-    }
+      }, each.key == "development" ? {
+      PAWLOCAL_DSQL_ASSUME_ROLE_ARN = aws_iam_role.dsql_runtime[each.key].arn
+    } : {})
     ports = {
       "8000" = "HTTP"
     }
@@ -182,7 +232,7 @@ resource "aws_dsql_cluster_policy" "api_connect" {
       {
         Sid       = "AllowLightsailServiceIdentity"
         Effect    = "Allow"
-        Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }
+        Principal = { AWS = local.dsql_app_principal_arns[each.key] }
         Action    = "dsql:DbConnect"
         Resource  = aws_dsql_cluster.app[each.key].arn
         Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
@@ -584,7 +634,7 @@ resource "terraform_data" "app_dsql_role" {
 
   triggers_replace = [
     aws_dsql_cluster.app[each.key].arn,
-    aws_lightsail_container_service.api[each.key].principal_arn,
+    local.dsql_app_principal_arns[each.key],
     each.value.database_role,
     # Keep the existing state fingerprint stable across Windows CRLF and Linux
     # LF checkouts. The role bootstrap is text; canonicalize it to CRLF before
@@ -594,18 +644,19 @@ resource "terraform_data" "app_dsql_role" {
   ]
 
   lifecycle {
-    # Keep the existing list position for state compatibility, but runtime
-    # database-engine changes do not alter the SQL role bootstrap operation.
-    ignore_changes = [triggers_replace[4]]
+    # The principal ARN changes only in development for this migration. Avoid
+    # re-running the shared SQL bootstrap in production; future deliberate
+    # bootstrap changes should update the role mapping trigger explicitly.
+    ignore_changes = [triggers_replace[3], triggers_replace[4]]
   }
 
   provisioner "local-exec" {
     working_dir = "${path.module}/../../../backend"
     interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]
-    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-principal-arn '${aws_lightsail_container_service.api[each.key].principal_arn}' --legacy-iam-user-arn 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/pawlocal/pawlocal-${each.key}-dsql-app'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-principal-arn '${local.dsql_app_principal_arns[each.key]}' --legacy-iam-user-arn 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/pawlocal/pawlocal-${each.key}-dsql-app' --legacy-iam-principal-arn '${aws_lightsail_container_service.api[each.key].principal_arn}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
   }
 
-  depends_on = [aws_dsql_cluster_policy.api_connect]
+  depends_on = [aws_dsql_cluster_policy.api_connect, aws_iam_role_policy.dsql_runtime]
 }
 
 resource "aws_s3_bucket" "cloudtrail" {

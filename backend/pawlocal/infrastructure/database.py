@@ -85,7 +85,7 @@ def create_database_engine(
 
 
 def _create_dsql_engine(url: URL) -> Engine:
-    """Build a DSQL engine whose connector uses the AWS SDK credential chain."""
+    """Build a DSQL engine using the configured runtime credential chain."""
     try:
         import certifi
         from aurora_dsql_sqlalchemy import create_dsql_engine
@@ -95,6 +95,16 @@ def _create_dsql_engine(url: URL) -> Engine:
             "dependencies before selecting this database."
         ) from exc
 
+    connect_args = {}
+    if settings.dsql_assume_role_arn:
+        from pawlocal.infrastructure.aws_credentials import (
+            create_assume_role_credentials_provider,
+        )
+
+        connect_args["custom_credentials_provider"] = (
+            create_assume_role_credentials_provider(settings.dsql_assume_role_arn)
+        )
+
     engine = create_dsql_engine(
         host=url.host,
         user=url.username,
@@ -103,6 +113,7 @@ def _create_dsql_engine(url: URL) -> Engine:
         sslmode="verify-full",
         sslrootcert=certifi.where(),
         application_name=url.query.get("application_name", "pawlocal"),
+        connect_args=connect_args,
         pool_pre_ping=True,
     )
     event.listen(engine, "begin", _set_dsql_search_path)

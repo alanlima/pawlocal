@@ -43,9 +43,7 @@ def test_dsql_engine_uses_the_runtime_factory_by_default(monkeypatch):
         calls.append(url)
         return engine
 
-    monkeypatch.setattr(
-        "pawlocal.infrastructure.database._create_dsql_engine", factory
-    )
+    monkeypatch.setattr("pawlocal.infrastructure.database._create_dsql_engine", factory)
     url = make_url("auroradsql+psycopg://pawlocal_app@cluster/db")
     assert create_database_engine(url) is engine
     assert calls == [url]
@@ -81,9 +79,7 @@ def test_dsql_engine_uses_the_runtime_factory_by_default(monkeypatch):
 def test_dsql_database_url_rejects_auth_query_parameters(query_key):
     from pawlocal.infrastructure.database import create_database_engine
 
-    url = make_url(
-        f"auroradsql+psycopg://pawlocal_app@cluster/db?{query_key}=secret"
-    )
+    url = make_url(f"auroradsql+psycopg://pawlocal_app@cluster/db?{query_key}=secret")
     with pytest.raises(RuntimeError, match="Do not configure auth credentials"):
         create_database_engine(url, dsql_engine_factory=lambda _: object())
 
@@ -164,9 +160,43 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
             "sslmode": "verify-full",
             "sslrootcert": certifi.where(),
             "application_name": "pawlocal-dev",
+            "connect_args": {},
             "pool_pre_ping": True,
         }
     ]
+    engine.dispose()
+
+
+def test_dsql_engine_passes_refreshable_role_provider_to_connector(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from sqlalchemy import create_engine
+
+    from pawlocal.config import Settings
+    from pawlocal.infrastructure.database import _create_dsql_engine
+
+    calls = []
+    engine = create_engine("sqlite://")
+    package = ModuleType("aurora_dsql_sqlalchemy")
+    package.create_dsql_engine = lambda **kwargs: calls.append(kwargs) or engine
+    monkeypatch.setitem(sys.modules, "aurora_dsql_sqlalchemy", package)
+    monkeypatch.setattr(
+        "pawlocal.infrastructure.database.settings",
+        Settings(
+            _env_file=None,
+            dsql_assume_role_arn="arn:aws:iam::123456789012:role/pawlocal-dsql",
+        ),
+    )
+
+    _create_dsql_engine(
+        make_url(
+            "auroradsql+psycopg://pawlocal_app@cluster.dsql.ap-southeast-2.on.aws/postgres"
+        )
+    )
+
+    provider = calls[0]["connect_args"]["custom_credentials_provider"]
+    assert provider._role_arn == "arn:aws:iam::123456789012:role/pawlocal-dsql"
     engine.dispose()
 
 
@@ -226,7 +256,9 @@ def test_dsql_database_url_rejects_unconsumed_options(query_key):
     from pawlocal.infrastructure.database import create_database_engine
 
     url = make_url(f"auroradsql+psycopg://pawlocal_app@cluster/db?{query_key}=value")
-    with pytest.raises(RuntimeError, match="Unsupported Aurora DSQL database URL options"):
+    with pytest.raises(
+        RuntimeError, match="Unsupported Aurora DSQL database URL options"
+    ):
         create_database_engine(url, dsql_engine_factory=lambda _: object())
 
 
@@ -242,7 +274,9 @@ def test_dsql_database_url_requires_endpoint_database_and_role(database_url):
     from pawlocal.infrastructure.database import create_database_engine
 
     with pytest.raises(RuntimeError, match="must include the cluster endpoint"):
-        create_database_engine(make_url(database_url), dsql_engine_factory=lambda _: object())
+        create_database_engine(
+            make_url(database_url), dsql_engine_factory=lambda _: object()
+        )
 
 
 def test_unknown_database_backend_fails_closed():

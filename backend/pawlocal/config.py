@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     database_name: str | None = None
     database_user: str | None = None
     database_password: str | None = None
+    dsql_assume_role_arn: str | None = None
     release_environment: str | None = None
     release_image_digest: str | None = None
     api_prefix: str = "/api/v1"

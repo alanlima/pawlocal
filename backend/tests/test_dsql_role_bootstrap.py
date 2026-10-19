@@ -61,7 +61,9 @@ def app_identity():
     )
 
 
-def test_bootstrap_creates_role_maps_lightsail_principal_and_grants_schema(app_identity):
+def test_bootstrap_creates_role_maps_lightsail_principal_and_grants_schema(
+    app_identity,
+):
     engine = FakeEngine([FakeResult(None), FakeResult(None), FakeResult(None)])
 
     ensure_app_role(engine, *app_identity)
@@ -113,7 +115,12 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
         calls.append(kwargs) or DisposableEngine()
     )
     monkeypatch.setitem(sys.modules, "aurora_dsql_sqlalchemy", package)
-    monkeypatch.setattr(dsql_role_bootstrap, "ensure_app_role", lambda *_args: None)
+    bootstrap_calls = []
+    monkeypatch.setattr(
+        dsql_role_bootstrap,
+        "ensure_app_role",
+        lambda *args: bootstrap_calls.append(args),
+    )
 
     assert (
         dsql_role_bootstrap.main(
@@ -126,9 +133,21 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
                 "pawlocal_development_app",
                 "--iam-principal-arn",
                 "arn:aws:iam::123456789012:user/pawlocal/app",
+                "--legacy-iam-user-arn",
+                "arn:aws:iam::123456789012:user/pawlocal/old-app",
+                "--legacy-iam-principal-arn",
+                "arn:aws:iam::569659730191:role/amazon/lightsail/ap-southeast-2/containers/pawlocal-api/principal",
             ]
         )
         == 0
+    )
+    assert bootstrap_calls[0][1:] == (
+        "pawlocal_development_app",
+        "arn:aws:iam::123456789012:user/pawlocal/app",
+        "arn:aws:iam::123456789012:user/pawlocal/old-app",
+        [
+            "arn:aws:iam::569659730191:role/amazon/lightsail/ap-southeast-2/containers/pawlocal-api/principal"
+        ],
     )
     assert calls == [
         {
@@ -145,9 +164,16 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
 
 
 def test_bootstrap_revokes_legacy_user_mapping(app_identity):
-    legacy_user = "arn:aws:iam::123456789012:user/pawlocal/pawlocal-development-dsql-app"
+    legacy_user = (
+        "arn:aws:iam::123456789012:user/pawlocal/pawlocal-development-dsql-app"
+    )
     engine = FakeEngine(
-        [FakeResult(None), FakeResult(None), FakeResult(app_identity[0]), FakeResult(None)]
+        [
+            FakeResult(None),
+            FakeResult(None),
+            FakeResult(app_identity[0]),
+            FakeResult(None),
+        ]
     )
 
     ensure_app_role(engine, *app_identity, legacy_iam_user_arn=legacy_user)
@@ -161,6 +187,45 @@ def test_bootstrap_revokes_legacy_user_mapping(app_identity):
     ]
 
 
+def test_bootstrap_revokes_legacy_lightsail_principal_mapping(app_identity):
+    legacy_lightsail_principal = (
+        "arn:aws:iam::569659730191:role/amazon/lightsail/"
+        "ap-southeast-2/containers/pawlocal-development-api/service-principal"
+    )
+    engine = FakeEngine(
+        [
+            FakeResult(None),
+            FakeResult(None),
+            FakeResult(app_identity[0]),
+            FakeResult(None),
+        ]
+    )
+
+    ensure_app_role(
+        engine,
+        *app_identity,
+        legacy_iam_principal_arns=[legacy_lightsail_principal],
+    )
+
+    assert (
+        f"AWS IAM REVOKE {app_identity[0]} FROM '{legacy_lightsail_principal}'"
+        in engine.statements
+    )
+
+
+def test_bootstrap_rejects_invalid_legacy_principal_before_connecting(app_identity):
+    engine = FakeEngine([])
+
+    with pytest.raises(ValueError, match="legacy IAM principal ARN"):
+        ensure_app_role(
+            engine,
+            *app_identity,
+            legacy_iam_principal_arns=["not-an-arn"],
+        )
+
+    assert engine.statements == []
+
+
 @pytest.mark.parametrize(
     ("database_role", "iam_principal_arn"),
     [
@@ -168,7 +233,9 @@ def test_bootstrap_revokes_legacy_user_mapping(app_identity):
         ("pawlocal_app", "not-an-arn"),
     ],
 )
-def test_bootstrap_validates_identifiers_before_connecting(database_role, iam_principal_arn):
+def test_bootstrap_validates_identifiers_before_connecting(
+    database_role, iam_principal_arn
+):
     engine = FakeEngine([])
 
     with pytest.raises(ValueError):

@@ -22,16 +22,19 @@ def ensure_app_role(
     database_role: str,
     iam_principal_arn: str,
     legacy_iam_user_arn: str | None = None,
+    legacy_iam_principal_arns: list[str] | None = None,
 ) -> None:
     """Ensure the custom role, IAM mapping, and app schema access exist idempotently."""
     if not _ROLE_PATTERN.fullmatch(database_role):
         raise ValueError("database role has an invalid format")
     if not _PRINCIPAL_ARN_PATTERN.fullmatch(iam_principal_arn):
         raise ValueError("IAM principal ARN has an invalid format")
-    if legacy_iam_user_arn is not None and not _PRINCIPAL_ARN_PATTERN.fullmatch(
-        legacy_iam_user_arn
-    ):
-        raise ValueError("legacy IAM user ARN has an invalid format")
+    legacy_principals = list(legacy_iam_principal_arns or [])
+    if legacy_iam_user_arn is not None:
+        legacy_principals.append(legacy_iam_user_arn)
+    for legacy_principal_arn in legacy_principals:
+        if not _PRINCIPAL_ARN_PATTERN.fullmatch(legacy_principal_arn):
+            raise ValueError("legacy IAM principal ARN has an invalid format")
 
     with engine.begin() as connection:
         role_exists = connection.execute(
@@ -48,7 +51,7 @@ def ensure_app_role(
                 "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
                 "WHERE arn = :iam_user_arn"
             ),
-                {"iam_user_arn": iam_principal_arn},
+            {"iam_user_arn": iam_principal_arn},
         ).scalar_one_or_none()
     if existing_mapping is None:
         with engine.begin() as connection:
@@ -60,19 +63,21 @@ def ensure_app_role(
             "IAM principal is already mapped to a different DSQL database role"
         )
 
-    if legacy_iam_user_arn is not None and legacy_iam_user_arn != iam_principal_arn:
+    for legacy_principal_arn in dict.fromkeys(legacy_principals):
+        if legacy_principal_arn == iam_principal_arn:
+            continue
         with engine.begin() as connection:
             legacy_mapping = connection.execute(
                 text(
                     "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
                     "WHERE arn = :iam_user_arn"
                 ),
-                {"iam_user_arn": legacy_iam_user_arn},
+                {"iam_user_arn": legacy_principal_arn},
             ).scalar_one_or_none()
         if legacy_mapping == database_role:
             with engine.begin() as connection:
                 connection.exec_driver_sql(
-                    f"AWS IAM REVOKE {database_role} FROM '{legacy_iam_user_arn}'"
+                    f"AWS IAM REVOKE {database_role} FROM '{legacy_principal_arn}'"
                 )
         elif legacy_mapping is not None:
             raise RuntimeError(
@@ -103,10 +108,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database-role", required=True)
     parser.add_argument("--iam-principal-arn", required=True)
     parser.add_argument("--legacy-iam-user-arn")
+    parser.add_argument("--legacy-iam-principal-arn", action="append", default=[])
     args = parser.parse_args(argv)
 
     try:
         import certifi
+
         if not args.endpoint.endswith(f".dsql.{args.region}.on.aws"):
             raise ValueError("DSQL endpoint does not match the selected region")
         from aurora_dsql_sqlalchemy import create_dsql_engine
@@ -127,10 +134,18 @@ def main(argv: list[str] | None = None) -> int:
                 args.database_role,
                 args.iam_principal_arn,
                 args.legacy_iam_user_arn,
+                args.legacy_iam_principal_arn,
             )
         finally:
             engine.dispose()
-    except (BotoCoreError, ImportError, OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:
+    except (
+        BotoCoreError,
+        ImportError,
+        OSError,
+        RuntimeError,
+        SQLAlchemyError,
+        ValueError,
+    ) as exc:
         # Connector errors can include connection details; keep Terraform output
         # free of tokens and credential-bearing diagnostics.
         print(
