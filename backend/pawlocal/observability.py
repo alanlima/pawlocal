@@ -286,7 +286,9 @@ def _classify_database_error(
     numbers = [getattr(item, "errno", None) for item in candidates]
     if errno.ECONNREFUSED in numbers:
         return "connection_refused", "os_errno"
-    if errno.ETIMEDOUT in numbers or "TimeoutError" in classes:
+    if errno.ETIMEDOUT in numbers or classes.intersection(
+        {"TimeoutError", "ConnectionTimeout"}
+    ):
         return (
             "connection_timeout",
             "os_errno" if errno.ETIMEDOUT in numbers else "exception_class",
@@ -310,7 +312,7 @@ def _classify_database_error(
             message_classifications.add("tls_verification_failed")
         elif "tls handshake" in message:
             message_classifications.add("tls_connection_failed")
-        if "connection timed out" in message:
+        if "connection timed out" in message or "connection timeout expired" in message:
             message_classifications.add("connection_timeout")
         if "connection refused" in message:
             message_classifications.add("connection_refused")

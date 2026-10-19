@@ -457,6 +457,7 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
         ("certificate verify failed: /private/cert.pem", "tls_verification_failed"),
         ("TLS handshake failed", "tls_connection_failed"),
         ("connection timed out", "connection_timeout"),
+        ("connection timeout expired", "connection_timeout"),
         ("opaque driver error", "connection_failure_unknown"),
     ],
 )
@@ -491,6 +492,32 @@ def test_psycopg_error_message_only_selects_fixed_safe_classification(
     assert fields["database_pgconn_available"] is False
     for secret in (*secret_values, "PARAM_SECRET", "private SQL statement"):
         assert secret not in encoded
+
+
+def test_psycopg_connection_timeout_class_is_classified_without_message_matching():
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    # Use the exception class name without requiring this class to exist in
+    # every psycopg 3.2 release allowed by pyproject.toml. The classifier must
+    # remain compatible with deployments whose driver exposes this class, and
+    # the opaque message proves classification comes from the class name.
+    connection_timeout_type = type("ConnectionTimeout", (psycopg.OperationalError,), {})
+    driver = connection_timeout_type("OPAQUE_PRIVATE_DRIVER_MESSAGE")
+    wrapped = OperationalError(
+        "private SQL statement", {"value": "PARAM_SECRET"}, driver
+    )
+
+    fields = safe_exception_log_fields(wrapped)
+    encoded = json.dumps(fields)
+
+    assert fields["database_error_classification"] == "connection_timeout"
+    assert fields["database_error_classification_source"] == "exception_class"
+    assert "OPAQUE_PRIVATE_DRIVER_MESSAGE" not in encoded
+    assert "private SQL statement" not in encoded
+    assert "PARAM_SECRET" not in encoded
 
 
 def test_psycopg_pgconn_auth_flags_are_boolean_hints_only(monkeypatch):
