@@ -55,18 +55,19 @@ TERRAFORM_GLOBAL_OPTIONS = (
     r"(?:=(?:\"[^\"]*\"|'[^']*'|[^\s]+))?"
     r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|[^\s-][^\s]*))?)*"
 )
+TERRAFORM_CLI = r"(?<![\w.-])(?:terraform|\"terraform\"|'terraform'|\"[^\"\r\n]*[/\\]terraform\"|'[^'\r\n]*[/\\]terraform')"
 TERRAFORM_STATE_MUTATION = re.compile(
-    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS +
+    TERRAFORM_CLI + TERRAFORM_GLOBAL_OPTIONS +
     r"[ \t]+state[ \t]+(?:push|import|mv|rm|replace-provider)\b"
 )
 TERRAFORM_WORKSPACE_STATE_MUTATION = re.compile(
-    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+workspace[ \t]+(?:new|delete)\b"
+    TERRAFORM_CLI + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+workspace[ \t]+(?:new|delete)\b"
 )
 TERRAFORM_TOP_LEVEL_STATE_MUTATION = re.compile(
-    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+(?:import|taint|untaint|refresh|force-unlock)\b"
+    TERRAFORM_CLI + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+(?:import|taint|untaint|refresh|force-unlock)\b"
 )
 TERRAFORM_INIT_STATE_MIGRATION = re.compile(
-    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+init\b"
+    TERRAFORM_CLI + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+init\b"
     r"[^\n;|)]*[ \t]+(?:-migrate-state|-force-copy)(?:[ \t]|$)"
 )
 UNRESOLVED_SUBPROCESS_COMMAND = "<unresolved-subprocess-command>"
@@ -616,6 +617,9 @@ jobs:
             "terraform untaint module.example",
             "terraform refresh",
             "terraform force-unlock abc123",
+            '"terraform" state rm module.example',
+            '"/usr/local/bin/terraform" state rm module.example',
+            "'/opt/terraform bin/terraform' state rm module.example",
             'terraform -chdir="$root" import module.example id',
             'terraform -chdir="$root" taint module.example',
             'terraform -chdir "$root" untaint module.example',
