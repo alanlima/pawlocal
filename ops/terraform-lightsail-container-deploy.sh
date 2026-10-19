@@ -22,7 +22,8 @@ if v.get('telemetry_enabled') is not False:
 print(image)
 PY
 )"
-root="$GITHUB_WORKSPACE/infra/terraform"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+root="$script_dir/../infra/terraform"
 terraform -chdir="$root" init -input=false -reconfigure \
   -backend-config="bucket=$PAWLOCAL_TF_STATE_BUCKET" \
   -backend-config='key=pawlocal/terraform.tfstate' \
