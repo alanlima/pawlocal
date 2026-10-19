@@ -108,7 +108,7 @@ variable "environment_sizes" {
     database_role = string
   }))
   default = {
-    development = { bundle_id = "small_3_0", hostname = "pawlocal-dev", api_name = "api-dev", database_role = "pawlocal_development_app" }
-    production  = { bundle_id = "medium_3_0", hostname = "pawlocal", api_name = "api", database_role = "pawlocal_production_app" }
+    development = { bundle_id = "micro_3_2", hostname = "pawlocal-dev", api_name = "api-dev", database_role = "pawlocal_development_app" }
+    production  = { bundle_id = "small_3_2", hostname = "pawlocal", api_name = "api", database_role = "pawlocal_production_app" }
   }
 }
