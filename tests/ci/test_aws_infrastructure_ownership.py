@@ -141,16 +141,19 @@ def python_process_launch_commands(source: str) -> list[str]:
                 and node.func.id == "getattr"
                 and len(node.args) >= 2
                 and isinstance(node.args[0], ast.Name)
-                and isinstance(node.args[1], ast.Constant)
-                and isinstance(node.args[1].value, str)
             ):
-                module, attribute = node.args[0].id, node.args[1].value
-                if (
-                    (module in subprocess_modules and attribute in subprocess_functions)
-                    or (module in os_modules and attribute in os_functions)
-                    or (module in asyncio_modules and attribute in {"create_subprocess_exec", "create_subprocess_shell"})
-                ):
-                    return True
+                module = node.args[0].id
+                module_is_process = module in subprocess_modules | os_modules | asyncio_modules
+                if module_is_process:
+                    if not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str):
+                        return True
+                    attribute = node.args[1].value
+                    if (
+                        (module in subprocess_modules and attribute in subprocess_functions)
+                        or (module in os_modules and attribute in os_functions)
+                        or (module in asyncio_modules and attribute in {"create_subprocess_exec", "create_subprocess_shell"})
+                    ):
+                        return True
             # The callable is invoked here, so only inspect its arguments for stored
             # launch callables; the call itself is handled by visit_Call.
             return any(callable_reference(arg) for arg in [*node.args, *(kw.value for kw in node.keywords)])
@@ -668,6 +671,7 @@ async_run("aws", "s3api", "put-bucket-policy")
         examples = (
             "import os\nlaunch = getattr(os, 'system')\nlaunch('aws ec2 terminate-instances')\n",
             "import subprocess\nlaunch = getattr(subprocess, 'run')\nlaunch(['aws', 'ec2', 'terminate-instances'])\n",
+            "import os\nmethod = 'system'\nlaunch = getattr(os, method)\nlaunch('aws ec2 terminate-instances')\n",
         )
         for source in examples:
             with self.subTest(source=source):
