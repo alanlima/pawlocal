@@ -222,6 +222,65 @@ def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypat
     assert "SELECT * FROM private_table" not in captured.getvalue()
 
 
+def test_unhandled_api_error_logs_nested_missing_credentials_class_safely(client):
+    import psycopg
+    from botocore.exceptions import NoCredentialsError
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.api import routes
+    from pawlocal.main import app
+
+    class BrokenQueries:
+        def search(self, **_filters):
+            try:
+                raise NoCredentialsError()
+            except NoCredentialsError as credential_error:
+                try:
+                    raise RuntimeError(
+                        "Failed to generate authentication token: private sentinel"
+                    ) from credential_error
+                except RuntimeError as token_error:
+                    try:
+                        raise psycopg.OperationalError(
+                            "private driver detail"
+                        ) from token_error
+                    except psycopg.OperationalError as driver_error:
+                        raise OperationalError(
+                            "private SQL and parameters",
+                            None,
+                            driver_error,
+                            hide_parameters=True,
+                        )
+
+    app.dependency_overrides[routes.get_place_queries] = lambda: BrokenQueries()
+    api_logger = logging.getLogger("pawlocal.api")
+    captured = io.StringIO()
+    handler = logging.StreamHandler(captured)
+    handler.setFormatter(_SafeJsonFormatter())
+    api_logger.addHandler(handler)
+    try:
+        response = client[0].get("/api/v1/places")
+    finally:
+        api_logger.removeHandler(handler)
+
+    assert response.status_code == 500
+    assert response.json()["code"] == "internal_error"
+    completed_log = next(
+        json.loads(line)
+        for line in captured.getvalue().splitlines()
+        if "API request completed" in line
+    )
+    assert completed_log["exception_class"] == "OperationalError"
+    assert completed_log["exception_chain"] == [
+        "OperationalError",
+        "RuntimeError",
+        "NoCredentialsError",
+    ]
+    assert "private sentinel" not in captured.getvalue()
+    assert "Unable to locate credentials" not in captured.getvalue()
+    assert "private" not in json.dumps(response.json())
+
+
 def test_exception_log_fields_reject_non_sqlstate_values():
     from pawlocal.observability import safe_exception_log_fields
 
@@ -231,14 +290,30 @@ def test_exception_log_fields_reject_non_sqlstate_values():
 
     fields = safe_exception_log_fields(ErrorWithUnsafeCode("private message"))
 
-    assert fields == {"exception_class": "ErrorWithUnsafeCode"}
+    assert fields == {
+        "exception_class": "ErrorWithUnsafeCode",
+        "exception_chain": [],
+    }
 
 
 @pytest.mark.parametrize(
     ("driver_pgcode", "expected_fields"),
     [
-        ("08006", {"exception_class": "OperationalError", "database_error_code": "08006"}),
-        ("08006-private", {"exception_class": "OperationalError"}),
+        (
+            "08006",
+            {
+                "exception_class": "OperationalError",
+                "exception_chain": ["DriverError"],
+                "database_error_code": "08006",
+            },
+        ),
+        (
+            "08006-private",
+            {
+                "exception_class": "OperationalError",
+                "exception_chain": ["DriverError"],
+            },
+        ),
     ],
 )
 def test_exception_log_fields_read_only_validated_sqlalchemy_orig_pgcode(
@@ -259,6 +334,81 @@ def test_exception_log_fields_read_only_validated_sqlalchemy_orig_pgcode(
     from pawlocal.observability import safe_exception_log_fields
 
     assert safe_exception_log_fields(wrapped) == expected_fields
+
+
+def test_exception_log_fields_capture_innermost_provider_error_without_text():
+    from botocore.exceptions import NoCredentialsError
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    class DriverConnectionError(Exception):
+        pass
+
+    try:
+        try:
+            raise NoCredentialsError()
+        except NoCredentialsError as credential_error:
+            raise RuntimeError(
+                "private token generation failure sentinel"
+            ) from credential_error
+    except RuntimeError as connector_error:
+        try:
+            raise DriverConnectionError(
+                "private database endpoint and token sentinel"
+            ) from connector_error
+        except DriverConnectionError as driver_error:
+            wrapped = OperationalError(
+                "private SQL and bind value sentinel",
+                None,
+                driver_error,
+                hide_parameters=True,
+            )
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields == {
+        "exception_class": "OperationalError",
+        "exception_chain": [
+            "DriverConnectionError",
+            "RuntimeError",
+            "NoCredentialsError",
+        ],
+    }
+    encoded = json.dumps(fields)
+    assert "private" not in encoded
+    assert "sentinel" not in encoded
+
+
+def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    try:
+        raise ConnectionRefusedError(10061, "private endpoint sentinel")
+    except ConnectionRefusedError as socket_error:
+        try:
+            raise psycopg.OperationalError("private driver detail") from socket_error
+        except psycopg.OperationalError as driver_error:
+            wrapped = OperationalError(
+                "private SQL and parameters",
+                None,
+                driver_error,
+                hide_parameters=True,
+            )
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields == {
+        "exception_class": "OperationalError",
+        "exception_chain": ["OperationalError", "ConnectionRefusedError"],
+        "os_error_number": 10061,
+    }
+    encoded = json.dumps(fields)
+    assert "private" not in encoded
+    assert "sentinel" not in encoded
 
 
 def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
