@@ -90,6 +90,7 @@ class PlaceFacilityRecord(Base):
             "'Picnic tables', 'Accessible paths')",
             name="ck_place_facilities_value",
         ),
+        CheckConstraint("ordinal >= 0", name="ck_place_facilities_ordinal"),
         Index("ix_place_facilities_facility_place", "facility", "place_id"),
     )
 

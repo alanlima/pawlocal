@@ -33,11 +33,22 @@ def test_database_engine_keeps_postgresql_as_the_default_path():
         engine.dispose()
 
 
-def test_dsql_engine_requires_an_explicit_runtime_factory():
+def test_dsql_engine_uses_the_runtime_factory_by_default(monkeypatch):
     from pawlocal.infrastructure.database import create_database_engine
 
-    with pytest.raises(RuntimeError, match="not runtime-configured"):
-        create_database_engine(make_url("auroradsql+psycopg://cluster/db"))
+    engine = object()
+    calls = []
+
+    def factory(url):
+        calls.append(url)
+        return engine
+
+    monkeypatch.setattr(
+        "pawlocal.infrastructure.database._create_dsql_engine", factory
+    )
+    url = make_url("auroradsql+psycopg://pawlocal_app@cluster/db")
+    assert create_database_engine(url) is engine
+    assert calls == [url]
 
 
 @pytest.mark.parametrize(
@@ -78,7 +89,9 @@ def test_dsql_database_url_rejects_auth_query_parameters(query_key):
 def test_dsql_engine_factory_receives_the_url_without_static_password():
     from pawlocal.infrastructure.database import create_database_engine
 
-    url = make_url("auroradsql+psycopg://cluster/db?application_name=pawlocal")
+    url = make_url(
+        "auroradsql+psycopg://pawlocal_app@cluster/db?application_name=pawlocal"
+    )
     engine = object()
     received = []
 
@@ -88,6 +101,82 @@ def test_dsql_engine_factory_receives_the_url_without_static_password():
 
     assert create_database_engine(url, dsql_engine_factory=factory) is engine
     assert received == [url]
+
+
+def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
+    monkeypatch,
+):
+    import sys
+    from types import ModuleType
+
+    from pawlocal.infrastructure.database import _create_dsql_engine
+
+    calls = []
+    engine = object()
+
+    def create_dsql_engine(**kwargs):
+        calls.append(kwargs)
+        return engine
+
+    package = ModuleType("aurora_dsql_sqlalchemy")
+    package.create_dsql_engine = create_dsql_engine
+    monkeypatch.setitem(sys.modules, "aurora_dsql_sqlalchemy", package)
+
+    url = make_url(
+        "auroradsql+psycopg://pawlocal_dev@cluster.dsql.ap-southeast-2.on.aws/"
+        "postgres?application_name=pawlocal-dev"
+    )
+    assert _create_dsql_engine(url) is engine
+    assert calls == [
+        {
+            "host": "cluster.dsql.ap-southeast-2.on.aws",
+            "user": "pawlocal_dev",
+            "driver": "psycopg",
+            "dbname": "postgres",
+            "application_name": "pawlocal-dev",
+            "pool_pre_ping": True,
+        }
+    ]
+
+
+def test_dsql_runtime_factory_builds_aws_dialect_without_connecting():
+    from pawlocal.infrastructure.database import _create_dsql_engine
+
+    engine = _create_dsql_engine(
+        make_url(
+            "auroradsql+psycopg://pawlocal_app@cluster.dsql.ap-southeast-2.on.aws/"
+            "postgres"
+        )
+    )
+    try:
+        assert engine.dialect.name == "auroradsql"
+        assert engine.url.password is None
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("query_key", ["sslmode", "connect_timeout", "region"])
+def test_dsql_database_url_rejects_unconsumed_options(query_key):
+    from pawlocal.infrastructure.database import create_database_engine
+
+    url = make_url(f"auroradsql+psycopg://pawlocal_app@cluster/db?{query_key}=value")
+    with pytest.raises(RuntimeError, match="Unsupported Aurora DSQL database URL options"):
+        create_database_engine(url, dsql_engine_factory=lambda _: object())
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "auroradsql+psycopg://cluster/db",
+        "auroradsql+psycopg://pawlocal_app@/db",
+        "auroradsql+psycopg://pawlocal_app@cluster/",
+    ],
+)
+def test_dsql_database_url_requires_endpoint_database_and_role(database_url):
+    from pawlocal.infrastructure.database import create_database_engine
+
+    with pytest.raises(RuntimeError, match="must include the cluster endpoint"):
+        create_database_engine(make_url(database_url), dsql_engine_factory=lambda _: object())
 
 
 def test_unknown_database_backend_fails_closed():

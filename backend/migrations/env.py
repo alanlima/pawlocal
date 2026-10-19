@@ -3,11 +3,13 @@ from sqlalchemy import create_engine, pool
 
 from pawlocal.config import settings
 from pawlocal.dsql_migrations import reject_dsql_alembic_dialect
+
+reject_dsql_alembic_dialect(settings.sqlalchemy_url.drivername)
+
 from pawlocal.infrastructure import models  # noqa: F401
 from pawlocal.infrastructure.database import Base
 
 config = context.config
-reject_dsql_alembic_dialect(settings.sqlalchemy_url.drivername)
 config.set_main_option(
     "sqlalchemy.url", settings.sqlalchemy_url.render_as_string(hide_password=False).replace("%", "%%")
 )

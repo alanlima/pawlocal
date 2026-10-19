@@ -124,6 +124,22 @@ def test_dsql_initial_schema_is_final_shape_and_has_one_statement_per_file():
     assert "TARGET_CONTRIBUTION_ID" in all_sql
     assert "CREATE INDEX ASYNC" in all_sql
     assert "CREATE UNIQUE INDEX ASYNC" in all_sql
+    assert "ORDINAL INTEGER NOT NULL CHECK (ORDINAL >= 0)" in all_sql
+
+
+def test_executable_dsql_migration_command_applies_only_to_dsql():
+    from types import SimpleNamespace
+
+    from pawlocal.dsql_migrate import run_dsql_migrations
+
+    engine = _Engine()
+    engine.dialect = SimpleNamespace(name="auroradsql")
+    assert run_dsql_migrations(engine)
+    assert not run_dsql_migrations(engine)
+
+    engine.dialect = SimpleNamespace(name="postgresql")
+    with pytest.raises(RuntimeError, match="requires an Aurora DSQL database URL"):
+        run_dsql_migrations(engine)
 
 
 def test_dsql_baseline_commits_one_ddl_each_waits_indexes_then_records_revision():

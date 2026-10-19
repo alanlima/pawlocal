@@ -15,6 +15,7 @@ class Base(DeclarativeBase):
 
 
 DSQLEngineFactory = Callable[[URL], Engine]
+_DSQL_ALLOWED_QUERY_KEYS = {"application_name"}
 _DSQL_AUTH_QUERY_MARKERS = (
     "auth",
     "token",
@@ -44,11 +45,12 @@ def _contains_dsql_auth_query(url: URL) -> bool:
 def create_database_engine(
     url: URL, *, dsql_engine_factory: DSQLEngineFactory | None = None
 ) -> Engine:
-    """Create a supported database engine without guessing DSQL credentials.
+    """Create a supported database engine.
 
-    PostgreSQL remains the default/local path. Aurora DSQL requires an explicit
-    factory so the deployment runtime can supply an approved short-lived AWS
-    credential source; this module does not select one or accept token values.
+    PostgreSQL remains the default/local path. Aurora DSQL uses the AWS
+    SQLAlchemy helper, which obtains IAM credentials through the AWS SDK
+    default credential chain. No key or generated database token is read,
+    stored, or placed in a database URL by this module.
     """
     backend = url.get_backend_name().lower()
     if backend == "auroradsql":
@@ -57,15 +59,44 @@ def create_database_engine(
                 "Do not configure auth credentials in the Aurora DSQL database URL; "
                 "runtime credentials must come from the approved engine factory."
             )
-        if dsql_engine_factory is None:
+        unexpected_query_keys = set(url.query) - _DSQL_ALLOWED_QUERY_KEYS
+        if unexpected_query_keys:
             raise RuntimeError(
-                "Aurora DSQL is not runtime-configured; provide an approved "
-                "DSQL engine factory before selecting this database."
+                "Unsupported Aurora DSQL database URL options: "
+                f"{sorted(unexpected_query_keys)}"
             )
-        return dsql_engine_factory(url)
+        if not url.host or not url.database or not url.username:
+            raise RuntimeError(
+                "Aurora DSQL database URL must include the cluster endpoint, "
+                "database name, and custom database role."
+            )
+        if url.port not in (None, 5432):
+            raise RuntimeError("Aurora DSQL uses port 5432.")
+        factory = dsql_engine_factory or _create_dsql_engine
+        return factory(url)
     if backend != "postgresql":
         raise RuntimeError(f"Unsupported configured database backend: {backend}")
     return create_engine(url, pool_pre_ping=True)
+
+
+def _create_dsql_engine(url: URL) -> Engine:
+    """Build a DSQL engine whose connector uses the AWS SDK credential chain."""
+    try:
+        from aurora_dsql_sqlalchemy import create_dsql_engine
+    except ImportError as exc:
+        raise RuntimeError(
+            "Aurora DSQL support is not installed; install the backend runtime "
+            "dependencies before selecting this database."
+        ) from exc
+
+    return create_dsql_engine(
+        host=url.host,
+        user=url.username,
+        driver="psycopg",
+        dbname=url.database,
+        application_name=url.query.get("application_name", "pawlocal"),
+        pool_pre_ping=True,
+    )
 
 
 engine = create_database_engine(settings.sqlalchemy_url)
