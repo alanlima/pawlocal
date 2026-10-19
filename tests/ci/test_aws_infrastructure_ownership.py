@@ -16,17 +16,28 @@ ALLOWED_AWS_COMMANDS = {
     ("s3", "cp"),
     ("cloudfront", "create-invalidation"),
 }
+TERRAFORM_STATE_MUTATION = re.compile(
+    r"\bterraform\b"
+    r"(?:[ \t]+-[A-Za-z0-9][A-Za-z0-9-]*"
+    r"(?:=(?:\"[^\"]*\"|'[^']*'|[^\s]+))?"
+    r"(?:[ \t]+(?:\"[^\"]*\"|'[^']*'|[^\s-][^\s]*))?)*"
+    r"[ \t]+state[ \t]+(?:push|import|mv|rm|replace-provider)\b"
+)
+
+
+def contains_terraform_state_mutation(source: str) -> bool:
+    normalized = re.sub(r"\\\r?\n[ \t]*", " ", source)
+    return TERRAFORM_STATE_MUTATION.search(normalized) is not None
 
 
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
     def test_executable_automation_does_not_mutate_infrastructure_outside_terraform(self) -> None:
-        forbidden_state = re.compile(r"\bterraform\s+state\s+(?:push|import|mv|rm|replace-provider)\b")
         aws_commands = re.compile(r"\baws\s+([a-z0-9-]+)\s+([a-z0-9-]+)\b")
         aws_sdk = re.compile(r"\bboto3\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
         for path in EXECUTION_FILES:
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
-                self.assertIsNone(forbidden_state.search(source), "manual Terraform state mutation is prohibited")
+                self.assertFalse(contains_terraform_state_mutation(source), "manual Terraform state mutation is prohibited")
                 self.assertIsNone(aws_sdk.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
                 for service, operation in aws_commands.findall(source):
                     self.assertIn(
@@ -34,6 +45,20 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
                         ALLOWED_AWS_COMMANDS,
                         f"unapproved AWS CLI command: aws {service} {operation}",
                     )
+
+    def test_state_mutation_guard_handles_global_terraform_options(self) -> None:
+        prohibited = (
+            "terraform state rm module.example",
+            'terraform -chdir="$root" state rm module.example',
+            'terraform -chdir "$root" state import module.example id',
+            "terraform -chdir=infra/terraform state mv a b",
+        )
+        for command in prohibited:
+            with self.subTest(command=command):
+                self.assertTrue(contains_terraform_state_mutation(command))
+        continued = "terraform " + "\\" + "\n  -chdir=infra/terraform " + "\\" + "\n  state rm module.example"
+        self.assertTrue(contains_terraform_state_mutation(continued))
+        self.assertFalse(contains_terraform_state_mutation('terraform -chdir="$root" plan -input=false'))
 
     def test_frontend_destinations_come_from_the_authoritative_terraform_outputs(self) -> None:
         deploy_script = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
