@@ -21,6 +21,21 @@ def composite_action_files(directory: Path) -> list[Path]:
     return sorted((*directory.rglob("action.yml"), *directory.rglob("action.yaml")))
 
 
+def local_action_script_files(directory: Path) -> list[Path]:
+    """Discover shell/Python helpers shipped with local actions, confined to repo."""
+    scripts: set[Path] = set()
+    repo_root = ROOT.resolve()
+    for metadata_path in composite_action_files(directory):
+        action_root = metadata_path.parent.resolve()
+        for candidate in action_root.rglob("*"):
+            if candidate.suffix.lower() not in {".sh", ".py"}:
+                continue
+            resolved = candidate.resolve()
+            if resolved.is_relative_to(repo_root) and resolved.is_relative_to(action_root) and resolved.is_file():
+                scripts.add(resolved)
+    return sorted(scripts)
+
+
 def javascript_action_files(directory: Path) -> list[Path]:
     """Resolve every JavaScript module in local Node actions, confined to the repo."""
     action_files: set[Path] = set()
@@ -48,6 +63,7 @@ EXECUTION_FILES = [
     *Path(ROOT / "ops").rglob("*.py"),
     *workflow_files(Path(ROOT / ".github/workflows")),
     *composite_action_files(Path(ROOT / ".github/actions")),
+    *local_action_script_files(Path(ROOT / ".github/actions")),
     *javascript_action_files(Path(ROOT / ".github/actions")),
 ]
 ALLOWED_AWS_COMMANDS = {
@@ -1184,6 +1200,22 @@ jobs:
                     'const cp = require("child_process"); cp.execSync("terraform state rm module.example");'
                 )
             )
+
+    def test_local_composite_action_shell_helpers_are_discovered(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir, tempfile.TemporaryDirectory(dir=ROOT.parent) as outside_dir:
+            action_dir = Path(temp_dir) / "shell-action"
+            action_dir.mkdir()
+            (action_dir / "action.yml").write_text(
+                "runs:\n  using: composite\n  steps:\n    - run: bash \"$GITHUB_ACTION_PATH/deploy.sh\"\n      shell: bash\n",
+                encoding="utf-8",
+            )
+            helper = action_dir / "deploy.sh"
+            helper.write_text("aws ec2 terminate-instances --instance-ids i-123\n", encoding="utf-8")
+            (Path(outside_dir) / "outside.sh").write_text("aws ec2 terminate-instances\n", encoding="utf-8")
+            discovered = local_action_script_files(Path(temp_dir))
+            self.assertEqual(discovered, [helper.resolve()])
+            self.assertEqual(aws_cli_commands(helper.read_text(encoding="utf-8")), [("ec2", "terminate-instances")])
+            self.assertNotIn(Path(outside_dir) / "outside.sh", discovered)
 
     def test_javascript_dynamic_process_commands_fail_closed(self) -> None:
         dynamic = 'const cp = require("node:child_process"); cp.execSync(command);'
