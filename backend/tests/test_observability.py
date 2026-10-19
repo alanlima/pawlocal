@@ -6,10 +6,11 @@ import pytest
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from pawlocal.config import settings
-from pawlocal.observability import _SafeJsonFormatter
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
+
+from pawlocal.config import settings
+from pawlocal.observability import _SafeJsonFormatter
 
 
 def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatch):
@@ -288,9 +289,10 @@ def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
 
 
 def test_application_failure_sets_only_stable_error_code(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
     from pawlocal import observability
     from pawlocal.application.places import PlaceQueries
-    from sqlalchemy.exc import OperationalError
 
     class BrokenRepository:
         def search(self, **_filters):
