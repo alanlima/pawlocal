@@ -281,6 +281,32 @@ def test_unhandled_api_error_logs_nested_missing_credentials_class_safely(client
     assert "private" not in json.dumps(response.json())
 
 
+def test_suppressed_exception_context_is_not_emitted_to_json_log():
+    from pawlocal.observability import safe_exception_log_fields
+
+    class SuppressedProviderError(Exception):
+        pass
+
+    try:
+        raise SuppressedProviderError("private suppressed detail")
+    except SuppressedProviderError:
+        try:
+            raise RuntimeError("sanitized provider failure") from None
+        except RuntimeError as translated_error:
+            fields = safe_exception_log_fields(translated_error)
+
+    record = logging.LogRecord(
+        "pawlocal.api", logging.ERROR, "main.py", 1, "API request completed", (), None
+    )
+    for key, value in fields.items():
+        setattr(record, key, value)
+    encoded_log = _SafeJsonFormatter().format(record)
+
+    assert fields == {"exception_class": "RuntimeError", "exception_chain": []}
+    assert "SuppressedProviderError" not in encoded_log
+    assert "private suppressed detail" not in encoded_log
+
+
 def test_exception_log_fields_reject_non_sqlstate_values():
     from pawlocal.observability import safe_exception_log_fields
 

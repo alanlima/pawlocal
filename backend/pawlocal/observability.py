@@ -180,7 +180,12 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
         next_candidate = original if isinstance(original, BaseException) else None
         if next_candidate is None or id(next_candidate) in seen:
             next_candidate = cause if isinstance(cause, BaseException) else None
-        if next_candidate is None and isinstance(context, BaseException):
+        context_is_visible = not getattr(candidate, "__suppress_context__", False)
+        if (
+            next_candidate is None
+            and context_is_visible
+            and isinstance(context, BaseException)
+        ):
             next_candidate = context
         candidate = next_candidate
 
