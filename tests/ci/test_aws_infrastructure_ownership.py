@@ -116,7 +116,7 @@ def python_process_launch_commands(source: str) -> list[str]:
     subprocess_functions = {"run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput"}
     os_functions = {"system", "popen", "startfile", "execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp", "execlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "spawnl", "spawnle", "spawnlp", "spawnlpe", "posix_spawn", "posix_spawnp"}
     asyncio_functions = {"create_subprocess_exec", "create_subprocess_shell", "subprocess_exec", "subprocess_shell"}
-    aliases: dict[str, tuple[str, str]] = {}
+    aliases: dict[str, tuple[str, str] | None] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -134,6 +134,22 @@ def python_process_launch_commands(source: str) -> list[str]:
                     aliases[alias.asname or alias.name] = ("os", alias.name)
                 elif node.module == "asyncio" and alias.name in asyncio_functions:
                     aliases[alias.asname or alias.name] = ("asyncio", alias.name)
+
+    def launchable(node: ast.AST) -> tuple[str, str] | None:
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id)
+        if not isinstance(node, ast.Attribute):
+            return None
+        module_name = node.value.id if isinstance(node.value, ast.Name) else None
+        if module_name in subprocess_modules and node.attr in subprocess_functions:
+            return ("subprocess", node.attr)
+        if module_name in os_modules and node.attr in os_functions:
+            return ("os", node.attr)
+        if module_name in asyncio_modules and node.attr in {"create_subprocess_exec", "create_subprocess_shell"}:
+            return ("asyncio", node.attr)
+        if node.attr in {"subprocess_exec", "subprocess_shell"}:
+            return ("asyncio_loop", node.attr)
+        return None
 
     assigned_argv: dict[str, list[str] | str | None] = {}
     alias_groups: dict[str, set[str]] = {}
@@ -208,6 +224,11 @@ def python_process_launch_commands(source: str) -> list[str]:
             value = argv_values(node.value)
             for target in node.targets:
                 if isinstance(target, ast.Name):
+                    callable_alias = launchable(node.value)
+                    if callable_alias is not None:
+                        aliases[target.id] = callable_alias
+                    else:
+                        aliases.pop(target.id, None)
                     if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
                         link_alias(target.id, node.value.id)
                     else:
@@ -220,6 +241,11 @@ def python_process_launch_commands(source: str) -> list[str]:
         def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
             value = argv_values(node.value) if node.value is not None else None
             if isinstance(node.target, ast.Name):
+                callable_alias = launchable(node.value) if node.value is not None else None
+                if callable_alias is not None:
+                    aliases[node.target.id] = callable_alias
+                else:
+                    aliases.pop(node.target.id, None)
                 if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
                     link_alias(node.target.id, node.value.id)
                 else:
@@ -300,9 +326,14 @@ def python_process_launch_commands(source: str) -> list[str]:
                 elif function.attr in {"subprocess_exec", "subprocess_shell"}:
                     launch_family, launch_name, recognized = "asyncio_loop", function.attr, True
             elif isinstance(function, ast.Name) and function.id in aliases:
-                launch_family, launch_name = aliases[function.id]
                 recognized = True
+                callable_alias = aliases[function.id]
+                if callable_alias is not None:
+                    launch_family, launch_name = callable_alias
             if recognized:
+                if launch_family is None or launch_name is None:
+                    commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
+                    return
                 argument = call.args[0] if call.args else next(
                     (keyword.value for keyword in call.keywords if keyword.arg == "args"), None
                 )
@@ -539,6 +570,28 @@ asyncio.create_subprocess_exec("aws", "s3api", "put-bucket-policy")
 asyncio.create_subprocess_shell(build_command())
 loop.subprocess_exec(protocol_factory, "terraform", "state", "rm", "module.example")
 loop.subprocess_shell(protocol_factory, build_command())
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+        commands = python_aws_cli_commands(source)
+        self.assertIn(("ec2", "terminate-instances"), commands)
+        self.assertIn(("s3api", "put-bucket-policy"), commands)
+        self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), commands)
+
+    def test_python_process_launch_callable_aliases_are_scanned(self) -> None:
+        source = '''
+import asyncio
+import os
+import subprocess
+launch = os.posix_spawnp
+launch("terraform", ["terraform", "state", "rm", "module.example"], env)
+run = subprocess.run
+run(["aws", "ec2", "terminate-instances"])
+shell = asyncio.create_subprocess_shell
+shell(build_command())
+from os import system as run_shell
+run_shell("terraform state rm module.example")
+from asyncio import create_subprocess_exec as async_run
+async_run("aws", "s3api", "put-bucket-policy")
 '''
         self.assertTrue(contains_forbidden_terraform_state_change(source))
         commands = python_aws_cli_commands(source)
