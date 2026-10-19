@@ -152,6 +152,7 @@ resource "aws_instance" "codebuild_nat" {
     iptables -t nat -A POSTROUTING -o ens5 -j MASQUERADE
     service iptables save
     systemctl enable --now iptables
+    echo 'PAWLOCAL_NAT_BOOTSTRAP_READY' > /dev/console
   USERDATA
   user_data_replace_on_change = true
   depends_on                  = [aws_route_table_association.runner_public]

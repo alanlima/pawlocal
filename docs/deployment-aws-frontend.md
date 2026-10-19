@@ -16,7 +16,26 @@ The root domain, frontend certificate ARN, repository identity, immutable GitHub
 
 1. With `enable_codebuild_runner = false`, the runner-specific Terraform resources consist only of the GitHub CodeConnection; the integrated root can still manage the separately reviewed application resources. The connection has no PAT; AWS reports it as `PENDING` until the owner completes the GitHub App authorization flow in the AWS Console. The owner must grant the app access to this repository and its workflow-job webhook events.
 2. After authorization succeeds, inspect the existing AWS account for a CodeBuild GitHub source credential before enabling the Terraform `aws_codebuild_source_credential` resource. That provider resource is account-level and can replace an existing GitHub CodeBuild credential. Then review and separately authorize the Terraform plan with `enable_codebuild_runner = true`; it creates the private runner network, NAT instance/EIP, CodeBuild project and webhook, and updates the Lightsail SSH allowlist. No CodeBuild runner credential or GitHub PAT is an input.
-3. Configure `PAWLOCAL_DEPLOY_MODE=codebuild` and the protected GitHub environment variables/secrets only after the project and webhook are ready. Dispatch the full-stack release workflow from `main` if development must be rerun after initial runner setup. Production promotion remains a separate manual workflow.
+3. After the runner Terraform apply completes, verify the NAT instance before enabling deployment jobs. The startup script emits `PAWLOCAL_NAT_BOOTSTRAP_READY` only after package installation, IP forwarding, masquerading and the iptables service succeed. From PowerShell, wait for EC2 health checks and confirm that the marker is present in the latest instance console output:
+
+   ```powershell
+   $region = "ap-southeast-2"
+   $natId = aws ec2 describe-instances --region $region --filters "Name=tag:Name,Values=pawlocal-codebuild-nat" "Name=instance-state-name,Values=running" --query "Reservations[].Instances[].InstanceId" --output text
+   if (-not $natId -or $natId -eq "None") { throw "No running PawLocal NAT instance found" }
+   aws ec2 wait instance-status-ok --region $region --instance-ids $natId
+   $expectedEgress = terraform -chdir=infra/terraform output -raw codebuild_runner_egress_ipv4
+   $actualEgress = aws ec2 describe-instances --region $region --instance-ids $natId --query "Reservations[0].Instances[0].PublicIpAddress" --output text
+   if ($actualEgress -ne $expectedEgress) { throw "NAT EIP is not attached to the expected instance" }
+   $ready = $false
+   for ($attempt = 0; $attempt -lt 30; $attempt++) {
+     $console = aws ec2 get-console-output --region $region --instance-id $natId --latest --query Output --output text
+     if ($console -match "PAWLOCAL_NAT_BOOTSTRAP_READY") { $ready = $true; break }
+     Start-Sleep -Seconds 20
+   }
+   if (-not $ready) { throw "NAT bootstrap did not report readiness; inspect EC2 console output and do not enable deployment jobs" }
+   ```
+
+   Only after these checks pass, configure `PAWLOCAL_DEPLOY_MODE=codebuild` and the protected GitHub environment variables/secrets. The first protected development job then verifies runner-to-Lightsail SSH over the expected NAT egress path. Dispatch the full-stack release workflow from `main` if development must be rerun after initial runner setup. Production promotion remains a separate manual workflow.
 
 The CodeBuild service role is limited to build logs, VPC attachment, and use of this connection. It is not the GitHub OIDC deployment role and has no Terraform state or infrastructure-management permissions. The deployment job gets its AWS access through the existing environment-scoped GitHub OIDC role. SSH private keys and DSQL access keys remain in protected GitHub environment secrets and are not Terraform inputs, outputs, state, plans, runner project variables, or build artifacts. The connection ARN is metadata, not a credential. Avoid printing secret values or shell environments into CodeBuild logs.
 
