@@ -24,7 +24,7 @@ ALLOWED_AWS_COMMANDS = {
     ("s3", "cp"),
     ("cloudfront", "create-invalidation"),
 }
-AWS_CLI_START = re.compile(r"\baws(?=[ \t])")
+AWS_CLI_START = re.compile(r"(?<![\w.-])(?:aws|\"aws\"|'aws')(?=[ \t])")
 AWS_OPTIONS_WITH_VALUES = {
     "--ca-bundle",
     "--cli-binary-format",
@@ -155,16 +155,22 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
         commands = (
             'aws --region "$AWS_REGION" ec2 terminate-instances --instance-ids i-123',
             "aws --profile deploy --region=ap-southeast-2 s3api put-bucket-policy",
+            'aws --endpoint-url "$AWS_ENDPOINT" s3api put-bucket-policy',
             'aws lightsail --region "$AWS_REGION" get-container-services',
         )
         expected = (
             ("ec2", "terminate-instances"),
+            ("s3api", "put-bucket-policy"),
             ("s3api", "put-bucket-policy"),
             ("lightsail", "get-container-services"),
         )
         for command, pair in zip(commands, expected, strict=True):
             with self.subTest(command=command):
                 self.assertEqual(aws_cli_commands(command), [pair])
+
+    def test_aws_cli_scanner_handles_quoted_executable(self) -> None:
+        command = '"aws" ec2 terminate-instances --instance-ids i-123'
+        self.assertEqual(aws_cli_commands(command), [("ec2", "terminate-instances")])
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
