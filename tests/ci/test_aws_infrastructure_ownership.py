@@ -56,14 +56,25 @@ TERRAFORM_STATE_MUTATION = re.compile(
     r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS +
     r"[ \t]+state[ \t]+(?:push|import|mv|rm|replace-provider)\b"
 )
-TERRAFORM_IMPORT = re.compile(r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+import\b")
+TERRAFORM_WORKSPACE_STATE_MUTATION = re.compile(
+    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+workspace[ \t]+(?:new|delete)\b"
+)
+TERRAFORM_TOP_LEVEL_STATE_MUTATION = re.compile(
+    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+(?:import|taint|untaint|refresh|force-unlock)\b"
+)
+TERRAFORM_INIT_STATE_MIGRATION = re.compile(
+    r"\bterraform\b" + TERRAFORM_GLOBAL_OPTIONS + r"[ \t]+init\b"
+    r"[^\n;|)]*[ \t]+(?:-migrate-state|-force-copy)(?:[ \t]|$)"
+)
 
 
 def contains_forbidden_terraform_state_change(source: str) -> bool:
     normalized = normalize_shell_continuations(source)
     return (
         TERRAFORM_STATE_MUTATION.search(normalized) is not None
-        or TERRAFORM_IMPORT.search(normalized) is not None
+        or TERRAFORM_WORKSPACE_STATE_MUTATION.search(normalized) is not None
+        or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(normalized) is not None
+        or TERRAFORM_INIT_STATE_MIGRATION.search(normalized) is not None
     )
 
 
@@ -185,9 +196,23 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
     def test_state_mutation_guard_handles_global_terraform_options(self) -> None:
         prohibited = (
             "terraform state rm module.example",
+            "terraform workspace new preview",
+            "terraform workspace delete preview",
             "terraform import module.example id",
+            "terraform taint module.example",
+            "terraform untaint module.example",
+            "terraform refresh",
+            "terraform force-unlock abc123",
             'terraform -chdir="$root" import module.example id',
+            'terraform -chdir="$root" taint module.example',
+            'terraform -chdir "$root" untaint module.example',
+            'terraform -chdir="$root" force-unlock abc123',
+            "terraform -chdir=infra/terraform refresh",
+            "terraform init -migrate-state",
+            'terraform -chdir="$root" init -force-copy',
             'terraform -chdir="$root" state rm module.example',
+            'terraform -chdir="$root" workspace new preview',
+            'terraform -chdir "$root" workspace delete preview',
             'terraform -chdir "$root" state import module.example id',
             "terraform -chdir=infra/terraform state mv a b",
         )
