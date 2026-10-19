@@ -127,7 +127,7 @@ variable "dsql_auth_retention_days" {
   nullable    = true
 
   validation {
-    condition     = var.dsql_auth_retention_days == null || (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
+    condition     = var.dsql_auth_retention_days == null ? true : (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
     error_message = "When specified, dsql_auth_retention_days must be a positive whole number of days."
   }
 }

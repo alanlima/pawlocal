@@ -43,6 +43,12 @@ variable "terraform_state_bucket_name" {
   type        = string
 }
 
+variable "additional_frontend_bucket_arns" {
+  description = "Additional exact frontend bucket ARNs owned by the root state and read by the Terraform release role during full-state refresh."
+  type        = list(string)
+  default     = []
+}
+
 variable "manage_github_oidc_provider" {
   description = "Create the account-level GitHub OIDC provider only if none exists."
   type        = bool
@@ -90,7 +96,7 @@ variable "dsql_auth_retention_days" {
   nullable    = true
 
   validation {
-    condition     = var.dsql_auth_retention_days == null || (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
+    condition     = var.dsql_auth_retention_days == null ? true : (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
     error_message = "When specified, dsql_auth_retention_days must be a positive whole number of days."
   }
 }

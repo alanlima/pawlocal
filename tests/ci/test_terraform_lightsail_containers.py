@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -74,6 +75,66 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("no successful verified development deployment", workflow)
         self.assertIn("terraform-lightsail-container-deploy.sh development", workflow)
         self.assertIn("validate-release-metadata.py", workflow)
+
+    def test_nullable_dsql_retention_validation_is_null_safe(self) -> None:
+        for filename in ("infra/terraform/variables.tf", "infra/terraform/fullstack/variables.tf"):
+            text = (ROOT / filename).read_text(encoding="utf-8")
+            self.assertIn(
+                "var.dsql_auth_retention_days == null ? true : (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)",
+                text,
+            )
+
+    def test_terraform_release_role_scopes_cloudfront_and_cognito_refresh_reads(self) -> None:
+        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        frontend_publish = re.search(
+            r'sid\s*=\s*"ListFrontendBucket"(.*?)(?=\n  statement|\n})',
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(frontend_publish)
+        self.assertIn('"s3:ListBucket"', frontend_publish.group(1))
+        self.assertIn("aws_s3_bucket.frontend[each.key].arn", frontend_publish.group(1))
+        self.assertNotIn('resources = ["*"]', frontend_publish.group(1))
+
+        terraform_bucket_read = re.search(
+            r'sid\s*=\s*"ListPawLocalFrontendBucketsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(terraform_bucket_read)
+        self.assertIn('"s3:ListBucket"', terraform_bucket_read.group(1))
+        self.assertIn('aws_s3_bucket.frontend["development"].arn', terraform_bucket_read.group(1))
+        self.assertIn("var.additional_frontend_bucket_arns", terraform_bucket_read.group(1))
+        self.assertNotIn('resources = ["*"]', terraform_bucket_read.group(1))
+        root_module = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
+        self.assertIn("additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]", root_module)
+
+        cloudfront = re.search(
+            r'sid\s*=\s*"DescribePawLocalSpaFunctionsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
+            text,
+            re.DOTALL,
+        )
+        cognito = re.search(
+            r'sid\s*=\s*"ReadPawLocalUserPoolMfaForTerraformRefresh"(.*?)(?=\n  statement|\n})',
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(cloudfront)
+        self.assertIn('"cloudfront:DescribeFunction"', cloudfront.group(1))
+        self.assertIn("function.arn", cloudfront.group(1))
+        self.assertIn("pawlocal-production-spa-routing", cloudfront.group(1))
+        self.assertNotIn('resources = ["*"]', cloudfront.group(1))
+        self.assertIsNotNone(cognito)
+        self.assertIn('"cognito-idp:GetUserPoolMfaConfig"', cognito.group(1))
+        self.assertIn("user_pool.arn", cognito.group(1))
+        self.assertNotIn('resources = ["*"]', cognito.group(1))
+
+    def test_dsql_role_bootstrap_fingerprint_is_line_ending_stable(self) -> None:
+        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        self.assertIn(
+            'sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\\r\\n", "\\n"), "\\n", "\\r\\n"))',
+            text,
+        )
 
 
 if __name__ == "__main__":

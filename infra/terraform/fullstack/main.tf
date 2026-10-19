@@ -476,6 +476,23 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
   }
 
   statement {
+    sid     = "DescribePawLocalSpaFunctionsForTerraformRefresh"
+    effect  = "Allow"
+    actions = ["cloudfront:DescribeFunction"]
+    resources = concat(
+      [for function in values(aws_cloudfront_function.spa) : function.arn],
+      ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-production-spa-routing"]
+    )
+  }
+
+  statement {
+    sid       = "ReadPawLocalUserPoolMfaForTerraformRefresh"
+    effect    = "Allow"
+    actions   = ["cognito-idp:GetUserPoolMfaConfig"]
+    resources = [for user_pool in values(aws_cognito_user_pool.app) : user_pool.arn]
+  }
+
+  statement {
     sid    = "ReadPawLocalBucketConfiguration"
     effect = "Allow"
     actions = [
@@ -485,6 +502,13 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
       "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetBucketLocation"
     ]
     resources = ["arn:aws:s3:::pawlocal-*"]
+  }
+
+  statement {
+    sid       = "ListPawLocalFrontendBucketsForTerraformRefresh"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
   }
 
   statement {
@@ -543,7 +567,10 @@ resource "terraform_data" "app_dsql_role" {
     aws_dsql_cluster.app[each.key].arn,
     aws_lightsail_container_service.api[each.key].principal_arn,
     each.value.database_role,
-    filesha256("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"),
+    # Keep the existing state fingerprint stable across Windows CRLF and Linux
+    # LF checkouts. The role bootstrap is text; canonicalize it to CRLF before
+    # hashing so the tracked operation does not rerun solely due to checkout EOLs.
+    sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\r\n", "\n"), "\n", "\r\n")),
     filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
   ]
 
