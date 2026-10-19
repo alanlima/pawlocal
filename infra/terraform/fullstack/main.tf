@@ -439,7 +439,8 @@ resource "terraform_data" "app_dsql_role" {
 
   provisioner "local-exec" {
     working_dir = "${path.module}/../../../backend"
-    command     = "\"${var.dsql_bootstrap_python}\" -m pawlocal.dsql_role_bootstrap --endpoint \"${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws\" --region \"${var.aws_region}\" --database-role \"${each.value.database_role}\" --iam-user-arn \"${aws_iam_user.app[each.key].arn}\""
+    interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]
+    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-user-arn '${aws_iam_user.app[each.key].arn}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
   }
 
   depends_on = [aws_iam_user_policy.app_dsql_connect]
