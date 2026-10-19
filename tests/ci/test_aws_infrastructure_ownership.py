@@ -511,7 +511,7 @@ def workflow_python_scripts(source: str) -> list[str]:
             if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                 continue
             shell = step.get("shell", "bash")
-            if isinstance(shell, str) and re.match(r"^python(?:3)?(?:\s|$)", shell.strip()):
+            if isinstance(shell, str) and re.search(r"(?:^|[/\\])python(?:\d+(?:\.\d+)*)?(?:\s|$)", shell.strip()):
                 scripts.append(step["run"])
     return scripts
 
@@ -527,7 +527,7 @@ def python_process_launch_commands_for_executable(source: str) -> list[str]:
 
 def python_heredoc_scripts(source: str) -> list[str]:
     """Extract Python heredocs embedded in shell helpers for AST policy scanning."""
-    starts = re.compile(r"(?im)^[^\n]*\bpython(?:3)?\b[^\n]*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n")
+    starts = re.compile(r"(?im)^[^\n]*\bpython(?:\d+(?:\.\d+)*)?\b[^\n]*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n")
     scripts: list[str] = []
     for start in starts.finditer(source):
         delimiter = re.escape(start.group(1))
@@ -927,8 +927,16 @@ jobs:
         source = 'jobs:\n  deploy:\n    steps:\n      - name: Python command\n        shell: python\n        run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n'
         self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
 
+    def test_versioned_python_shell_workflow_steps_use_ast_guard(self) -> None:
+        source = 'jobs:\n  deploy:\n    steps:\n      - name: Python command\n        shell: python3.12\n        run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n'
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
+
     def test_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
         source = "python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
+        self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
+
+    def test_versioned_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
+        source = "python3.12 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
         self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
