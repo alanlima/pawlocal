@@ -117,6 +117,18 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn('aws_s3_bucket.frontend["development"].arn', acceleration_read.group(1))
         self.assertIn("var.additional_frontend_bucket_arns", acceleration_read.group(1))
         self.assertNotIn('resources = ["*"]', acceleration_read.group(1))
+
+        replication_read = re.search(
+            r'dynamic\s+"statement"\s*\{(.*?ReadPawLocalFrontendBucketReplicationForTerraformRefresh.*?)\n  \}',
+            text,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(replication_read)
+        self.assertIn('for_each = each.key == "development" ? [true] : []', replication_read.group(1))
+        self.assertIn('actions   = ["s3:GetReplicationConfiguration"]', replication_read.group(1))
+        self.assertIn('aws_s3_bucket.frontend["development"].arn', replication_read.group(1))
+        self.assertIn("var.additional_frontend_bucket_arns", replication_read.group(1))
+        self.assertNotIn('resources = ["*"]', replication_read.group(1))
         root_module = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
         self.assertIn("additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]", root_module)
 
