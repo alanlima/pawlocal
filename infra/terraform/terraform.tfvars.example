@@ -5,11 +5,14 @@ certificate_arn      = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-
 github_repository    = "owner/repository"
 github_owner_id      = "123456"
 github_repository_id = "1234567890"
+# Base64-encoded raw PGP public key; the matching private key is only used
+# offline to transfer the encrypted Terraform access-key output to GitHub secrets.
+dsql_access_key_pgp_public_key = "REPLACE_WITH_BASE64_RAW_PGP_PUBLIC_KEY"
 environment          = "production"
 
-# Keep false to use the account's existing shared GitHub Actions OIDC provider.
-# Set true only when the account does not already have that provider.
-manage_github_oidc_provider = false
+# The existing root state already manages the account-level GitHub Actions OIDC provider.
+# Keep true so Terraform retains ownership at the existing root state address.
+manage_github_oidc_provider = true
 
 # Required inputs for the Lightsail API deployment path. Use restricted, owner-approved
 # SSH ranges; do not use 0.0.0.0/0. Private keys belong in GitHub environment secrets.

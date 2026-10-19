@@ -374,6 +374,12 @@ resource "aws_iam_user" "app" {
   path     = "/pawlocal/"
 }
 
+resource "aws_iam_access_key" "app" {
+  for_each = local.environments
+  user     = aws_iam_user.app[each.key].name
+  pgp_key  = var.dsql_access_key_pgp_public_key
+}
+
 data "aws_iam_policy_document" "app_dsql_connect" {
   for_each = local.environments
   statement {
