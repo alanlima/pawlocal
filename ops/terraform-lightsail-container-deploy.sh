@@ -22,7 +22,8 @@ if v.get('telemetry_enabled') is not False:
 print(image)
 PY
 )"
-root="$GITHUB_WORKSPACE/infra/terraform"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+root="$script_dir/../infra/terraform"
 terraform -chdir="$root" init -input=false -reconfigure \
   -backend-config="bucket=$PAWLOCAL_TF_STATE_BUCKET" \
   -backend-config='key=pawlocal/terraform.tfstate' \
@@ -37,6 +38,24 @@ export TF_VAR_terraform_state_bucket_name="$PAWLOCAL_TF_STATE_BUCKET"
 export TF_VAR_dsql_bootstrap_python=/usr/bin/python3
 
 current_targets="$(terraform -chdir="$root" output -json environment_targets)"
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  TARGETS_JSON="$current_targets" python3 - "$environment" "$GITHUB_ENV" <<'PY'
+import json,os,sys
+import re
+environment,github_env=sys.argv[1:]
+targets=json.loads(os.environ['TARGETS_JSON'])
+target=targets.get(environment) or {}
+bucket=target.get('frontend_bucket')
+distribution=target.get('distribution_id')
+if not isinstance(bucket,str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]',bucket):
+    raise SystemExit(f'Terraform state has no valid frontend bucket for {environment}')
+if not isinstance(distribution,str) or not re.fullmatch(r'[A-Z0-9]+',distribution):
+    raise SystemExit(f'Terraform state has no frontend publication target for {environment}')
+with open(github_env,'a',encoding='utf-8') as output:
+    output.write(f'PAWLOCAL_FRONTEND_BUCKET={bucket}\n')
+    output.write(f'PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID={distribution}\n')
+PY
+fi
 export TF_VAR_backend_image_digests="$(CURRENT_TARGETS="$current_targets" python3 - "$environment" "$image" <<'PY'
 import json,os,sys
 current=json.loads(os.environ['CURRENT_TARGETS'])
@@ -55,7 +74,7 @@ plan="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-container-${environment}.XXXXXX.tf
 trap 'rm -f "$plan"' EXIT
 terraform -chdir="$root" plan -input=false -lock-timeout=5m -out="$plan"
 terraform -chdir="$root" show -json "$plan" |
-  python3 ops/validate-lightsail-container-plan.py --environment "$environment" --image "$image"
+  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image"
 terraform -chdir="$root" apply -input=false -lock-timeout=5m -auto-approve "$plan"
 service_json="$(aws lightsail get-container-services --service-name "pawlocal-${environment}-api" --query 'containerServices[0]' --output json)"
 printf '%s' "$service_json" | TARGET_IMAGE="$image" python3 -c '

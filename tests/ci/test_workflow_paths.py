@@ -107,6 +107,16 @@ class WorkflowPathTests(unittest.TestCase):
                     expected_workflows,
                 )
 
+    def test_local_action_changes_trigger_workflow_validation(self) -> None:
+        self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actions/**"), 2)
+        for path in (
+            ".github/actions/deploy/action.yml",
+            ".github/actions/deploy/index.js",
+            ".github/actions/deploy/lib/publish.js",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(matches("workflow-validation.yml", path))
+
     def test_workflow_changes_trigger_validation_and_affected_frontend_check(self) -> None:
         path = ".github/workflows/frontend-production-deploy.yml"
         self.assertTrue(matches("workflow-validation.yml", path))
@@ -164,6 +174,24 @@ class WorkflowPathTests(unittest.TestCase):
         ):
             with self.subTest(path=path):
                 self.assertTrue(matches("workflow-validation.yml", path))
+
+    def test_historical_production_promotion_uses_current_deployment_tooling(self) -> None:
+        workflow = (WORKFLOWS / "deploy-production.yml").read_text(encoding="utf-8")
+        release_checkout = workflow.index("name: Check out selected release source")
+        tooling_checkout = workflow.index("name: Check out current deployment tooling")
+        self.assertLess(release_checkout, tooling_checkout)
+        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
+        self.assertIn("path: deployment-tools", workflow)
+        self.assertIn("ref: ${{ inputs.release_commit }}", workflow)
+        self.assertIn(
+            "bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production",
+            workflow,
+        )
+        adapter = Path("ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
+        self.assertIn('script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"', adapter)
+        self.assertIn('root="$script_dir/../infra/terraform"', adapter)
+        self.assertIn('python3 "$script_dir/validate-lightsail-container-plan.py"', adapter)
+        self.assertNotIn('python3 ops/validate-lightsail-container-plan.py', adapter)
 
     def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text()
