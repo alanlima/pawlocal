@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session, selectinload
 
@@ -55,6 +55,20 @@ PLACES = (
         ),
     ),
 )
+
+_DSQL_APP_SCHEMA = "pawlocal"
+
+
+def verify_dsql_app_schema(engine) -> None:
+    """Fail closed if a DSQL seed would use a schema the API does not read."""
+    if engine.dialect.name != "auroradsql":
+        return
+    with engine.connect() as connection:
+        schema = connection.scalar(text("SELECT current_schema()"))
+    if schema != _DSQL_APP_SCHEMA:
+        raise RuntimeError(
+            "Aurora DSQL seed aborted: runtime schema does not match the API schema"
+        )
 
 
 def validate_target(
@@ -211,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         from pawlocal.infrastructure.database import engine
 
         try:
+            verify_dsql_app_schema(engine)
             for outcome in seed_with_engine(
                 engine,
                 args.environment,
