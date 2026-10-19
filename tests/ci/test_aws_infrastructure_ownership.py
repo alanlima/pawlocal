@@ -136,6 +136,9 @@ def python_process_launch_commands(source: str) -> list[str]:
     def callable_reference(node: ast.AST) -> bool:
         """Detect launch callables used as values; only direct import aliases are modeled."""
         if isinstance(node, ast.Call):
+            # A returned callable cannot be resolved without interprocedural analysis.
+            if isinstance(node.func, ast.Call):
+                return True
             if (
                 isinstance(node.func, ast.Name)
                 and node.func.id == "getattr"
@@ -260,12 +263,31 @@ def python_process_launch_commands(source: str) -> list[str]:
             value = argv_values(node.value)
             for target in node.targets:
                 if isinstance(target, ast.Name):
+                    if isinstance(node.value, ast.Name):
+                        if node.value.id in subprocess_modules:
+                            subprocess_modules.add(target.id)
+                        else:
+                            subprocess_modules.discard(target.id)
+                        if node.value.id in os_modules:
+                            os_modules.add(target.id)
+                        else:
+                            os_modules.discard(target.id)
+                        if node.value.id in asyncio_modules:
+                            asyncio_modules.add(target.id)
+                        else:
+                            asyncio_modules.discard(target.id)
+                    else:
+                        subprocess_modules.discard(target.id)
+                        os_modules.discard(target.id)
+                        asyncio_modules.discard(target.id)
                     callable_alias = launchable(node.value)
                     if callable_alias is not None:
                         aliases[target.id] = None
                         commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                     else:
                         aliases.pop(target.id, None)
+                        if isinstance(node.value, ast.Call):
+                            aliases[target.id] = None
                         if callable_reference(node.value):
                             commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                     if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
@@ -349,6 +371,9 @@ def python_process_launch_commands(source: str) -> list[str]:
 
         def visit_Call(self, call: ast.Call) -> None:
             function = call.func
+            if isinstance(function, ast.Call):
+                commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
+                return
             if launchable(function) is None and callable_reference(function):
                 commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 return
@@ -672,6 +697,9 @@ async_run("aws", "s3api", "put-bucket-policy")
             "import os\nlaunch = getattr(os, 'system')\nlaunch('aws ec2 terminate-instances')\n",
             "import subprocess\nlaunch = getattr(subprocess, 'run')\nlaunch(['aws', 'ec2', 'terminate-instances'])\n",
             "import os\nmethod = 'system'\nlaunch = getattr(os, method)\nlaunch('aws ec2 terminate-instances')\n",
+            "import os\nm = os\nlaunch = getattr(m, 'system')\nlaunch('aws ec2 terminate-instances')\n",
+            "import os\ndef get_launcher():\n    return os.system\nget_launcher()('aws ec2 terminate-instances')\n",
+            "import os\ndef get_launcher():\n    return os.system\nlaunch = get_launcher()\nlaunch('aws ec2 terminate-instances')\n",
         )
         for source in examples:
             with self.subTest(source=source):
