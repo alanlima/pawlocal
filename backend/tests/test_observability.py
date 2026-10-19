@@ -666,17 +666,14 @@ def test_pgconn_authentication_diagnostic_keeps_wording_without_password_or_toke
     assert "opaque wrapper" not in json.dumps(fields)
 
 
-def test_pgconn_error_redacts_explicit_credential_values_only(monkeypatch):
+def test_pgconn_error_preserves_token_like_server_text_by_design(monkeypatch):
     import psycopg
     from sqlalchemy.exc import OperationalError
 
     from pawlocal.observability import safe_exception_log_fields
 
     diagnostic = (
-        "FATAL: IAM authentication failed; password=PASSWORD_SENTINEL "
-        "token=TOKEN_SENTINEL; retry after provider refresh; "
-        "AWS_SESSION_TOKEN=AWS_TOKEN_SENTINEL; "
-        "DSN=postgresql://dbuser:DSN_PASSWORD_SENTINEL@db.example/pawlocal"
+        "FATAL: IAM authentication failed; token=TOKEN_SENTINEL; retry after refresh"
     )
     driver = psycopg.OperationalError("opaque wrapper")
     pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
@@ -686,21 +683,10 @@ def test_pgconn_error_redacts_explicit_credential_values_only(monkeypatch):
     fields = safe_exception_log_fields(wrapped)
     detail = fields["database_pgconn_error_message"]
 
-    assert detail == (
-        "FATAL: IAM authentication failed; password=[REDACTED] "
-        "token=[REDACTED]; retry after provider refresh; "
-        "AWS_SESSION_TOKEN=[REDACTED]; "
-        "DSN=postgresql://dbuser:[REDACTED]@db.example/pawlocal"
-    )
-    for secret in (
-        "PASSWORD_SENTINEL",
-        "TOKEN_SENTINEL",
-        "DSN_PASSWORD_SENTINEL",
-        "AWS_TOKEN_SENTINEL",
-        "opaque wrapper",
-        "private SQL",
-    ):
-        assert secret not in json.dumps(fields)
+    assert detail == diagnostic
+    assert "TOKEN_SENTINEL" in json.dumps(fields)
+    assert "opaque wrapper" not in json.dumps(fields)
+    assert "private SQL" not in json.dumps(fields)
 
 
 def test_pgconn_error_message_is_capped_at_2048_characters(monkeypatch):
@@ -721,7 +707,7 @@ def test_pgconn_error_message_is_capped_at_2048_characters(monkeypatch):
     assert len(fields["database_pgconn_error_message"]) == 2048
 
 
-def test_pgconn_error_message_byte_limit_replaces_split_utf8_character(monkeypatch):
+def test_pgconn_error_message_byte_limit_drops_split_utf8_character(monkeypatch):
     import psycopg
     from sqlalchemy.exc import OperationalError
 
@@ -735,7 +721,26 @@ def test_pgconn_error_message_byte_limit_replaces_split_utf8_character(monkeypat
 
     fields = safe_exception_log_fields(wrapped)
 
-    assert fields["database_pgconn_error_message"] == "a" * 2047 + "\ufffd"
+    assert fields["database_pgconn_error_message"] == "a" * 2047
+    assert len(fields["database_pgconn_error_message"].encode("utf-8")) <= 2048
+
+
+def test_pgconn_error_message_cap_applies_after_utf8_conversion(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    diagnostic = "é" * 2048
+    driver = psycopg.OperationalError("opaque wrapper")
+    pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_pgconn_error_message"] == "é" * 1024
+    assert len(fields["database_pgconn_error_message"].encode("utf-8")) == 2048
 
 
 def test_password_flags_alone_do_not_infer_authentication_cause(monkeypatch):

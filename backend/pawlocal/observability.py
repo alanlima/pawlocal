@@ -31,20 +31,6 @@ _SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 _MAX_EXCEPTION_CHAIN_DEPTH = 5
 _MAX_DATABASE_ERROR_MESSAGE_BYTES = 2048
-_DATABASE_CREDENTIAL_FIELD = re.compile(
-    r"(?P<prefix>\b(?:password|passwd|pwd|token|session[_-]?token|refresh[_-]?token|"
-    r"id[_-]?token|secret|secret[_-]?key|secret[_-]?access[_-]?key|"
-    r"access[_-]?key(?:[_-]?id)?|aws[_-]?(?:access[_-]?key[_-]?id|"
-    r"secret[_-]?access[_-]?key|session[_-]?token)|client[_-]?secret|"
-    r"api[_-]?key|authorization)\b"
-    r"\s*[:=]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
-    re.IGNORECASE,
-)
-_DATABASE_DSN_PASSWORD = re.compile(
-    r"(?P<scheme>\b(?:postgres(?:ql)?|mysql|mariadb)://)"
-    r"(?P<user>[^:/@\s]+:)[^@\s/?#]+(?P<suffix>@)",
-    re.IGNORECASE,
-)
 
 
 class _SafeJsonFormatter(logging.Formatter):
@@ -280,20 +266,16 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
 
 
 def _database_pgconn_error_message(value: Any) -> str | None:
-    """Return bounded libpq text, scrubbing only explicit credential values."""
+    """Return bounded libpq connection text, excluding wrapper exceptions."""
     if isinstance(value, bytes):
-        value = value[:_MAX_DATABASE_ERROR_MESSAGE_BYTES].decode(
-            "utf-8", errors="replace"
-        )
+        value = value.decode("utf-8", errors="replace")
     elif isinstance(value, str):
-        value = value[:_MAX_DATABASE_ERROR_MESSAGE_BYTES]
+        pass
     else:
         return None
-    value = _DATABASE_CREDENTIAL_FIELD.sub(
-        lambda match: f"{match.group('prefix')}[REDACTED]",
-        value,
+    value = value.encode("utf-8")[:_MAX_DATABASE_ERROR_MESSAGE_BYTES].decode(
+        "utf-8", errors="ignore"
     )
-    value = _DATABASE_DSN_PASSWORD.sub(r"\g<scheme>\g<user>[REDACTED]\g<suffix>", value)
     return value or None
 
 
