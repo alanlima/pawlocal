@@ -60,6 +60,7 @@ class _SafeJsonFormatter(logging.Formatter):
             "database_error_classification_source",
             "database_pgconn_available",
             "database_pgconn_error_message_present",
+            "database_pgconn_error_message",
             "database_auth_needs_password",
             "database_auth_used_password",
         ):
@@ -150,6 +151,7 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "database_error_classification_source",
             "database_pgconn_available",
             "database_pgconn_error_message_present",
+            "database_pgconn_error_message",
             "database_auth_needs_password",
             "database_auth_used_password",
         }
@@ -248,6 +250,9 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
             fields["database_pgconn_error_message_present"] = isinstance(
                 pgconn_message, (bytes, str)
             ) and bool(pgconn_message)
+            detail = _database_pgconn_error_message(pgconn_message)
+            if detail is not None:
+                fields["database_pgconn_error_message"] = detail
             for attribute, field in (
                 ("needs_password", "database_auth_needs_password"),
                 ("used_password", "database_auth_used_password"),
@@ -257,6 +262,17 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
                     fields[field] = value
             break
     return fields
+
+
+def _database_pgconn_error_message(value: Any) -> str | None:
+    """Return the bounded raw libpq connection diagnostic, without wrapper text."""
+    if isinstance(value, bytes):
+        value = value[:2048].decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        value = value[:2048]
+    else:
+        return None
+    return value or None
 
 
 def _safe_attribute(value: Any, name: str) -> Any:

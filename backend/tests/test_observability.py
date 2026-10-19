@@ -572,8 +572,7 @@ def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
             "needs_password": False,
             "used_password": True,
             "error_message": (
-                b"FATAL: IAM authentication failed user=PRIVATE_USER "
-                b"host=PRIVATE_HOST token=SIGNED_TOKEN"
+                b'FATAL: password authentication failed for user "pawlocal"\n'
             ),
         },
     )()
@@ -593,14 +592,10 @@ def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
     assert fields["database_pgconn_error_message_present"] is True
     assert fields["database_auth_needs_password"] is False
     assert fields["database_auth_used_password"] is True
-    for secret in (
-        "PRIVATE_USER",
-        "PRIVATE_HOST",
-        "SIGNED_TOKEN",
-        "PRIVATE_SQL",
-        "PARAM_SECRET",
-        "opaque driver exception text",
-    ):
+    assert fields["database_pgconn_error_message"] == (
+        'FATAL: password authentication failed for user "pawlocal"\n'
+    )
+    for secret in ("PRIVATE_SQL", "PARAM_SECRET", "opaque driver exception text"):
         assert secret not in encoded
 
 
@@ -614,7 +609,7 @@ def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
         ("unmatched private libpq detail", True),
     ],
 )
-def test_pgconn_error_message_presence_is_boolean_and_preserves_fallback(
+def test_pgconn_error_message_is_logged_verbatim_and_bounded_to_libpq(
     error_message, message_present, monkeypatch
 ):
     import psycopg
@@ -636,9 +631,57 @@ def test_pgconn_error_message_presence_is_boolean_and_preserves_fallback(
     assert fields["database_pgconn_error_message_present"] is message_present
     assert fields["database_error_classification"] == "connection_failure_unknown"
     assert fields["database_error_classification_source"] == "fallback"
-    assert "unmatched private libpq detail" not in encoded
+    if message_present:
+        expected = (
+            error_message.decode()
+            if isinstance(error_message, bytes)
+            else error_message
+        )
+        assert fields["database_pgconn_error_message"] == expected
+        assert expected in encoded
+    else:
+        assert "database_pgconn_error_message" not in fields
     assert "PRIVATE_SQL" not in encoded
     assert "PRIVATE_PARAM" not in encoded
+
+
+def test_pgconn_authentication_diagnostic_keeps_wording_without_password_or_token(
+    monkeypatch,
+):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    diagnostic = b'FATAL: password authentication failed for user "pawlocal"\n'
+    driver = psycopg.OperationalError("opaque wrapper")
+    pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {"password": "DO_NOT_LOG"}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_pgconn_error_message"] == diagnostic.decode()
+    assert "DO_NOT_LOG" not in json.dumps(fields)
+    assert "opaque wrapper" not in json.dumps(fields)
+
+
+def test_pgconn_error_message_is_capped_at_2048_characters(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    diagnostic = "connection failed: " + "x" * 4096
+    driver = psycopg.OperationalError("opaque wrapper")
+    pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_pgconn_error_message"] == diagnostic[:2048]
+    assert len(fields["database_pgconn_error_message"]) == 2048
 
 
 def test_password_flags_alone_do_not_infer_authentication_cause(monkeypatch):
@@ -670,7 +713,7 @@ def test_conflicting_driver_and_pgconn_diagnostics_fall_back_to_unknown(monkeypa
     pgconn = type(
         "FakePgconn",
         (),
-        {"error_message": b"connection refused PRIVATE_PGCONN"},
+        {"error_message": b"connection refused"},
     )()
     monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
     wrapped = OperationalError("PRIVATE_SQL", {"token": "PRIVATE_PARAM"}, driver)
@@ -680,7 +723,8 @@ def test_conflicting_driver_and_pgconn_diagnostics_fall_back_to_unknown(monkeypa
     assert fields["database_error_classification"] == "connection_failure_unknown"
     assert fields["database_error_classification_source"] == "ambiguous_driver_message"
     encoded = json.dumps(fields)
-    for secret in ("PRIVATE_DRIVER", "PRIVATE_PGCONN", "PRIVATE_SQL", "PRIVATE_PARAM"):
+    assert fields["database_pgconn_error_message"] == "connection refused"
+    for secret in ("PRIVATE_DRIVER", "PRIVATE_SQL", "PRIVATE_PARAM"):
         assert secret not in encoded
 
 
@@ -694,7 +738,9 @@ def test_pgconn_invalid_utf8_does_not_break_safe_classification(monkeypatch):
     pgconn = type(
         "FakePgconn",
         (),
-        {"error_message": b"\xff FATAL: IAM authentication failed PRIVATE_TOKEN"},
+        {
+            "error_message": b'\xff FATAL: password authentication failed for user "pawlocal"'
+        },
     )()
     monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
     wrapped = OperationalError("PRIVATE_SQL", {"value": "PRIVATE_PARAM"}, driver)
@@ -706,7 +752,10 @@ def test_pgconn_invalid_utf8_does_not_break_safe_classification(monkeypatch):
         fields["database_error_classification_source"] == "pgconn_error_message_pattern"
     )
     encoded = json.dumps(fields)
-    for secret in ("PRIVATE_TOKEN", "PRIVATE_SQL", "PRIVATE_PARAM"):
+    assert fields["database_pgconn_error_message"] == (
+        '\ufffd FATAL: password authentication failed for user "pawlocal"'
+    )
+    for secret in ("PRIVATE_SQL", "PRIVATE_PARAM"):
         assert secret not in encoded
 
 
