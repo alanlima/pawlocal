@@ -130,7 +130,7 @@ case "$operation" in
     verify_release "$2" "$4" "$6"
     ;;
   seed)
-    die "One-off database seeding is unavailable for container services until a stateful, audited seed mechanism is implemented"
+    die "Seeding is unavailable until a container-compatible, audited seed mechanism is implemented"
     ;;
   *) die "Operation must be deploy, verify, or seed" ;;
 esac
