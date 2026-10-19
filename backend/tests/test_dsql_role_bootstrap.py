@@ -48,7 +48,9 @@ class FakeEngine:
 
     @property
     def statements(self):
-        return [statement for transaction in self.transactions for statement in transaction]
+        return [
+            statement for transaction in self.transactions for statement in transaction
+        ]
 
 
 @pytest.fixture
@@ -60,9 +62,7 @@ def app_identity():
 
 
 def test_bootstrap_creates_role_maps_user_and_grants_schema(app_identity):
-    engine = FakeEngine(
-        [FakeResult(None), FakeResult(None), FakeResult(None)]
-    )
+    engine = FakeEngine([FakeResult(None), FakeResult(None), FakeResult(None)])
 
     ensure_app_role(engine, *app_identity)
 
@@ -76,9 +76,7 @@ def test_bootstrap_creates_role_maps_user_and_grants_schema(app_identity):
 
 
 def test_bootstrap_is_idempotent_for_existing_role_and_mapping(app_identity):
-    engine = FakeEngine(
-        [FakeResult(1), FakeResult(app_identity[0]), FakeResult(1)]
-    )
+    engine = FakeEngine([FakeResult(1), FakeResult(app_identity[0]), FakeResult(1)])
 
     ensure_app_role(engine, *app_identity)
 
@@ -94,6 +92,56 @@ def test_bootstrap_rejects_user_mapped_to_another_role(app_identity):
         ensure_app_role(engine, *app_identity)
 
     assert engine.statements == []
+
+
+def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    import certifi
+
+    from pawlocal import dsql_role_bootstrap
+
+    calls = []
+
+    class DisposableEngine:
+        def dispose(self):
+            pass
+
+    package = ModuleType("aurora_dsql_sqlalchemy")
+    package.create_dsql_engine = lambda **kwargs: (
+        calls.append(kwargs) or DisposableEngine()
+    )
+    monkeypatch.setitem(sys.modules, "aurora_dsql_sqlalchemy", package)
+    monkeypatch.setattr(dsql_role_bootstrap, "ensure_app_role", lambda *_args: None)
+
+    assert (
+        dsql_role_bootstrap.main(
+            [
+                "--endpoint",
+                "cluster.dsql.ap-southeast-2.on.aws",
+                "--region",
+                "ap-southeast-2",
+                "--database-role",
+                "pawlocal_development_app",
+                "--iam-user-arn",
+                "arn:aws:iam::123456789012:user/pawlocal/app",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        {
+            "host": "cluster.dsql.ap-southeast-2.on.aws",
+            "user": "admin",
+            "driver": "psycopg",
+            "dbname": "postgres",
+            "sslmode": "verify-full",
+            "sslrootcert": certifi.where(),
+            "application_name": "pawlocal-terraform-role-bootstrap",
+            "pool_pre_ping": True,
+        }
+    ]
 
 
 @pytest.mark.parametrize(
