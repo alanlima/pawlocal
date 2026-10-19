@@ -3,6 +3,9 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+
 from pawlocal.infrastructure import models  # noqa: F401
 from pawlocal.infrastructure.database import Base
 from pawlocal.infrastructure.models import PlaceRecord
@@ -12,8 +15,6 @@ from pawlocal.seed_places import (
     validate_target,
     verify_dsql_app_schema,
 )
-from sqlalchemy import create_engine
-from sqlalchemy.engine import make_url
 
 PLACES = load_catalog()
 
