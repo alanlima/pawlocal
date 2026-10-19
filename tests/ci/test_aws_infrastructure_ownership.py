@@ -714,16 +714,19 @@ def javascript_process_launch_commands(source: str) -> list[str]:
     commands: list[str] = []
     for match in calls.finditer(source):
         args = match.group(1).strip()
-        array_form = re.match(r"(['\"])(aws|terraform)\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
+        array_form = re.match(r"(['\"])(.*?)\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
         if array_form:
             executable = array_form.group(2)
+            executable_name = re.split(r"[/\\]", executable)[-1]
+            if executable_name not in {"aws", "terraform"}:
+                continue
             array_source = array_form.group(3)
             tokens = re.findall(r"(['\"])(.*?)\1", array_source, re.DOTALL)
             residual = re.sub(r"(['\"])(.*?)\1", "", array_source, flags=re.DOTALL).strip(" ,\t\r\n")
             if residual:
                 commands.append("<unresolved-child-process-command>")
             else:
-                commands.append(executable + " " + " ".join(token[1] for token in tokens))
+                commands.append(executable_name + " " + " ".join(token[1] for token in tokens))
             continue
         literal = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
         if literal:
@@ -1307,6 +1310,22 @@ cp.execFile("terraform", ["state", "rm", "module.other"]);
             ["terraform state rm module.example", "terraform state rm module.other"],
         )
         self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_javascript_path_qualified_aws_and_terraform_executables_are_scanned(self) -> None:
+        source = '''const cp = require("node:child_process");
+cp.execFileSync("/usr/local/bin/aws", ["ec2", "terminate-instances", "--instance-ids", "i-123"]);
+cp.spawn('/usr/bin/terraform', ['state', 'rm', 'module.example']);
+'''
+        commands = javascript_process_launch_commands(source)
+        self.assertEqual(
+            commands,
+            [
+                "aws ec2 terminate-instances --instance-ids i-123",
+                "terraform state rm module.example",
+            ],
+        )
+        self.assertEqual(aws_cli_commands(commands[0]), [("ec2", "terminate-instances")])
+        self.assertTrue(contains_forbidden_terraform_state_change(commands[1]))
 
     def test_javascript_dynamic_terraform_argv_fails_closed(self) -> None:
         source = '''const cp = require("child_process");
