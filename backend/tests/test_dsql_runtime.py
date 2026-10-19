@@ -4,7 +4,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 
-from pawlocal.infrastructure.community import CommunityRepository
+from pawlocal.infrastructure.community import (
+    CommunityRepository,
+    _RetryableDSQLOCCError,
+)
 from pawlocal.infrastructure.models import PlaceRecord
 from pawlocal.infrastructure.places import build_search_statement
 
@@ -60,7 +63,9 @@ def _serialization_error(code):
 def test_review_transaction_retries_dsql_occ_and_returns_on_success(monkeypatch):
     session = _FakeSession()
     repository = CommunityRepository(session)
-    outcomes = iter([_serialization_error("40001"), "submitted"])
+    outcomes = iter(
+        [_RetryableDSQLOCCError(_serialization_error("40001")), "submitted"]
+    )
     calls = []
 
     def submit_once(subject, values):
@@ -70,7 +75,7 @@ def test_review_transaction_retries_dsql_occ_and_returns_on_success(monkeypatch)
             raise result
         return result
 
-    monkeypatch.setattr(repository, "_submit_contribution_once", submit_once)
+    monkeypatch.setattr(repository, "_submit_review_once", submit_once)
     monkeypatch.setattr("pawlocal.infrastructure.community.sleep", lambda _: None)
 
     assert repository.submit_contribution("subject", {"kind": "review"}) == "submitted"
@@ -87,9 +92,9 @@ def test_review_transaction_stops_after_bounded_dsql_conflict_retries(monkeypatc
     def submit_once(_subject, _values):
         nonlocal calls
         calls += 1
-        raise _serialization_error(code)
+        raise _RetryableDSQLOCCError(_serialization_error(code))
 
-    monkeypatch.setattr(repository, "_submit_contribution_once", submit_once)
+    monkeypatch.setattr(repository, "_submit_review_once", submit_once)
     monkeypatch.setattr("pawlocal.infrastructure.community.sleep", lambda _: None)
 
     with pytest.raises(DBAPIError):
@@ -109,9 +114,56 @@ def test_review_transaction_does_not_retry_non_dsql_errors(monkeypatch):
         calls += 1
         raise _serialization_error("40001")
 
-    monkeypatch.setattr(repository, "_submit_contribution_once", submit_once)
+    monkeypatch.setattr(repository, "_submit_review_once", submit_once)
 
     with pytest.raises(DBAPIError):
         repository.submit_contribution("subject", {"kind": "review"})
     assert calls == 1
-    assert session.rollbacks == 1
+    assert session.rollbacks == 0
+
+
+def test_review_refresh_conflict_after_commit_is_not_retried():
+    from uuid import uuid4
+
+    class _CommittedSession(_FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.scalar_calls = 0
+            self.commits = 0
+            self.refreshes = 0
+
+        def scalar(self, _statement):
+            self.scalar_calls += 1
+            if self.scalar_calls == 1:
+                return SimpleNamespace(average_rating=None)
+            return 5.0
+
+        def add(self, _record):
+            pass
+
+        def flush(self):
+            pass
+
+        def commit(self):
+            self.commits += 1
+
+        def refresh(self, _record):
+            self.refreshes += 1
+            raise _serialization_error("40001")
+
+    session = _CommittedSession()
+    repository = CommunityRepository(session)
+
+    with pytest.raises(DBAPIError):
+        repository.submit_contribution(
+            "subject",
+            {
+                "kind": "review",
+                "place_id": uuid4(),
+                "rating": 5,
+                "body": "One committed review",
+            },
+        )
+
+    assert session.commits == 1
+    assert session.refreshes == 1

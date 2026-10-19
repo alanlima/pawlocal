@@ -3,7 +3,7 @@ from time import sleep
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from pawlocal.application.errors import DuplicateReviewError
 from pawlocal.domain.contributions import SubmittedContribution
@@ -17,6 +17,12 @@ from pawlocal.infrastructure.places import SqlAlchemyPlaceRepository
 
 _DSQL_RETRYABLE_SQLSTATES = {"40001", "OC000", "OC001"}
 _MAX_DSQL_REVIEW_ATTEMPTS = 3
+
+
+class _RetryableDSQLOCCError(Exception):
+    def __init__(self, error: DBAPIError):
+        super().__init__("Retryable Aurora DSQL optimistic concurrency conflict")
+        self.error = error
 
 
 def _dsql_conflict_code(error: DBAPIError) -> str | None:
@@ -36,6 +42,7 @@ class CommunityRepository:
     def list_favourites(self, subject: str):
         records = self.session.scalars(
             select(PlaceRecord)
+            .options(selectinload(PlaceRecord.facility_records))
             .join(FavouriteRecord, FavouriteRecord.place_id == PlaceRecord.id)
             .where(
                 FavouriteRecord.user_subject == subject,
@@ -74,54 +81,56 @@ class CommunityRepository:
         attempts = _MAX_DSQL_REVIEW_ATTEMPTS if is_dsql else 1
         for attempt in range(attempts):
             try:
-                return self._submit_contribution_once(subject, values)
-            except IntegrityError as exc:
-                # A uniqueness violation is a business conflict, not a transient
-                # OCC failure. Do not hide unrelated integrity errors.
+                return self._submit_review_once(subject, values)
+            except _RetryableDSQLOCCError as exc:
                 self.session.rollback()
-                if values.get("place_id"):
-                    raise DuplicateReviewError from exc
-                raise
-            except DBAPIError as exc:
-                code = _dsql_conflict_code(exc)
-                self.session.rollback()
-                if not is_dsql or code not in _DSQL_RETRYABLE_SQLSTATES:
-                    raise
                 if attempt + 1 == attempts:
-                    raise
+                    raise exc.error from exc
                 # Bounded exponential jitter reduces repeated collisions between
                 # requests that failed together without growing latency much.
                 sleep(uniform(0, 0.01 * (2**attempt)))
 
-    def _submit_contribution_once(self, subject: str, values: dict):
+    def _submit_review_once(self, subject: str, values: dict):
+        return self._submit_contribution_once(
+            subject,
+            values,
+            retry_dsql_occ=(
+                self.session.get_bind().dialect.name == "auroradsql"
+            ),
+        )
+
+    def _submit_contribution_once(
+        self, subject: str, values: dict, *, retry_dsql_occ: bool = False
+    ):
         place_id = values.get("place_id")
         place_record = None
-        if place_id and values["kind"] == "review":
-            place_record = self.session.scalar(
-                select(PlaceRecord)
-                .where(
-                    PlaceRecord.id == place_id,
-                    PlaceRecord.is_published.is_(True),
-                )
-                .with_for_update()
-            )
-            if place_record is None:
-                return None
-        elif (
-            place_id
-            and SqlAlchemyPlaceRepository(self.session).get_published(place_id) is None
-        ):
-            return None
-        record = ContributionRecord(
-            kind=values["kind"],
-            place_id=place_id,
-            rating=values.get("rating"),
-            body=values["body"],
-            contributor_subject=subject,
-            is_published=True,
-        )
-        self.session.add(record)
         try:
+            if place_id and values["kind"] == "review":
+                place_record = self.session.scalar(
+                    select(PlaceRecord)
+                    .where(
+                        PlaceRecord.id == place_id,
+                        PlaceRecord.is_published.is_(True),
+                    )
+                    .with_for_update()
+                )
+                if place_record is None:
+                    return None
+            elif (
+                place_id
+                and SqlAlchemyPlaceRepository(self.session).get_published(place_id)
+                is None
+            ):
+                return None
+            record = ContributionRecord(
+                kind=values["kind"],
+                place_id=place_id,
+                rating=values.get("rating"),
+                body=values["body"],
+                contributor_subject=subject,
+                is_published=True,
+            )
+            self.session.add(record)
             self.session.flush()
             if values["kind"] == "review" and place_record is not None:
                 average_rating = self.session.scalar(
@@ -138,6 +147,17 @@ class CommunityRepository:
             if values["kind"] == "review" and place_id:
                 raise DuplicateReviewError from exc
             raise
+        except DBAPIError as exc:
+            if (
+                retry_dsql_occ
+                and _dsql_conflict_code(exc) in _DSQL_RETRYABLE_SQLSTATES
+            ):
+                raise _RetryableDSQLOCCError(exc) from exc
+            self.session.rollback()
+            raise
+        # Refresh is intentionally outside the retryable transaction block. A
+        # transient error here may happen after commit, and replaying the review
+        # could submit a duplicate or a second contribution.
         self.session.refresh(record)
         return SubmittedContribution(
             id=record.id,

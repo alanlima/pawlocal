@@ -1,5 +1,5 @@
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from pawlocal.domain.places import Place, validate_category
 from pawlocal.infrastructure.models import PlaceFacilityRecord, PlaceRecord
@@ -28,6 +28,7 @@ class SqlAlchemyPlaceRepository:
         )
         records = self.session.scalars(
             statement.order_by(PlaceRecord.name, PlaceRecord.id)
+            .options(selectinload(PlaceRecord.facility_records))
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()

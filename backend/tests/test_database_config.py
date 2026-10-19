@@ -81,7 +81,9 @@ def test_dsql_engine_uses_the_runtime_factory_by_default(monkeypatch):
 def test_dsql_database_url_rejects_auth_query_parameters(query_key):
     from pawlocal.infrastructure.database import create_database_engine
 
-    url = make_url(f"auroradsql+psycopg://admin@cluster/db?{query_key}=secret")
+    url = make_url(
+        f"auroradsql+psycopg://pawlocal_app@cluster/db?{query_key}=secret"
+    )
     with pytest.raises(RuntimeError, match="Do not configure auth credentials"):
         create_database_engine(url, dsql_engine_factory=lambda _: object())
 
@@ -101,6 +103,26 @@ def test_dsql_engine_factory_receives_the_url_without_static_password():
 
     assert create_database_engine(url, dsql_engine_factory=factory) is engine
     assert received == [url]
+
+
+@pytest.mark.parametrize("username", ["admin", "Admin", " ADMIN "])
+def test_dsql_engine_rejects_reserved_admin_role(username):
+    from pawlocal.infrastructure.database import create_database_engine
+
+    encoded_username = username.replace(" ", "%20")
+    url = make_url(f"auroradsql+psycopg://{encoded_username}@cluster/db")
+    with pytest.raises(RuntimeError, match="reserved database role 'admin'"):
+        create_database_engine(url, dsql_engine_factory=lambda _: object())
+
+
+def test_dsql_settings_reject_reserved_admin_role():
+    settings = Settings(
+        _env_file=None,
+        database_url="auroradsql+psycopg://admin@cluster/db",
+    )
+
+    with pytest.raises(ValueError, match="reserved database role 'admin'"):
+        _ = settings.sqlalchemy_url
 
 
 def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(

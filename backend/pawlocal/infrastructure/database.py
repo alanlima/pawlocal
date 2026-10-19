@@ -54,6 +54,11 @@ def create_database_engine(
     """
     backend = url.get_backend_name().lower()
     if backend == "auroradsql":
+        if (url.username or "").strip().casefold() == "admin":
+            raise RuntimeError(
+                "Aurora DSQL reserved database role 'admin' cannot be used; "
+                "configure a custom application role."
+            )
         if url.password is not None or _contains_dsql_auth_query(url):
             raise RuntimeError(
                 "Do not configure auth credentials in the Aurora DSQL database URL; "
