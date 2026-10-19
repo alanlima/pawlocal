@@ -27,6 +27,7 @@ on:
       - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -46,7 +47,7 @@ jobs:
 
   publish:
     name: Publish immutable backend image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs:
       - frontend
       - backend
@@ -156,11 +157,10 @@ jobs:
 
   deploy-development:
     name: Deploy and verify development
-    # The approved initial firewall rule is the operator workstation /32. Do not
-    # start a GitHub-hosted runner deployment until a fixed-egress runner is approved.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
+    # Dispatch from main to rerun the verified dev release after initial runner setup.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'codebuild'
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: codebuild-pawlocal-deploy-runner-${{ github.run_id }}-${{ github.run_attempt }}
     environment: development
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}

@@ -12,8 +12,10 @@ environment          = "production"
 manage_github_oidc_provider = true
 
 # Required inputs for the Lightsail API deployment path. Use restricted, owner-approved
-# SSH ranges; do not use 0.0.0.0/0. Private keys belong in GitHub environment secrets.
-ssh_cidr_blocks = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+# administrator ranges; the runner EIP /32 is added when the CodeBuild runner is enabled.
+# Private keys belong in GitHub environment secrets.
+ssh_admin_cidr_blocks = ["REPLACE_WITH_OWNER_APPROVED_ADMIN_CIDR"]
+enable_codebuild_runner = false
 dsql_bootstrap_python = "C:/path/to/pawlocal/backend/.venv/Scripts/python.exe"
 deploy_ssh_public_keys = {
   development = "REPLACE_WITH_DEV_SSH_PUBLIC_KEY"

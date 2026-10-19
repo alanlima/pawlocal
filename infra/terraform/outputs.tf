@@ -18,6 +18,21 @@ output "github_deploy_role_arn" {
   value       = aws_iam_role.github_deploy.arn
 }
 
+output "github_codeconnection_arn" {
+  description = "Terraform-managed GitHub App connection. It remains PENDING until the owner authorizes it in AWS."
+  value       = aws_codestarconnections_connection.github_runner.arn
+}
+
+output "codebuild_runner_project_name" {
+  description = "CodeBuild runner project name used to construct the protected deployment job label; null until the runner is enabled."
+  value       = var.enable_codebuild_runner ? aws_codebuild_project.github_runner[0].name : null
+}
+
+output "codebuild_runner_egress_ipv4" {
+  description = "Fixed NAT instance egress address whose /32 is added to the Lightsail SSH allowlist; null until the runner is enabled."
+  value       = var.enable_codebuild_runner ? aws_eip.codebuild_runner[0].public_ip : null
+}
+
 output "environment_targets" {
   description = "Deployment targets for development and production, with production frontend assets mapped to the existing root-state bucket/distribution."
   value = {

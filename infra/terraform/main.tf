@@ -12,6 +12,10 @@ locals {
   github_owner        = split("/", var.github_repository)[0]
   github_repo         = split("/", var.github_repository)[1]
   github_oidc_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:ref:refs/heads/main"
+  lightsail_ssh_cidr_blocks = concat(
+    var.ssh_admin_cidr_blocks,
+    var.enable_codebuild_runner ? ["${aws_eip.codebuild_runner[0].public_ip}/32"] : []
+  )
   common_tags = {
     costcenter  = "personal"
     environment = var.environment
@@ -289,7 +293,7 @@ module "fullstack" {
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   deploy_ssh_public_keys         = var.deploy_ssh_public_keys
-  ssh_cidr_blocks                = var.ssh_cidr_blocks
+  ssh_cidr_blocks                = local.lightsail_ssh_cidr_blocks
   dsql_bootstrap_python          = var.dsql_bootstrap_python
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name

@@ -83,13 +83,19 @@ variable "deploy_ssh_public_keys" {
   }
 }
 
-variable "ssh_cidr_blocks" {
-  description = "Restricted IPv4 CIDRs allowed to SSH to each Lightsail instance. Owner must choose the allowed network ranges."
+variable "ssh_admin_cidr_blocks" {
+  description = "Owner-approved restricted IPv4 administrator CIDRs allowed to SSH to each Lightsail instance. The CodeBuild NAT EIP /32 is added separately when the runner is enabled."
   type        = list(string)
   validation {
-    condition     = length(var.ssh_cidr_blocks) > 0 && alltrue([for cidr in var.ssh_cidr_blocks : cidr != "0.0.0.0/0"])
-    error_message = "Provide at least one restricted IPv4 CIDR; unrestricted SSH is rejected."
+    condition     = length(var.ssh_admin_cidr_blocks) > 0 && alltrue([for cidr in var.ssh_admin_cidr_blocks : can(cidrnetmask(cidr)) && try(tonumber(split("/", cidr)[1]) > 0, false)])
+    error_message = "Provide at least one restricted IPv4 administrator CIDR with a prefix narrower than /0; unrestricted SSH is rejected."
   }
+}
+
+variable "enable_codebuild_runner" {
+  description = "Create the VPC, fixed-egress NAT instance, CodeBuild runner project, webhook, and source credential after the GitHub CodeConnection has been authorized."
+  type        = bool
+  default     = false
 }
 
 variable "dsql_bootstrap_python" {

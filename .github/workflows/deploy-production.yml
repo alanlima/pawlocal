@@ -18,7 +18,7 @@ concurrency:
 jobs:
   validate-release:
     name: Validate development-verified release
-    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
+    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'codebuild'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -121,7 +121,7 @@ jobs:
   deploy-production:
     name: Promote verified release to production
     needs: validate-release
-    runs-on: ubuntu-latest
+    runs-on: codebuild-pawlocal-deploy-runner-${{ github.run_id }}-${{ github.run_attempt }}
     environment: production
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
