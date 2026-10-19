@@ -88,8 +88,10 @@ resource "aws_dsql_cluster" "app" {
 }
 
 resource "aws_lightsail_certificate" "api" {
-  for_each    = local.environments
-  name        = "pawlocal-${each.key}-api"
+  for_each = local.environments
+  # AWS rejected the original service-derived names as already existing, even
+  # though they were absent from the certificate listing. Use migration names.
+  name        = "pawlocal-${each.key}-api-migration-20261019"
   domain_name = local.api_hostnames[each.key]
   tags        = merge(local.common_tags, { environment = each.key })
 }
