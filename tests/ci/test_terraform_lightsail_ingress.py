@@ -32,6 +32,8 @@ class TerraformLightsailIngressTests(unittest.TestCase):
             self.assertIn('temporary_ssh_environment', source)
             self.assertIn('temporary_ssh_cidr', source)
             self.assertIn('can(regex("/32$", var.temporary_ssh_cidr))', source)
+            self.assertIn('var.temporary_ssh_environment == null ? true :', source)
+            self.assertIn('var.temporary_ssh_cidr == null ? true :', source)
 
         self.assertIn('var.temporary_ssh_environment == environment ? [var.temporary_ssh_cidr] : []', module)
         self.assertIn('for_each = local.effective_ssh_cidr_blocks[each.key]', module)
@@ -45,9 +47,13 @@ class TerraformLightsailIngressTests(unittest.TestCase):
         self.assertIn('"arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate"', module)
         self.assertIn('"arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"', module)
         self.assertIn('"lightsail:PutInstancePublicPorts"', module)
+        self.assertIn('"lightsail:CloseInstancePublicPorts"', module)
+        self.assertIn('"ec2:DescribeAvailabilityZones"', module)
+        self.assertIn('"dsql:GetCluster"', module)
+        self.assertIn('"cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"', module)
         self.assertIn('resources = [aws_lightsail_instance.api[each.key].arn]', module)
 
-    def test_ingress_helper_targets_and_checks_one_in_place_firewall_update(self) -> None:
+    def test_ingress_helper_targets_and_checks_one_firewall_update(self) -> None:
         script = (ROOT / "ops/terraform-lightsail-ingress.sh").read_text(encoding="utf-8")
         self.assertIn('module.fullstack.aws_lightsail_instance_public_ports.api[', script)
         self.assertIn('-target="$target"', script)
@@ -69,12 +75,17 @@ class TerraformLightsailIngressTests(unittest.TestCase):
         }
 
     @staticmethod
-    def _plan(before: dict[str, Any], after: dict[str, Any], address: str | None = None) -> dict[str, Any]:
+    def _plan(
+        before: dict[str, Any],
+        after: dict[str, Any],
+        address: str | None = None,
+        actions: list[str] | None = None,
+    ) -> dict[str, Any]:
         return {
             "resource_changes": [
                 {
                     "address": address or 'module.fullstack.aws_lightsail_instance_public_ports.api["development"]',
-                    "change": {"actions": ["update"], "before": before, "after": after},
+                    "change": {"actions": actions or ["update"], "before": before, "after": after},
                 }
             ]
         }
@@ -86,8 +97,28 @@ class TerraformLightsailIngressTests(unittest.TestCase):
         before_open = self._firewall(baseline["development"])
         after_open = self._firewall([*baseline["development"], runner])
         PLAN_VALIDATOR.validate(self._plan(before_open, after_open), "open", "development", runner, baseline_json)
+        PLAN_VALIDATOR.validate(
+            self._plan(before_open, after_open, actions=["delete", "create"]),
+            "open", "development", runner, baseline_json,
+        )
 
         PLAN_VALIDATOR.validate(self._plan(after_open, before_open), "restore", "development", runner, baseline_json)
+
+    def test_plan_validator_rejects_replacement_that_changes_web_or_broadens_ssh(self) -> None:
+        baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
+        baseline_json = json.dumps(baseline)
+        runner = "203.0.113.10/32"
+        before = self._firewall(baseline["development"])
+        after = self._firewall([*baseline["development"], runner])
+        for changed in (
+            self._firewall(["0.0.0.0/0", runner]),
+            self._firewall([*baseline["development"], runner], ["192.0.2.3/32"]),
+        ):
+            with self.assertRaises(ValueError):
+                PLAN_VALIDATOR.validate(
+                    self._plan(before, changed, actions=["delete", "create"]),
+                    "open", "development", runner, baseline_json,
+                )
 
     def test_plan_validator_rejects_zero_updates_and_changes_to_web_or_other_rules(self) -> None:
         baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
@@ -118,7 +149,7 @@ class TerraformLightsailIngressTests(unittest.TestCase):
             self.assertIn('group: pawlocal-lightsail-deploy', workflow)
             self.assertIn('cancel-in-progress: false', workflow)
             self.assertIn('ops/terraform-lightsail-ingress.sh restore', workflow)
-            self.assertIn('steps.enable-ingress.outcome != \'skipped\'', workflow)
+            self.assertIn("steps.enable-ingress.outputs.ingress_state_may_have_changed == 'true'", workflow)
 
         self.assertIn('workflow_dispatch:', development)
         self.assertIn('github.event_name == \'workflow_dispatch\'', development)

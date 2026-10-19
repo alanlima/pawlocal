@@ -35,7 +35,12 @@ def _web_ports(blocks: Iterable[dict[str, Any]]) -> dict[int, list[str]]:
     for block in blocks:
         for port in values:
             if _matches_exact_tcp(block, port):
-                values[port].append(_normalize(block))
+                # Compare only requested firewall semantics. AWS provider computed
+                # aliases can be unknown during a plan and are not security rules.
+                semantic = {key: block.get(key) for key in (
+                    "protocol", "from_port", "to_port", "cidrs", "ipv6_cidrs"
+                )}
+                values[port].append(_normalize(semantic))
     if not values[80] or not values[443]:
         raise ValueError("Both existing TCP/80 and TCP/443 rules must remain present")
     return values
@@ -103,8 +108,9 @@ def validate(plan: dict[str, Any], operation: str, environment: str, runner_cidr
     resource_change = changes[0]
     if resource_change.get("address") != expected_address:
         raise ValueError(f"Only {expected_address} may change")
-    if resource_change.get("change", {}).get("actions") != ["update"]:
-        raise ValueError("The selected firewall must have one in-place update; create/delete/replace is rejected")
+    actions = resource_change.get("change", {}).get("actions")
+    if actions not in (["update"], ["delete", "create"]):
+        raise ValueError("The selected firewall must be an in-place update or provider-required replacement")
     change = resource_change["change"]
     before = change.get("before")
     after = change.get("after")
@@ -145,7 +151,7 @@ def main() -> int:
     except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
         print(f"Refusing Terraform ingress plan: {exc}", file=sys.stderr)
         return 2
-    print(f"Validated exactly one in-place {args.operation} update for {args.environment}; web and other port rules are unchanged")
+    print(f"Validated exactly one {args.operation} firewall change for {args.environment}; web and other port rules are unchanged")
     return 0
 
 

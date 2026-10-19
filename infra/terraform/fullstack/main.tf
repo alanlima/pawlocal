@@ -482,8 +482,26 @@ data "aws_iam_policy_document" "github_terraform_ingress" {
   }
 
   statement {
+    sid       = "ReadTerraformRefreshDependencies"
+    actions   = ["ec2:DescribeAvailabilityZones"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadTerraformRefreshResources"
+    actions   = ["dsql:GetCluster"]
+    resources = [for cluster in aws_dsql_cluster.app : cluster.arn]
+  }
+
+  statement {
+    sid       = "ReadTerraformRefreshUserPools"
+    actions   = ["cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"]
+    resources = [for pool in aws_cognito_user_pool.app : pool.arn]
+  }
+
+  statement {
     sid       = "UpdateOnlyThisEnvironmentInstancePorts"
-    actions   = ["lightsail:PutInstancePublicPorts"]
+    actions   = ["lightsail:PutInstancePublicPorts", "lightsail:CloseInstancePublicPorts"]
     resources = [aws_lightsail_instance.api[each.key].arn]
   }
 }

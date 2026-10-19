@@ -376,7 +376,7 @@ jobs:
           retention-days: 90
 
       - name: Reconfigure Terraform ingress role for cleanup
-        if: ${{ always() && steps.enable-ingress.outcome != 'skipped' }}
+        if: ${{ always() && steps.enable-ingress.outputs.ingress_state_may_have_changed == 'true' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
@@ -384,7 +384,7 @@ jobs:
           role-session-name: PawLocalProdIngressCleanup-${{ github.run_id }}
 
       - name: Restore production SSH ingress through Terraform
-        if: ${{ always() && steps.enable-ingress.outcome != 'skipped' }}
+        if: ${{ always() && steps.enable-ingress.outputs.ingress_state_may_have_changed == 'true' }}
         env:
           PAWLOCAL_RUNNER_IPV4_CIDR: ${{ steps.runner-ip.outputs.runner_cidr }}
         run: bash ops/terraform-lightsail-ingress.sh restore production
