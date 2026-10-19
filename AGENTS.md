@@ -299,7 +299,7 @@ Do not give incident agents unrestricted production permissions.
 
 ## 10. Cost management
 
-Terraform configuration and the existing shared Terraform state are the only mechanism for creating, changing, replacing, or deleting AWS infrastructure. AWS console, CLI, SDK, shell, and bootstrap scripts must not mutate infrastructure or Terraform state. CI may publish immutable application artifacts; any AWS-side application deployment must be owned by a Terraform resource in the shared state. Runtime secrets must not be stored in Terraform state. Never manually edit, import, or remove state bindings.
+Terraform configuration and its authoritative Terraform state are the only mechanism for creating, changing, replacing, or deleting durable AWS infrastructure. AWS CLI, SDK, console, shell, and bootstrap scripts may be used for read-only infrastructure inventory and troubleshooting, but must not create, change, or delete AWS resources. Approved CI artifact publication may write application artifacts only to Terraform-managed destinations; deployment state changes remain Terraform-managed. Do not manually edit state files or use imperative state import/removal commands. Use reviewed Terraform configuration and supported declarative migration blocks for ownership changes. Runtime secrets must not be stored in Terraform state.
 
 PawLocal must remain inexpensive to operate at low traffic.
 

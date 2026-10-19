@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars and fill with the existing GitHub identity/state inputs.
+# Keep terraform.tfvars untracked.
+terraform_state_bucket_name = "REPLACE_WITH_EXISTING_STATE_BUCKET"
+github_repository           = "owner/repository"
+github_owner_id             = "123456"
+github_repository_id        = "1234567890"

@@ -14,8 +14,6 @@ output "environment_targets" {
     dsql_cluster_arn           = aws_dsql_cluster.app[name].arn
     dsql_endpoint              = "${aws_dsql_cluster.app[name].identifier}.dsql.${var.aws_region}.on.aws"
     dsql_database_role         = config.database_role
-    deploy_role_arn            = contains(keys(local.frontend_environments), name) ? aws_iam_role.github_deploy[name].arn : null
-    terraform_deploy_role_arn  = aws_iam_role.github_terraform_deploy[name].arn
     cognito_user_pool_id       = aws_cognito_user_pool.app[name].id
     cognito_client_id          = aws_cognito_user_pool_client.app[name].id
     cognito_domain             = "https://${aws_cognito_user_pool_domain.app[name].domain}.auth.${var.aws_region}.amazoncognito.com"
@@ -23,6 +21,19 @@ output "environment_targets" {
     cognito_redirect_uri       = "https://${config.hostname}.${trimsuffix(var.root_domain, ".")}/auth/callback"
     cognito_logout_uri         = "https://${config.hostname}.${trimsuffix(var.root_domain, ".")}/"
     cognito_scopes             = "openid email profile"
+  } }
+}
+
+output "shared_iam_targets" {
+  description = "Exact application resource ARNs consumed by the shared IAM root when it builds least-privilege GitHub policies."
+  value = { for name in keys(local.environments) : name => {
+    frontend_bucket_arn       = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].arn : null
+    frontend_distribution_arn = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].arn : null
+    frontend_distribution_id  = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].id : null
+    frontend_function_arn     = contains(keys(local.frontend_environments), name) ? aws_cloudfront_function.spa[name].arn : null
+    cognito_user_pool_arn     = aws_cognito_user_pool.app[name].arn
+    api_container_service_arn = aws_lightsail_container_service.api[name].arn
+    audit_bucket_arn          = try(aws_s3_bucket.cloudtrail[0].arn, null)
   } }
 }
 

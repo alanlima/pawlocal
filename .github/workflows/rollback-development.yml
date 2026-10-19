@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   rollback-development:
-    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
+    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions' && vars.PAWLOCAL_TERRAFORM_LAYOUT == 'split'
     runs-on: ubuntu-latest
     environment: development
     permissions:
@@ -32,13 +32,12 @@ jobs:
       PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+      PAWLOCAL_TERRAFORM_LAYOUT: ${{ vars.PAWLOCAL_TERRAFORM_LAYOUT }}
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
       PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
       PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
       PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
-      TF_VAR_github_repository_id: ${{ github.repository_id }}
     steps:
       - name: Check out current deployment tooling
         uses: actions/checkout@v4

@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and supply the existing deployment inputs locally.
+# This example contains placeholders only; keep terraform.tfvars untracked.
+domain_name     = "example.com"
+certificate_arn = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+environment     = "production"
+
+# Supply the DSQL bootstrap interpreter available to this operator.
+dsql_bootstrap_python = "C:/path/to/pawlocal/backend/.venv/Scripts/python.exe"
+
+# Leave audit event capture disabled unless its destination and retention are approved.
+enable_dsql_auth_event_capture = false

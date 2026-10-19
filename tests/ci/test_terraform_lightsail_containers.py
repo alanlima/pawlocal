@@ -68,7 +68,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         adapter = (ROOT / "ops/deployment-adapters/lightsail-dsql.sh").read_text(encoding="utf-8")
         self.assertIn("get-container-services", deploy)
         self.assertIn("currentDeployment", deploy)
-        self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8"))
+        self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", (ROOT / "infra/terraform/app-infra/fullstack/main.tf").read_text(encoding="utf-8"))
         self.assertIn("running_image_digest", adapter)
 
     def test_deploy_adapter_cleans_frontend_temp_dir_after_publication(self) -> None:
@@ -267,7 +267,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("validate-release-metadata.py", workflow)
 
     def test_nullable_dsql_retention_validation_is_null_safe(self) -> None:
-        for filename in ("infra/terraform/variables.tf", "infra/terraform/fullstack/variables.tf"):
+        for filename in ("infra/terraform/app-infra/variables.tf", "infra/terraform/app-infra/fullstack/variables.tf"):
             text = (ROOT / filename).read_text(encoding="utf-8")
             self.assertIn(
                 "var.dsql_auth_retention_days == null ? true : (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)",
@@ -275,16 +275,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             )
 
     def test_terraform_release_role_scopes_cloudfront_and_cognito_refresh_reads(self) -> None:
-        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        frontend_publish = re.search(
-            r'sid\s*=\s*"ListFrontendBucket"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(frontend_publish)
-        self.assertIn('"s3:ListBucket"', frontend_publish.group(1))
-        self.assertIn("aws_s3_bucket.frontend[each.key].arn", frontend_publish.group(1))
-        self.assertNotIn('resources = ["*"]', frontend_publish.group(1))
+        text = (ROOT / "infra/terraform/shared-infra/main.tf").read_text(encoding="utf-8")
 
         terraform_bucket_read = re.search(
             r'sid\s*=\s*"ListPawLocalFrontendBucketsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
@@ -293,8 +284,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         )
         self.assertIsNotNone(terraform_bucket_read)
         self.assertIn('"s3:ListBucket"', terraform_bucket_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', terraform_bucket_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", terraform_bucket_read.group(1))
+        self.assertIn("local.frontend_bucket_arns", terraform_bucket_read.group(1))
         self.assertNotIn('resources = ["*"]', terraform_bucket_read.group(1))
 
         acceleration_read = re.search(
@@ -304,8 +294,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         )
         self.assertIsNotNone(acceleration_read)
         self.assertIn('"s3:GetAccelerateConfiguration"', acceleration_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', acceleration_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", acceleration_read.group(1))
+        self.assertIn("local.frontend_bucket_arns", acceleration_read.group(1))
         self.assertNotIn('resources = ["*"]', acceleration_read.group(1))
 
         replication_read = re.search(
@@ -316,11 +305,12 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIsNotNone(replication_read)
         self.assertIn('for_each = each.key == "development" ? [true] : []', replication_read.group(1))
         self.assertIn('actions   = ["s3:GetReplicationConfiguration"]', replication_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', replication_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", replication_read.group(1))
+        self.assertIn("local.frontend_bucket_arns", replication_read.group(1))
         self.assertNotIn('resources = ["*"]', replication_read.group(1))
-        root_module = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
-        self.assertIn("additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]", root_module)
+        app_targets = (ROOT / "infra/terraform/app-infra/outputs.tf").read_text(encoding="utf-8")
+        self.assertIn('output "shared_iam_targets"', app_targets)
+        self.assertIn("aws_s3_bucket.site.arn", app_targets)
+        self.assertIn('data "terraform_remote_state" "app"', text)
 
         cloudfront = re.search(
             r'sid\s*=\s*"DescribePawLocalSpaFunctionsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
@@ -334,18 +324,17 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         )
         self.assertIsNotNone(cloudfront)
         self.assertIn('"cloudfront:DescribeFunction"', cloudfront.group(1))
-        self.assertIn("function.arn", cloudfront.group(1))
-        self.assertIn("pawlocal-production-spa-routing", cloudfront.group(1))
+        self.assertIn("local.spa_function_arns", cloudfront.group(1))
         self.assertNotIn('resources = ["*"]', cloudfront.group(1))
         self.assertIsNotNone(cognito)
         self.assertIn('"cognito-idp:GetUserPoolMfaConfig"', cognito.group(1))
-        self.assertIn("user_pool.arn", cognito.group(1))
+        self.assertIn("local.cognito_user_pool_arns", cognito.group(1))
         self.assertNotIn('resources = ["*"]', cognito.group(1))
 
     def test_dsql_role_bootstrap_fingerprint_is_line_ending_stable(self) -> None:
-        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        text = (ROOT / "infra/terraform/app-infra/fullstack/main.tf").read_text(encoding="utf-8")
         self.assertIn(
-            'sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\\r\\n", "\\n"), "\\n", "\\r\\n"))',
+            'sha256(replace(replace(file("${path.module}/../../../../backend/pawlocal/dsql_role_bootstrap.py"), "\\r\\n", "\\n"), "\\n", "\\r\\n"))',
             text,
         )
 
@@ -360,8 +349,8 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             "",
         ])
         resources = (
-            ("infra/terraform/main.tf", "site_spa"),
-            ("infra/terraform/fullstack/main.tf", "spa"),
+            ("infra/terraform/app-infra/main.tf", "site_spa"),
+            ("infra/terraform/app-infra/fullstack/main.tf", "spa"),
         )
         for filename, name in resources:
             with self.subTest(resource=name, filename=filename):

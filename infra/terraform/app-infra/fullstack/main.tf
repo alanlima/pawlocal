@@ -9,9 +9,6 @@ locals {
   frontend_environments = {
     development = var.environment_sizes.development
   }
-  github_owner = split("/", var.github_repository)[0]
-  github_repo  = split("/", var.github_repository)[1]
-
   common_tags = {
     costcenter = "personal"
     managedby  = "terraform"
@@ -374,207 +371,7 @@ resource "aws_cognito_user_pool_client" "app" {
   }
 }
 
-data "aws_iam_openid_connect_provider" "github" {
-  count = var.manage_github_oidc_provider ? 0 : 1
-  url   = "https://token.actions.githubusercontent.com"
-}
-
-resource "aws_iam_openid_connect_provider" "github" {
-  count          = var.manage_github_oidc_provider ? 1 : 0
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-}
-
-locals {
-  oidc_provider_arn = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
-}
-
-data "aws_iam_policy_document" "github_deploy_trust" {
-  for_each = local.environments
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-    principals {
-      type        = "Federated"
-      identifiers = [local.oidc_provider_arn]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.key}"]
-    }
-  }
-}
-
-resource "aws_iam_role" "github_deploy" {
-  for_each           = local.frontend_environments
-  name               = "pawlocal-${each.key}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
-}
-
-data "aws_iam_policy_document" "github_deploy" {
-  for_each = local.frontend_environments
-  statement {
-    sid       = "ListFrontendBucket"
-    actions   = ["s3:ListBucket"]
-    resources = [aws_s3_bucket.frontend[each.key].arn]
-  }
-  statement {
-    sid       = "PublishFrontend"
-    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
-    resources = ["${aws_s3_bucket.frontend[each.key].arn}/*"]
-  }
-  statement {
-    sid       = "InvalidateFrontendDistribution"
-    actions   = ["cloudfront:CreateInvalidation"]
-    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${aws_cloudfront_distribution.app[each.key].id}"]
-  }
-}
-
-resource "aws_iam_role_policy" "github_deploy" {
-  for_each = local.frontend_environments
-  role     = aws_iam_role.github_deploy[each.key].id
-  policy   = data.aws_iam_policy_document.github_deploy[each.key].json
-}
-
-# This role can refresh the shared application's Terraform state and publish a
-# deployment only to its matching container service. All infrastructure create,
-# update, and delete permissions remain outside the release role.
-resource "aws_iam_role" "github_terraform_deploy" {
-  for_each           = local.environments
-  name               = "pawlocal-${each.key}-terraform-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
-  description        = "Terraform state-backed release deployment for the PawLocal ${each.key} Lightsail container service."
-}
-
-data "aws_iam_policy_document" "github_terraform_deploy" {
-  for_each = local.environments
-
-  statement {
-    sid    = "ReadApplicationInfrastructureForTerraformRefresh"
-    effect = "Allow"
-    actions = [
-      "acm:Describe*", "acm:List*",
-      "cloudfront:Get*", "cloudfront:List*",
-      "cognito-idp:Describe*", "cognito-idp:List*",
-      "dsql:Get*", "dsql:List*",
-      "events:Describe*", "events:List*",
-      "iam:Get*", "iam:List*",
-      "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments",
-      "lightsail:GetCertificates", "lightsail:GetDomains", "lightsail:GetInstances",
-      "lightsail:GetStaticIps", "lightsail:GetContainerServicePowers",
-      "lightsail:GetContainerServiceBundles",
-      "route53:Get*", "route53:List*",
-      "sns:Get*", "sns:List*",
-      "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:ListTags",
-      "tag:GetResources"
-    ]
-    resources = ["*"]
-  }
-
-  statement {
-    sid     = "DescribePawLocalSpaFunctionsForTerraformRefresh"
-    effect  = "Allow"
-    actions = ["cloudfront:DescribeFunction"]
-    resources = concat(
-      [for function in values(aws_cloudfront_function.spa) : function.arn],
-      ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-production-spa-routing"]
-    )
-  }
-
-  statement {
-    sid       = "ReadPawLocalUserPoolMfaForTerraformRefresh"
-    effect    = "Allow"
-    actions   = ["cognito-idp:GetUserPoolMfaConfig"]
-    resources = [for user_pool in values(aws_cognito_user_pool.app) : user_pool.arn]
-  }
-
-  statement {
-    sid    = "ReadPawLocalBucketConfiguration"
-    effect = "Allow"
-    actions = [
-      "s3:GetBucket*", "s3:GetEncryptionConfiguration",
-      "s3:GetLifecycleConfiguration", "s3:GetBucketPolicy",
-      "s3:GetBucketOwnershipControls", "s3:GetBucketPublicAccessBlock",
-      "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetBucketLocation"
-    ]
-    resources = ["arn:aws:s3:::pawlocal-*"]
-  }
-
-  statement {
-    sid       = "ListPawLocalFrontendBucketsForTerraformRefresh"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
-  }
-
-  statement {
-    sid       = "ReadPawLocalFrontendBucketAccelerationForTerraformRefresh"
-    effect    = "Allow"
-    actions   = ["s3:GetAccelerateConfiguration"]
-    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
-  }
-
-  dynamic "statement" {
-    for_each = each.key == "development" ? [true] : []
-
-    content {
-      sid       = "ReadPawLocalFrontendBucketReplicationForTerraformRefresh"
-      effect    = "Allow"
-      actions   = ["s3:GetReplicationConfiguration"]
-      resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
-    }
-  }
-
-  statement {
-    sid    = "LockAndUpdateSharedTerraformState"
-    effect = "Allow"
-    actions = [
-      "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
-    ]
-    resources = [
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate",
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"
-    ]
-  }
-
-  statement {
-    sid       = "ListSharedTerraformStatePrefix"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["pawlocal/terraform.tfstate", "pawlocal/terraform.tfstate.tflock"]
-    }
-  }
-
-  statement {
-    sid       = "ReadSharedTerraformStateBucketLocation"
-    effect    = "Allow"
-    actions   = ["s3:GetBucketLocation"]
-    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
-  }
-
-  statement {
-    sid       = "DeployOnlyThisContainerService"
-    effect    = "Allow"
-    actions   = ["lightsail:CreateContainerServiceDeployment"]
-    resources = [aws_lightsail_container_service.api[each.key].arn]
-  }
-}
-
-resource "aws_iam_role_policy" "github_terraform_deploy" {
-  for_each = local.environments
-  name     = "pawlocal-${each.key}-terraform-container-release"
-  role     = aws_iam_role.github_terraform_deploy[each.key].id
-  policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
-}
+# GitHub OIDC identities and deployment policies are owned by ../shared-infra.
 
 # Aurora DSQL database roles and IAM mappings are SQL state rather than AWS API
 # resources. terraform_data records the idempotent bootstrap operation in the
@@ -589,8 +386,8 @@ resource "terraform_data" "app_dsql_role" {
     # Keep the existing state fingerprint stable across Windows CRLF and Linux
     # LF checkouts. The role bootstrap is text; canonicalize it to CRLF before
     # hashing so the tracked operation does not rerun solely due to checkout EOLs.
-    sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\r\n", "\n"), "\n", "\r\n")),
-    filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
+    sha256(replace(replace(file("${path.module}/../../../../backend/pawlocal/dsql_role_bootstrap.py"), "\r\n", "\n"), "\n", "\r\n")),
+    filesha256("${path.module}/../../../../backend/pawlocal/infrastructure/database.py"),
   ]
 
   lifecycle {

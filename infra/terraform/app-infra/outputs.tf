@@ -13,11 +13,6 @@ output "cloudfront_distribution_id" {
   value       = aws_cloudfront_distribution.site.id
 }
 
-output "github_deploy_role_arn" {
-  description = "Existing-root-state production frontend publisher role ARN for the GitHub Actions production environment."
-  value       = aws_iam_role.github_deploy.arn
-}
-
 output "environment_targets" {
   description = "Deployment targets for development and production, with production frontend assets mapped to the existing root-state bucket/distribution."
   value = {
@@ -29,7 +24,19 @@ output "environment_targets" {
       frontend_url    = "https://${local.site_fqdn}"
       frontend_bucket = aws_s3_bucket.site.bucket
       distribution_id = aws_cloudfront_distribution.site.id
-      deploy_role_arn = aws_iam_role.github_deploy.arn
+    })
+  }
+}
+
+output "shared_iam_targets" {
+  description = "Exact application resource ARNs consumed by the shared IAM root when it builds least-privilege GitHub policies."
+  value = {
+    development = module.fullstack.shared_iam_targets.development
+    production = merge(module.fullstack.shared_iam_targets.production, {
+      frontend_bucket_arn       = aws_s3_bucket.site.arn
+      frontend_distribution_arn = aws_cloudfront_distribution.site.arn
+      frontend_distribution_id  = aws_cloudfront_distribution.site.id
+      frontend_function_arn     = aws_cloudfront_function.site_spa.arn
     })
   }
 }

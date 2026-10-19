@@ -19,42 +19,6 @@ variable "cloudfront_certificate_arn" {
   }
 }
 
-variable "github_repository" {
-  description = "GitHub repository in owner/name format."
-  type        = string
-  validation {
-    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
-    error_message = "Use owner/repository format."
-  }
-}
-
-variable "github_owner_id" {
-  description = "Immutable numeric GitHub owner ID for OIDC trust."
-  type        = string
-}
-
-variable "github_repository_id" {
-  description = "Immutable numeric GitHub repository ID for OIDC trust."
-  type        = string
-}
-
-variable "terraform_state_bucket_name" {
-  description = "Existing S3 bucket that stores the shared PawLocal Terraform root state."
-  type        = string
-}
-
-variable "additional_frontend_bucket_arns" {
-  description = "Additional exact frontend bucket ARNs owned by the root state and read by the Terraform release role during full-state refresh."
-  type        = list(string)
-  default     = []
-}
-
-variable "manage_github_oidc_provider" {
-  description = "Create the account-level GitHub OIDC provider only if none exists."
-  type        = bool
-  default     = false
-}
-
 variable "backend_image_digests" {
   description = "Environment-keyed immutable public GHCR image references for the Lightsail API deployment."
   type        = map(string)

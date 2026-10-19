@@ -120,6 +120,7 @@ jobs:
 
   deploy-production:
     name: Promote verified release to production
+    if: vars.PAWLOCAL_TERRAFORM_LAYOUT == 'split'
     needs: validate-release
     runs-on: ubuntu-latest
     environment: production
@@ -141,10 +142,9 @@ jobs:
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
       PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TERRAFORM_LAYOUT: ${{ vars.PAWLOCAL_TERRAFORM_LAYOUT }}
       PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
-      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
-      TF_VAR_github_repository_id: ${{ github.repository_id }}
     permissions:
       actions: read
       contents: read

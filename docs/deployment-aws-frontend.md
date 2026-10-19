@@ -1,6 +1,6 @@
 # AWS deployment and full-stack release status
 
-The tracked `infra/terraform/` directory is the sole Terraform root and uses the existing `pawlocal/terraform.tfstate` S3 backend. It retains the existing production frontend bucket, CloudFront distribution, DNS records, and account GitHub OIDC provider in the same state. The `fullstack/` module has no backend of its own. Development and production APIs use separate Lightsail Container Services and Aurora DSQL clusters. Both frontend sites use private S3 buckets behind CloudFront Origin Access Control (OAC); visitors use the public CloudFront-backed domain rather than direct S3 URLs.
+The current deployed layout uses the `infra/terraform/` root and existing `pawlocal/terraform.tfstate` S3 backend. Issue #81 prepares a later split into `app-infra` and `shared-infra`; until its separately reviewed state migration is complete, the split layout is inactive and no deployment should target the new state keys. The target layout preserves the production frontend bucket, CloudFront distribution, DNS records, account GitHub OIDC provider, Lightsail services, DSQL clusters and Cognito resources. Both frontend sites use private S3 buckets behind CloudFront Origin Access Control (OAC); visitors use the public CloudFront-backed domain rather than direct S3 URLs.
 
 The owner accepted the Lightsail Container Service design through Issue #75 and explicitly authorized its state-backed AWS apply on 2026-10-19 after reviewing the estimated USD $50/month container cost before other stack costs and transfer. The migration replaced the Lightsail VM/static-IP API path with container services, managed endpoint TLS, Route 53 CNAME records, public digest-pinned GHCR images, and Terraform-managed deployment versions. Both Aurora DSQL clean-install baselines are recorded in the `pawlocal` schema and both API health routes and deployment digests are verified. Database-backed place queries still return HTTP 500, so live DSQL runtime compatibility, credential refresh, and the database query smoke criterion remain open. Two unused CLI-created DSQL access keys were deleted after CloudTrail and IAM checks.
 
@@ -39,6 +39,8 @@ The selected container sizing defaults are development `micro` (1 GiB) and produ
 - Live DSQL service-principal/database-role validation before production promotion. Do not treat offline tests or a Terraform plan as proof of runtime DSQL connectivity.
 
 ## Initialize and review Terraform
+
+The original single-root commands below describe the pre-split layout. After the Issue #81 state migration is reviewed and completed, use [the ownership runbook](terraform-state-ownership.md) for the two roots and their dependency order. Do not point releases at `app-infra` until its state imports and the shared state outputs have been verified.
 
 From PowerShell at the repository root:
 

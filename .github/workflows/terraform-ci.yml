@@ -26,11 +26,18 @@ concurrency:
 
 jobs:
   terraform:
-    name: Terraform format and validation
+    name: Terraform format and validation (${{ matrix.root }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root:
+          - infra/terraform
+          - infra/terraform/app-infra
+          - infra/terraform/shared-infra
     defaults:
       run:
-        working-directory: infra/terraform
+        working-directory: ${{ matrix.root }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4

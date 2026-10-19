@@ -51,7 +51,10 @@ observability/**/data/
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+!**/*.tfvars.example
 *.tfplan
+**/migration-imports.tf
+*.state-migration-backup
 crash.log
 crash.*.log
 override.tf

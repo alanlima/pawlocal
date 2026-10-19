@@ -158,7 +158,7 @@ jobs:
 
   deploy-development:
     name: Deploy and verify development
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions' && vars.PAWLOCAL_TERRAFORM_LAYOUT == 'split'
     needs: publish
     runs-on: ubuntu-latest
     environment: development
@@ -177,10 +177,9 @@ jobs:
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
       PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TERRAFORM_LAYOUT: ${{ vars.PAWLOCAL_TERRAFORM_LAYOUT }}
       PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
-      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
-      TF_VAR_github_repository_id: ${{ github.repository_id }}
     permissions:
       actions: read
       contents: read

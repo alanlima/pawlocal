@@ -9,7 +9,8 @@ environment="${1:-}"
 manifest="${2:-}"
 case "$environment" in development|production) ;; *) die "Usage: $0 <development|production> <release-manifest>" ;; esac
 [[ -f "$manifest" ]] || die "Release manifest is missing"
-for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN TF_VAR_github_owner_id TF_VAR_github_repository_id GITHUB_REPOSITORY GITHUB_WORKSPACE; do need "$name"; done
+for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN PAWLOCAL_TERRAFORM_LAYOUT GITHUB_WORKSPACE; do need "$name"; done
+[[ "$PAWLOCAL_TERRAFORM_LAYOUT" == "split" ]] || die "Terraform layer migration is not activated; refusing to plan or apply the app-infra state"
 
 image="$(python3 - "$manifest" <<'PY'
 import json,re,sys
@@ -22,18 +23,16 @@ if v.get('telemetry_enabled') is not False:
 print(image)
 PY
 )"
-root="$GITHUB_WORKSPACE/infra/terraform"
+root="$GITHUB_WORKSPACE/infra/terraform/app-infra"
 terraform -chdir="$root" init -input=false -reconfigure \
   -backend-config="bucket=$PAWLOCAL_TF_STATE_BUCKET" \
-  -backend-config='key=pawlocal/terraform.tfstate' \
+  -backend-config='key=pawlocal/app-infra.tfstate' \
   -backend-config="region=$AWS_REGION" \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
 export TF_VAR_aws_region="$AWS_REGION"
 export TF_VAR_domain_name="$PAWLOCAL_DOMAIN_NAME"
 export TF_VAR_certificate_arn="$PAWLOCAL_CERTIFICATE_ARN"
-export TF_VAR_github_repository="$GITHUB_REPOSITORY"
-export TF_VAR_terraform_state_bucket_name="$PAWLOCAL_TF_STATE_BUCKET"
 export TF_VAR_dsql_bootstrap_python=/usr/bin/python3
 
 current_targets="$(terraform -chdir="$root" output -json environment_targets)"
