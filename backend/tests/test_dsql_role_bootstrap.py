@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from pawlocal.dsql_role_bootstrap import ensure_app_role
 
 
@@ -98,6 +99,7 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
     from types import ModuleType
 
     import certifi
+
     from pawlocal import dsql_role_bootstrap
 
     calls = []
@@ -134,7 +136,7 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
             "user": "admin",
             "driver": "psycopg",
             "dbname": "postgres",
-                "sslmode": "verify-full",
+            "sslmode": "verify-full",
             "sslrootcert": certifi.where(),
             "application_name": "pawlocal-terraform-role-bootstrap",
             "pool_pre_ping": True,
