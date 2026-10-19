@@ -501,19 +501,28 @@ def workflow_python_scripts(source: str) -> list[str]:
         return []
     scripts: list[str] = []
     jobs = workflow.get("jobs", {})
+    workflow_shell = _default_run_shell(workflow)
     if not isinstance(jobs, dict):
         return scripts
     for job in jobs.values():
         steps = job.get("steps", []) if isinstance(job, dict) else []
         if not isinstance(steps, list):
             continue
+        job_shell = _default_run_shell(job) if isinstance(job, dict) else None
         for step in steps:
             if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                 continue
-            shell = step.get("shell", "bash")
+            shell = step.get("shell", job_shell or workflow_shell or "bash")
             if isinstance(shell, str) and re.search(r"(?:^|[/\\])python(?:\d+(?:\.\d+)*)?(?:\s|$)", shell.strip()):
                 scripts.append(step["run"])
     return scripts
+
+
+def _default_run_shell(owner: dict) -> str | None:
+    defaults = owner.get("defaults", {})
+    run_defaults = defaults.get("run", {}) if isinstance(defaults, dict) else {}
+    shell = run_defaults.get("shell") if isinstance(run_defaults, dict) else None
+    return shell if isinstance(shell, str) else None
 
 
 def python_process_launch_commands_for_workflow(source: str) -> list[str]:
@@ -521,7 +530,14 @@ def python_process_launch_commands_for_workflow(source: str) -> list[str]:
 
 
 def python_process_launch_commands_for_executable(source: str) -> list[str]:
-    scripts = [source, *python_heredoc_scripts(source), *workflow_python_scripts(source)]
+    resolved_workflow_scripts = workflow_run_scripts(source)
+    scripts = [source, *workflow_python_scripts(source), *resolved_workflow_scripts]
+    scripts.extend(
+        heredoc
+        for script in resolved_workflow_scripts
+        for heredoc in python_heredoc_scripts(script)
+    )
+    scripts.extend(python_heredoc_scripts(source))
     return [command for script in scripts for command in python_process_launch_commands(script)]
 
 
@@ -931,6 +947,15 @@ jobs:
         source = 'jobs:\n  deploy:\n    steps:\n      - name: Python command\n        shell: python3.12\n        run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n'
         self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
 
+    def test_python_workflow_shell_defaults_are_inherited(self) -> None:
+        sources = (
+            'defaults:\n  run:\n    shell: python\njobs:\n  deploy:\n    steps:\n      - run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n',
+            'jobs:\n  deploy:\n    defaults:\n      run:\n        shell: python3.12\n    steps:\n      - run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n',
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
+
     def test_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
         source = "python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
         self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
@@ -938,6 +963,19 @@ jobs:
     def test_versioned_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
         source = "python3.12 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
         self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
+
+    def test_python_heredoc_in_resolved_workflow_script_uses_ast_guard(self) -> None:
+        source = '''jobs:
+  deploy:
+    steps:
+      - name: Embedded Python
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          subprocess.run(["aws", "ec2", "terminate-instances"])
+          PY
+'''
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
