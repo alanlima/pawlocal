@@ -1,7 +1,6 @@
 import pytest
-from sqlalchemy.engine import make_url
-
 from pawlocal.config import Settings
+from sqlalchemy.engine import make_url
 
 
 def test_compose_database_fields_preserve_url_special_password_characters():
@@ -132,9 +131,10 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
     from types import ModuleType
 
     from pawlocal.infrastructure.database import _create_dsql_engine
+    from sqlalchemy import create_engine, event
 
     calls = []
-    engine = object()
+    engine = create_engine("sqlite://")
 
     def create_dsql_engine(**kwargs):
         calls.append(kwargs)
@@ -149,6 +149,9 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
         "postgres?application_name=pawlocal-dev"
     )
     assert _create_dsql_engine(url) is engine
+    from pawlocal.infrastructure.database import _set_dsql_search_path
+
+    assert event.contains(engine, "begin", _set_dsql_search_path)
     assert calls == [
         {
             "host": "cluster.dsql.ap-southeast-2.on.aws",
@@ -159,6 +162,41 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
             "pool_pre_ping": True,
         }
     ]
+    engine.dispose()
+
+
+def test_dsql_engine_installs_schema_search_path_for_each_transaction(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from pawlocal.infrastructure.database import (
+        _create_dsql_engine,
+        _set_dsql_search_path,
+    )
+    from sqlalchemy import create_engine, event
+
+    engine = create_engine("sqlite://")
+    package = ModuleType("aurora_dsql_sqlalchemy")
+    package.create_dsql_engine = lambda **_kwargs: engine
+    monkeypatch.setitem(sys.modules, "aurora_dsql_sqlalchemy", package)
+
+    configured = _create_dsql_engine(
+        make_url(
+            "auroradsql+psycopg://pawlocal_app@cluster.dsql.ap-southeast-2.on.aws/postgres"
+        )
+    )
+
+    assert configured is engine
+    assert event.contains(engine, "begin", _set_dsql_search_path)
+    connection_statements = []
+
+    class FakeConnection:
+        def exec_driver_sql(self, statement):
+            connection_statements.append(statement)
+
+    _set_dsql_search_path(FakeConnection())
+    assert connection_statements == ["SET LOCAL search_path TO pawlocal"]
+    engine.dispose()
 
 
 def test_dsql_runtime_factory_builds_aws_dialect_without_connecting():

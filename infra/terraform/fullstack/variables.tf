@@ -10,7 +10,7 @@ variable "root_domain" {
 }
 
 variable "cloudfront_certificate_arn" {
-  description = "Existing ACM certificate ARN in us-east-1 covering pawlocal-dev and pawlocal hostnames."
+  description = "Existing ACM certificate ARN in us-east-1 covering the frontend CloudFront hostnames pawlocal-dev and pawlocal."
   type        = string
   sensitive   = true
   validation {
@@ -61,6 +61,11 @@ variable "ssh_cidr_blocks" {
     condition     = length(var.ssh_cidr_blocks) > 0 && alltrue([for cidr in var.ssh_cidr_blocks : cidr != "0.0.0.0/0"])
     error_message = "Provide at least one restricted IPv4 CIDR; unrestricted SSH is rejected."
   }
+}
+
+variable "dsql_bootstrap_python" {
+  description = "Absolute path to the Python interpreter with backend dependencies installed for Terraform's DSQL role bootstrap."
+  type        = string
 }
 
 variable "enable_dsql_auth_event_capture" {

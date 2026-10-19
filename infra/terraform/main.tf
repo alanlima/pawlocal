@@ -81,18 +81,6 @@ resource "aws_cloudfront_distribution" "site" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
-  origin {
-    domain_name = "${module.fullstack.environment_targets["production"].api_hostname}."
-    origin_id   = "pawlocal-production-api"
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
-
   default_cache_behavior {
     target_origin_id       = "pawlocal-private-s3-origin"
     viewer_protocol_policy = "redirect-to-https"
@@ -112,27 +100,6 @@ resource "aws_cloudfront_distribution" "site" {
         forward = "none"
       }
     }
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "/api/*"
-    target_origin_id       = "pawlocal-production-api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD", "OPTIONS"]
-    compress               = true
-
-    forwarded_values {
-      query_string = true
-      headers      = ["Accept", "Authorization", "Content-Type", "Origin", "X-Request-ID"]
-      cookies {
-        forward = "all"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
   }
 
   restrictions {
@@ -156,7 +123,7 @@ resource "aws_cloudfront_distribution" "site" {
 resource "aws_cloudfront_function" "site_spa" {
   name    = "pawlocal-production-spa-routing"
   runtime = "cloudfront-js-1.0"
-  comment = "Route frontend paths to the SPA entrypoint while preserving API origin errors."
+  comment = "Route frontend paths to the SPA entrypoint."
   publish = true
   code    = <<-JS
     function handler(event) {
@@ -323,6 +290,7 @@ module "fullstack" {
   manage_github_oidc_provider    = false
   deploy_ssh_public_keys         = var.deploy_ssh_public_keys
   ssh_cidr_blocks                = var.ssh_cidr_blocks
+  dsql_bootstrap_python          = var.dsql_bootstrap_python
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name
   dsql_auth_retention_days       = var.dsql_auth_retention_days

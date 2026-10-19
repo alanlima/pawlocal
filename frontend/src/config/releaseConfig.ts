@@ -22,16 +22,23 @@ export function validateReleaseConfig() {
   if (!apiBaseUrl) {
     throw new Error('Cloud release builds require an explicit VITE_API_BASE_URL')
   }
-  if (/^http:\/\//i.test(apiBaseUrl)) {
+  let apiUrl: URL
+  try {
+    apiUrl = new URL(apiBaseUrl)
+  } catch {
+    throw new Error('Cloud release VITE_API_BASE_URL must be an absolute HTTPS URL')
+  }
+  if (apiUrl.protocol !== 'https:') {
     throw new Error('Cloud release API endpoints must use HTTPS')
   }
-  if (/^https:\/\//i.test(apiBaseUrl)) {
-    new URL(apiBaseUrl)
-  } else if (!apiBaseUrl.startsWith('/') || apiBaseUrl.startsWith('//')) {
-    throw new Error('VITE_API_BASE_URL must be an absolute HTTPS URL or a same-origin path')
+  if (apiUrl.pathname.replace(/\/$/, '') !== '/api/v1') {
+    throw new Error('Cloud release VITE_API_BASE_URL must end with /api/v1')
   }
-  if (releaseEnvironment === 'production' && apiBaseUrl !== '/api/v1') {
-    throw new Error('Production VITE_API_BASE_URL must be exactly /api/v1')
+  const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
+  if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
+    throw new Error(
+      `Cloud ${releaseEnvironment} builds must use the ${expectedApiHostPrefix}<domain> API hostname`,
+    )
   }
 
   const requiredCognitoSettings = [

@@ -38,8 +38,11 @@ locals {
     environment       = environment
     aws_region        = var.aws_region
     api_hostname      = "${config.api_name}.${trimsuffix(var.root_domain, ".")}"
+    frontend_hostname = "${config.hostname}.${trimsuffix(var.root_domain, ".")}"
     database_role     = config.database_role
     deploy_public_key = var.deploy_ssh_public_keys[environment]
+    cognito_issuer    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.app[environment].id}"
+    cognito_client_id = aws_cognito_user_pool_client.app[environment].id
   }) }
 }
 
@@ -179,17 +182,6 @@ resource "aws_cloudfront_distribution" "app" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend[each.key].id
   }
 
-  origin {
-    domain_name = "${each.value.api_name}.${trimsuffix(var.root_domain, ".")}."
-    origin_id   = "pawlocal-${each.key}-api"
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
-
   default_cache_behavior {
     target_origin_id       = "pawlocal-${each.key}-private-s3"
     viewer_protocol_policy = "redirect-to-https"
@@ -204,23 +196,6 @@ resource "aws_cloudfront_distribution" "app" {
       query_string = false
       cookies { forward = "none" }
     }
-  }
-
-  ordered_cache_behavior {
-    path_pattern           = "/api/*"
-    target_origin_id       = "pawlocal-${each.key}-api"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD", "OPTIONS"]
-    compress               = true
-    forwarded_values {
-      query_string = true
-      headers      = ["Authorization", "Content-Type", "Origin", "Accept", "X-Request-ID"]
-      cookies { forward = "all" }
-    }
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 0
   }
 
   restrictions {
@@ -239,12 +214,11 @@ resource "aws_cloudfront_function" "spa" {
   for_each = local.frontend_environments
   name     = "pawlocal-${each.key}-spa-routing"
   runtime  = "cloudfront-js-1.0"
-  comment  = "Route frontend paths to the SPA entrypoint without rewriting API responses."
+  comment  = "Route frontend paths to the SPA entrypoint."
   publish  = true
   code     = <<-JS
     function handler(event) {
       var request = event.request;
-      if (request.uri.indexOf('/api/') === 0) return request;
       if (request.uri === '/' || request.uri.indexOf('.') !== -1) return request;
       request.uri = '/index.html';
       return request;
@@ -298,6 +272,61 @@ resource "aws_route53_record" "frontend_aaaa" {
     name                   = aws_cloudfront_distribution.app[each.key].domain_name
     zone_id                = aws_cloudfront_distribution.app[each.key].hosted_zone_id
     evaluate_target_health = false
+  }
+}
+
+resource "random_id" "cognito_domain_suffix" {
+  for_each    = local.environments
+  byte_length = 3
+}
+
+resource "aws_cognito_user_pool" "app" {
+  for_each = local.environments
+  name     = "pawlocal-${each.key}"
+
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
+
+  password_policy {
+    minimum_length                   = 12
+    require_lowercase                = true
+    require_numbers                  = true
+    require_symbols                  = true
+    require_uppercase                = true
+    temporary_password_validity_days = 7
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cognito_user_pool_domain" "app" {
+  for_each     = local.environments
+  domain       = "pawlocal-${each.key}-${random_id.cognito_domain_suffix[each.key].hex}"
+  user_pool_id = aws_cognito_user_pool.app[each.key].id
+}
+
+resource "aws_cognito_user_pool_client" "app" {
+  for_each     = local.environments
+  name         = "pawlocal-${each.key}-browser"
+  user_pool_id = aws_cognito_user_pool.app[each.key].id
+
+  generate_secret                      = false
+  prevent_user_existence_errors        = "ENABLED"
+  enable_token_revocation              = true
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = ["https://${each.value.hostname}.${trimsuffix(var.root_domain, ".")}/auth/callback"]
+  logout_urls                          = ["https://${each.value.hostname}.${trimsuffix(var.root_domain, ".")}/"]
+  access_token_validity                = 60
+  refresh_token_validity               = 30
+  id_token_validity                    = 60
+
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "days"
   }
 }
 
@@ -392,6 +421,28 @@ resource "aws_iam_user_policy" "app_dsql_connect" {
   for_each = local.environments
   user     = aws_iam_user.app[each.key].name
   policy   = data.aws_iam_policy_document.app_dsql_connect[each.key].json
+}
+
+# Aurora DSQL database roles and IAM mappings are SQL state, not AWS API
+# resources. Provision them through Terraform using the apply operator's current
+# short-lived/local AWS identity; never pass an auth token through Terraform.
+resource "terraform_data" "app_dsql_role" {
+  for_each = local.environments
+
+  triggers_replace = [
+    aws_dsql_cluster.app[each.key].arn,
+    aws_iam_user.app[each.key].arn,
+    each.value.database_role,
+    filesha256("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"),
+    filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
+  ]
+
+  provisioner "local-exec" {
+    working_dir = "${path.module}/../../../backend"
+    command     = "\"${var.dsql_bootstrap_python}\" -m pawlocal.dsql_role_bootstrap --endpoint \"${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws\" --region \"${var.aws_region}\" --database-role \"${each.value.database_role}\" --iam-user-arn \"${aws_iam_user.app[each.key].arn}\""
+  }
+
+  depends_on = [aws_iam_user_policy.app_dsql_connect]
 }
 
 resource "aws_s3_bucket" "cloudtrail" {
