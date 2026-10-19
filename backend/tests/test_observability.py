@@ -457,6 +457,7 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
         ("certificate verify failed: /private/cert.pem", "tls_verification_failed"),
         ("TLS handshake failed", "tls_connection_failed"),
         ("connection timed out", "connection_timeout"),
+        ("connection timeout expired", "connection_timeout"),
         ("opaque driver error", "connection_failure_unknown"),
     ],
 )
