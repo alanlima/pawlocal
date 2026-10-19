@@ -331,6 +331,8 @@ def test_exception_log_fields_reject_non_sqlstate_values():
                 "exception_class": "OperationalError",
                 "exception_chain": ["DriverError"],
                 "database_error_code": "08006",
+                "database_error_classification": "connection_failure_unknown",
+                "database_error_classification_source": "fallback",
             },
         ),
         (
@@ -338,6 +340,8 @@ def test_exception_log_fields_reject_non_sqlstate_values():
             {
                 "exception_class": "OperationalError",
                 "exception_chain": ["DriverError"],
+                "database_error_classification": "connection_failure_unknown",
+                "database_error_classification_source": "fallback",
             },
         ),
     ],
@@ -400,6 +404,8 @@ def test_exception_log_fields_capture_innermost_provider_error_without_text():
             "RuntimeError",
             "NoCredentialsError",
         ],
+        "database_error_classification": "credential_provider_missing",
+        "database_error_classification_source": "exception_class",
     }
     encoded = json.dumps(fields)
     assert "private" not in encoded
@@ -431,10 +437,123 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
         "exception_class": "OperationalError",
         "exception_chain": ["OperationalError", "ConnectionRefusedError"],
         "os_error_number": 10061,
+        "database_error_classification": "connection_refused",
+        "database_error_classification_source": "os_errno",
+        "database_pgconn_available": False,
     }
     encoded = json.dumps(fields)
     assert "private" not in encoded
     assert "sentinel" not in encoded
+
+
+@pytest.mark.parametrize(
+    ("message", "classification"),
+    [
+        ("Failed to generate authentication token", "token_generation_failed"),
+        ("password authentication failed", "authentication_rejected"),
+        ("could not translate host name", "dns_resolution_failed"),
+        ("certificate verify failed: /private/cert.pem", "tls_verification_failed"),
+        ("connection timed out", "connection_timeout"),
+        ("opaque driver error", "connection_failure_unknown"),
+    ],
+)
+def test_psycopg_error_message_only_selects_fixed_safe_classification(
+    message, classification
+):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    secret_values = [
+        "DBPASSWORD_SENTINEL",
+        "postgresql://user:URI_SECRET@db.example:5432/db?token=SIGNED_TOKEN",
+        "SELECT * FROM users WHERE email='PRIVATE_USER'",
+        "TLS_CERT_PATH_SENTINEL",
+    ]
+    driver = psycopg.OperationalError(
+        f"{message}; {secret_values[0]} {secret_values[1]} {secret_values[2]} {secret_values[3]}"
+    )
+    wrapped = OperationalError(
+        "private SQL statement", {"token": "PARAM_SECRET"}, driver
+    )
+
+    fields = safe_exception_log_fields(wrapped)
+    encoded = json.dumps(fields)
+
+    assert fields["database_error_classification"] == classification
+    assert fields["database_error_classification_source"] == (
+        "driver_message_pattern" if message != "opaque driver error" else "fallback"
+    )
+    assert fields["database_pgconn_available"] is False
+    for secret in (*secret_values, "PARAM_SECRET", "private SQL statement"):
+        assert secret not in encoded
+
+
+def test_psycopg_pgconn_auth_flags_are_boolean_hints_only(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    driver = psycopg.OperationalError(
+        "authentication failed user=PRIVATE_USER password=DBPASSWORD_SENTINEL"
+    )
+    pgconn = type("FakePgconn", (), {"needs_password": True, "used_password": False})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError(
+        "SELECT 'PRIVATE_SQL'", {"password": "PARAM_SECRET"}, driver
+    )
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_error_classification"] == "credential_provider_missing"
+    assert fields["database_error_classification_source"] == "pgconn_hint"
+    assert fields["database_pgconn_available"] is True
+    assert fields["database_auth_needs_password"] is True
+    assert fields["database_auth_used_password"] is False
+    encoded = json.dumps(fields)
+    for secret in (
+        "PRIVATE_USER",
+        "DBPASSWORD_SENTINEL",
+        "PRIVATE_SQL",
+        "PARAM_SECRET",
+    ):
+        assert secret not in encoded
+
+
+def test_psycopg_ambiguous_message_and_failing_pgconn_getter_stay_safe(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    driver = psycopg.OperationalError(
+        "connection refused at host=PRIVATE_HOST; certificate verify failed at /PRIVATE_CERT"
+    )
+
+    def failing_pgconn(_self):
+        raise RuntimeError("PRIVATE_GETTER_SECRET")
+
+    monkeypatch.setattr(type(driver), "pgconn", property(failing_pgconn))
+    wrapped = OperationalError(
+        "SELECT 'PRIVATE_SQL'", {"token": "PARAM_SECRET"}, driver
+    )
+
+    fields = safe_exception_log_fields(wrapped)
+    encoded = json.dumps(fields)
+
+    assert fields["database_error_classification"] == "connection_failure_unknown"
+    assert fields["database_error_classification_source"] == "ambiguous_driver_message"
+    assert fields["database_pgconn_available"] is False
+    for secret in (
+        "PRIVATE_HOST",
+        "PRIVATE_CERT",
+        "PRIVATE_GETTER_SECRET",
+        "PRIVATE_SQL",
+        "PARAM_SECRET",
+    ):
+        assert secret not in encoded
 
 
 def test_failed_sql_query_does_not_export_exception_details(monkeypatch):
