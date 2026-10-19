@@ -37,8 +37,8 @@ class TerraformLightsailIngressTests(unittest.TestCase):
 
         self.assertIn('var.temporary_ssh_environment == environment ? [var.temporary_ssh_cidr] : []', module)
         self.assertIn('for_each = local.effective_ssh_cidr_blocks[each.key]', module)
-        self.assertIn('from_port  = 80', module)
-        self.assertIn('from_port  = 443', module)
+        self.assertIn('from_port         = 80', module)
+        self.assertIn('from_port         = 443', module)
 
     def test_terraform_ingress_role_is_environment_and_resource_scoped(self) -> None:
         module = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
@@ -64,11 +64,12 @@ class TerraformLightsailIngressTests(unittest.TestCase):
     @staticmethod
     def _firewall(ssh_cidrs: list[str], web443: list[str] | None = None) -> dict[str, Any]:
         return {
+            "instance_name": "pawlocal-development-api",
             "port_info": [
-                {"protocol": "tcp", "from_port": 80, "to_port": 80, "cidrs": ["0.0.0.0/0"], "ipv6_cidrs": ["::/0"]},
-                {"protocol": "tcp", "from_port": 443, "to_port": 443, "cidrs": web443 or ["0.0.0.0/0"], "ipv6_cidrs": ["::/0"]},
+                {"protocol": "tcp", "from_port": 80, "to_port": 80, "cidrs": ["0.0.0.0/0"], "ipv6_cidrs": ["::/0"], "cidr_list_aliases": []},
+                {"protocol": "tcp", "from_port": 443, "to_port": 443, "cidrs": web443 or ["0.0.0.0/0"], "ipv6_cidrs": ["::/0"], "cidr_list_aliases": []},
                 *[
-                    {"protocol": "tcp", "from_port": 22, "to_port": 22, "cidrs": [cidr], "ipv6_cidrs": []}
+                    {"protocol": "tcp", "from_port": 22, "to_port": 22, "cidrs": [cidr], "ipv6_cidrs": [], "cidr_list_aliases": []}
                     for cidr in ssh_cidrs
                 ],
             ]
@@ -119,6 +120,29 @@ class TerraformLightsailIngressTests(unittest.TestCase):
                     self._plan(before, changed, actions=["delete", "create"]),
                     "open", "development", runner, baseline_json,
                 )
+
+    def test_plan_validator_rejects_ssh_alias_and_wrong_instance(self) -> None:
+        baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
+        baseline_json = json.dumps(baseline)
+        runner = "203.0.113.10/32"
+        before = self._firewall(baseline["development"])
+        after = self._firewall([*baseline["development"], runner])
+        after["port_info"][-1]["cidr_list_aliases"] = ["lightsail-connect"]
+        with self.assertRaisesRegex(ValueError, "CIDR aliases"):
+            PLAN_VALIDATOR.validate(self._plan(before, after), "open", "development", runner, baseline_json)
+
+        after = self._firewall([*baseline["development"], runner])
+        after["instance_name"] = "pawlocal-production-api"
+        with self.assertRaisesRegex(ValueError, "unexpected Lightsail instance"):
+            PLAN_VALIDATOR.validate(self._plan(before, after), "open", "development", runner, baseline_json)
+
+    def test_plan_validator_allows_create_only_restore_recovery(self) -> None:
+        baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
+        baseline_json = json.dumps(baseline)
+        runner = "203.0.113.10/32"
+        restore_state = self._firewall(baseline["development"])
+        plan = self._plan(None, restore_state, actions=["create"])
+        PLAN_VALIDATOR.validate(plan, "restore", "development", runner, baseline_json)
 
     def test_plan_validator_rejects_zero_updates_and_changes_to_web_or_other_rules(self) -> None:
         baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
