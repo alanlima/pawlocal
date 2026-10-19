@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 import shlex
@@ -75,11 +76,131 @@ def contains_forbidden_terraform_state_change(source: str) -> bool:
         or TERRAFORM_WORKSPACE_STATE_MUTATION.search(normalized) is not None
         or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(normalized) is not None
         or TERRAFORM_INIT_STATE_MIGRATION.search(normalized) is not None
+        or any(
+            TERRAFORM_STATE_MUTATION.search(command)
+            or TERRAFORM_WORKSPACE_STATE_MUTATION.search(command)
+            or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(command)
+            or TERRAFORM_INIT_STATE_MIGRATION.search(command)
+            for command in python_subprocess_commands(source)
+        )
+        or any(
+            TERRAFORM_STATE_MUTATION.search(script)
+            or TERRAFORM_WORKSPACE_STATE_MUTATION.search(script)
+            or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(script)
+            or TERRAFORM_INIT_STATE_MIGRATION.search(script)
+            for script in workflow_run_scripts(source)
+        )
     )
 
 
 def normalize_shell_continuations(source: str) -> str:
     return re.sub(r"\\\r?\n[ \t]*", " ", source)
+
+
+def python_subprocess_commands(source: str) -> list[str]:
+    """Extract statically resolvable subprocess argv from Python source."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    subprocess_modules = {"subprocess"}
+    subprocess_functions = {"run", "Popen", "call", "check_call", "check_output"}
+    aliases: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess":
+                    subprocess_modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+            for alias in node.names:
+                if alias.name in subprocess_functions:
+                    aliases[alias.asname or alias.name] = [alias.name]
+
+    assigned_argv: dict[str, list[object]] = {}
+
+    def argv_values(node: ast.AST) -> list[object] | None:
+        if isinstance(node, (ast.List, ast.Tuple)):
+            values: list[object] = []
+            for item in node.elts:
+                try:
+                    value = ast.literal_eval(item)
+                except (ValueError, TypeError):
+                    value = "<dynamic>"
+                if not isinstance(value, str):
+                    value = "<dynamic>"
+                values.append(value)
+            return values
+        if isinstance(node, ast.Name):
+            return assigned_argv.get(node.id)
+        return None
+
+    calls: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value_node = node.value
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            values = argv_values(value_node) if value_node is not None else None
+            if values is not None:
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        assigned_argv[target.id] = values
+        elif isinstance(node, ast.Call):
+            calls.append(node)
+
+    commands: list[str] = []
+    for call in calls:
+        function = call.func
+        recognized = False
+        if isinstance(function, ast.Attribute) and function.attr in subprocess_functions:
+            recognized = isinstance(function.value, ast.Name) and function.value.id in subprocess_modules
+        elif isinstance(function, ast.Name) and function.id in aliases:
+            recognized = True
+        if not recognized:
+            continue
+        argument = call.args[0] if call.args else next(
+            (keyword.value for keyword in call.keywords if keyword.arg == "args"), None
+        )
+        values = argv_values(argument) if argument is not None else None
+        if values:
+            commands.append(shlex.join([str(value) for value in values]))
+    return commands
+
+
+def workflow_run_scripts(source: str) -> list[str]:
+    """Read YAML block scalars under `run:` and apply folded/literal semantics."""
+    lines = source.splitlines()
+    scripts: list[str] = []
+    run_block = re.compile(r"^(?P<indent>[ \t]*)run:[ \t]*(?P<style>[>|])(?:[+-]?[1-9]?|[1-9]?[+-]?)[ \t]*(?:#.*)?$")
+    index = 0
+    while index < len(lines):
+        match = run_block.match(lines[index])
+        if not match:
+            index += 1
+            continue
+        parent_indent = len(match.group("indent").expandtabs(8))
+        index += 1
+        body: list[str] = []
+        content_indent: int | None = None
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() == "":
+                body.append("")
+                index += 1
+                continue
+            indent = len(line) - len(line.lstrip(" \t"))
+            if indent <= parent_indent:
+                break
+            if content_indent is None:
+                content_indent = indent
+            body.append(line[content_indent:] if len(line) >= content_indent else "")
+            index += 1
+        scalar = "\n".join(body)
+        if match.group("style") == ">":
+            scalar = re.sub(r"(?<!\n)\n(?!\n)", " ", scalar)
+        if scalar.strip():
+            scripts.append(scalar)
+    return scripts
 
 
 def aws_cli_commands(source: str) -> list[tuple[str, str]]:
@@ -135,6 +256,10 @@ def aws_cli_commands(source: str) -> list[tuple[str, str]]:
             commands.append((service, "<unsupported-option-or-missing-command>"))
             continue
         commands.append((service, tokens[operation_index]))
+    for command in python_subprocess_commands(source):
+        commands.extend(aws_cli_commands(command))
+    for script in workflow_run_scripts(source):
+        commands.extend(aws_cli_commands(script))
     return commands
 
 
@@ -182,6 +307,39 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
     def test_aws_cli_scanner_handles_quoted_executable(self) -> None:
         command = '"aws" ec2 terminate-instances --instance-ids i-123'
         self.assertEqual(aws_cli_commands(command), [("ec2", "terminate-instances")])
+
+    def test_aws_cli_scanner_reads_python_subprocess_argv(self) -> None:
+        source = '''
+import subprocess
+subprocess.run(["aws", "ec2", "terminate-instances", "--instance-ids", "i-123"])
+'''
+        self.assertEqual(aws_cli_commands(source), [("ec2", "terminate-instances")])
+
+    def test_terraform_guard_reads_python_subprocess_argv(self) -> None:
+        source = '''
+import subprocess
+subprocess.run(["terraform", "state", "rm", "module.example"])
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_workflow_scanner_folds_yaml_run_blocks(self) -> None:
+        source = '''
+jobs:
+  deploy:
+    steps:
+      - name: AWS
+        run: >-
+          aws
+          ec2 terminate-instances --instance-ids i-123
+      - name: Terraform
+        run: >
+          terraform state
+          rm module.example
+'''
+        scripts = workflow_run_scripts(source)
+        self.assertEqual(len(scripts), 2)
+        self.assertIn(("ec2", "terminate-instances"), aws_cli_commands(source))
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
