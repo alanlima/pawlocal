@@ -3,17 +3,19 @@ output "environment_targets" {
   value = { for name, config in local.environments : name => {
     frontend_url               = "https://${config.hostname}.${trimsuffix(var.root_domain, ".")}"
     api_health_url             = "https://${config.api_name}.${trimsuffix(var.root_domain, ".")}/health"
-    instance_name              = aws_lightsail_instance.api[name].name
-    static_ip                  = aws_lightsail_static_ip.api[name].ip_address
     api_hostname               = "${config.api_name}.${trimsuffix(var.root_domain, ".")}"
+    api_container_service_name = aws_lightsail_container_service.api[name].name
+    api_container_service_url  = aws_lightsail_container_service.api[name].url
+    api_container_service_arn  = aws_lightsail_container_service.api[name].arn
+    api_runtime_principal_arn  = aws_lightsail_container_service.api[name].principal_arn
+    api_backend_image          = local.backend_images[name]
     frontend_bucket            = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].bucket : null
     distribution_id            = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].id : null
     dsql_cluster_arn           = aws_dsql_cluster.app[name].arn
     dsql_endpoint              = "${aws_dsql_cluster.app[name].identifier}.dsql.${var.aws_region}.on.aws"
-    app_iam_user               = aws_iam_user.app[name].name
     dsql_database_role         = config.database_role
     deploy_role_arn            = contains(keys(local.frontend_environments), name) ? aws_iam_role.github_deploy[name].arn : null
-    terraform_ingress_role_arn = try(aws_iam_role.github_terraform_ingress[name].arn, null)
+    terraform_deploy_role_arn  = aws_iam_role.github_terraform_deploy[name].arn
     cognito_user_pool_id       = aws_cognito_user_pool.app[name].id
     cognito_client_id          = aws_cognito_user_pool_client.app[name].id
     cognito_domain             = "https://${aws_cognito_user_pool_domain.app[name].domain}.auth.${var.aws_region}.amazoncognito.com"

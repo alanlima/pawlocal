@@ -43,7 +43,7 @@ Community contributions publish immediately, subject to validation, abuse protec
 | CI/CD | GitHub Actions |
 | Agent orchestration | AWS Labs CLI Agent Orchestrator (CAO) |
 
-Cloud hosting resources are not finalised. Cost approval is mandatory before provisioning AWS infrastructure.
+The accepted Issue #75 hosting design uses Lightsail Container Services and Aurora DSQL; cost approval is still mandatory before provisioning or applying billable AWS changes.
 
 ---
 
@@ -146,7 +146,7 @@ Implementation must happen in the following order.
 - Validate complete Docker Compose startup.
 - Implement CI/CD.
 - Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Production must not deploy automatically on merges to `main`.
-- Keep the existing mock-backed static frontend release distinct from the proposed full-stack release model. Full-stack CI/CD changes remain gated on Issue #41's hosting/compatibility decision and explicit cost/provisioning approval; do not point a workflow at unconfigured targets or credentials.
+- Keep the existing mock-backed static frontend release distinct from the full-stack release model. Full-stack CI/CD follows the accepted Issue #75 architecture and remains gated on a reviewed Terraform migration plan, live DSQL compatibility, and explicit cost/provisioning approval; do not point a workflow at unconfigured targets or credentials.
 - Use `pawlocal-dev.<domain>` for the development site and `pawlocal.<domain>` for production. No domain, DNS, certificate, target, or secret is authorized by this naming convention alone.
 - Evaluate AWS hosting alternatives and running costs.
 - Obtain human approval before provisioning billable resources.
@@ -298,6 +298,8 @@ Do not give incident agents unrestricted production permissions.
 ---
 
 ## 10. Cost management
+
+Terraform configuration and the existing shared Terraform state are the only mechanism for creating, changing, replacing, or deleting AWS infrastructure. AWS console, CLI, SDK, shell, and bootstrap scripts must not mutate infrastructure or Terraform state. CI may publish immutable application artifacts; any AWS-side application deployment must be owned by a Terraform resource in the shared state. Runtime secrets must not be stored in Terraform state. Never manually edit, import, or remove state bindings.
 
 PawLocal must remain inexpensive to operate at low traffic.
 

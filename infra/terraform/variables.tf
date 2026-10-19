@@ -82,54 +82,19 @@ variable "manage_github_oidc_provider" {
   default     = true
 }
 
-variable "deploy_ssh_public_keys" {
-  description = "Environment-keyed SSH public keys for API deployment. Private keys are supplied independently as GitHub environment secrets."
+variable "backend_image_digests" {
+  description = "Environment-keyed immutable public GHCR image references. Development and production must use the same digest when promoting a release."
   type        = map(string)
-  sensitive   = true
+  default     = {}
   validation {
-    condition     = alltrue([for k in keys(var.deploy_ssh_public_keys) : contains(["development", "production"], k)])
-    error_message = "Keys may only be development and production."
-  }
-}
-
-variable "ssh_cidr_blocks" {
-  description = "Environment-keyed baseline IPv4 CIDRs allowed to SSH to each Lightsail instance."
-  type        = map(list(string))
-  validation {
-    condition = toset(keys(var.ssh_cidr_blocks)) == toset(["development", "production"]) && alltrue([
-      for cidrs in values(var.ssh_cidr_blocks) : length(cidrs) > 0 && alltrue([
-        for cidr in cidrs : cidr != "0.0.0.0/0" && can(cidrnetmask(cidr))
-      ])
+    condition = alltrue([
+      for image in values(var.backend_image_digests) : can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", image))
     ])
-    error_message = "Provide restricted IPv4 CIDRs for development and production; unrestricted SSH is rejected."
-  }
-}
-
-variable "temporary_ssh_environment" {
-  description = "Environment whose Lightsail SSH allowlist temporarily includes the current GitHub Actions runner. Null leaves both baseline allowlists unchanged."
-  type        = string
-  default     = null
-  nullable    = true
-  validation {
-    condition     = var.temporary_ssh_environment == null ? true : contains(["development", "production"], var.temporary_ssh_environment)
-    error_message = "temporary_ssh_environment must be development or production when set."
-  }
-}
-
-variable "temporary_ssh_cidr" {
-  description = "The current GitHub Actions runner public IPv4 address as a single /32. Used only for the selected deployment environment."
-  type        = string
-  default     = null
-  nullable    = true
-  validation {
-    condition = var.temporary_ssh_cidr == null ? true : (
-      can(cidrnetmask(var.temporary_ssh_cidr)) && can(regex("/32$", var.temporary_ssh_cidr))
-    )
-    error_message = "temporary_ssh_cidr must be a single IPv4 /32 when set."
+    error_message = "Backend images must be public ghcr.io/alanlima/pawlocal-api references pinned to a sha256 digest."
   }
   validation {
-    condition     = (var.temporary_ssh_environment == null) ? var.temporary_ssh_cidr == null : (var.temporary_ssh_cidr != null && can(regex("/32$", var.temporary_ssh_cidr)))
-    error_message = "temporary_ssh_environment and temporary_ssh_cidr must either both be set or both be null."
+    condition     = alltrue([for environment in keys(var.backend_image_digests) : contains(["development", "production"], environment)])
+    error_message = "Backend image keys may only be development and production."
   }
 }
 

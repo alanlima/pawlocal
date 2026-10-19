@@ -12,17 +12,26 @@ from sqlalchemy.exc import SQLAlchemyError
 
 _ROLE_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _APP_SCHEMA = "pawlocal"
-_USER_ARN_PATTERN = re.compile(
-    r"^arn:aws:iam::[0-9]{12}:user/(?:[A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$"
+_PRINCIPAL_ARN_PATTERN = re.compile(
+    r"^arn:aws:iam::[0-9]{12}:(?:user|role)/(?:[A-Za-z0-9+=,.@_-]+/)*[A-Za-z0-9+=,.@_-]+$"
 )
 
 
-def ensure_app_role(engine, database_role: str, iam_user_arn: str) -> None:
+def ensure_app_role(
+    engine,
+    database_role: str,
+    iam_principal_arn: str,
+    legacy_iam_user_arn: str | None = None,
+) -> None:
     """Ensure the custom role, IAM mapping, and app schema access exist idempotently."""
     if not _ROLE_PATTERN.fullmatch(database_role):
         raise ValueError("database role has an invalid format")
-    if not _USER_ARN_PATTERN.fullmatch(iam_user_arn):
-        raise ValueError("IAM user ARN has an invalid format")
+    if not _PRINCIPAL_ARN_PATTERN.fullmatch(iam_principal_arn):
+        raise ValueError("IAM principal ARN has an invalid format")
+    if legacy_iam_user_arn is not None and not _PRINCIPAL_ARN_PATTERN.fullmatch(
+        legacy_iam_user_arn
+    ):
+        raise ValueError("legacy IAM user ARN has an invalid format")
 
     with engine.begin() as connection:
         role_exists = connection.execute(
@@ -39,17 +48,36 @@ def ensure_app_role(engine, database_role: str, iam_user_arn: str) -> None:
                 "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
                 "WHERE arn = :iam_user_arn"
             ),
-            {"iam_user_arn": iam_user_arn},
+                {"iam_user_arn": iam_principal_arn},
         ).scalar_one_or_none()
     if existing_mapping is None:
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                f"AWS IAM GRANT {database_role} TO '{iam_user_arn}'"
+                f"AWS IAM GRANT {database_role} TO '{iam_principal_arn}'"
             )
     elif existing_mapping != database_role:
         raise RuntimeError(
-            "IAM user is already mapped to a different DSQL database role"
+            "IAM principal is already mapped to a different DSQL database role"
         )
+
+    if legacy_iam_user_arn is not None and legacy_iam_user_arn != iam_principal_arn:
+        with engine.begin() as connection:
+            legacy_mapping = connection.execute(
+                text(
+                    "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
+                    "WHERE arn = :iam_user_arn"
+                ),
+                {"iam_user_arn": legacy_iam_user_arn},
+            ).scalar_one_or_none()
+        if legacy_mapping == database_role:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    f"AWS IAM REVOKE {database_role} FROM '{legacy_iam_user_arn}'"
+                )
+        elif legacy_mapping is not None:
+            raise RuntimeError(
+                "legacy IAM user is mapped to a different DSQL database role"
+            )
 
     with engine.begin() as connection:
         schema_exists = connection.execute(
@@ -73,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--endpoint", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--database-role", required=True)
-    parser.add_argument("--iam-user-arn", required=True)
+    parser.add_argument("--iam-principal-arn", required=True)
+    parser.add_argument("--legacy-iam-user-arn")
     args = parser.parse_args(argv)
 
     try:
@@ -93,7 +122,12 @@ def main(argv: list[str] | None = None) -> int:
             pool_pre_ping=True,
         )
         try:
-            ensure_app_role(engine, args.database_role, args.iam_user_arn)
+            ensure_app_role(
+                engine,
+                args.database_role,
+                args.iam_principal_arn,
+                args.legacy_iam_user_arn,
+            )
         finally:
             engine.dispose()
     except (BotoCoreError, ImportError, OSError, RuntimeError, SQLAlchemyError, ValueError) as exc:

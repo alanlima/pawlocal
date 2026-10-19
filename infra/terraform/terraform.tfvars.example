@@ -12,17 +12,14 @@ environment          = "production"
 # Keep true so Terraform retains ownership at the existing root state address.
 manage_github_oidc_provider = true
 
-# Required inputs for the Lightsail API deployment path. Use restricted, owner-approved
-# SSH ranges; do not use 0.0.0.0/0. Private keys belong in GitHub environment secrets.
-ssh_cidr_blocks = {
-  development = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
-  production  = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+# Provide digest-pinned images from the same verified release for the first
+# state-backed migration. Subsequent dev and prod releases update this input
+# through the Terraform deployment workflow.
+backend_image_digests = {
+  development = "ghcr.io/alanlima/pawlocal-api@sha256:cc54cd9dab3b0e2210ad07e8f01d3e4dc9b0e4036a9ff826661e046f29598873"
+  production  = "ghcr.io/alanlima/pawlocal-api@sha256:cc54cd9dab3b0e2210ad07e8f01d3e4dc9b0e4036a9ff826661e046f29598873"
 }
 dsql_bootstrap_python = "C:/path/to/pawlocal/backend/.venv/Scripts/python.exe"
-deploy_ssh_public_keys = {
-  development = "REPLACE_WITH_DEV_SSH_PUBLIC_KEY"
-  production  = "REPLACE_WITH_PROD_SSH_PUBLIC_KEY"
-}
 
 # DSQL audit capture is disabled until the owner selects a destination and retention.
 enable_dsql_auth_event_capture = false

@@ -28,13 +28,6 @@ on:
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_dispatch:
-    inputs:
-      seed_development:
-        description: Seed the development database once after this deployment
-        required: false
-        type: boolean
-        default: false
-
 permissions:
   contents: read
 
@@ -178,22 +171,14 @@ jobs:
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
       PAWLOCAL_TELEMETRY_ENABLED: "false"
       AWS_REGION: ${{ vars.AWS_REGION }}
-      PAWLOCAL_DEPLOY_HOST: ${{ vars.PAWLOCAL_DEPLOY_HOST }}
-      PAWLOCAL_DEPLOY_KNOWN_HOSTS: ${{ vars.PAWLOCAL_DEPLOY_KNOWN_HOSTS }}
       PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
       PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
-      PAWLOCAL_DSQL_ENDPOINT: ${{ vars.PAWLOCAL_DSQL_ENDPOINT }}
-      PAWLOCAL_DSQL_DATABASE_ROLE: ${{ vars.PAWLOCAL_DSQL_DATABASE_ROLE }}
-      PAWLOCAL_COGNITO_ISSUER: ${{ vars.PAWLOCAL_COGNITO_ISSUER }}
-      PAWLOCAL_COGNITO_APP_CLIENT_ID: ${{ vars.PAWLOCAL_COGNITO_APP_CLIENT_ID }}
       PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
       PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
-      PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
     permissions:
@@ -308,47 +293,29 @@ jobs:
               description: 'Full-stack development deployment started',
             })
 
-      - name: Set up Terraform for temporary Lightsail ingress
+      - name: Set up Terraform for container deployment
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.10.5
 
-      - name: Capture this runner IPv4 address
-        id: runner-ip
-        run: |
-          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
-          python3 - "$runner_ip" <<'PY'
-          import ipaddress, sys
-          try:
-              address = ipaddress.ip_address(sys.argv[1])
-          except ValueError as exc:
-              raise SystemExit(f"Invalid runner IPv4 response: {exc}")
-          if address.version != 4:
-              raise SystemExit("Expected an IPv4 runner egress address")
-          print(f"::add-mask::{address}")
-          PY
-          echo "runner_cidr=${runner_ip}/32" >> "$GITHUB_OUTPUT"
-
-      - name: Configure Terraform ingress role
+      - name: Assume the Terraform deployment role
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalDevIngress-${{ github.run_id }}
+          role-session-name: PawLocalDevTerraform-${{ github.run_id }}
 
-      - name: Temporarily allow this runner through Terraform
-        id: enable-ingress
+      - name: Deploy the container image through shared Terraform state
         env:
-          PAWLOCAL_RUNNER_IPV4_CIDR: ${{ steps.runner-ip.outputs.runner_cidr }}
-        run: bash ops/terraform-lightsail-ingress.sh open development
+          RELEASE_MANIFEST: release/release-manifest.json
+        run: bash ops/terraform-lightsail-container-deploy.sh development "$RELEASE_MANIFEST"
 
-      - name: Restore the development deployment role
+      - name: Restore the environment frontend publishing role
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalDevDeploy-${{ github.run_id }}
-
+          role-session-name: PawLocalDevelopment-Deploy-${{ github.run_id }}
       - name: Deploy through the selected environment adapter
         env:
           RELEASE_MANIFEST: release/release-manifest.json
@@ -356,11 +323,6 @@ jobs:
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
           PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
-          PAWLOCAL_DSQL_ACCESS_KEY_ID: ${{ secrets.PAWLOCAL_DSQL_ACCESS_KEY_ID }}
-          PAWLOCAL_DSQL_SECRET_ACCESS_KEY: ${{ secrets.PAWLOCAL_DSQL_SECRET_ACCESS_KEY }}
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_ACTOR: ${{ github.actor }}
         run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
 
       - name: Verify development release through the selected adapter
@@ -370,36 +332,12 @@ jobs:
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
           PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
         run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
 
       - name: Validate development deployment evidence and selected migration chain
         env:
           PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
         run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider "$PAWLOCAL_DATABASE_PROVIDER"
-
-      - name: Seed the development database once when explicitly enabled
-        if: success() && github.event_name == 'workflow_dispatch' && inputs.seed_development == true
-        id: seed-development
-        env:
-          RELEASE_MANIFEST: release/release-manifest.json
-          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
-        run: bash ops/run-deployment-adapter.sh seed --environment development --manifest "$RELEASE_MANIFEST"
-
-      - name: Verify seeded places through the public API
-        if: success() && steps.seed-development.outcome == 'success'
-        env:
-          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-        run: python ops/validate-seeded-places.py "$PAWLOCAL_API_HEALTH_URL" release/development-seed-verification.json
-
-      - name: Upload development seed verification evidence
-        if: success() && steps.seed-development.outcome == 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: pawlocal-development-seed-verification
-          path: release/development-seed-verification.json
-          if-no-files-found: error
-          retention-days: 90
 
       - name: Upload verified development release metadata
         if: success()
@@ -412,20 +350,6 @@ jobs:
             release/development-verification.json
           if-no-files-found: error
           retention-days: 90
-
-      - name: Reconfigure Terraform ingress role for cleanup
-        if: ${{ always() && steps.enable-ingress.outputs.ingress_state_may_have_changed == 'true' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalDevIngressCleanup-${{ github.run_id }}
-
-      - name: Restore development SSH ingress through Terraform
-        if: ${{ always() && steps.enable-ingress.outputs.ingress_state_may_have_changed == 'true' }}
-        env:
-          PAWLOCAL_RUNNER_IPV4_CIDR: ${{ steps.runner-ip.outputs.runner_cidr }}
-        run: bash ops/terraform-lightsail-ingress.sh restore development
 
       - name: Mark development deployment successful
         if: success()

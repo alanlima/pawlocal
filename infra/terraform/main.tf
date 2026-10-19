@@ -289,10 +289,7 @@ module "fullstack" {
   terraform_state_bucket_name = var.terraform_state_bucket_name
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
-  deploy_ssh_public_keys         = var.deploy_ssh_public_keys
-  ssh_cidr_blocks                = var.ssh_cidr_blocks
-  temporary_ssh_environment      = var.temporary_ssh_environment
-  temporary_ssh_cidr             = var.temporary_ssh_cidr
+  backend_image_digests          = var.backend_image_digests
   dsql_bootstrap_python          = var.dsql_bootstrap_python
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name

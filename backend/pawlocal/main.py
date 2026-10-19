@@ -171,4 +171,8 @@ async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "environment": settings.release_environment or "local",
+        "image_digest": settings.release_image_digest or "unknown",
+    }

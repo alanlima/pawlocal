@@ -1,0 +1,224 @@
+name: Roll back development release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_commit:
+        description: Main-branch commit from a previously successful, verified development deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-lightsail-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback-development:
+    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
+    runs-on: ubuntu-latest
+    environment: development
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+      PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
+      PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
+      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+    steps:
+      - name: Check out current deployment tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Find previously verified development release
+        id: release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        with:
+          script: |
+            const commit = process.env.RELEASE_COMMIT.toLowerCase()
+            if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('Enter a complete 40-character commit SHA')
+            const workflow = await github.rest.actions.getWorkflow({ ...context.repo, workflow_id: 'fullstack-release.yml' })
+            let run
+            for (let page = 1; page <= 20 && !run; page++) {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                ...context.repo, workflow_id: workflow.data.id, branch: 'main', status: 'success', per_page: 100, page,
+              })
+              if (!runs.data.workflow_runs.length) break
+              run = runs.data.workflow_runs.find(item => item.head_sha === commit && item.event === 'push' && item.head_branch === 'main')
+            }
+            if (!run) throw new Error('No successful main-branch full-stack release exists for this commit')
+            const deployments = await github.rest.repos.listDeployments({
+              ...context.repo, ref: commit, environment: 'development', per_page: 100,
+            })
+            let verified = false
+            for (const deployment of deployments.data) {
+              if (Number(deployment.payload?.workflow_run_id) !== run.id) continue
+              const statuses = await github.rest.repos.listDeploymentStatuses({ ...context.repo, deployment_id: deployment.id, per_page: 100 })
+              const latest = statuses.data.reduce((result, item) =>
+                !result || Date.parse(item.created_at) > Date.parse(result.created_at) ? item : result, null)
+              let payload
+              try {
+                payload = typeof latest?.payload === 'string' ? JSON.parse(latest.payload) : (latest?.payload || {})
+              } catch {
+                continue
+              }
+              if (latest?.state === 'success' && payload.telemetry_enabled === false) verified = true
+            }
+            if (!verified) throw new Error('The selected commit has no successful verified development deployment')
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: run.id })
+            if (!artifacts.data.artifacts.some(item => item.name === 'pawlocal-release-manifest' && !item.expired)) {
+              throw new Error('The selected release manifest artifact is missing or expired')
+            }
+            core.setOutput('run_id', run.id)
+
+      - name: Download the verified release manifest and frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-release-manifest
+          run-id: ${{ steps.release.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: release/
+
+      - name: Create development rollback deployment record
+        id: deployment
+        uses: actions/github-script@v7
+        env:
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          SOURCE_RUN_ID: ${{ steps.release.outputs.run_id }}
+        with:
+          script: |
+            const manifest = JSON.parse(require('fs').readFileSync('release/release-manifest.json', 'utf8'))
+            const deployment = await github.rest.repos.createDeployment({
+              ...context.repo,
+              ref: process.env.RELEASE_COMMIT,
+              environment: 'development',
+              production_environment: false,
+              auto_merge: false,
+              required_contexts: [],
+              payload: {
+                workflow_run_id: context.runId,
+                source_release_run_id: Number(process.env.SOURCE_RUN_ID),
+                backend_image: manifest.backend_image,
+                backend_image_digest: manifest.backend_image_digest,
+                frontend_artifact_digest: manifest.frontend.artifact_digest,
+                rollback: true,
+                telemetry_enabled: manifest.telemetry_enabled,
+              },
+            })
+            core.setOutput('deployment_id', deployment.data.id)
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: deployment.data.id,
+              state: 'in_progress',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Development release rollback started',
+            })
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Assume the development Terraform deployment role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalDevRollbackTerraform-${{ github.run_id }}
+
+      - name: Restore the selected backend image through Terraform
+        env:
+          RELEASE_MANIFEST: release/release-manifest.json
+        run: bash ops/terraform-lightsail-container-deploy.sh development "$RELEASE_MANIFEST"
+
+      - name: Assume the development frontend publishing role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalDevRollbackFrontend-${{ github.run_id }}
+
+      - name: Restore the selected frontend artifact
+        env:
+          RELEASE_MANIFEST: release/release-manifest.json
+          FRONTEND_ARCHIVE: release/frontend-development.tar.gz
+        run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
+
+      - name: Verify restored development release
+        env:
+          RELEASE_MANIFEST: release/release-manifest.json
+          EVIDENCE_FILE: release/development-rollback-verification.json
+          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+        run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+
+      - name: Validate rollback evidence
+        run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-rollback-verification.json --environment development --database-provider aurora_dsql
+
+      - name: Upload rollback evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-development-rollback
+          path: release/development-rollback-verification.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Mark development rollback successful
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        with:
+          script: |
+            const evidence = JSON.parse(require('fs').readFileSync('release/development-rollback-verification.json', 'utf8'))
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: 'success',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Rollback release health and database query verification passed',
+              payload: JSON.stringify({
+                backend_image_digest: evidence.backend_image_digest,
+                frontend_artifact_digest: evidence.frontend_artifact_digest,
+                database_provider: evidence.database_provider,
+                migration_id: evidence.migration_id,
+                telemetry_enabled: evidence.telemetry_enabled,
+                rollback: true,
+              }),
+            })
+
+      - name: Mark development rollback failed
+        if: ${{ (failure() || cancelled()) && steps.deployment.outputs.deployment_id != '' }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: 'failure',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Development release rollback failed; inspect run evidence before promotion',
+            })

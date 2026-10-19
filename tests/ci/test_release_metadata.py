@@ -45,6 +45,7 @@ def deployment_evidence(manifest: dict, provider: str) -> dict:
         "environment": manifest["frontend"]["environment"],
         "commit": manifest["commit"],
         "backend_image_digest": manifest["backend_image_digest"],
+        "running_image_digest": manifest["backend_image_digest"],
         "frontend_artifact_digest": manifest["frontend"]["artifact_digest"],
         "database_provider": provider,
         "migration_runner": chain["runner"],
@@ -86,6 +87,14 @@ class ReleaseMetadataTests(unittest.TestCase):
         result = self.validate(manifest, evidence)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("migration_id does not match", result.stderr)
+
+    def test_evidence_rejects_running_image_digest_mismatch(self) -> None:
+        manifest = release_manifest()
+        evidence = deployment_evidence(manifest, "aurora_dsql")
+        evidence["running_image_digest"] = "sha256:" + "f" * 64
+        result = self.validate(manifest, evidence)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("running image digest", result.stderr)
 
     def test_evidence_rejects_unhealthy_endpoints_and_enabled_telemetry(self) -> None:
         manifest = release_manifest()
