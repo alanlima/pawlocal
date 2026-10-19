@@ -732,6 +732,16 @@ def javascript_process_launch_commands(source: str) -> list[str]:
         if literal:
             command = literal.group(2)
             tail = args[literal.end():].lstrip()
+            try:
+                command_tokens = shlex.split(command)
+            except ValueError:
+                commands.append("<unresolved-child-process-command>")
+                continue
+            if command_tokens:
+                command_executable = re.split(r"[/\\]", command_tokens[0])[-1]
+                if command_executable in {"aws", "terraform"}:
+                    command_tokens[0] = command_executable
+                    command = shlex.join(command_tokens)
             # Command-string concatenation can hide AWS or Terraform operations.
             if tail.startswith("+") or (command in {"aws", "terraform"} and tail.startswith(",")):
                 commands.append("<unresolved-child-process-command>")
@@ -1315,6 +1325,22 @@ cp.execFile("terraform", ["state", "rm", "module.other"]);
         source = '''const cp = require("node:child_process");
 cp.execFileSync("/usr/local/bin/aws", ["ec2", "terminate-instances", "--instance-ids", "i-123"]);
 cp.spawn('/usr/bin/terraform', ['state', 'rm', 'module.example']);
+'''
+        commands = javascript_process_launch_commands(source)
+        self.assertEqual(
+            commands,
+            [
+                "aws ec2 terminate-instances --instance-ids i-123",
+                "terraform state rm module.example",
+            ],
+        )
+        self.assertEqual(aws_cli_commands(commands[0]), [("ec2", "terminate-instances")])
+        self.assertTrue(contains_forbidden_terraform_state_change(commands[1]))
+
+    def test_javascript_path_qualified_command_strings_are_scanned(self) -> None:
+        source = '''const cp = require("child_process");
+cp.execSync('/usr/local/bin/aws ec2 terminate-instances --instance-ids i-123');
+cp.execSync("/usr/bin/terraform state rm module.example");
 '''
         commands = javascript_process_launch_commands(source)
         self.assertEqual(
