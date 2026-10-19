@@ -35,6 +35,8 @@ The PostgreSQL/Alembic history remains the local and PostgreSQL path. Migrations
 
 For clean DSQL installs, `python -m pawlocal.dsql_migrate` applies the separate `migrations/dsql/0001_initial` baseline through `pawlocal.dsql_migrations.apply_dsql_baseline(engine)`. It executes one DDL statement per transaction, waits for asynchronous index jobs, then verifies each index's catalog validity and requested definition before continuing. When `IF NOT EXISTS` returns no job ID after an interrupted run, the runner verifies the catalog and fails closed if the index is missing, invalid, or different. It records the baseline revision only after all schema work succeeds. Subsequent calls skip the recorded baseline. No forward DSQL upgrade revisions or PostgreSQL-to-DSQL data migration are implemented; future schema changes need numbered DSQL migrations before deployment. `execute_bounded_dml_batches` caps each transaction below DSQL's 3,000-row DML limit. This is a clean-install path for a new, empty DSQL database only.
 
+The demo seed command is a separate, explicit operation. It uses the configured app runtime engine and, for DSQL, verifies `current_schema()` is `pawlocal` before inserting. It never redirects the application to `public` or changes table grants.
+
 | Concern | PostgreSQL/Alembic | DSQL clean-install baseline |
 |---|---|---|
 | Facilities | `0001`-`0006` use a PostgreSQL `varchar[]`; `0007` converts data to `place_facilities` with `unnest` | Starts directly with normalized `place_facilities`; no array conversion |
@@ -43,7 +45,7 @@ For clean DSQL installs, `python -m pawlocal.dsql_migrate` applies the separate 
 | DDL / DML | Existing history includes migration `0005` mixed DDL and backfill and `0006` quarantine/backfill and cleanup | One DDL per transaction; version ledger and bounded row-by-row DML are separate transactions |
 | Existing data | Existing PostgreSQL rows are converted by `0007` | Import/backfill from PostgreSQL is not implemented; this path initializes a new empty database |
 
-The PostgreSQL history therefore cannot be replayed on DSQL; use the separate baseline only for a new, empty DSQL database. No live DSQL cluster has validated the baseline, generated query plans, or runtime OCC behavior.
+The PostgreSQL history therefore cannot be replayed on DSQL; use the separate baseline only for a new, empty DSQL database. The development cluster's 2026-10-20 catalog inspection found the baseline tables in `pawlocal`, owned by the app role, and separate admin-owned tables in `public`. The API's list/detail requests did not expose the two synthetic records present in `public`. The operator could not read app-owned table contents directly, so this evidence does not establish app-schema row contents, generated query plans, or runtime OCC behavior.
 
 Offline evidence: the DSQL baseline statements pass `dsql-lint`; unit tests exercise transaction separation, async-index wait ordering, ledger behavior, and DML batching. The AWS dialect compiles the normalized facility search query. Review submission retries DSQL optimistic concurrency conflicts with a bounded three-attempt policy and rolls back the full failed transaction before retry. These checks do not prove a live DSQL migration, runtime query, token refresh, concurrency result, or query plan.
 

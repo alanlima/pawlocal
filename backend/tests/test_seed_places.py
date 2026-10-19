@@ -7,7 +7,12 @@ from sqlalchemy.engine import make_url
 from pawlocal.infrastructure import models  # noqa: F401
 from pawlocal.infrastructure.database import Base
 from pawlocal.infrastructure.models import PlaceRecord
-from pawlocal.seed_places import PLACES, seed_with_engine, validate_target
+from pawlocal.seed_places import (
+    PLACES,
+    seed_with_engine,
+    validate_target,
+    verify_dsql_app_schema,
+)
 
 
 @pytest.fixture
@@ -70,6 +75,29 @@ def test_target_guard_requires_environment_endpoint_allowlist():
             expected_endpoint=None,
             confirm_production=False,
         )
+
+
+@pytest.mark.parametrize("schema", ["pawlocal", "public"])
+def test_dsql_seed_schema_guard_requires_api_schema(schema):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    class Connection:
+        def scalar(self, _statement):
+            return schema
+
+    class Engine:
+        dialect = SimpleNamespace(name="auroradsql")
+
+        @contextmanager
+        def connect(self):
+            yield Connection()
+
+    if schema == "pawlocal":
+        verify_dsql_app_schema(Engine())
+    else:
+        with pytest.raises(RuntimeError, match="runtime schema does not match"):
+            verify_dsql_app_schema(Engine())
 
 
 def test_production_requires_explicit_confirmation(seed_engine):

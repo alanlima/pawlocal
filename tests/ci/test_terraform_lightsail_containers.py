@@ -25,6 +25,17 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     image = "ghcr.io/alanlima/pawlocal-api@sha256:" + "a" * 64
     account_id = "097922957316"
 
+    def test_dsql_cluster_policy_restores_lightsail_principal_and_db_user_condition(self) -> None:
+        terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        cluster_policy = terraform.split('resource "aws_dsql_cluster_policy" "api_connect" {', 1)[1].split('\n}', 1)[0]
+        runtime_policy = terraform.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[1].split('\n}', 1)[0]
+
+        self.assertIn('Action    = "dsql:DbConnectAdmin"', cluster_policy)
+        self.assertIn('Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }', cluster_policy)
+        self.assertIn('Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }', cluster_policy)
+        self.assertIn('Action   = "dsql:DbConnect"', runtime_policy)
+        self.assertIn('Resource = aws_dsql_cluster.app[each.key].arn', runtime_policy)
+
     @staticmethod
     def plan(address: str, actions: list[str], image: str) -> dict:
         environment = "development" if '["development"]' in address else "production"
