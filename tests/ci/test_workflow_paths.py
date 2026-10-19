@@ -175,6 +175,17 @@ class WorkflowPathTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(matches("workflow-validation.yml", path))
 
+    def test_historical_production_promotion_uses_current_deployment_tooling(self) -> None:
+        workflow = (WORKFLOWS / "deploy-production.yml").read_text(encoding="utf-8")
+        self.assertIn("name: Check out current deployment tooling", workflow)
+        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
+        self.assertIn("path: deployment-tools", workflow)
+        self.assertIn("ref: ${{ inputs.release_commit }}", workflow)
+        self.assertIn(
+            "bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production",
+            workflow,
+        )
+
     def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text()
         self.assertIn("statuses.data.reduce((latest, status)", workflow)

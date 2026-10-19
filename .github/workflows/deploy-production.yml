@@ -150,6 +150,12 @@ jobs:
       id-token: write
       packages: read
     steps:
+      - name: Check out current deployment tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: deployment-tools
+
       - name: Check out selected release source
         uses: actions/checkout@v4
         with:
@@ -282,7 +288,7 @@ jobs:
       - name: Deploy the container image through shared Terraform state
         env:
           RELEASE_MANIFEST: release/production-release-manifest.json
-        run: bash ops/terraform-lightsail-container-deploy.sh production "$RELEASE_MANIFEST"
+        run: bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production "$RELEASE_MANIFEST"
 
       - name: Restore the environment frontend publishing role
         uses: aws-actions/configure-aws-credentials@v4
