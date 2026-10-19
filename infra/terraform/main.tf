@@ -313,13 +313,12 @@ module "fullstack" {
     aws = aws.fullstack
   }
 
-  aws_region                     = var.aws_region
-  root_domain                    = var.domain_name
-  cloudfront_certificate_arn     = var.certificate_arn
-  github_repository              = var.github_repository
-  github_owner_id                = var.github_owner_id
-  github_repository_id           = var.github_repository_id
-  dsql_access_key_pgp_public_key = var.dsql_access_key_pgp_public_key
+  aws_region                 = var.aws_region
+  root_domain                = var.domain_name
+  cloudfront_certificate_arn = var.certificate_arn
+  github_repository          = var.github_repository
+  github_owner_id            = var.github_owner_id
+  github_repository_id       = var.github_repository_id
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   deploy_ssh_public_keys         = var.deploy_ssh_public_keys

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from uuid import UUID
@@ -26,7 +27,7 @@ PLACES = (
     SeedPlace(
         id=UUID("639a0c12-6e38-4ea0-a1d0-4caabbe4bd01"),
         name="Orleigh Park",
-        area="West End",
+        area="Brisbane City",
         address="68 Hill End Terrace, West End Qld 4101",
         description=(
             "Brisbane City Council identifies an off-leash dog park at Orleigh Park. "
@@ -39,7 +40,7 @@ PLACES = (
     SeedPlace(
         id=UUID("edcd490d-6c79-487a-8c3d-0af495e9d902"),
         name="Whites Hill Reserve",
-        area="Camp Hill",
+        area="Brisbane City",
         address="258 Boundary Road, Camp Hill Qld 4152",
         description=(
             "Brisbane City Council identifies a dog park within Whites Hill Reserve. "
@@ -56,8 +57,14 @@ PLACES = (
 )
 
 
-def validate_target(url: URL, environment: str, *, confirm_production: bool) -> None:
-    """Fail before creating an engine unless the DSQL target is unmistakable."""
+def validate_target(
+    url: URL,
+    environment: str,
+    *,
+    expected_endpoint: str | None,
+    confirm_production: bool,
+) -> None:
+    """Fail before creating an engine unless its endpoint matches the env allowlist."""
     if environment not in {"development", "production"}:
         raise ValueError("environment must be development or production")
     if environment == "production" and not confirm_production:
@@ -65,6 +72,14 @@ def validate_target(url: URL, environment: str, *, confirm_production: bool) -> 
     if url.get_backend_name().casefold() != "auroradsql":
         raise ValueError(
             "seeding is restricted to Aurora DSQL; PostgreSQL is not allowed"
+        )
+    if not expected_endpoint:
+        raise ValueError(
+            "PAWLOCAL_EXPECTED_DSQL_ENDPOINT must be set to the environment's approved DSQL endpoint"
+        )
+    if url.host is None or url.host.casefold() != expected_endpoint.strip().casefold():
+        raise ValueError(
+            "PAWLOCAL_DATABASE_URL host does not match PAWLOCAL_EXPECTED_DSQL_ENDPOINT"
         )
     expected = f"pawlocal-{environment}"
     application_name = url.query.get("application_name")
@@ -186,7 +201,10 @@ def main(argv: list[str] | None = None) -> int:
 
         url = settings.sqlalchemy_url
         validate_target(
-            url, args.environment, confirm_production=args.confirm_production
+            url,
+            args.environment,
+            expected_endpoint=os.environ.get("PAWLOCAL_EXPECTED_DSQL_ENDPOINT"),
+            confirm_production=args.confirm_production,
         )
         # Import only after the target guard: database.py binds its runtime engine
         # from PAWLOCAL_DATABASE_URL when imported.
