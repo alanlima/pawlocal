@@ -15,6 +15,7 @@ from pawlocal.observability import (
     extract_trace_context,
     log_request,
     mark_failed,
+    safe_exception_log_fields,
     shutdown_observability,
     synthetic_database_failure,
 )
@@ -103,10 +104,12 @@ async def trace_and_log_request(request: Request, call_next):
             )
 
         error_code = None
+        exception_fields = {}
         try:
             response = await call_next(request)
-        except Exception:  # noqa: BLE001 - return a generic response without exception details
+        except Exception as exc:  # noqa: BLE001 - keep response and logs message-free
             error_code = "unhandled_api_error"
+            exception_fields = safe_exception_log_fields(exc)
             mark_failed(span, error_code)
             response = JSONResponse(
                 status_code=500,
@@ -143,6 +146,7 @@ async def trace_and_log_request(request: Request, call_next):
             http_status=status_code,
             duration_ms=duration_ms,
             error_code=error_code if status_code >= 500 else None,
+            **(exception_fields if error_code == "unhandled_api_error" else {}),
         )
         return response
 
