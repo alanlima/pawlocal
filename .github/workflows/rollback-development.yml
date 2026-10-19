@@ -159,12 +159,14 @@ jobs:
 
       - name: Restore the selected frontend artifact
         env:
+          PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
           RELEASE_MANIFEST: release/release-manifest.json
           FRONTEND_ARCHIVE: release/frontend-development.tar.gz
         run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
 
       - name: Verify restored development release
         env:
+          PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
           RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/development-rollback-verification.json
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}

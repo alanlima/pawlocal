@@ -65,7 +65,11 @@ class TerraformLightsailContainerTests(unittest.TestCase):
 
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
-        self.assertIn("PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}", workflow)
+        restore_step = workflow.split("      - name: Restore the selected frontend artifact\n", 1)[1].split("      - name:", 1)[0]
+        verify_step = workflow.split("      - name: Verify restored development release\n", 1)[1].split("      - name:", 1)[0]
+        adapter_variable = "PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}"
+        self.assertIn(adapter_variable, restore_step)
+        self.assertIn(adapter_variable, verify_step)
         self.assertIn("No successful main-branch full-stack release", workflow)
         self.assertIn("no successful verified development deployment", workflow)
         self.assertIn("terraform-lightsail-container-deploy.sh development", workflow)
