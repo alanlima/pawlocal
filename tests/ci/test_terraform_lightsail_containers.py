@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import tarfile
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,6 +70,90 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("currentDeployment", deploy)
         self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8"))
         self.assertIn("running_image_digest", adapter)
+
+    def test_deploy_adapter_cleans_frontend_temp_dir_after_publication(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Adapter subprocess paths are exercised by the Ubuntu CI runner")
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Bash is required to exercise the deployment adapter")
+
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            test_repo = temp / "repo"
+            for relative_path in (
+                "ops/run-deployment-adapter.sh",
+                "ops/deployment-adapters/lightsail-dsql.sh",
+                "ops/validate-release-metadata.py",
+            ):
+                source_path = ROOT / relative_path
+                target_path = test_repo / relative_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(source_path.read_bytes().replace(b"\r\n", b"\n"))
+                if target_path.suffix == ".sh":
+                    target_path.chmod(0o755)
+            manifest = {
+                "schema_version": 2,
+                "commit": "a" * 40,
+                "backend_image": f"ghcr.io/alanlima/pawlocal-api@sha256:{'b' * 64}",
+                "backend_image_digest": f"sha256:{'b' * 64}",
+                "migration_chains": {
+                    "postgresql": {"runner": "alembic", "migration_id": "0007_normalize_place_facilities"},
+                    "aurora_dsql": {"runner": "dsql_baseline", "migration_id": "dsql_0001_initial"},
+                },
+                "telemetry_enabled": False,
+                "frontend": {
+                    "environment": "development",
+                    "artifact_digest": "sha256:" + "0" * 64,
+                },
+            }
+            manifest_path = temp / "manifest.json"
+            archive_path = temp / "frontend.tar.gz"
+            source = temp / "dist"
+            source.mkdir()
+            (source / "index.html").write_text("<html></html>", encoding="utf-8")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(source / "index.html", arcname="index.html")
+            manifest["frontend"]["artifact_digest"] = "sha256:" + hashlib.sha256(archive_path.read_bytes()).hexdigest()
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            aws_log = temp / "aws.log"
+            aws = fake_bin / "aws"
+            aws.write_text(
+                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AWS_CALL_LOG\"\n",
+                encoding="utf-8",
+            )
+            aws.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
+                "AWS_CALL_LOG": str(aws_log),
+                "RUNNER_TEMP": directory,
+                "PAWLOCAL_DEPLOY_ADAPTER_PATH": "ops/deployment-adapters/lightsail-dsql.sh",
+                "PAWLOCAL_FRONTEND_BUCKET": "test-frontend-bucket",
+                "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID": "test-distribution",
+            })
+            result = subprocess.run(
+                [bash, "ops/run-deployment-adapter.sh", "deploy", "--environment", "development",
+                 "--manifest", str(manifest_path), "--frontend-archive", str(archive_path)],
+                cwd=test_repo,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Published development frontend artifact", result.stdout)
+            self.assertNotIn("app_dir: unbound variable", result.stderr)
+            calls = aws_log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(calls), 3)
+            self.assertTrue(calls[0].startswith("s3 sync "))
+            self.assertTrue(calls[1].startswith("s3 cp "))
+            self.assertTrue(calls[2].startswith("cloudfront create-invalidation "))
+            self.assertEqual(list(temp.glob("pawlocal-frontend.*")), [])
 
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
