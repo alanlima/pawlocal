@@ -525,6 +525,70 @@ def test_psycopg_pgconn_auth_flags_are_boolean_hints_only(monkeypatch):
         assert secret not in encoded
 
 
+def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    driver = psycopg.OperationalError("opaque driver exception text")
+    pgconn = type(
+        "FakePgconn",
+        (),
+        {
+            "needs_password": False,
+            "used_password": True,
+            "error_message": (
+                b"FATAL: IAM authentication failed user=PRIVATE_USER "
+                b"host=PRIVATE_HOST token=SIGNED_TOKEN"
+            ),
+        },
+    )()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError(
+        "SELECT 'PRIVATE_SQL'", {"token": "PARAM_SECRET"}, driver
+    )
+
+    fields = safe_exception_log_fields(wrapped)
+    encoded = json.dumps(fields)
+
+    assert fields["database_error_classification"] == "authentication_rejected"
+    assert (
+        fields["database_error_classification_source"] == "pgconn_error_message_pattern"
+    )
+    assert fields["database_pgconn_available"] is True
+    assert fields["database_auth_needs_password"] is False
+    assert fields["database_auth_used_password"] is True
+    for secret in (
+        "PRIVATE_USER",
+        "PRIVATE_HOST",
+        "SIGNED_TOKEN",
+        "PRIVATE_SQL",
+        "PARAM_SECRET",
+        "opaque driver exception text",
+    ):
+        assert secret not in encoded
+
+
+def test_password_flags_alone_do_not_infer_authentication_cause(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    driver = psycopg.OperationalError("opaque driver detail")
+    pgconn = type("FakePgconn", (), {"needs_password": False, "used_password": True})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {"value": "PARAM_SECRET"}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_error_classification"] == "connection_failure_unknown"
+    assert fields["database_error_classification_source"] == "fallback"
+    assert fields["database_auth_needs_password"] is False
+    assert fields["database_auth_used_password"] is True
+
+
 def test_psycopg_ambiguous_message_and_failing_pgconn_getter_stay_safe(monkeypatch):
     import psycopg
     from sqlalchemy.exc import OperationalError
