@@ -114,7 +114,10 @@ def test_0006_quarantines_legacy_rows_and_downgrade_restores_them():
             ).all()
             connection.commit()
 
-            command.upgrade(config, "head")
+            # This test asserts revision 0006's quarantine/downgrade behavior.
+            # Keep it pinned to that revision as later migrations are added;
+            # the current Alembic head (0007) is covered by the CI head upgrade.
+            command.upgrade(config, "0006_contribution_validation")
             active_contributions = connection.execute(
                 text(f"SELECT {contribution_columns} FROM contributions ORDER BY id")
             ).all()

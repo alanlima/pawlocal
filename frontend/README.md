@@ -32,17 +32,17 @@ These override values make PawLocal available at <http://localhost:5174> and Gra
 
 With default ports, the app is at <http://localhost:5173>, Grafana is at <http://localhost:3000>, and the API health check is at <http://localhost:8000/health>; Grafana loads the **PawLocal local observability** dashboard. Prometheus, Loki, Tempo, the Collector health endpoint and PostgreSQL are also host-reachable on localhost ports 9090, 3100, 3200, 13133 and 55432. Compose binds every published port to loopback. The frontend uses the HTTP adapter with the Vite proxy to `backend:8000`; set `VITE_USE_MOCK_BACKEND=true` only when running the mock-only frontend without the backend service.
 
-| Service | Host address | Purpose |
-|---|---|---|
-| Frontend (default) | `localhost:5173` | Vite development UI |
-| FastAPI backend | `localhost:8000` | API health and local synthetic-failure requests |
-| PostgreSQL | `localhost:55432` | Local persistence |
-| Collector OTLP/HTTP | `localhost:4318` | Browser traces, metrics and logs |
-| Collector health | `localhost:13133` | Collector readiness |
-| Grafana (default) | `localhost:3000` | Dashboards, logs and Tempo traces |
-| Prometheus | `localhost:9090` | Scraped frontend metrics |
-| Loki | `localhost:3100` | Structured frontend and backend logs |
-| Tempo | `localhost:3200` | Correlated browser, API and database traces |
+| Service             | Host address      | Purpose                                         |
+| ------------------- | ----------------- | ----------------------------------------------- |
+| Frontend (default)  | `localhost:5173`  | Vite development UI                             |
+| FastAPI backend     | `localhost:8000`  | API health and local synthetic-failure requests |
+| PostgreSQL          | `localhost:55432` | Local persistence                               |
+| Collector OTLP/HTTP | `localhost:4318`  | Browser traces, metrics and logs                |
+| Collector health    | `localhost:13133` | Collector readiness                             |
+| Grafana (default)   | `localhost:3000`  | Dashboards, logs and Tempo traces               |
+| Prometheus          | `localhost:9090`  | Scraped frontend metrics                        |
+| Loki                | `localhost:3100`  | Structured frontend and backend logs            |
+| Tempo               | `localhost:3200`  | Correlated browser, API and database traces     |
 
 ### Health and status checks
 
@@ -65,7 +65,7 @@ The Collector accepts browser OTLP/HTTP only from the origin in `PAWLOCAL_FRONTE
 
 1. Open PawLocal, search for a matching area or place, then open a result.
 2. In Grafana's PawLocal dashboard, inspect search/detail outcomes, latency and frontend logs. Open a log's trace ID to view its trace in Tempo. A successful search, a search with no results, and a failed search have distinct bounded outcomes.
-3. Root Compose runs the HTTP adapter against the backend. Protected actions require a host-provided `window.pawLocalAuth` session; Compose does not provide demo-member sign-in. The mock-only walkthrough below is separate from Compose.
+3. Root Compose runs the HTTP adapter against the backend. Protected actions use Cognito when the public client settings are configured; Compose does not provide a demo-member session. The mock-only walkthrough below is separate from Compose.
 4. To exercise the frontend's deterministic mock search failure, start a standalone Vite server with mock mode and development faults explicitly enabled. In PowerShell, run from the repository root:
 
    ```powershell
@@ -140,16 +140,24 @@ Feature components import the shared `placeService` instance from `src/services`
 
 The approved OpenAPI contract includes the public, paginated `GET /contributions/reportable` operation. `HttpPlaceService` maps only the public response fields to the frontend contribution type; contributor and reporter identities are never returned. The service factory selects `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`; false or unset selects `HttpPlaceService`, using `VITE_API_BASE_URL` or the same-origin `/api/v1` default. Root Compose sets mock mode to false and proxies `/api/v1` to the `backend` service. HTTP failures stay visible and never fall back to mock data.
 
-### Host authentication integration
+### Cognito User Pool authentication
 
-The frontend does not implement sign-in screens or provision an identity provider. A host application may inject the current Cognito session before the PawLocal app loads using this browser contract:
+HTTP mode integrates with the approved Amazon Cognito User Pool using OAuth 2.0 authorization code flow with PKCE. The browser redirects to the Cognito Hosted UI for sign-in, exchanges the returned code using the one-time PKCE verifier, and sends only the Cognito **access token** as a Bearer token to protected API operations. The API remains responsible for validating the token signature, exact issuer, `token_use=access`, expiry, app-client ID and configured audience policy. The frontend does not authorize requests from an ID token or client-supplied user ID.
 
-```ts
-window.pawLocalAuth = {
-  getAccessToken: () => cognitoSession.getAccessToken(), // sync or Promise<string | null>
-  signIn: () => startHostSignIn(), // optional
-  signOut: () => endHostSession(), // optional
-}
-```
+Supply these **public client settings separately for development and production** when building each frontend bundle. The values are configuration, not credentials; never add a Cognito client secret or AWS credential to a `VITE_*` variable or browser asset.
 
-`getAccessToken()` is called for every HTTP request; return the current short-lived Cognito **access token**, or `null` when signed out. The adapter adds it as a Bearer token for protected API calls and does not persist or display it. The host owns the sign-in/sign-out UX and token refresh. If no provider or sign-in action is configured, the HTTP-mode UI reports that authentication is unavailable and does not simulate a signed-in user. Mock demo-member mode is only a local mock behavior and does not authenticate HTTP requests. Authenticated browser flows remain unverified until a host supplies a configured Cognito session.
+| Variable                    | Purpose                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `VITE_RELEASE_ENV`          | Must be `development` or `production` for a cloud release build.                                               |
+| `VITE_USE_MOCK_BACKEND`     | Must be exactly `false` for cloud release builds.                                                              |
+| `VITE_TELEMETRY_ENABLED`    | Must be exactly `false` for the initial cloud release.                                                         |
+| `VITE_API_BASE_URL`         | Development may use `/api/v1` or an absolute HTTPS API URL; production must use exactly the same-origin `/api/v1` path. |
+| `VITE_COGNITO_DOMAIN`       | HTTPS Cognito Hosted UI domain for the selected user pool.                                                     |
+| `VITE_COGNITO_CLIENT_ID`    | Public app-client ID configured for authorization-code flow without a client secret.                           |
+| `VITE_COGNITO_REDIRECT_URI` | Exact callback URL registered with the app client.                                                             |
+| `VITE_COGNITO_LOGOUT_URI`   | Exact post-logout URL registered with the app client.                                                          |
+| `VITE_COGNITO_SCOPES`       | Optional OAuth scopes; defaults to `openid email profile`.                                                     |
+
+`npm run build` always runs `prebuild` and requires valid release settings, including for a workstation build; it fails before TypeScript/Vite runs if `VITE_RELEASE_ENV` or any required value is missing or malformed. Local `npm run dev` does not require release settings. The frontend also checks the same release invariants at startup. Run `npm run validate:release-config` to validate the currently selected release environment directly.
+
+The authorization state, PKCE verifier, access token and refresh token stay in the current tab's `sessionStorage`; the frontend refreshes short-lived access tokens and clears the session on sign-out. Tokens are never logged or added to telemetry. If Cognito is not configured during local development, HTTP browsing remains available but protected actions report that authentication is not configured. Mock demo-member mode remains local-only and never authenticates HTTP requests.

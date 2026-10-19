@@ -39,7 +39,16 @@ class Settings(BaseSettings):
                 port=self.database_port,
                 database=self.database_name,
             )
-        return make_url(self.database_url)
+        url = make_url(self.database_url)
+        if (
+            url.get_backend_name().lower() == "auroradsql"
+            and (url.username or "").strip().casefold() == "admin"
+        ):
+            raise ValueError(
+                "Aurora DSQL reserved database role 'admin' cannot be used; "
+                "configure a custom application role."
+            )
+        return url
 
 
 settings = Settings()

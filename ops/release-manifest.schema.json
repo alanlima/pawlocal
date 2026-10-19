@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawlocal.example/schemas/release-manifest.schema.json",
+  "title": "PawLocal full-stack release manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "commit",
+    "backend_image",
+    "backend_image_digest",
+    "migration_chains",
+    "telemetry_enabled"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "backend_image": { "type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$" },
+    "backend_image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "migration_chains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["postgresql", "aurora_dsql"],
+      "properties": {
+        "postgresql": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runner", "migration_id"],
+          "properties": {
+            "runner": { "const": "alembic" },
+            "migration_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" }
+          }
+        },
+        "aurora_dsql": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runner", "migration_id"],
+          "properties": {
+            "runner": { "const": "dsql_baseline" },
+            "migration_id": { "const": "dsql_0001_initial" }
+          }
+        }
+      }
+    },
+    "telemetry_enabled": { "const": false },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["environment", "artifact_digest"],
+      "properties": {
+        "environment": { "enum": ["development", "production"] },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "source_development_artifact_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

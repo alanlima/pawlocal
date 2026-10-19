@@ -2,7 +2,6 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    JSON,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -15,8 +14,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from pawlocal.domain.places import PLACE_FACILITIES
 from pawlocal.infrastructure.database import Base
@@ -34,11 +32,6 @@ class PlaceRecord(Base):
             name="ck_places_average_rating",
         ),
         CheckConstraint("length(trim(name)) > 0", name="ck_places_name_nonempty"),
-        CheckConstraint(
-            "facilities <@ ARRAY['Fenced', 'Off-leash area', 'Drinking water', "
-            "'Shade', 'Picnic tables', 'Accessible paths']::varchar(80)[]",
-            name="ck_places_facilities",
-        ).ddl_if(dialect="postgresql"),
         Index("ix_places_area_category", "area", "category"),
         Index("ix_places_published_name", "is_published", "name"),
     )
@@ -52,10 +45,11 @@ class PlaceRecord(Base):
     address: Mapped[str | None] = mapped_column(String(300))
     description: Mapped[str | None] = mapped_column(Text)
     dog_access_rules: Mapped[str | None] = mapped_column(Text)
-    facilities: Mapped[list[str]] = mapped_column(
-        JSON().with_variant(ARRAY(String(80)), "postgresql"),
-        nullable=False,
-        default=list,
+    facility_records: Mapped[list["PlaceFacilityRecord"]] = relationship(
+        back_populates="place",
+        cascade="all, delete-orphan",
+        order_by="PlaceFacilityRecord.ordinal",
+        passive_deletes=True,
     )
     average_rating: Mapped[float | None] = mapped_column(Float)
     source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -72,12 +66,50 @@ class PlaceRecord(Base):
         onupdate=func.now(),
     )
 
-    @validates("facilities")
-    def validate_facilities(self, _: str, facilities: list[str]) -> list[str]:
-        unsupported = set(facilities) - set(PLACE_FACILITIES)
+    @property
+    def facilities(self) -> list[str]:
+        return [record.facility for record in self.facility_records]
+
+    @facilities.setter
+    def facilities(self, facilities: list[str]) -> None:
+        unsupported = set(facilities) - PLACE_FACILITIES
         if unsupported:
             raise ValueError(f"Unsupported place facilities: {sorted(unsupported)}")
-        return facilities
+        # Facility values are unique by schema. Keep their supplied order for
+        # stable API output and avoid duplicate association rows.
+        self.facility_records = [
+            _create_place_facility(facility, ordinal)
+            for ordinal, facility in enumerate(dict.fromkeys(facilities))
+        ]
+
+class PlaceFacilityRecord(Base):
+    __tablename__ = "place_facilities"
+    __table_args__ = (
+        CheckConstraint(
+            "facility IN ('Fenced', 'Off-leash area', 'Drinking water', 'Shade', "
+            "'Picnic tables', 'Accessible paths')",
+            name="ck_place_facilities_value",
+        ),
+        CheckConstraint("ordinal >= 0", name="ck_place_facilities_ordinal"),
+        Index("ix_place_facilities_facility_place", "facility", "place_id"),
+    )
+
+    place_id: Mapped[UUID] = mapped_column(
+        ForeignKey("places.id", ondelete="CASCADE"), primary_key=True
+    )
+    facility: Mapped[str] = mapped_column(String(80), primary_key=True)
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    place: Mapped[PlaceRecord] = relationship(back_populates="facility_records")
+
+    @validates("facility")
+    def validate_facility(self, _: str, facility: str) -> str:
+        if facility not in PLACE_FACILITIES:
+            raise ValueError(f"Unsupported place facilities: {[facility]}")
+        return facility
+
+
+def _create_place_facility(facility: str, ordinal: int) -> PlaceFacilityRecord:
+    return PlaceFacilityRecord(facility=facility, ordinal=ordinal)
 
 
 class ContributionRecord(Base):

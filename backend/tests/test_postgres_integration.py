@@ -46,12 +46,10 @@ def test_postgres_repositories_constraints_and_records_survive_new_sessions():
             with pytest.raises(IntegrityError):
                 session.execute(
                     text(
-                        "INSERT INTO places (id, name, category, area, facilities) "
-                        "VALUES (:id, 'Invalid facility integration fixture', "
-                        "'dog_park', 'Brisbane City', "
-                        "ARRAY['Unsupported facility']::varchar(80)[])"
+                        "INSERT INTO place_facilities (place_id, facility, ordinal) "
+                        "VALUES (:id, 'Unsupported facility', 0)"
                     ),
-                    {"id": uuid4()},
+                    {"id": place_id},
                 )
             session.rollback()
 

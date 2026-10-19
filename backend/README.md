@@ -1,6 +1,6 @@
 # Backend development
 
-The API uses FastAPI and SQLAlchemy 2. PostgreSQL is the runtime database; request handlers use a `PlaceService`-independent API boundary and access persisted data through application queries and repositories. The API does not include seed locations: only approved listing data should be published.
+The API uses FastAPI and SQLAlchemy 2. PostgreSQL is the local development default. The selected cloud runtime supports Aurora DSQL through AWS's SQLAlchemy adapter. Request handlers access persisted data through application queries and repositories. The API does not include seed locations: only approved listing data should be published.
 
 ## Local setup
 
@@ -20,6 +20,34 @@ uvicorn pawlocal.main:app --reload
 ```
 
 The API health endpoint is `http://127.0.0.1:8000/health`; OpenAPI docs are at `/docs`. Run backend tests with `pytest` from this directory. API/repository tests use isolated SQLite fixtures and do not require approved production place data.
+
+## Aurora DSQL compatibility status
+
+PR #61 CI and GitGuardian checked the provider-neutral release workflow, but did not deploy the application or create a DSQL cluster. This backend change wires the selected Aurora DSQL runtime connector; there is still no live DSQL migration, runtime connection, IAM token refresh, or OCC evidence. No DSQL or other AWS resources were created for this work.
+
+`create_database_engine` preserves the PostgreSQL path and sends Aurora DSQL URLs to AWS's `create_dsql_engine` helper. That helper obtains short-lived DSQL IAM tokens through the AWS DSQL connector and AWS SDK credential chain, and configures TLS certificate verification. The app passes only the endpoint, custom database role, database name, and optional `application_name`; it does not read keys, create tokens, or place credentials in connection URLs. Configure each host's AWS SDK credential source outside the repository and image (for the MVP, one IAM user's key per environment as approved in Issue #43). Do not set DSQL passwords or token/auth URL options. The connector's live connection and token refresh behavior remain unverified.
+
+The deployment can set `PAWLOCAL_DATABASE_URL` to `auroradsql+psycopg://<custom-db-role>@<cluster-endpoint>/postgres?application_name=pawlocal-dev` (use the production role and application name in production). The endpoint includes its AWS Region. For host credentials in a restricted shared credentials file, configure the standard `AWS_SHARED_CREDENTIALS_FILE` variable for the API service; boto3's normal provider chain reads it. Do not put key values in this URL, repository files, or the container image.
+
+Place facilities are represented by the normalized `place_facilities` relation in the current ORM and migration `0007`; search uses one correlated `EXISTS` predicate per selected facility. This removes the prior PostgreSQL array/`ANY` query dependency. The representative SQL generated from the application query compiles with AWS's SQLAlchemy DSQL dialect and passes `dsql-lint` (offline SQL evidence only).
+
+The PostgreSQL/Alembic history remains the local and PostgreSQL path. Migrations `0001` through `0006` create PostgreSQL arrays, synchronous indexes, and contain PostgreSQL-specific backfill/quarantine SQL. Migration `0007` normalizes facilities for PostgreSQL and intentionally fails closed on the DSQL dialect because it migrates from that legacy array schema. Do not point the Alembic chain at DSQL.
+
+For clean DSQL installs, `python -m pawlocal.dsql_migrate` applies the separate `migrations/dsql/0001_initial` baseline through `pawlocal.dsql_migrations.apply_dsql_baseline(engine)`. It executes one DDL statement per transaction, waits for asynchronous index jobs, then verifies each index's catalog validity and requested definition before continuing. When `IF NOT EXISTS` returns no job ID after an interrupted run, the runner verifies the catalog and fails closed if the index is missing, invalid, or different. It records the baseline revision only after all schema work succeeds. Subsequent calls skip the recorded baseline. No forward DSQL upgrade revisions or PostgreSQL-to-DSQL data migration are implemented; future schema changes need numbered DSQL migrations before deployment. `execute_bounded_dml_batches` caps each transaction below DSQL's 3,000-row DML limit. This is a clean-install path for a new, empty DSQL database only.
+
+| Concern | PostgreSQL/Alembic | DSQL clean-install baseline |
+|---|---|---|
+| Facilities | `0001`-`0006` use a PostgreSQL `varchar[]`; `0007` converts data to `place_facilities` with `unnest` | Starts directly with normalized `place_facilities`; no array conversion |
+| Search | ORM query filters normalized facility rows with correlated `EXISTS`; avoids `ANY` and array containment | Same ORM query; AWS dialect SQL compiles offline and rendered search/count SQL passes `dsql-lint` |
+| Indexes | Alembic emits synchronous `CREATE INDEX` | Each index is `CREATE INDEX ASYNC`; runner waits for its job before proceeding |
+| DDL / DML | Existing history includes migration `0005` mixed DDL and backfill and `0006` quarantine/backfill and cleanup | One DDL per transaction; version ledger and bounded row-by-row DML are separate transactions |
+| Existing data | Existing PostgreSQL rows are converted by `0007` | Import/backfill from PostgreSQL is not implemented; this path initializes a new empty database |
+
+The PostgreSQL history therefore cannot be replayed on DSQL; use the separate baseline only for a new, empty DSQL database. No live DSQL cluster has validated the baseline, generated query plans, or runtime OCC behavior.
+
+Offline evidence: the DSQL baseline statements pass `dsql-lint`; unit tests exercise transaction separation, async-index wait ordering, ledger behavior, and DML batching. The AWS dialect compiles the normalized facility search query. Review submission retries DSQL optimistic concurrency conflicts with a bounded three-attempt policy and rolls back the full failed transaction before retry. These checks do not prove a live DSQL migration, runtime query, token refresh, concurrency result, or query plan.
+
+The application is configured to keep local Compose on PostgreSQL; select DSQL in the cloud only after the endpoint and approved environment-specific AWS SDK credentials are installed on that host. The DSQL adapter uses the default AWS SDK credential chain, so later migration to temporary credentials is a host-configuration change. No live Aurora DSQL connection, migration, token refresh, OCC, query plan, or DPU behavior is claimed verified. Live validation requires provisioned DSQL test resources and environment credentials, which are outside this backend-only change.
 
 ## Local tracing, logs and synthetic failures
 

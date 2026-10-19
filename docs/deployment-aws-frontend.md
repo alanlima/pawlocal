@@ -1,10 +1,10 @@
-# AWS deployment: mock-backed frontend
+# AWS deployment and full-stack release status
 
-This runbook describes the first PawLocal release: a static React/Vite frontend using seeded mock data. It does not deploy the API, database, or hosted observability stack.
+The tracked Terraform in `infra/terraform/` describes a static S3/CloudFront frontend deployment. It is not the Issue #43 full-stack target and no resources from this work have been provisioned. The full-stack workflow implementation is present in `.github/workflows/fullstack-release.yml` and `.github/workflows/deploy-production.yml`, with deployment delegated to an intentionally unconfigured environment adapter.
 
-The separately reviewed Stage 4 backend-hosting direction and its remaining DSQL compatibility and credential gate are documented in the [hosting proposal](stage4-hosting-options.md). The owner approved the MVP budget; backup, HA, RPO/RTO, restore, and recovery are deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44). These changes do not expand this static frontend deployment.
+The Lightsail application-hosting direction and MVP budget are approved. Aurora DSQL remains a candidate pending compatibility and runtime-credential validation; no database provider or deployable application target has been configured. Backup, HA, RPO/RTO, restore, recovery, and rollback are deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44). See the [hosting proposal](stage4-hosting-options.md) for the cost and compatibility gates.
 
-Issue #43 records the full-stack policy: PR CI; automatic development deployment after successful main CI; and a separate manually dispatched production promotion selecting a release verified in development. Use `pawlocal-dev.<domain>` for development and `pawlocal.<domain>` for production. This policy is not implemented by this static-site workflow. The current workflow continues to publish the mock-backed frontend to its existing production distribution until the replacement full-stack flow is ready. DSQL compatibility and credentials remain required before selecting that database path. The owner-approved MVP excludes backup, HA, RPO/RTO, restore, recovery, and telemetry work; see Issues #44 and #59.
+Issue #43's policy is PR CI, automatic development deployment after successful main CI, and separate manual production promotion of the same backend digest after development verification. The current workflows implement this control flow behind an adapter. Lightsail is the approved application-hosting direction; the database provider and runtime identity/credential path remain unresolved. The adapter, deployable cloud target, GitHub environments, OIDC roles, and environment variables are not configured, so neither dev nor prod deployment is actionable. Telemetry is disabled for the initial release; enablement is deferred to [Issue #59](https://github.com/alanlima/pawlocal/issues/59). Backup, HA, RPO/RTO, restore, recovery, and rollback are outside MVP scope and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44). The MVP budget is approved; no AWS resources have been provisioned through this work and no deployment has occurred.
 
 ## Architecture
 
@@ -56,9 +56,9 @@ On 2026-10-18, Terraform 1.14.3 with the locked AWS provider planned both owners
 
 The state pull, temporary local backend, and local state removal did not write to the remote state or mutate AWS resources. Repeat these checks against the target account and state immediately before a real ownership migration; do not infer that another environment's state has the same ownership.
 
-## Configure GitHub Actions
+## Existing static-site configuration
 
-After applying Terraform, set these repository Actions **variables** (not secrets):
+The following values belong to the existing static-site workflow only; they are not inputs to the Issue #43 full-stack adapter:
 
 | Variable | Value |
 | --- | --- |
@@ -67,42 +67,34 @@ After applying Terraform, set these repository Actions **variables** (not secret
 | `FRONTEND_BUCKET` | Terraform output `site_bucket_name` |
 | `FRONTEND_DISTRIBUTION_ID` | Terraform output `cloudfront_distribution_id` |
 
-No long-lived AWS access key is used. Only the production deployment job has `id-token: write`; GitHub OIDC trusts the configured repository's `main` branch. The pull request workflow runs format/lint, unit tests, and a production build with `VITE_USE_MOCK_BACKEND=true` when `frontend/**` or its workflow changes. Superseded pull request checks are canceled per PR. The separate production deployment workflow runs the same checks and build on `main` pushes that change `frontend/**`, then publishes the built assets and invalidates CloudFront. It can also be run manually from `main` for the initial publish after infrastructure is applied and later republishing. Changes outside the frontend and deployment workflow do not trigger automatic deployment. This describes the current mock-backed static-site workflow only; it is not the Issue #43 full-stack release flow.
+The legacy static-site workflow is retained separately from the full-stack flow and is not evidence that the full application has been deployed. Do not use it as the Issue #43 release path.
 
-Issue #43's full-stack flow requires separate development and production GitHub environments, endpoints, secrets, and deployment credentials; successful PR/main CI; automatic dev deployment and health/smoke verification; and a manual production dispatch that validates a main-history commit with successful CI and a verified dev deployment. Promote the same immutable backend image digest. Vite configuration is build-time today, so production must either receive public runtime configuration or use a controlled environment-specific build from the same tested commit; never embed secrets in browser assets. Serialize production promotions without canceling an active deploy and record commit/image/frontend/migration identifiers and results. Backup, HA, and recovery/rollback procedures are deferred to Issue #44; the MVP must not claim those guarantees.
+The implemented workflows use separate development and production GitHub environments, validate dev health before marking deployment successful, and require production promotion to reference a verified commit and release manifest. They reuse the immutable backend image digest and build the frontend separately for each environment from the selected commit because Vite embeds public Cognito settings. No client secret is embedded. Production promotions are serialized without canceling an active deployment. Release/deployment records capture commit, image digest, frontend artifact digest, selected database provider, migration runner and identifier, telemetry state, and verification evidence. Configuration is still required before either environment can run: an owner-selected target/provider, reviewed adapter under `ops/deployment-adapters/`, environment-specific OIDC role ARNs and AWS region, public/API health URLs, and public Cognito/API build settings. The runtime database credential delivery path depends on the unresolved DSQL compatibility and workload identity decisions.
 
-## Proposed full-stack operator sequence (not yet actionable)
+## Full-stack release operation and current blockers
 
-These are the intended operator steps for Issue #43 after DSQL compatibility/credentials are validated and the deployment targets, credentials, and workflows are implemented. The owner has approved the MVP budget. **They cannot be run today:** the required full-stack environments and `Deploy Production` workflow do not exist, and the current static frontend workflow is a separate mock-backed release. Treat that existing mock-backed production deployment as a temporary transition; change or disable it before claiming the Issue #43 full-stack promotion policy is implemented, so it cannot continue publishing the demo bundle as the production application. Backup/HA/recovery procedures and telemetry remain out of the MVP scope.
+The release workflow files and control flow are implemented, but are not actionable until the deployment adapter and deployable target are configured, DSQL compatibility and the selected database's runtime credential path are validated, environment-scoped AWS OIDC roles and required GitHub variables are configured, and deployment endpoints exist. The Lightsail hosting direction and MVP budget are approved; the database provider and runtime identity path remain open. This work has not provisioned AWS resources or deployed the application. Do not describe any AWS target as live. Telemetry is off, with enablement deferred to Issue #59; Issue #44 owns the deferred backup/HA/recovery/rollback review after MVP cloud deployment.
 
-### Production promotion
+### Intended production promotion
 
 1. Open GitHub → **Actions** → **Deploy Production** → **Run workflow**.
 2. Select the approved `main` ref and enter/select the release commit SHA that has already passed required CI and completed development deployment plus health/smoke verification.
 3. Let the workflow validate that the SHA belongs to permitted `main` history, required CI passed, and the same release was successfully verified in development. A free-text SHA alone is not sufficient evidence.
 4. Run preflight checks against production configuration and health endpoints. Apply only reviewed DSQL-compatible database migrations when needed. Use expand/contract migrations that remain backward-compatible with the currently deployed application throughout rollout; do not rename/drop columns or tighten constraints until all deployed code versions no longer depend on the old shape. Database recovery and rollback procedures are deferred to Issue #44; stop promotion and escalate if a migration or deployment fails.
-5. Deploy the exact backend image digest used in development and the approved frontend artifact/version for that commit. Do not rebuild the backend image for production. Keep production concurrency serialized and do not cancel an active deployment.
-6. Run health checks and end-to-end smoke checks against the public production endpoints and confirm the user journey works with production data/API configuration. If checks fail, stop promotion and record the failing checks and deployed identifiers. Do not claim an MVP recovery or rollback guarantee; the recovery review is deferred to Issue #44. Record the commit SHA, backend image digest, frontend artifact/version, migration version, health/smoke results, and deployment outcome.
+5. Deploy the exact backend image digest used in development and the environment-specific frontend built from the same commit. Do not rebuild the backend image for production. Keep production concurrency serialized and do not cancel an active deployment.
+6. Run health checks and end-to-end smoke checks against the public production endpoints and confirm the user journey works with production data/API configuration. If checks fail, stop promotion and record the failing checks and deployed identifiers. Do not claim an MVP recovery or rollback guarantee; the recovery review is deferred to Issue #44. Record the commit SHA, backend image digest, frontend artifact/version, selected database provider and migration runner/identifier, health/smoke results, and deployment outcome.
 
-### Deferred manual rollback design (Issue #44)
+Backup, HA, RPO/RTO, restore, recovery, and rollback procedures are not part of this MVP workflow. They are deferred for review to Issue #44 after the MVP is deployed to cloud.
 
-1. Stop further promotion and identify the previous known-good frontend artifact/version and backend image digest from deployment evidence.
-2. Redeploy those exact previous artifacts through the approved production deployment mechanism; do not rebuild them.
-3. Do **not** automatically reverse database migrations. Confirm the current schema remains compatible with the previous application release; use only backward-compatible migration sequencing. If compatibility is uncertain, stop and follow the reviewed database recovery procedure rather than attempting an automatic downgrade.
-4. Re-run health and end-to-end smoke checks against the public production endpoints, verify the user-facing journey, and record the rollback artifacts, schema/migration version, checks, and result. Keep the failed release and incident evidence for diagnosis.
+## Legacy static-site Terraform notes
 
-This rollback procedure is deferred to Issue #44 and is not an Issue #43 MVP acceptance criterion. The production workflow and deployment targets remain unimplemented until DSQL compatibility, configuration, and CI/dev verification are complete.
-
-## Verify and operate
+The following operational notes apply only if the separate static-site Terraform stack is intentionally used. They do not verify or operate the Issue #43 full-stack release:
 
 - Visit the Terraform `site_url` output over HTTPS after CloudFront reports `Deployed` and DNS has propagated.
 - Reload a nested place URL directly to verify SPA fallback.
-- Confirm the frontend displays seeded demo data and has no backend dependency.
-- Inspect GitHub Actions logs for the build, S3 sync, and invalidation result. Do not print credentials or Terraform variable values in logs.
+- Inspect Actions logs for any static-site publish activity. Do not print credentials or Terraform variable values in logs.
 
-For the first publish after the infrastructure apply, run **Frontend production deployment** manually from the GitHub Actions tab with `main` selected.
-
-Main-branch deployment workflow runs share a production concurrency group with `queue: max`, so up to 100 pending deployments wait in order and an active S3 sync or CloudFront invalidation is not canceled. This queue is separate from pull request checks, which cancel superseded runs. GitHub documents that pending-run order is based on when a run starts waiting on the concurrency group, not strictly on dispatch time, and cancels runs beyond the 100-run queue limit. Each successful merge that changes `frontend/**` deploys automatically to the same distribution. Rollback by reverting the frontend change and merging the revert; the normal workflow republishes the prior source state.
+The legacy static-site workflow is not the MVP full-stack deployment path. Do not use its mock-backed demo behavior as production validation. The current Issue #43 workflows use environment-specific builds with mock mode false and telemetry disabled.
 
 ## Cost and cleanup
 

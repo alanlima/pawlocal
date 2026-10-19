@@ -1,0 +1,367 @@
+name: Full-stack release to development
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "openapi.yaml"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "docker-compose.yml"
+      - ".github/workflows/**"
+      - "ops/**"
+      - '!**/*.md'
+      - '!**/*.mdx'
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/**"
+      - "backend/**"
+      - "openapi.yaml"
+      - "pyproject.toml"
+      - "requirements.txt"
+      - "docker-compose.yml"
+      - ".github/workflows/**"
+      - "ops/**"
+      - '!**/*.md'
+      - '!**/*.mdx'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-fullstack-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  frontend:
+    name: Frontend checks and HTTP-mode build
+    uses: ./.github/workflows/frontend-deploy.yml
+
+  backend:
+    name: Backend checks
+    uses: ./.github/workflows/backend-ci.yml
+
+  publish:
+    name: Publish immutable backend image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - frontend
+      - backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image name
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "image=ghcr.io/${OWNER,,}/pawlocal-api" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish backend image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/pawlocal-api:release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=pawlocal-api
+          cache-to: type=gha,mode=max,scope=pawlocal-api
+
+      - name: Set up Python for migration metadata
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read provider-specific migration identifiers
+        id: migration
+        working-directory: backend
+        run: |
+          python -m pip install --quiet 'alembic>=1.13,<2'
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import ast
+          from pathlib import Path
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          script = ScriptDirectory.from_config(Config("alembic.ini"))
+          heads = script.get_heads()
+          if len(heads) != 1:
+              raise SystemExit(f"Expected one Alembic head, found {heads}")
+          dsql_tree = ast.parse(Path("pawlocal/dsql_migrations.py").read_text(encoding="utf-8"))
+          dsql_revision = None
+          for statement in dsql_tree.body:
+              if isinstance(statement, ast.Assign) and any(
+                  isinstance(target, ast.Name) and target.id == "BASELINE_REVISION"
+                  for target in statement.targets
+              ):
+                  dsql_revision = ast.literal_eval(statement.value)
+                  break
+          if not dsql_revision:
+              raise SystemExit("No Aurora DSQL baseline revision was found")
+          print(f"postgresql_migration_id={heads[0]}")
+          print(f"aurora_dsql_migration_id={dsql_revision}")
+          PY
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+      - name: Create backend release manifest
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          POSTGRESQL_MIGRATION_ID: ${{ steps.migration.outputs.postgresql_migration_id }}
+          AURORA_DSQL_MIGRATION_ID: ${{ steps.migration.outputs.aurora_dsql_migration_id }}
+        run: |
+          mkdir -p release
+          jq -n \
+            --arg commit "${GITHUB_SHA}" \
+            --arg image "${IMAGE}@${IMAGE_DIGEST}" \
+            --arg image_digest "${IMAGE_DIGEST}" \
+            --arg postgresql_migration_id "${POSTGRESQL_MIGRATION_ID}" \
+            --arg aurora_dsql_migration_id "${AURORA_DSQL_MIGRATION_ID}" \
+            '{schema_version:2,commit:$commit,backend_image:$image,backend_image_digest:$image_digest,migration_chains:{postgresql:{runner:"alembic",migration_id:$postgresql_migration_id},aurora_dsql:{runner:"dsql_baseline",migration_id:$aurora_dsql_migration_id}},telemetry_enabled:false}' \
+            > release/backend-release.json
+          python ops/validate-release-metadata.py --manifest release/backend-release.json
+
+      - name: Upload backend release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-backend-release
+          path: release/backend-release.json
+          if-no-files-found: error
+          retention-days: 90
+
+  deploy-development:
+    name: Deploy and verify development
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
+      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+      PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+      PAWLOCAL_TELEMETRY_ENABLED: "false"
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+      packages: read
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+
+      - name: Download backend release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-backend-release
+          path: release/
+
+      - name: Validate backend image reference and telemetry setting
+        run: |
+          python ops/validate-release-metadata.py --manifest release/backend-release.json
+          test -n "$PAWLOCAL_DATABASE_PROVIDER"
+
+      - name: Require the environment-specific OIDC role
+        run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN"
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalDev-${{ github.run_id }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build development frontend
+        working-directory: frontend
+        env:
+          VITE_RELEASE_ENV: development
+          VITE_USE_MOCK_BACKEND: "false"
+          VITE_TELEMETRY_ENABLED: "false"
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_COGNITO_DOMAIN: ${{ vars.VITE_COGNITO_DOMAIN }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+          VITE_COGNITO_REDIRECT_URI: ${{ vars.VITE_COGNITO_REDIRECT_URI }}
+          VITE_COGNITO_LOGOUT_URI: ${{ vars.VITE_COGNITO_LOGOUT_URI }}
+          VITE_COGNITO_SCOPES: ${{ vars.VITE_COGNITO_SCOPES }}
+          VITE_APP_COMMIT: ${{ github.sha }}
+        run: |
+          test -n "$VITE_API_BASE_URL"
+          npm ci
+          npm run build
+
+      - name: Package frontend and complete release manifest
+        id: release
+        run: |
+          mkdir -p release
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+            -czf release/frontend-development.tar.gz -C frontend/dist .
+          frontend_digest="sha256:$(sha256sum release/frontend-development.tar.gz | cut -d ' ' -f 1)"
+          jq --arg frontend_digest "$frontend_digest" \
+            '. + {frontend:{environment:"development",artifact_digest:$frontend_digest}}' \
+            release/backend-release.json > release/release-manifest.json
+          manifest_digest="sha256:$(sha256sum release/release-manifest.json | cut -d ' ' -f 1)"
+          echo "frontend_digest=$frontend_digest" >> "$GITHUB_OUTPUT"
+          echo "manifest_digest=$manifest_digest" >> "$GITHUB_OUTPUT"
+          python ops/validate-release-metadata.py --manifest release/release-manifest.json
+
+      - name: Create development deployment record
+        id: deployment
+        uses: actions/github-script@v7
+        env:
+          MANIFEST_DIGEST: ${{ steps.release.outputs.manifest_digest }}
+          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+        with:
+          script: |
+            const fs = require('fs')
+            const crypto = require('crypto')
+            const manifest = fs.readFileSync('release/release-manifest.json')
+            const actualDigest = `sha256:${crypto.createHash('sha256').update(manifest).digest('hex')}`
+            if (actualDigest !== process.env.MANIFEST_DIGEST) throw new Error('Release manifest digest mismatch')
+            const value = JSON.parse(manifest.toString())
+            const deployment = await github.rest.repos.createDeployment({
+              ...context.repo,
+              ref: context.sha,
+              environment: 'development',
+              production_environment: false,
+              auto_merge: false,
+              required_contexts: [],
+              payload: {
+                workflow_run_id: context.runId,
+                backend_image: value.backend_image,
+                backend_image_digest: value.backend_image_digest,
+                frontend_artifact_digest: value.frontend.artifact_digest,
+                release_manifest_digest: actualDigest,
+                migration_chains: value.migration_chains,
+                telemetry_enabled: value.telemetry_enabled,
+              },
+            })
+            core.setOutput('deployment_id', deployment.data.id)
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: deployment.data.id,
+              state: 'in_progress',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Full-stack development deployment started',
+            })
+
+      - name: Deploy through the selected environment adapter
+        env:
+          RELEASE_MANIFEST: release/release-manifest.json
+          FRONTEND_ARCHIVE: release/frontend-development.tar.gz
+          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+        run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
+
+      - name: Verify development release through the selected adapter
+        env:
+          RELEASE_MANIFEST: release/release-manifest.json
+          EVIDENCE_FILE: release/development-verification.json
+          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+        run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+
+      - name: Validate development deployment evidence and selected migration chain
+        env:
+          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+        run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider "$PAWLOCAL_DATABASE_PROVIDER"
+
+      - name: Upload verified development release metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-release-manifest
+          path: |
+            release/release-manifest.json
+            release/frontend-development.tar.gz
+            release/development-verification.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Mark development deployment successful
+        if: success()
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+        with:
+          script: |
+            const fs = require('fs')
+            const deployment = JSON.parse(fs.readFileSync('release/release-manifest.json', 'utf8'))
+            const evidence = JSON.parse(fs.readFileSync('release/development-verification.json', 'utf8'))
+            await core.summary.addHeading('Development deployment verified')
+              .addCodeBlock(JSON.stringify({
+                commit: deployment.commit,
+                backend_image: deployment.backend_image,
+                frontend_artifact_digest: deployment.frontend.artifact_digest,
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                telemetry_enabled: deployment.telemetry_enabled,
+              }, null, 2), 'json').write()
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: 'success',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Development health, release verification, and evidence upload passed',
+              environment_url: process.env.PAWLOCAL_PUBLIC_BASE_URL,
+              payload: JSON.stringify({
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                backend_image_digest: deployment.backend_image_digest,
+                telemetry_enabled: evidence.telemetry_enabled,
+              }),
+            })
+
+      - name: Mark development deployment failed
+        if: ${{ (failure() || cancelled()) && steps.deployment.outputs.deployment_id != '' }}
+        uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              ...context.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: 'failure',
+              environment: 'development',
+              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              description: 'Development deployment, verification, or evidence finalization failed',
+            })

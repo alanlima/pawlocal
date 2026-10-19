@@ -31,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-backend-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ format('pawlocal-backend-{0}-{1}', github.workflow, github.event.pull_request.number || github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -70,10 +70,18 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install backend and test dependencies
-        run: python -m pip install -e ".[test]"
+        run: python -m pip install -e ".[test,dsql-prototype]"
 
       - name: Lint Python code
         run: ruff check .
+
+      - name: Lint Aurora DSQL baseline SQL
+        run: dsql-lint migrations/dsql/0001_initial/*.sql
+
+      - name: Compile and lint Aurora DSQL place search SQL
+        run: |
+          python scripts/render_dsql_search_query.py > "$RUNNER_TEMP/pawlocal-dsql-search.sql"
+          dsql-lint "$RUNNER_TEMP/pawlocal-dsql-search.sql"
 
       - name: Apply migrations to the disposable CI database
         run: alembic -c alembic.ini upgrade head

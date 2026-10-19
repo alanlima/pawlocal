@@ -3,7 +3,8 @@ import { HttpPlaceService } from './HttpPlaceService'
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  delete window.pawLocalAuth
+  vi.unstubAllEnvs()
+  sessionStorage.clear()
 })
 
 describe('HttpPlaceService', () => {
@@ -119,19 +120,37 @@ describe('HttpPlaceService', () => {
     expect(reviewPayload.rating).toBe(4)
   })
 
-  it('attaches an access token provided by the host session to API requests', async () => {
+  it('attaches the Cognito access token to protected API requests', async () => {
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input
       void _init
       return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
     })
     vi.stubGlobal('fetch', fetchMock)
-    window.pawLocalAuth = { getAccessToken: async () => 'short-lived-cognito-token' }
+    vi.stubEnv('VITE_COGNITO_DOMAIN', 'https://pawlocal-test.auth.ap-southeast-2.amazoncognito.com')
+    vi.stubEnv('VITE_COGNITO_CLIENT_ID', 'public-app-client')
+    vi.stubEnv('VITE_COGNITO_REDIRECT_URI', 'https://pawlocal.example.test/')
+    vi.stubEnv('VITE_COGNITO_LOGOUT_URI', 'https://pawlocal.example.test/')
+    const tokenPayload = btoa(
+      JSON.stringify({
+        token_use: 'access',
+        client_id: 'public-app-client',
+        exp: Math.floor(Date.now() / 1000) + 600,
+      }),
+    )
+    sessionStorage.setItem(
+      'pawlocal.cognito.session',
+      JSON.stringify({
+        accessToken: `header.${tokenPayload}.signature`,
+        expiresAt: Date.now() + 600_000,
+        refreshToken: 'refresh-token',
+      }),
+    )
 
     await new HttpPlaceService().listFavourites()
 
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('Authorization')).toBe(
-      'Bearer short-lived-cognito-token',
+      `Bearer header.${tokenPayload}.signature`,
     )
   })
 
@@ -191,7 +210,7 @@ describe('HttpPlaceService', () => {
     )
   })
 
-  it('sends protected requests without Authorization when the host session is absent', async () => {
+  it('sends protected requests without Authorization when the Cognito session is absent', async () => {
     const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => {
       void _input
       void _init
