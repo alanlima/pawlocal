@@ -78,7 +78,7 @@ variable "temporary_ssh_environment" {
   default     = null
   nullable    = true
   validation {
-    condition     = var.temporary_ssh_environment == null || contains(["development", "production"], var.temporary_ssh_environment)
+    condition     = var.temporary_ssh_environment == null ? true : contains(["development", "production"], var.temporary_ssh_environment)
     error_message = "temporary_ssh_environment must be development or production when set."
   }
 }
@@ -89,13 +89,13 @@ variable "temporary_ssh_cidr" {
   default     = null
   nullable    = true
   validation {
-    condition = var.temporary_ssh_cidr == null || (
+    condition = var.temporary_ssh_cidr == null ? true : (
       can(cidrnetmask(var.temporary_ssh_cidr)) && can(regex("/32$", var.temporary_ssh_cidr))
     )
     error_message = "temporary_ssh_cidr must be a single IPv4 /32 when set."
   }
   validation {
-    condition     = (var.temporary_ssh_environment == null) == (var.temporary_ssh_cidr == null)
+    condition     = (var.temporary_ssh_environment == null) ? var.temporary_ssh_cidr == null : (var.temporary_ssh_cidr != null && can(regex("/32$", var.temporary_ssh_cidr)))
     error_message = "temporary_ssh_environment and temporary_ssh_cidr must either both be set or both be null."
   }
 }

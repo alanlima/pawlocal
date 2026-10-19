@@ -59,6 +59,11 @@ target="module.fullstack.aws_lightsail_instance_public_ports.api[\"$environment\
 plan_file="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-ingress-${environment}.XXXXXX.tfplan")"
 trap 'rm -f "$plan_file"' EXIT
 
+# The workflow only needs restoration after an apply could have changed AWS/state.
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'ingress_state_may_have_changed=false\n' >> "$GITHUB_OUTPUT"
+fi
+
 terraform -chdir="$terraform_root" plan -input=false -lock-timeout=5m \
   -target="$target" -out="$plan_file"
 terraform -chdir="$terraform_root" show -json "$plan_file" |
@@ -67,6 +72,9 @@ terraform -chdir="$terraform_root" show -json "$plan_file" |
     --environment "$environment" \
     --runner-cidr "$PAWLOCAL_RUNNER_IPV4_CIDR" \
     --baseline-cidrs-json "$PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  printf 'ingress_state_may_have_changed=true\n' >> "$GITHUB_OUTPUT"
+fi
 terraform -chdir="$terraform_root" apply -input=false -lock-timeout=5m \
   -auto-approve "$plan_file"
 

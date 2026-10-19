@@ -142,27 +142,30 @@ resource "aws_lightsail_instance_public_ports" "api" {
   instance_name = aws_lightsail_instance.api[each.key].name
 
   port_info {
-    protocol   = "tcp"
-    from_port  = 80
-    to_port    = 80
-    cidrs      = ["0.0.0.0/0"]
-    ipv6_cidrs = ["::/0"]
+    protocol          = "tcp"
+    from_port         = 80
+    to_port           = 80
+    cidrs             = ["0.0.0.0/0"]
+    ipv6_cidrs        = ["::/0"]
+    cidr_list_aliases = []
   }
   port_info {
-    protocol   = "tcp"
-    from_port  = 443
-    to_port    = 443
-    cidrs      = ["0.0.0.0/0"]
-    ipv6_cidrs = ["::/0"]
+    protocol          = "tcp"
+    from_port         = 443
+    to_port           = 443
+    cidrs             = ["0.0.0.0/0"]
+    ipv6_cidrs        = ["::/0"]
+    cidr_list_aliases = []
   }
   dynamic "port_info" {
     for_each = local.effective_ssh_cidr_blocks[each.key]
     content {
-      protocol   = "tcp"
-      from_port  = 22
-      to_port    = 22
-      cidrs      = [port_info.value]
-      ipv6_cidrs = []
+      protocol          = "tcp"
+      from_port         = 22
+      to_port           = 22
+      cidrs             = [port_info.value]
+      ipv6_cidrs        = []
+      cidr_list_aliases = []
     }
   }
 }
@@ -482,8 +485,26 @@ data "aws_iam_policy_document" "github_terraform_ingress" {
   }
 
   statement {
+    sid       = "ReadTerraformRefreshDependencies"
+    actions   = ["ec2:DescribeAvailabilityZones"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadTerraformRefreshResources"
+    actions   = ["dsql:GetCluster", "dsql:GetVpcEndpointServiceName"]
+    resources = [for cluster in aws_dsql_cluster.app : cluster.arn]
+  }
+
+  statement {
+    sid       = "ReadTerraformRefreshUserPools"
+    actions   = ["cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"]
+    resources = [for pool in aws_cognito_user_pool.app : pool.arn]
+  }
+
+  statement {
     sid       = "UpdateOnlyThisEnvironmentInstancePorts"
-    actions   = ["lightsail:PutInstancePublicPorts"]
+    actions   = ["lightsail:PutInstancePublicPorts", "lightsail:CloseInstancePublicPorts"]
     resources = [aws_lightsail_instance.api[each.key].arn]
   }
 }
