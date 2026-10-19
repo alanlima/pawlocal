@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import re
 import unittest
@@ -158,6 +159,36 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             'sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\\r\\n", "\\n"), "\\n", "\\r\\n"))',
             text,
         )
+
+    def test_cloudfront_function_code_preserves_live_crlf_bytes(self) -> None:
+        expected = "\r\n".join([
+            "function handler(event) {",
+            "  var request = event.request;",
+            "  if (request.uri === '/' || request.uri.indexOf('.') !== -1) return request;",
+            "  request.uri = '/index.html';",
+            "  return request;",
+            "}",
+            "",
+        ])
+        resources = (
+            ("infra/terraform/main.tf", "site_spa"),
+            ("infra/terraform/fullstack/main.tf", "spa"),
+        )
+        for filename, name in resources:
+            with self.subTest(resource=name, filename=filename):
+                text = (ROOT / filename).read_text(encoding="utf-8")
+                resource = re.search(
+                    rf'resource\s+"aws_cloudfront_function"\s+"{name}"\s*\{{(.*?)(?=\nresource|\Z)',
+                    text,
+                    re.DOTALL,
+                )
+                self.assertIsNotNone(resource)
+                code = re.search(r'code\s*=\s*join\("\\r\\n",\s*\[(.*?)\]\s*\)', resource.group(1), re.DOTALL)
+                self.assertIsNotNone(code)
+                encoded_lines = re.findall(r'^\s*("(?:\\.|[^"\\])*")\s*,?\s*$', code.group(1), re.MULTILINE)
+                rendered = "\r\n".join(json.loads(line) for line in encoded_lines)
+                self.assertEqual(rendered, expected)
+                self.assertEqual(rendered.count("\r\n"), 6)
 
 
 if __name__ == "__main__":

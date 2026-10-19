@@ -125,14 +125,15 @@ resource "aws_cloudfront_function" "site_spa" {
   runtime = "cloudfront-js-1.0"
   comment = "Route frontend paths to the SPA entrypoint."
   publish = true
-  code    = <<-JS
-    function handler(event) {
-      var request = event.request;
-      if (request.uri === '/' || request.uri.indexOf('.') !== -1) return request;
-      request.uri = '/index.html';
-      return request;
-    }
-  JS
+  code = join("\r\n", [
+    "function handler(event) {",
+    "  var request = event.request;",
+    "  if (request.uri === '/' || request.uri.indexOf('.') !== -1) return request;",
+    "  request.uri = '/index.html';",
+    "  return request;",
+    "}",
+    ""
+  ])
 }
 
 data "aws_iam_policy_document" "site_bucket" {
