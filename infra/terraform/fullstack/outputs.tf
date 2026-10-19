@@ -16,6 +16,16 @@ output "environment_targets" {
   } }
 }
 
+output "dsql_access_keys" {
+  description = "Environment-scoped IAM access-key IDs and PGP-encrypted secrets. Decrypt only in the approved operator environment, then store each value in its matching GitHub environment secret."
+  sensitive   = true
+  value = { for name, key in aws_iam_access_key.app : name => {
+    id               = key.id
+    encrypted_secret = key.encrypted_secret
+    key_fingerprint  = key.key_fingerprint
+  } }
+}
+
 output "dsql_auth_alert_topic_arn" {
   description = "Present only when DSQL data-event capture and an alert email are configured. Confirm the SNS subscription before relying on delivery."
   value       = try(aws_sns_topic.dsql_auth[0].arn, null)

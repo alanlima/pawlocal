@@ -319,7 +319,9 @@ module "fullstack" {
   github_repository              = var.github_repository
   github_owner_id                = var.github_owner_id
   github_repository_id           = var.github_repository_id
-  manage_github_oidc_provider    = var.manage_github_oidc_provider
+  dsql_access_key_pgp_public_key = var.dsql_access_key_pgp_public_key
+  # The existing root state owns the account-level provider; the child module reads it.
+  manage_github_oidc_provider    = false
   deploy_ssh_public_keys         = var.deploy_ssh_public_keys
   ssh_cidr_blocks                = var.ssh_cidr_blocks
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
