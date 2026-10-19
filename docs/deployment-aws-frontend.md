@@ -10,6 +10,12 @@ Terraform configuration and the existing shared Terraform state are the only mec
 
 The frontend publisher uses AWS CLI only for application artifact operations (`s3 sync`, release archive upload, and CloudFront invalidation). It does not create or configure AWS resources. Backend container deployments use `aws_lightsail_container_service_deployment_version` through the existing Terraform root state.
 
+### Shell and CLI mutation-path audit
+
+The implementation's AWS CLI calls were reviewed. `s3 sync` and `s3 cp` publish frontend release artifacts, `cloudfront create-invalidation` refreshes the frontend cache, and `lightsail get-container-services` is a read-only post-deployment check. None creates, changes, or deletes AWS infrastructure. The backend deployment script applies a saved Terraform plan that is rejected unless it changes only the selected environment's stateful Lightsail deployment-version resource.
+
+Terraform's `terraform_data.app_dsql_role` uses a local-exec helper for Aurora DSQL SQL objects (the app database role, IAM-to-database-role mapping, and app schema), because these are database-layer objects and the AWS Terraform provider exposes no resource for them. The helper is idempotent and its input/code fingerprints are stored in the existing Terraform state. `terraform_data` tracks when to run the helper; it cannot refresh or detect out-of-band drift in the SQL objects, so its state is not a remote representation of those objects. It does not create AWS infrastructure resources or IAM credentials. Treat this as a stateful Terraform-managed database bootstrap, not as a pattern for AWS resource provisioning; future AWS infrastructure mutations must be native Terraform resources tracked by the shared state. The prior CLI-created DSQL access keys were removed, and both legacy app users were verified to have no access keys on 2026-10-19.
+
 ## Architecture
 
 The frontend remains a private S3 origin behind CloudFront OAC with HTTPS, SPA fallback, and Route 53 alias records. The API is served directly by the Lightsail Container Service public endpoint; Route 53 CNAME records map `api-dev.<domain>` and `api.<domain>` to its generated hostname. Terraform creates domain-validation records, and Lightsail manages the endpoint certificate. Frontend and API origins remain separate.
