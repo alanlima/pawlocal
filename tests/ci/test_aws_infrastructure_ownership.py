@@ -153,6 +153,11 @@ def python_subprocess_commands(source: str) -> list[str]:
         if name is not None and name in alias_groups:
             set_argv(name, None)
 
+    def invalidate_all_argv() -> None:
+        for group in {id(group): group for group in alias_groups.values()}.values():
+            if group:
+                set_argv(next(iter(group)), None)
+
     def argv_values(node: ast.AST) -> list[str] | str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return node.value
@@ -219,22 +224,50 @@ def python_subprocess_commands(source: str) -> list[str]:
             self.visit(node.value)
 
         def visit_Expr(self, node: ast.Expr) -> None:
-            call = node.value
-            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute):
-                target = call.func.value
-                if isinstance(target, ast.Name) and target.id in assigned_argv:
-                    current = assigned_argv[target.id]
-                    incoming = argv_values(call.args[0]) if call.args else None
-                    if call.func.attr == "extend":
-                        set_argv(target.id, current + incoming if isinstance(current, list) and isinstance(incoming, list) else None)
-                    elif call.func.attr == "append":
-                        set_argv(target.id, current + incoming if isinstance(current, list) and isinstance(incoming, str) else None)
-                    elif call.func.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__setitem__", "__delitem__"}:
-                        set_argv(target.id, None)
             self.visit(node.value)
+
+        def visit_control_flow(self, node: ast.AST) -> None:
+            invalidate_all_argv()
+            self.generic_visit(node)
+            invalidate_all_argv()
+
+        def visit_If(self, node: ast.If) -> None:
+            self.visit_control_flow(node)
+
+        def visit_For(self, node: ast.For) -> None:
+            self.visit_control_flow(node)
+
+        def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+            self.visit_control_flow(node)
+
+        def visit_While(self, node: ast.While) -> None:
+            self.visit_control_flow(node)
+
+        def visit_Try(self, node: ast.Try) -> None:
+            self.visit_control_flow(node)
+
+        def visit_With(self, node: ast.With) -> None:
+            self.visit_control_flow(node)
+
+        def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+            self.visit_control_flow(node)
+
+        def visit_Match(self, node: ast.Match) -> None:
+            self.visit_control_flow(node)
 
         def visit_Call(self, call: ast.Call) -> None:
             function = call.func
+            if isinstance(function, ast.Attribute):
+                target_name = root_name(function.value)
+                if target_name is not None and target_name in alias_groups:
+                    current = assigned_argv.get(target_name)
+                    incoming = argv_values(call.args[0]) if call.args else None
+                    if function.attr == "extend":
+                        set_argv(target_name, current + incoming if isinstance(current, list) and isinstance(incoming, list) else None)
+                    elif function.attr == "append":
+                        set_argv(target_name, current + incoming if isinstance(current, list) and isinstance(incoming, str) else None)
+                    elif function.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__setitem__", "__delitem__"}:
+                        set_argv(target_name, None)
             recognized = False
             if isinstance(function, ast.Attribute) and function.attr in subprocess_functions:
                 recognized = isinstance(function.value, ast.Name) and function.value.id in subprocess_modules
@@ -253,6 +286,10 @@ def python_subprocess_commands(source: str) -> list[str]:
                     commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 return
             self.generic_visit(call)
+
+        def visit_Delete(self, node: ast.Delete) -> None:
+            for target in node.targets:
+                invalidate_target(target)
 
     CommandVisitor().visit(tree)
     return commands
@@ -486,6 +523,25 @@ subprocess.run(argv)
         for source in examples:
             with self.subTest(source=source):
                 self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_python_subprocess_control_flow_and_nested_mutation_fail_closed(self) -> None:
+        conditional = '''
+import subprocess
+argv = ["terraform", "plan"]
+if condition:
+    argv[1:] = ["state", "rm", "module.example"]
+else:
+    argv = ["terraform", "plan"]
+subprocess.run(argv)
+'''
+        nested_mutator = '''
+import subprocess
+argv = ["terraform"]
+result = argv.extend(["state", "rm", "module.example"])
+subprocess.run(argv)
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(conditional))
+        self.assertTrue(contains_forbidden_terraform_state_change(nested_mutator))
 
     def test_workflow_scanner_folds_yaml_run_blocks(self) -> None:
         source = '''
