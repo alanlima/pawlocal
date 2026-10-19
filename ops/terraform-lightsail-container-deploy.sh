@@ -74,7 +74,7 @@ plan="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-container-${environment}.XXXXXX.tf
 trap 'rm -f "$plan"' EXIT
 terraform -chdir="$root" plan -input=false -lock-timeout=5m -out="$plan"
 terraform -chdir="$root" show -json "$plan" |
-  python3 ops/validate-lightsail-container-plan.py --environment "$environment" --image "$image"
+  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image"
 terraform -chdir="$root" apply -input=false -lock-timeout=5m -auto-approve "$plan"
 service_json="$(aws lightsail get-container-services --service-name "pawlocal-${environment}-api" --query 'containerServices[0]' --output json)"
 printf '%s' "$service_json" | TARGET_IMAGE="$image" python3 -c '

@@ -190,6 +190,8 @@ class WorkflowPathTests(unittest.TestCase):
         adapter = Path("ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
         self.assertIn('script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"', adapter)
         self.assertIn('root="$script_dir/../infra/terraform"', adapter)
+        self.assertIn('python3 "$script_dir/validate-lightsail-container-plan.py"', adapter)
+        self.assertNotIn('python3 ops/validate-lightsail-container-plan.py', adapter)
 
     def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text()
