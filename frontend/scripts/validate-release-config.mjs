@@ -46,11 +46,15 @@ export function validateReleaseSettings(env = process.env) {
     throw new Error('Cloud release VITE_API_BASE_URL must be an absolute HTTPS URL')
   }
   if (apiUrl.pathname.replace(/\/$/, '') !== '/api/v1' || apiUrl.search || apiUrl.hash) {
-    throw new Error('Cloud release VITE_API_BASE_URL must end with /api/v1 and have no query or fragment')
+    throw new Error(
+      'Cloud release VITE_API_BASE_URL must end with /api/v1 and have no query or fragment',
+    )
   }
   const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
   if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
-    throw new Error(`Cloud ${releaseEnvironment} builds must use the ${expectedApiHostPrefix}<domain> API hostname`)
+    throw new Error(
+      `Cloud ${releaseEnvironment} builds must use the ${expectedApiHostPrefix}<domain> API hostname`,
+    )
   }
 
   const clientId = env.VITE_COGNITO_CLIENT_ID?.trim()
