@@ -32,3 +32,19 @@ provider "aws" {
     tags = local.common_tags
   }
 }
+
+provider "aws" {
+  alias  = "fullstack"
+  region = var.aws_region
+
+  default_tags {
+    tags = {
+      costcenter  = "personal"
+      environment = "mvp"
+      managedby   = "terraform"
+      project     = "pawlocal"
+      component   = "fullstack-mvp"
+      workload    = "application"
+    }
+  }
+}

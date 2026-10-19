@@ -14,6 +14,22 @@ output "cloudfront_distribution_id" {
 }
 
 output "github_deploy_role_arn" {
-  description = "IAM role ARN to configure as the GitHub Actions AWS_ROLE_ARN repository variable."
+  description = "Existing-root-state production frontend publisher role ARN for the GitHub Actions production environment."
   value       = aws_iam_role.github_deploy.arn
+}
+
+output "environment_targets" {
+  description = "Deployment targets for development and production, with production frontend assets mapped to the existing root-state bucket/distribution."
+  value = {
+    development = merge(module.fullstack.environment_targets["development"], {
+      frontend_bucket = module.fullstack.environment_targets["development"].frontend_bucket
+      distribution_id = module.fullstack.environment_targets["development"].distribution_id
+    })
+    production = merge(module.fullstack.environment_targets["production"], {
+      frontend_url    = "https://${local.site_fqdn}"
+      frontend_bucket = aws_s3_bucket.site.bucket
+      distribution_id = aws_cloudfront_distribution.site.id
+      deploy_role_arn = aws_iam_role.github_deploy.arn
+    })
+  }
 }

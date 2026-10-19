@@ -115,6 +115,9 @@ def validate_evidence(
     health = evidence.get("public_endpoint_health")
     if not isinstance(health, dict) or health != {"frontend": True, "api": True}:
         fail("Deployment evidence must confirm healthy frontend and API endpoints")
+    query_smoke = evidence.get("database_query_smoke")
+    if query_smoke != {"route": "/api/v1/places", "result": "valid_place_page"}:
+        fail("Deployment evidence must confirm a successful public /api/v1/places database-query smoke")
     verified_at = evidence.get("verified_at")
     if not isinstance(verified_at, str):
         fail("Deployment evidence verified_at must be an ISO-8601 timestamp")

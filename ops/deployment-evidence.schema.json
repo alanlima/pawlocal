@@ -15,6 +15,7 @@
     "migration_id",
     "telemetry_enabled",
     "public_endpoint_health",
+    "database_query_smoke",
     "verified_at"
   ],
   "properties": {
@@ -34,6 +35,15 @@
       "properties": {
         "frontend": { "const": true },
         "api": { "const": true }
+      }
+    },
+    "database_query_smoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route", "result"],
+      "properties": {
+        "route": { "const": "/api/v1/places" },
+        "result": { "const": "valid_place_page" }
       }
     },
     "verified_at": { "type": "string", "format": "date-time" }

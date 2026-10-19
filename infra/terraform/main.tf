@@ -81,12 +81,29 @@ resource "aws_cloudfront_distribution" "site" {
     origin_access_control_id = aws_cloudfront_origin_access_control.site.id
   }
 
+  origin {
+    domain_name = "${module.fullstack.environment_targets["production"].api_hostname}."
+    origin_id   = "pawlocal-production-api"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "pawlocal-private-s3-origin"
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD", "OPTIONS"]
     compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.site_spa.arn
+    }
 
     forwarded_values {
       query_string = false
@@ -97,19 +114,25 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  # React Router paths should resolve to the SPA entry point.
-  custom_error_response {
-    error_code            = 403
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    target_origin_id       = "pawlocal-production-api"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD", "OPTIONS"]
+    compress               = true
 
-  custom_error_response {
-    error_code            = 404
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
+    forwarded_values {
+      query_string = true
+      headers      = ["Accept", "Authorization", "Content-Type", "Origin", "X-Request-ID"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
   }
 
   restrictions {
@@ -124,7 +147,25 @@ resource "aws_cloudfront_distribution" "site" {
     minimum_protocol_version = "TLSv1.2_2021"
   }
 
-  depends_on = [aws_s3_bucket_public_access_block.site]
+  depends_on = [
+    aws_s3_bucket_public_access_block.site,
+    module.fullstack,
+  ]
+}
+
+resource "aws_cloudfront_function" "site_spa" {
+  name    = "pawlocal-production-spa-routing"
+  runtime = "cloudfront-js-1.0"
+  comment = "Route frontend paths to the SPA entrypoint while preserving API origin errors."
+  publish = true
+  code    = <<-JS
+    function handler(event) {
+      var request = event.request;
+      if (request.uri === '/' || request.uri.indexOf('.') !== -1) return request;
+      request.uri = '/index.html';
+      return request;
+    }
+  JS
 }
 
 data "aws_iam_policy_document" "site_bucket" {
@@ -218,7 +259,10 @@ data "aws_iam_policy_document" "github_deploy_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.github_oidc_subject]
+      values = [
+        local.github_oidc_subject,
+        "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:production"
+      ]
     }
   }
 }
@@ -226,7 +270,7 @@ data "aws_iam_policy_document" "github_deploy_assume_role" {
 resource "aws_iam_role" "github_deploy" {
   name               = "pawlocal-frontend-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_deploy_assume_role.json
-  description        = "Allows the PawLocal main-branch workflow to publish frontend files and invalidate its CDN."
+  description        = "Allows PawLocal main-branch and production-environment workflows to publish frontend files and invalidate the existing CDN."
 }
 
 data "aws_iam_policy_document" "github_deploy" {
@@ -260,4 +304,26 @@ resource "aws_iam_role_policy" "github_deploy" {
   name   = "pawlocal-frontend-publish"
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
+}
+
+module "fullstack" {
+  source = "./fullstack"
+
+  providers = {
+    aws = aws.fullstack
+  }
+
+  aws_region                     = var.aws_region
+  root_domain                    = var.domain_name
+  cloudfront_certificate_arn     = var.certificate_arn
+  github_repository              = var.github_repository
+  github_owner_id                = var.github_owner_id
+  github_repository_id           = var.github_repository_id
+  manage_github_oidc_provider    = var.manage_github_oidc_provider
+  deploy_ssh_public_keys         = var.deploy_ssh_public_keys
+  ssh_cidr_blocks                = var.ssh_cidr_blocks
+  enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
+  dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name
+  dsql_auth_retention_days       = var.dsql_auth_retention_days
+  dsql_auth_alert_email          = var.dsql_auth_alert_email
 }

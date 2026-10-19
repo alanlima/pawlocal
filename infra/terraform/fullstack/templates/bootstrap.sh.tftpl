@@ -1,0 +1,154 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee -a /var/log/pawlocal-bootstrap.log | logger -t pawlocal-bootstrap -s 2>/dev/console) 2>&1
+
+dnf install -y docker
+systemctl enable --now docker
+useradd --create-home --shell /bin/bash pawlocal-deploy || true
+install -d -o pawlocal-deploy -g pawlocal-deploy -m 0700 /home/pawlocal-deploy/.ssh
+cat > /home/pawlocal-deploy/.ssh/authorized_keys <<'PAWLOCAL_PUBLIC_KEY'
+${deploy_public_key}
+PAWLOCAL_PUBLIC_KEY
+chown pawlocal-deploy:pawlocal-deploy /home/pawlocal-deploy/.ssh/authorized_keys
+chmod 0600 /home/pawlocal-deploy/.ssh/authorized_keys
+
+install -d -o root -g root -m 0755 /opt/pawlocal
+install -d -o root -g root -m 0700 /etc/pawlocal
+install -d -o root -g root -m 0755 /var/lib/pawlocal/caddy-data /var/lib/pawlocal/caddy-config
+docker network create pawlocal >/dev/null 2>&1 || true
+
+cat > /opt/pawlocal/Caddyfile <<'PAWLOCAL_CADDYFILE'
+{
+}
+${api_hostname} {
+  encode zstd gzip
+  reverse_proxy pawlocal-api:8000
+}
+PAWLOCAL_CADDYFILE
+chown root:root /opt/pawlocal/Caddyfile
+chmod 0644 /opt/pawlocal/Caddyfile
+
+docker run -d --name pawlocal-caddy --restart unless-stopped --network pawlocal \
+  -p 80:80 -p 443:443 -p 443:443/udp \
+  -v /opt/pawlocal/Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v /var/lib/pawlocal/caddy-data:/data -v /var/lib/pawlocal/caddy-config:/config \
+  caddy:2.10-alpine
+
+cat > /usr/local/sbin/pawlocal-set-dsql-credentials <<'PAWLOCAL_CREDENTIAL_INSTALLER'
+#!/bin/bash
+set -euo pipefail
+umask 077
+IFS= read -r id_line
+IFS= read -r secret_line
+if [[ ! "$id_line" =~ ^aws_access_key_id=[A-Z0-9]{16,128}$ ]] || [[ ! "$secret_line" =~ ^aws_secret_access_key=[A-Za-z0-9/+=]{32,256}$ ]]; then
+  echo "Credential input did not match the expected format." >&2
+  exit 2
+fi
+install -d -o root -g root -m 0700 /etc/pawlocal
+tmp="$(mktemp /etc/pawlocal/aws-credentials.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+{
+  printf '[default]\n'
+  printf '%s\n' "$id_line" "$secret_line"
+} > "$tmp"
+chown root:root "$tmp"
+chmod 0600 "$tmp"
+mv -f "$tmp" /etc/pawlocal/aws-credentials
+trap - EXIT
+PAWLOCAL_CREDENTIAL_INSTALLER
+chown root:root /usr/local/sbin/pawlocal-set-dsql-credentials
+chmod 0750 /usr/local/sbin/pawlocal-set-dsql-credentials
+
+cat > /usr/local/sbin/pawlocal-set-app-config <<'PAWLOCAL_CONFIG_INSTALLER'
+#!/bin/bash
+set -euo pipefail
+umask 077
+IFS= read -r provider
+IFS= read -r region
+IFS= read -r endpoint
+IFS= read -r role
+if [[ "$provider" != "aurora_dsql" || "$region" != "${aws_region}" || ! "$endpoint" =~ ^[a-zA-Z0-9.-]+\.dsql\.${aws_region}\.on\.aws$ || "$role" != "${database_role}" ]]; then
+  echo "Application configuration did not match the selected DSQL target." >&2
+  exit 2
+fi
+tmp="$(mktemp /etc/pawlocal/app.env.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT
+printf 'PAWLOCAL_DATABASE_PROVIDER=%s\nAWS_REGION=%s\nAWS_PROFILE=default\nPAWLOCAL_DATABASE_URL=auroradsql+psycopg://%s@%s/postgres?application_name=pawlocal-%s\nPAWLOCAL_TELEMETRY_ENABLED=false\nOTEL_SDK_DISABLED=true\n' "$provider" "$region" "$role" "$endpoint" "${environment}" > "$tmp"
+chown root:root "$tmp"
+chmod 0600 "$tmp"
+mv -f "$tmp" /etc/pawlocal/app.env
+trap - EXIT
+PAWLOCAL_CONFIG_INSTALLER
+chown root:root /usr/local/sbin/pawlocal-set-app-config
+chmod 0750 /usr/local/sbin/pawlocal-set-app-config
+
+cat > /usr/local/sbin/pawlocal-deploy <<'PAWLOCAL_DEPLOY'
+#!/bin/bash
+set -euo pipefail
+if [[ $# -ne 4 ]]; then
+  echo "Usage: pawlocal-deploy <environment> <image@sha256:digest> <database-provider> <migration-id>" >&2
+  exit 2
+fi
+environment="$1"
+image="$2"
+provider="$3"
+migration_id="$4"
+[[ "$environment" == development || "$environment" == production ]]
+[[ "$image" =~ ^ghcr\.io/[a-z0-9_.-]+/pawlocal-api@sha256:[a-f0-9]{64}$ ]]
+[[ "$provider" == aurora_dsql ]]
+[[ "$migration_id" == dsql_0001_initial ]]
+[[ -s /etc/pawlocal/aws-credentials ]]
+[[ -s /etc/pawlocal/app.env ]]
+export PAWLOCAL_BACKEND_IMAGE="$image"
+export PAWLOCAL_BACKEND_DIGEST="sha256:$${image##*@sha256:}"
+docker image inspect "$image" >/dev/null
+docker run --rm --env-file /etc/pawlocal/app.env \
+  -e AWS_SHARED_CREDENTIALS_FILE=/run/pawlocal/aws-credentials \
+  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
+  -v /etc/pawlocal/aws-credentials:/run/pawlocal/aws-credentials:ro \
+  "$image" python -m pawlocal.dsql_migrate
+docker rm -f pawlocal-api >/dev/null 2>&1 || true
+docker run -d --name pawlocal-api --restart unless-stopped --network pawlocal --network-alias pawlocal-api \
+  --env-file /etc/pawlocal/app.env \
+  -e AWS_SHARED_CREDENTIALS_FILE=/run/pawlocal/aws-credentials \
+  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
+  -v /etc/pawlocal/aws-credentials:/run/pawlocal/aws-credentials:ro \
+  --health-cmd "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\"" \
+  --health-interval 30s --health-timeout 5s --health-retries 3 --health-start-period 30s \
+  "$image"
+for attempt in $(seq 1 30); do
+  if docker inspect --format='{{.State.Health.Status}}' pawlocal-api 2>/dev/null | grep -qx healthy; then
+    break
+  fi
+  if [[ "$attempt" == 30 ]]; then
+    docker logs pawlocal-api >&2
+    exit 1
+  fi
+  sleep 5
+done
+printf 'environment=%s\nimage=%s\nprovider=%s\nmigration_id=%s\ntelemetry_enabled=false\n' "$environment" "$image" "$provider" "$migration_id" > /var/lib/pawlocal/current-release.txt
+chmod 0600 /var/lib/pawlocal/current-release.txt
+PAWLOCAL_DEPLOY
+chown root:root /usr/local/sbin/pawlocal-deploy
+chmod 0750 /usr/local/sbin/pawlocal-deploy
+
+cat > /usr/local/sbin/pawlocal-load-image <<'PAWLOCAL_IMAGE_LOADER'
+#!/bin/bash
+set -euo pipefail
+if [[ $# -ne 1 || ! "$1" =~ ^ghcr\.io/[a-z0-9_.-]+/pawlocal-api@sha256:[a-f0-9]{64}$ ]]; then
+  echo "Usage: pawlocal-load-image <digest-pinned-image>" >&2
+  exit 2
+fi
+docker load
+docker image inspect "$1" >/dev/null
+PAWLOCAL_IMAGE_LOADER
+chown root:root /usr/local/sbin/pawlocal-load-image
+chmod 0750 /usr/local/sbin/pawlocal-load-image
+
+cat > /etc/sudoers.d/pawlocal-deploy <<'PAWLOCAL_SUDOERS'
+pawlocal-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pawlocal-deploy *, /usr/local/sbin/pawlocal-load-image *, /usr/local/sbin/pawlocal-set-dsql-credentials, /usr/local/sbin/pawlocal-set-app-config
+PAWLOCAL_SUDOERS
+chmod 0440 /etc/sudoers.d/pawlocal-deploy
+visudo -cf /etc/sudoers.d/pawlocal-deploy
+
+echo "PawLocal ${environment} host bootstrap complete for ${api_hostname}; application configuration and credentials are injected by the deployment adapter."
