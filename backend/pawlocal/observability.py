@@ -30,6 +30,7 @@ _logger_provider: LoggerProvider | None = None
 _SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 _MAX_EXCEPTION_CHAIN_DEPTH = 5
+_MAX_DATABASE_ERROR_MESSAGE_BYTES = 2048
 
 
 class _SafeJsonFormatter(logging.Formatter):
@@ -59,6 +60,8 @@ class _SafeJsonFormatter(logging.Formatter):
             "database_error_classification",
             "database_error_classification_source",
             "database_pgconn_available",
+            "database_pgconn_error_message_present",
+            "database_pgconn_error_message",
             "database_auth_needs_password",
             "database_auth_used_password",
         ):
@@ -148,6 +151,8 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "database_error_classification",
             "database_error_classification_source",
             "database_pgconn_available",
+            "database_pgconn_error_message_present",
+            "database_pgconn_error_message",
             "database_auth_needs_password",
             "database_auth_used_password",
         }
@@ -236,11 +241,19 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
             fields["database_error_classification"],
             fields["database_error_classification_source"],
         ) = _classify_database_error(candidates, database_candidates)
+        fields["database_pgconn_error_message_present"] = False
         for driver_error in database_candidates:
             pgconn = _safe_attribute(driver_error, "pgconn")
             fields["database_pgconn_available"] = pgconn is not None
             if pgconn is None:
                 break
+            pgconn_message = _safe_attribute(pgconn, "error_message")
+            fields["database_pgconn_error_message_present"] = isinstance(
+                pgconn_message, (bytes, str)
+            ) and bool(pgconn_message)
+            detail = _database_pgconn_error_message(pgconn_message)
+            if detail is not None:
+                fields["database_pgconn_error_message"] = detail
             for attribute, field in (
                 ("needs_password", "database_auth_needs_password"),
                 ("used_password", "database_auth_used_password"),
@@ -250,6 +263,20 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
                     fields[field] = value
             break
     return fields
+
+
+def _database_pgconn_error_message(value: Any) -> str | None:
+    """Return bounded libpq connection text, excluding wrapper exceptions."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    elif isinstance(value, str):
+        pass
+    else:
+        return None
+    value = value.encode("utf-8")[:_MAX_DATABASE_ERROR_MESSAGE_BYTES].decode(
+        "utf-8", errors="ignore"
+    )
+    return value or None
 
 
 def _safe_attribute(value: Any, name: str) -> Any:
