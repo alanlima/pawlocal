@@ -22,14 +22,36 @@ def composite_action_files(directory: Path) -> list[Path]:
 
 
 def local_action_script_files(directory: Path) -> list[Path]:
-    """Discover shell/Python helpers shipped with local actions, confined to repo."""
+    """Discover local-action shell/Python helpers, including referenced extensionless files."""
     scripts: set[Path] = set()
     repo_root = ROOT.resolve()
     for metadata_path in composite_action_files(directory):
         action_root = metadata_path.parent.resolve()
-        for candidate in action_root.rglob("*"):
-            if candidate.suffix.lower() not in {".sh", ".py"}:
-                continue
+        referenced: set[str] = set()
+        try:
+            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            metadata = None
+        runs = metadata.get("runs", {}) if isinstance(metadata, dict) else {}
+        steps = runs.get("steps", []) if isinstance(runs, dict) else []
+        if isinstance(steps, list):
+            for step in steps:
+                command = step.get("run") if isinstance(step, dict) else None
+                if isinstance(command, str):
+                    referenced.update(
+                        match.group(1)
+                        for match in re.finditer(
+                            r"(?:\$GITHUB_ACTION_PATH|\$\{\{\s*github\.action_path\s*\}\})/([^\s\"'`]+)",
+                            command,
+                        )
+                    )
+        candidates = [
+            path
+            for path in action_root.rglob("*")
+            if path.suffix.lower() in {".sh", ".bash", ".py"}
+        ]
+        candidates.extend(action_root / relative for relative in referenced)
+        for candidate in candidates:
             resolved = candidate.resolve()
             if resolved.is_relative_to(repo_root) and resolved.is_relative_to(action_root) and resolved.is_file():
                 scripts.add(resolved)
@@ -673,6 +695,20 @@ def javascript_process_launch_commands(source: str) -> list[str]:
             parts = re.split(r"\s+as\s+", item.strip())
             if parts and parts[0] in launch_names:
                 alias_map[parts[-1]] = parts[0]
+    module_aliases = set(re.findall(
+        r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\)",
+        source,
+    ))
+    module_aliases.update(re.findall(
+        r"\bimport\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['\"](?:node:)?child_process['\"]",
+        source,
+    ))
+    for match in re.finditer(
+        r"\b(?:const|let|var)?\s*([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\.\s*(exec|execSync|spawn|spawnSync|execFile|execFileSync)\b",
+        source,
+    ):
+        if match.group(2) in module_aliases:
+            alias_map[match.group(1)] = match.group(3)
     names = "|".join((*launch_names, *alias_map))
     calls = re.compile(rf"(?:\b[A-Za-z_$][\w$]*\s*\.\s*)?(?:{names})\s*\(\s*([^)]*)\)", re.DOTALL)
     commands: list[str] = []
@@ -1199,16 +1235,21 @@ jobs:
             action_dir = Path(temp_dir) / "shell-action"
             action_dir.mkdir()
             (action_dir / "action.yml").write_text(
-                "runs:\n  using: composite\n  steps:\n    - run: bash \"$GITHUB_ACTION_PATH/deploy.sh\"\n      shell: bash\n",
+                "runs:\n  using: composite\n  steps:\n    - run: bash \"$GITHUB_ACTION_PATH/deploy.sh\"\n      shell: bash\n    - run: bash \"$GITHUB_ACTION_PATH/deploy\"\n      shell: bash\n",
                 encoding="utf-8",
             )
             helper = action_dir / "deploy.sh"
             helper.write_text("aws ec2 terminate-instances --instance-ids i-123\n", encoding="utf-8")
+            bash_helper = action_dir / "deploy.bash"
+            bash_helper.write_text("aws ec2 terminate-instances --instance-ids i-456\n", encoding="utf-8")
+            extensionless = action_dir / "deploy"
+            extensionless.write_text("terraform state rm module.example\n", encoding="utf-8")
             (Path(outside_dir) / "outside.sh").write_text("aws ec2 terminate-instances\n", encoding="utf-8")
             discovered = local_action_script_files(Path(temp_dir))
-            self.assertEqual(discovered, [helper.resolve()])
+            self.assertEqual(set(discovered), {extensionless.resolve(), helper.resolve(), bash_helper.resolve()})
             self.assertEqual(aws_cli_commands(helper.read_text(encoding="utf-8")), [("ec2", "terminate-instances")])
             self.assertNotIn(Path(outside_dir) / "outside.sh", discovered)
+            self.assertTrue(contains_forbidden_terraform_state_change(extensionless.read_text(encoding="utf-8")))
 
     def test_javascript_dynamic_process_commands_fail_closed(self) -> None:
         dynamic = 'const cp = require("node:child_process"); cp.execSync(command);'
@@ -1249,6 +1290,11 @@ cp.execSync(
                 aws_cli_commands(javascript_process_launch_commands(source)[0]),
                 [("ec2", "terminate-instances")],
             )
+
+    def test_javascript_child_process_member_alias_fails_closed(self) -> None:
+        source = 'const cp = require("child_process"); const run = cp.execSync; run(command);'
+        self.assertEqual(javascript_process_launch_commands(source), ["<unresolved-child-process-command>"])
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_javascript_terraform_argv_arrays_reach_state_guard(self) -> None:
         source = '''const cp = require("child_process");
