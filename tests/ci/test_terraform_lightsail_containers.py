@@ -155,6 +155,105 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             self.assertTrue(calls[2].startswith("cloudfront create-invalidation "))
             self.assertEqual(list(temp.glob("pawlocal-frontend.*")), [])
 
+    def test_verify_adapter_reports_query_500_without_cleanup_error(self) -> None:
+        if os.name == "nt":
+            self.skipTest("Adapter subprocess paths are exercised by the Ubuntu CI runner")
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Bash is required to exercise the deployment adapter")
+
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            test_repo = temp / "repo"
+            for relative_path in (
+                "ops/run-deployment-adapter.sh",
+                "ops/deployment-adapters/lightsail-dsql.sh",
+                "ops/validate-release-metadata.py",
+                "ops/api_smoke_url.py",
+            ):
+                source_path = ROOT / relative_path
+                target_path = test_repo / relative_path
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_bytes(source_path.read_bytes().replace(b"\r\n", b"\n"))
+                if target_path.suffix == ".sh":
+                    target_path.chmod(0o755)
+
+            digest = "sha256:" + "b" * 64
+            manifest = {
+                "schema_version": 2,
+                "commit": "a" * 40,
+                "backend_image": f"ghcr.io/alanlima/pawlocal-api@{digest}",
+                "backend_image_digest": digest,
+                "migration_chains": {
+                    "postgresql": {"runner": "alembic", "migration_id": "0007_normalize_place_facilities"},
+                    "aurora_dsql": {"runner": "dsql_baseline", "migration_id": "dsql_0001_initial"},
+                },
+                "telemetry_enabled": False,
+                "frontend": {
+                    "environment": "development",
+                    "artifact_digest": "sha256:" + "c" * 64,
+                },
+            }
+            manifest_path = temp / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            health_path = temp / "health.json"
+            health_path.write_text(json.dumps({
+                "status": "ok",
+                "environment": "development",
+                "image_digest": digest,
+            }), encoding="utf-8")
+
+            fake_bin = temp / "bin"
+            fake_bin.mkdir()
+            curl_log = temp / "curl.log"
+            curl = fake_bin / "curl"
+            curl.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -Eeuo pipefail\n"
+                "calls=0\n"
+                "if [[ -f \"$CURL_CALL_LOG\" ]]; then calls=\"$(cat \"$CURL_CALL_LOG\")\"; fi\n"
+                "calls=$((calls + 1))\n"
+                "printf '%s' \"$calls\" > \"$CURL_CALL_LOG\"\n"
+                "output=''\n"
+                "while [[ $# -gt 0 ]]; do\n"
+                "  if [[ $1 == --output ]]; then output=$2; shift 2; else shift; fi\n"
+                "done\n"
+                "if [[ $calls == 1 ]]; then cp \"$FAKE_HEALTH_RESPONSE\" \"$output\"; exit 0; fi\n"
+                "printf '%s\\n' 'curl: (22) The requested URL returned error: 500' >&2\n"
+                "exit 22\n",
+                encoding="utf-8",
+            )
+            curl.chmod(0o755)
+            environment = os.environ.copy()
+            environment.update({
+                "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
+                "CURL_CALL_LOG": str(curl_log),
+                "FAKE_HEALTH_RESPONSE": str(health_path),
+                "RUNNER_TEMP": directory,
+                "PAWLOCAL_DEPLOY_ADAPTER_PATH": "ops/deployment-adapters/lightsail-dsql.sh",
+                "PAWLOCAL_API_HEALTH_URL": "https://api.example.test/health",
+                "PAWLOCAL_PUBLIC_BASE_URL": "https://app.example.test",
+            })
+            evidence_path = temp / "evidence.json"
+            result = subprocess.run(
+                [bash, "ops/run-deployment-adapter.sh", "verify", "--environment", "development",
+                 "--manifest", str(manifest_path), "--evidence", str(evidence_path)],
+                cwd=test_repo,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("curl: (22) The requested URL returned error: 500", result.stderr)
+            self.assertNotIn("response: unbound variable", result.stderr)
+            self.assertNotIn("health_response: unbound variable", result.stderr)
+            self.assertEqual(curl_log.read_text(encoding="utf-8"), "2")
+            self.assertEqual(list(temp.glob("pawlocal-health.*")), [])
+            self.assertEqual(list(temp.glob("pawlocal-api-smoke.*")), [])
+            self.assertFalse(evidence_path.exists())
+
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
         restore_step = workflow.split("      - name: Restore the selected frontend artifact\n", 1)[1].split("      - name:", 1)[0]
