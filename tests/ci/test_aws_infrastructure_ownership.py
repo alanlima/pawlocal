@@ -705,6 +705,11 @@ async_run("aws", "s3api", "put-bucket-policy")
             with self.subTest(source=source):
                 self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
 
+    def test_helper_returned_process_launcher_assignment_fails_closed(self) -> None:
+        source = "import os\ndef get_launcher():\n    return os.system\nlaunch = get_launcher()\nlaunch('terraform state rm module.example')\n"
+        self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+
     def test_direct_imported_launch_alias_remains_supported(self) -> None:
         source = "from subprocess import run as launch\nlaunch(['aws', 'ec2', 'terminate-instances'])\n"
         self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
