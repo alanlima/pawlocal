@@ -44,7 +44,7 @@ def test_0007_backfills_facilities_in_order_and_handles_empty_arrays():
 
             assert connection.execute(
                 text("SELECT version_num FROM alembic_version")
-            ).scalar_one() == "0007_normalize_place_facilities"
+            ).scalar_one() == "0008_facility_ordinal_constraint"
             ordered_facilities = connection.execute(
                 text(
                     "SELECT facility FROM place_facilities "
