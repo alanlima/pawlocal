@@ -229,14 +229,15 @@ resource "aws_dsql_cluster_policy" "api_connect" {
         Action    = "dsql:DbConnectAdmin"
         Resource  = aws_dsql_cluster.app[each.key].arn
       },
-      {
+      merge({
         Sid       = "AllowLightsailServiceIdentity"
         Effect    = "Allow"
         Principal = { AWS = local.dsql_app_principal_arns[each.key] }
         Action    = "dsql:DbConnect"
         Resource  = aws_dsql_cluster.app[each.key].arn
+        }, each.key == "development" ? {} : {
         Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
-      }
+      })
     ]
   })
 }
