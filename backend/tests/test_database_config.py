@@ -1,7 +1,6 @@
 import pytest
-from sqlalchemy.engine import make_url
-
 from pawlocal.config import Settings
+from sqlalchemy.engine import make_url
 
 
 def test_compose_database_fields_preserve_url_special_password_characters():
@@ -131,9 +130,9 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
     import sys
     from types import ModuleType
 
-    from sqlalchemy import create_engine, event
-
+    import certifi
     from pawlocal.infrastructure.database import _create_dsql_engine
+    from sqlalchemy import create_engine, event
 
     calls = []
     engine = create_engine("sqlite://")
@@ -160,6 +159,7 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
             "user": "pawlocal_dev",
             "driver": "psycopg",
             "dbname": "postgres",
+            "sslrootcert": certifi.where(),
             "application_name": "pawlocal-dev",
             "pool_pre_ping": True,
         }
@@ -171,12 +171,11 @@ def test_dsql_engine_installs_schema_search_path_for_each_transaction(monkeypatc
     import sys
     from types import ModuleType
 
-    from sqlalchemy import create_engine, event
-
     from pawlocal.infrastructure.database import (
         _create_dsql_engine,
         _set_dsql_search_path,
     )
+    from sqlalchemy import create_engine, event
 
     engine = create_engine("sqlite://")
     package = ModuleType("aurora_dsql_sqlalchemy")

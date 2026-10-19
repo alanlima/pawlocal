@@ -77,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        import certifi
         if not args.endpoint.endswith(f".dsql.{args.region}.on.aws"):
             raise ValueError("DSQL endpoint does not match the selected region")
         from aurora_dsql_sqlalchemy import create_dsql_engine
@@ -86,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             user="admin",
             driver="psycopg",
             dbname="postgres",
+            sslrootcert=certifi.where(),
             application_name="pawlocal-terraform-role-bootstrap",
             pool_pre_ping=True,
         )

@@ -87,6 +87,7 @@ def create_database_engine(
 def _create_dsql_engine(url: URL) -> Engine:
     """Build a DSQL engine whose connector uses the AWS SDK credential chain."""
     try:
+        import certifi
         from aurora_dsql_sqlalchemy import create_dsql_engine
     except ImportError as exc:
         raise RuntimeError(
@@ -99,6 +100,7 @@ def _create_dsql_engine(url: URL) -> Engine:
         user=url.username,
         driver="psycopg",
         dbname=url.database,
+        sslrootcert=certifi.where(),
         application_name=url.query.get("application_name", "pawlocal"),
         pool_pre_ping=True,
     )
