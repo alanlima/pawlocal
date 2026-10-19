@@ -666,6 +666,40 @@ def test_pgconn_authentication_diagnostic_keeps_wording_without_password_or_toke
     assert "opaque wrapper" not in json.dumps(fields)
 
 
+def test_pgconn_error_redacts_explicit_credential_values_only(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    diagnostic = (
+        "FATAL: IAM authentication failed; password=PASSWORD_SENTINEL "
+        "token=TOKEN_SENTINEL; retry after provider refresh; "
+        "DSN=postgresql://dbuser:DSN_PASSWORD_SENTINEL@db.example/pawlocal"
+    )
+    driver = psycopg.OperationalError("opaque wrapper")
+    pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+    detail = fields["database_pgconn_error_message"]
+
+    assert detail == (
+        "FATAL: IAM authentication failed; password=[REDACTED] "
+        "token=[REDACTED]; retry after provider refresh; "
+        "DSN=postgresql://dbuser:[REDACTED]@db.example/pawlocal"
+    )
+    for secret in (
+        "PASSWORD_SENTINEL",
+        "TOKEN_SENTINEL",
+        "DSN_PASSWORD_SENTINEL",
+        "opaque wrapper",
+        "private SQL",
+    ):
+        assert secret not in json.dumps(fields)
+
+
 def test_pgconn_error_message_is_capped_at_2048_characters(monkeypatch):
     import psycopg
     from sqlalchemy.exc import OperationalError
@@ -682,6 +716,23 @@ def test_pgconn_error_message_is_capped_at_2048_characters(monkeypatch):
 
     assert fields["database_pgconn_error_message"] == diagnostic[:2048]
     assert len(fields["database_pgconn_error_message"]) == 2048
+
+
+def test_pgconn_error_message_byte_limit_replaces_split_utf8_character(monkeypatch):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    diagnostic = b"a" * 2047 + "é".encode()
+    driver = psycopg.OperationalError("opaque wrapper")
+    pgconn = type("FakePgconn", (), {"error_message": diagnostic})()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("private SQL", {}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_pgconn_error_message"] == "a" * 2047 + "\ufffd"
 
 
 def test_password_flags_alone_do_not_infer_authentication_cause(monkeypatch):
