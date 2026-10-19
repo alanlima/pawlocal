@@ -71,6 +71,10 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
         command = "aws s3api " + "\\" + "\n  put-bucket-policy --bucket pawlocal-example"
         self.assertEqual(aws_cli_commands(command), [("s3api", "put-bucket-policy")])
         self.assertNotIn(aws_cli_commands(command)[0], ALLOWED_AWS_COMMANDS)
+        split_service_and_operation = (
+            "aws " + "\\" + "\n  ec2 " + "\\" + "\n  terminate-instances --instance-ids i-123"
+        )
+        self.assertEqual(aws_cli_commands(split_service_and_operation), [("ec2", "terminate-instances")])
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
