@@ -33,9 +33,3 @@ output "environment_targets" {
     })
   }
 }
-
-output "dsql_access_keys" {
-  description = "Environment-scoped DSQL IAM access-key IDs and PGP-encrypted secrets from the Terraform-managed IAM access keys."
-  sensitive   = true
-  value       = module.fullstack.dsql_access_keys
-}

@@ -5,9 +5,6 @@ certificate_arn      = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-
 github_repository    = "owner/repository"
 github_owner_id      = "123456"
 github_repository_id = "1234567890"
-# Base64-encoded raw PGP public key; the matching private key is only used
-# offline to transfer the encrypted Terraform access-key output to GitHub secrets.
-dsql_access_key_pgp_public_key = "REPLACE_WITH_BASE64_RAW_PGP_PUBLIC_KEY"
 environment          = "production"
 
 # The existing root state already manages the account-level GitHub Actions OIDC provider.

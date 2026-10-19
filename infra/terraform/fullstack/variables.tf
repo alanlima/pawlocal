@@ -38,16 +38,6 @@ variable "github_repository_id" {
   type        = string
 }
 
-variable "dsql_access_key_pgp_public_key" {
-  description = "Base64-encoded raw PGP public key used to encrypt each Terraform-managed DSQL IAM access-key secret. Keep the private key outside the repository and Terraform state."
-  type        = string
-  sensitive   = true
-  validation {
-    condition     = can(base64decode(var.dsql_access_key_pgp_public_key)) && length(var.dsql_access_key_pgp_public_key) > 0
-    error_message = "Provide a base64-encoded raw PGP public key."
-  }
-}
-
 variable "manage_github_oidc_provider" {
   description = "Create the account-level GitHub OIDC provider only if none exists."
   type        = bool

@@ -25,6 +25,7 @@ def test_target_guard_requires_matching_dsql_environment():
             "auroradsql+psycopg://app@dsql.example/postgres?application_name=pawlocal-development"
         ),
         "development",
+        expected_endpoint="dsql.example",
         confirm_production=False,
     )
     with pytest.raises(ValueError, match="Aurora DSQL"):
@@ -33,6 +34,7 @@ def test_target_guard_requires_matching_dsql_environment():
                 "postgresql+psycopg://localhost/pawlocal?application_name=pawlocal-development"
             ),
             "development",
+            expected_endpoint="dsql.example",
             confirm_production=False,
         )
     with pytest.raises(ValueError, match="application_name"):
@@ -41,6 +43,31 @@ def test_target_guard_requires_matching_dsql_environment():
                 "auroradsql+psycopg://app@dsql.example/postgres?application_name=pawlocal-production"
             ),
             "development",
+            expected_endpoint="dsql.example",
+            confirm_production=False,
+        )
+
+
+def test_target_guard_rejects_production_endpoint_with_development_name():
+    with pytest.raises(ValueError, match="does not match"):
+        validate_target(
+            make_url(
+                "auroradsql+psycopg://app@dsql-production.dsql.ap-southeast-2.on.aws/postgres?application_name=pawlocal-development"
+            ),
+            "development",
+            expected_endpoint="dsql-development.dsql.ap-southeast-2.on.aws",
+            confirm_production=False,
+        )
+
+
+def test_target_guard_requires_environment_endpoint_allowlist():
+    with pytest.raises(ValueError, match="PAWLOCAL_EXPECTED_DSQL_ENDPOINT"):
+        validate_target(
+            make_url(
+                "auroradsql+psycopg://app@dsql-development.dsql.ap-southeast-2.on.aws/postgres?application_name=pawlocal-development"
+            ),
+            "development",
+            expected_endpoint=None,
             confirm_production=False,
         )
 
