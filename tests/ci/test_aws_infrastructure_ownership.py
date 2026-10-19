@@ -136,6 +136,21 @@ def python_process_launch_commands(source: str) -> list[str]:
     def callable_reference(node: ast.AST) -> bool:
         """Detect launch callables used as values; only direct import aliases are modeled."""
         if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "getattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Name)
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+            ):
+                module, attribute = node.args[0].id, node.args[1].value
+                if (
+                    (module in subprocess_modules and attribute in subprocess_functions)
+                    or (module in os_modules and attribute in os_functions)
+                    or (module in asyncio_modules and attribute in {"create_subprocess_exec", "create_subprocess_shell"})
+                ):
+                    return True
             # The callable is invoked here, so only inspect its arguments for stored
             # launch callables; the call itself is handled by visit_Call.
             return any(callable_reference(arg) for arg in [*node.args, *(kw.value for kw in node.keywords)])
@@ -331,6 +346,9 @@ def python_process_launch_commands(source: str) -> list[str]:
 
         def visit_Call(self, call: ast.Call) -> None:
             function = call.func
+            if launchable(function) is None and callable_reference(function):
+                commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
+                return
             if isinstance(function, ast.Attribute):
                 target_name = root_name(function.value)
                 if target_name is not None and target_name in alias_groups:
@@ -641,6 +659,15 @@ async_run("aws", "s3api", "put-bucket-policy")
             "import subprocess\nlaunches = [subprocess.run]\n",
             "import subprocess\nholder.launch = subprocess.run\n",
             "import subprocess\nhelper(subprocess.run)\n",
+        )
+        for source in examples:
+            with self.subTest(source=source):
+                self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
+
+    def test_dynamic_getattr_process_launch_callable_fails_closed(self) -> None:
+        examples = (
+            "import os\nlaunch = getattr(os, 'system')\nlaunch('aws ec2 terminate-instances')\n",
+            "import subprocess\nlaunch = getattr(subprocess, 'run')\nlaunch(['aws', 'ec2', 'terminate-instances'])\n",
         )
         for source in examples:
             with self.subTest(source=source):
