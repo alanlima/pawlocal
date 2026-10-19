@@ -280,13 +280,14 @@ module "fullstack" {
     aws = aws.fullstack
   }
 
-  aws_region                  = var.aws_region
-  root_domain                 = var.domain_name
-  cloudfront_certificate_arn  = var.certificate_arn
-  github_repository           = var.github_repository
-  github_owner_id             = var.github_owner_id
-  github_repository_id        = var.github_repository_id
-  terraform_state_bucket_name = var.terraform_state_bucket_name
+  aws_region                      = var.aws_region
+  root_domain                     = var.domain_name
+  cloudfront_certificate_arn      = var.certificate_arn
+  github_repository               = var.github_repository
+  github_owner_id                 = var.github_owner_id
+  github_repository_id            = var.github_repository_id
+  terraform_state_bucket_name     = var.terraform_state_bucket_name
+  additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   backend_image_digests          = var.backend_image_digests
