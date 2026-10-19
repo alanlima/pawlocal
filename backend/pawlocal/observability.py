@@ -59,6 +59,7 @@ class _SafeJsonFormatter(logging.Formatter):
             "database_error_classification",
             "database_error_classification_source",
             "database_pgconn_available",
+            "database_pgconn_error_message_present",
             "database_auth_needs_password",
             "database_auth_used_password",
         ):
@@ -148,6 +149,7 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "database_error_classification",
             "database_error_classification_source",
             "database_pgconn_available",
+            "database_pgconn_error_message_present",
             "database_auth_needs_password",
             "database_auth_used_password",
         }
@@ -236,11 +238,16 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
             fields["database_error_classification"],
             fields["database_error_classification_source"],
         ) = _classify_database_error(candidates, database_candidates)
+        fields["database_pgconn_error_message_present"] = False
         for driver_error in database_candidates:
             pgconn = _safe_attribute(driver_error, "pgconn")
             fields["database_pgconn_available"] = pgconn is not None
             if pgconn is None:
                 break
+            pgconn_message = _safe_attribute(pgconn, "error_message")
+            fields["database_pgconn_error_message_present"] = isinstance(
+                pgconn_message, (bytes, str)
+            ) and bool(pgconn_message)
             for attribute, field in (
                 ("needs_password", "database_auth_needs_password"),
                 ("used_password", "database_auth_used_password"),

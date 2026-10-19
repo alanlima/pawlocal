@@ -276,6 +276,7 @@ def test_unhandled_api_error_logs_nested_missing_credentials_class_safely(client
         "RuntimeError",
         "NoCredentialsError",
     ]
+    assert completed_log["database_pgconn_error_message_present"] is False
     assert "private sentinel" not in captured.getvalue()
     assert "Unable to locate credentials" not in captured.getvalue()
     assert "private" not in json.dumps(response.json())
@@ -333,6 +334,7 @@ def test_exception_log_fields_reject_non_sqlstate_values():
                 "database_error_code": "08006",
                 "database_error_classification": "connection_failure_unknown",
                 "database_error_classification_source": "fallback",
+                "database_pgconn_error_message_present": False,
             },
         ),
         (
@@ -342,6 +344,7 @@ def test_exception_log_fields_reject_non_sqlstate_values():
                 "exception_chain": ["DriverError"],
                 "database_error_classification": "connection_failure_unknown",
                 "database_error_classification_source": "fallback",
+                "database_pgconn_error_message_present": False,
             },
         ),
     ],
@@ -406,6 +409,7 @@ def test_exception_log_fields_capture_innermost_provider_error_without_text():
         ],
         "database_error_classification": "credential_provider_missing",
         "database_error_classification_source": "exception_class",
+        "database_pgconn_error_message_present": False,
     }
     encoded = json.dumps(fields)
     assert "private" not in encoded
@@ -442,6 +446,7 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
         "database_error_classification": "connection_refused",
         "database_error_classification_source": "os_errno",
         "database_pgconn_available": False,
+        "database_pgconn_error_message_present": False,
     }
     encoded = json.dumps(fields)
     assert "private" not in encoded
@@ -540,6 +545,7 @@ def test_psycopg_pgconn_auth_flags_are_boolean_hints_only(monkeypatch):
     assert fields["database_error_classification"] == "authentication_rejected"
     assert fields["database_error_classification_source"] == "driver_message_pattern"
     assert fields["database_pgconn_available"] is True
+    assert fields["database_pgconn_error_message_present"] is False
     assert fields["database_auth_needs_password"] is True
     assert fields["database_auth_used_password"] is False
     encoded = json.dumps(fields)
@@ -584,6 +590,7 @@ def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
         fields["database_error_classification_source"] == "pgconn_error_message_pattern"
     )
     assert fields["database_pgconn_available"] is True
+    assert fields["database_pgconn_error_message_present"] is True
     assert fields["database_auth_needs_password"] is False
     assert fields["database_auth_used_password"] is True
     for secret in (
@@ -595,6 +602,43 @@ def test_pgconn_error_message_maps_only_to_fixed_classification(monkeypatch):
         "opaque driver exception text",
     ):
         assert secret not in encoded
+
+
+@pytest.mark.parametrize(
+    ("error_message", "message_present"),
+    [
+        (None, False),
+        (b"", False),
+        ("", False),
+        (b"unmatched private libpq detail", True),
+        ("unmatched private libpq detail", True),
+    ],
+)
+def test_pgconn_error_message_presence_is_boolean_and_preserves_fallback(
+    error_message, message_present, monkeypatch
+):
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    driver = psycopg.OperationalError("opaque driver exception")
+    pgconn_attributes = {"needs_password": False, "used_password": True}
+    if error_message is not None:
+        pgconn_attributes["error_message"] = error_message
+    pgconn = type("FakePgconn", (), pgconn_attributes)()
+    monkeypatch.setattr(type(driver), "pgconn", property(lambda _self: pgconn))
+    wrapped = OperationalError("PRIVATE_SQL", {"token": "PRIVATE_PARAM"}, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+    encoded = json.dumps(fields)
+
+    assert fields["database_pgconn_error_message_present"] is message_present
+    assert fields["database_error_classification"] == "connection_failure_unknown"
+    assert fields["database_error_classification_source"] == "fallback"
+    assert "unmatched private libpq detail" not in encoded
+    assert "PRIVATE_SQL" not in encoded
+    assert "PRIVATE_PARAM" not in encoded
 
 
 def test_password_flags_alone_do_not_infer_authentication_cause(monkeypatch):
