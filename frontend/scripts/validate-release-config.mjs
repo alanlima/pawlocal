@@ -53,7 +53,7 @@ export function validateReleaseSettings(env = process.env) {
   const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
   if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
     throw new Error(
-      `Cloud ${releaseEnvironment} builds must use the ${expectedApiHostPrefix}<domain> API hostname`,
+      `Cloud ${releaseEnvironment} builds must set VITE_API_BASE_URL to the ${expectedApiHostPrefix}<domain> API hostname`,
     )
   }
 
