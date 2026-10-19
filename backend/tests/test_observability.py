@@ -675,6 +675,7 @@ def test_pgconn_error_redacts_explicit_credential_values_only(monkeypatch):
     diagnostic = (
         "FATAL: IAM authentication failed; password=PASSWORD_SENTINEL "
         "token=TOKEN_SENTINEL; retry after provider refresh; "
+        "AWS_SESSION_TOKEN=AWS_TOKEN_SENTINEL; "
         "DSN=postgresql://dbuser:DSN_PASSWORD_SENTINEL@db.example/pawlocal"
     )
     driver = psycopg.OperationalError("opaque wrapper")
@@ -688,12 +689,14 @@ def test_pgconn_error_redacts_explicit_credential_values_only(monkeypatch):
     assert detail == (
         "FATAL: IAM authentication failed; password=[REDACTED] "
         "token=[REDACTED]; retry after provider refresh; "
+        "AWS_SESSION_TOKEN=[REDACTED]; "
         "DSN=postgresql://dbuser:[REDACTED]@db.example/pawlocal"
     )
     for secret in (
         "PASSWORD_SENTINEL",
         "TOKEN_SENTINEL",
         "DSN_PASSWORD_SENTINEL",
+        "AWS_TOKEN_SENTINEL",
         "opaque wrapper",
         "private SQL",
     ):

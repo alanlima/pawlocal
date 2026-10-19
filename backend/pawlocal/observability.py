@@ -32,8 +32,11 @@ _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 _MAX_EXCEPTION_CHAIN_DEPTH = 5
 _MAX_DATABASE_ERROR_MESSAGE_BYTES = 2048
 _DATABASE_CREDENTIAL_FIELD = re.compile(
-    r"(?P<prefix>\b(?:password|passwd|pwd|token|session[_-]?token|secret|secret[_-]?key|"
-    r"access[_-]?key(?:[_-]?id)?|client[_-]?secret|api[_-]?key|authorization)\b"
+    r"(?P<prefix>\b(?:password|passwd|pwd|token|session[_-]?token|refresh[_-]?token|"
+    r"id[_-]?token|secret|secret[_-]?key|secret[_-]?access[_-]?key|"
+    r"access[_-]?key(?:[_-]?id)?|aws[_-]?(?:access[_-]?key[_-]?id|"
+    r"secret[_-]?access[_-]?key|session[_-]?token)|client[_-]?secret|"
+    r"api[_-]?key|authorization)\b"
     r"\s*[:=]\s*)(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;]+)",
     re.IGNORECASE,
 )
