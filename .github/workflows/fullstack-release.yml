@@ -165,6 +165,15 @@ jobs:
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
       PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
       PAWLOCAL_TELEMETRY_ENABLED: "false"
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_DEPLOY_HOST: ${{ vars.PAWLOCAL_DEPLOY_HOST }}
+      PAWLOCAL_DEPLOY_KNOWN_HOSTS: ${{ vars.PAWLOCAL_DEPLOY_KNOWN_HOSTS }}
+      PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
+      PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
+      PAWLOCAL_DSQL_ENDPOINT: ${{ vars.PAWLOCAL_DSQL_ENDPOINT }}
+      PAWLOCAL_DSQL_DATABASE_ROLE: ${{ vars.PAWLOCAL_DSQL_DATABASE_ROLE }}
+      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
     permissions:
       actions: read
       contents: read
@@ -284,6 +293,11 @@ jobs:
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
           PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_DSQL_ACCESS_KEY_ID: ${{ secrets.PAWLOCAL_DSQL_ACCESS_KEY_ID }}
+          PAWLOCAL_DSQL_SECRET_ACCESS_KEY: ${{ secrets.PAWLOCAL_DSQL_SECRET_ACCESS_KEY }}
+          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: bash ops/run-deployment-adapter.sh deploy --environment development --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
 
       - name: Verify development release through the selected adapter
@@ -293,6 +307,7 @@ jobs:
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
           PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
         run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
 
       - name: Validate development deployment evidence and selected migration chain
