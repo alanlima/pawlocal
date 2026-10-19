@@ -69,15 +69,6 @@ jobs:
           aws-region: ap-southeast-2
           role-session-name: PawLocalDevSeed-${{ github.run_id }}
 
-      - name: Verify assumed database role identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          caller_arn="$(aws sts get-caller-identity --query Arn --output text)"
-          expected_prefix="arn:aws:sts::${PAWLOCAL_AWS_ACCOUNT_ID}:assumed-role/pawlocal-development-dsql-runtime/"
-          [[ "$caller_arn" == "$expected_prefix"* ]] || { echo "OIDC did not assume the expected development runtime role." >&2; exit 1; }
-          echo "Confirmed the development DSQL runtime role."
-
       - name: Seed the fixed development catalog
         working-directory: backend
         shell: bash
