@@ -50,6 +50,7 @@ class TerraformLightsailIngressTests(unittest.TestCase):
         self.assertIn('"lightsail:CloseInstancePublicPorts"', module)
         self.assertIn('"ec2:DescribeAvailabilityZones"', module)
         self.assertIn('"dsql:GetCluster"', module)
+        self.assertIn('"dsql:GetVpcEndpointServiceName"', module)
         self.assertIn('"cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"', module)
         self.assertIn('resources = [aws_lightsail_instance.api[each.key].arn]', module)
 

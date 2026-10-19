@@ -492,7 +492,7 @@ data "aws_iam_policy_document" "github_terraform_ingress" {
 
   statement {
     sid       = "ReadTerraformRefreshResources"
-    actions   = ["dsql:GetCluster"]
+    actions   = ["dsql:GetCluster", "dsql:GetVpcEndpointServiceName"]
     resources = [for cluster in aws_dsql_cluster.app : cluster.arn]
   }
 
