@@ -491,14 +491,22 @@ data "aws_iam_policy_document" "github_terraform_ingress" {
   }
 
   statement {
-    sid       = "ReadTerraformRefreshResources"
-    actions   = ["dsql:GetCluster", "dsql:GetVpcEndpointServiceName"]
+    sid = "ReadTerraformRefreshResources"
+    actions = [
+      "dsql:GetCluster",
+      "dsql:GetVpcEndpointServiceName",
+      "dsql:ListTagsForResource",
+    ]
     resources = [for cluster in aws_dsql_cluster.app : cluster.arn]
   }
 
   statement {
-    sid       = "ReadTerraformRefreshUserPools"
-    actions   = ["cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"]
+    sid = "ReadTerraformRefreshUserPools"
+    actions = [
+      "cognito-idp:DescribeUserPool",
+      "cognito-idp:DescribeUserPoolClient",
+      "cognito-idp:GetUserPoolMfaConfig",
+    ]
     resources = [for pool in aws_cognito_user_pool.app : pool.arn]
   }
 
