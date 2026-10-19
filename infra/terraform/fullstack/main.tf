@@ -581,6 +581,17 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
     }
   }
 
+  dynamic "statement" {
+    for_each = each.key == "development" ? [true] : []
+
+    content {
+      sid       = "ConnectAsDsqlAdminForDevelopmentBootstrap"
+      effect    = "Allow"
+      actions   = ["dsql:DbConnectAdmin"]
+      resources = [aws_dsql_cluster.app["development"].arn]
+    }
+  }
+
   statement {
     sid    = "LockAndUpdateSharedTerraformState"
     effect = "Allow"
