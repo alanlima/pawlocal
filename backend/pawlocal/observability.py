@@ -1,5 +1,6 @@
 """Local OpenTelemetry setup and privacy-safe backend request logging."""
 
+import errno
 import json
 import logging
 import re
@@ -55,6 +56,11 @@ class _SafeJsonFormatter(logging.Formatter):
             "exception_chain",
             "os_error_number",
             "database_error_code",
+            "database_error_classification",
+            "database_error_classification_source",
+            "database_pgconn_available",
+            "database_auth_needs_password",
+            "database_auth_used_password",
         ):
             value = getattr(record, field, None)
             if value is not None:
@@ -139,6 +145,11 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "exception_chain",
             "os_error_number",
             "database_error_code",
+            "database_error_classification",
+            "database_error_classification_source",
+            "database_pgconn_available",
+            "database_auth_needs_password",
+            "database_auth_used_password",
         }
     }
     safe_fields.update(current_correlation_fields(span))
@@ -149,9 +160,9 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
     """Return bounded exception identifiers without messages or traceback data.
 
     Database drivers often wrap an operating-system failure. Record only
-    exception type names, validated SQLSTATEs, and integer OS error numbers so
-    connection failures can be distinguished without exporting driver text,
-    SQL, parameters, endpoint values, or credentials.
+    exception type names, validated SQLSTATEs, bounded OS error numbers, and a
+    fixed database-error classification. Driver messages are inspected only in
+    memory to map known phrases to constants; message text is never returned.
     """
     class_name = type(exc).__name__
     fields = {
@@ -211,7 +222,108 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
         ):
             fields["os_error_number"] = value
             break
+
+    database_candidates = [
+        item
+        for item in candidates
+        if type(item).__module__.split(".", 1)[0] in {"psycopg", "psycopg2"}
+    ]
+    if database_candidates or any(
+        _safe_exception_class(item) in {"OperationalError", "DatabaseError"}
+        for item in candidates
+    ):
+        (
+            fields["database_error_classification"],
+            fields["database_error_classification_source"],
+        ) = _classify_database_error(candidates, database_candidates)
+        for driver_error in database_candidates:
+            pgconn = _safe_attribute(driver_error, "pgconn")
+            fields["database_pgconn_available"] = pgconn is not None
+            if pgconn is None:
+                break
+            for attribute, field in (
+                ("needs_password", "database_auth_needs_password"),
+                ("used_password", "database_auth_used_password"),
+            ):
+                value = _safe_attribute(pgconn, attribute)
+                if isinstance(value, bool):
+                    fields[field] = value
+            break
     return fields
+
+
+def _safe_attribute(value: Any, name: str) -> Any:
+    try:
+        return getattr(value, name, None)
+    except Exception:  # noqa: BLE001 - optional driver diagnostics must not mask the original failure
+        return None
+
+
+def _classify_database_error(
+    candidates: list[BaseException], driver_candidates: list[BaseException]
+) -> tuple[str, str]:
+    """Map database failures to constants; never return exception text."""
+    classes = {_safe_exception_class(item) for item in candidates}
+    sqlstate = next(
+        (
+            code
+            for item in candidates
+            for code in (getattr(item, "sqlstate", None), getattr(item, "pgcode", None))
+            if isinstance(code, str) and _SAFE_SQLSTATE.fullmatch(code.upper())
+        ),
+        None,
+    )
+    if "NoCredentialsError" in classes:
+        return "credential_provider_missing", "exception_class"
+    if sqlstate and sqlstate.startswith("28"):
+        return "authentication_rejected", "sqlstate"
+    if "gaierror" in classes:
+        return "dns_resolution_failed", "exception_class"
+    if classes.intersection({"CertificateError", "SSLCertVerificationError"}):
+        return "tls_verification_failed", "exception_class"
+    if "SSLError" in classes:
+        return "tls_connection_failed", "exception_class"
+    numbers = [getattr(item, "errno", None) for item in candidates]
+    if errno.ECONNREFUSED in numbers:
+        return "connection_refused", "os_errno"
+    if errno.ETIMEDOUT in numbers or "TimeoutError" in classes:
+        return (
+            "connection_timeout",
+            "os_errno" if errno.ETIMEDOUT in numbers else "exception_class",
+        )
+
+    # Phrase matching is limited to a short, in-memory prefix of the actual
+    # psycopg exception's first argument. It only selects an enum constant.
+    message_classifications: set[str] = set()
+    for item in driver_candidates:
+        args = getattr(item, "args", ())
+        message = args[0] if args and isinstance(args[0], str) else ""
+        message = message[:2048].lower()
+        if "failed to generate authentication token" in message:
+            message_classifications.add("token_generation_failed")
+        if (
+            "password authentication failed" in message
+            or "authentication failed" in message
+        ):
+            message_classifications.add("authentication_rejected")
+        if "certificate verify failed" in message:
+            message_classifications.add("tls_verification_failed")
+        elif "tls handshake" in message:
+            message_classifications.add("tls_connection_failed")
+        if "connection timed out" in message:
+            message_classifications.add("connection_timeout")
+        if "connection refused" in message:
+            message_classifications.add("connection_refused")
+        if (
+            "could not translate host name" in message
+            or "name or service not known" in message
+        ):
+            message_classifications.add("dns_resolution_failed")
+    if len(message_classifications) == 1:
+        return next(iter(message_classifications)), "driver_message_pattern"
+    if len(message_classifications) > 1:
+        return "connection_failure_unknown", "ambiguous_driver_message"
+    return "connection_failure_unknown", "fallback"
 
 
 def _safe_exception_class(exc: BaseException) -> str:
