@@ -65,6 +65,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
 
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
+        self.assertIn("PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}", workflow)
         self.assertIn("No successful main-branch full-stack release", workflow)
         self.assertIn("no successful verified development deployment", workflow)
         self.assertIn("terraform-lightsail-container-deploy.sh development", workflow)

@@ -162,6 +162,11 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("migration_runner", evidence_schema["required"])
         self.assertIn("migration_id", evidence_schema["required"])
         self.assertIn("database_query_smoke", evidence_schema["required"])
+        self.assertIn("running_image_digest", evidence_schema["required"])
+        self.assertEqual(
+            evidence["running_image_digest"]["pattern"],
+            "^sha256:[0-9a-f]{64}$",
+        )
         self.assertEqual(evidence["database_provider"]["enum"], ["postgresql", "aurora_dsql"])
 
 

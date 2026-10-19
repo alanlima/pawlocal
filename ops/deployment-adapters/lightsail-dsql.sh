@@ -99,13 +99,13 @@ PY
 import json,sys
 from datetime import datetime,timezone
 from pathlib import Path
-environment,manifest_path,evidence_path=sys.argv[1:]
+environment,manifest_path,evidence_path,running_image_digest=sys.argv[1:]
 manifest=json.loads(Path(manifest_path).read_text(encoding='utf-8'))
 frontend=manifest.get('frontend',{})
 Path(evidence_path).write_text(json.dumps({
   'schema_version':1,'environment':environment,'commit':manifest['commit'],
   'backend_image_digest':manifest['backend_image_digest'],
-  'running_image_digest':sys.argv[4],
+  'running_image_digest':running_image_digest,
   'frontend_artifact_digest':frontend['artifact_digest'],
   'database_provider':'aurora_dsql','migration_runner':'dsql_baseline',
   'migration_id':manifest['migration_chains']['aurora_dsql']['migration_id'],
