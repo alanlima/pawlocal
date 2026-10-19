@@ -236,11 +236,6 @@ data "aws_iam_policy_document" "codebuild_runner" {
       aws_subnet.runner_private[0].arn,
       aws_security_group.codebuild_runner[0].arn,
     ]
-    condition {
-      test     = "ArnEquals"
-      variable = "ec2:Vpc"
-      values   = [aws_vpc.codebuild_runner[0].arn]
-    }
   }
 
   statement {
