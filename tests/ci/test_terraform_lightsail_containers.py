@@ -23,110 +23,73 @@ SPEC.loader.exec_module(VALIDATOR)
 
 class TerraformLightsailContainerTests(unittest.TestCase):
     image = "ghcr.io/alanlima/pawlocal-api@sha256:" + "a" * 64
+    account_id = "097922957316"
 
     @staticmethod
     def plan(address: str, actions: list[str], image: str) -> dict:
+        environment = "development" if '["development"]' in address else "production"
+        env = {
+            "PAWLOCAL_RELEASE_ENVIRONMENT": environment,
+            "PAWLOCAL_RELEASE_IMAGE_DIGEST": image.rsplit("@", maxsplit=1)[-1],
+        }
+        if environment == "development":
+            env["PAWLOCAL_DSQL_ASSUME_ROLE_ARN"] = (
+                "arn:aws:iam::097922957316:role/pawlocal-development-dsql-runtime"
+            )
         return {"resource_changes": [{"address": address, "change": {
-            "actions": actions, "after": {"container": [{"image": image}]}
+            "actions": actions, "after": {"container": [{"container_name": "pawlocal-api", "image": image, "environment": env}]}
         }}]}
 
     def test_accepts_only_selected_environment_container_deployment(self) -> None:
         address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]'
-        VALIDATOR.validate(self.plan(address, ["update"], self.image), "development", self.image)
+        VALIDATOR.validate(self.plan(address, ["update"], self.image), "development", self.image, self.account_id)
 
     def test_accepts_selected_immutable_container_deployment_replacement(self) -> None:
         address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]'
-        VALIDATOR.validate(self.plan(address, ["delete", "create"], self.image), "development", self.image)
+        VALIDATOR.validate(self.plan(address, ["delete", "create"], self.image), "development", self.image, self.account_id)
 
     def test_rejects_unrelated_infrastructure_changes(self) -> None:
         plan = self.plan('module.fullstack.aws_lightsail_container_service.api["development"]', ["update"], self.image)
         with self.assertRaisesRegex(ValueError, "outside the selected"):
-            VALIDATOR.validate(plan, "development", self.image)
+            VALIDATOR.validate(plan, "development", self.image, self.account_id)
 
     def test_rejects_changes_to_both_environments(self) -> None:
         plan = self.plan('module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]', ["update"], self.image)
         plan["resource_changes"].append(self.plan('module.fullstack.aws_lightsail_container_service_deployment_version.api["production"]', ["update"], self.image)["resource_changes"][0])
         with self.assertRaisesRegex(ValueError, "outside the selected"):
-            VALIDATOR.validate(plan, "development", self.image)
+            VALIDATOR.validate(plan, "development", self.image, self.account_id)
 
-    def test_accepts_complete_reviewed_development_dsql_authorization_bundle(self) -> None:
-        cluster_arn = "arn:aws:dsql:ap-southeast-2:097922957316:cluster/fnufjjgjjvrjncowdpzbx42xie"
+    def test_rejects_any_control_plane_change_from_release_role(self) -> None:
         container_address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]'
-        runtime_policy_address = 'module.fullstack.aws_iam_role_policy.dsql_runtime["development"]'
-        terraform_policy_address = 'module.fullstack.aws_iam_role_policy.github_terraform_deploy["development"]'
-        plan = self.plan(container_address, ["delete", "create"], self.image)
-        plan["resource_changes"].extend([
-            {"address": 'module.fullstack.aws_dsql_cluster_policy.api_connect["development"]', "change": {"actions": ["update"]}},
-            {"address": 'module.fullstack.aws_iam_role.dsql_runtime["development"]', "change": {"actions": ["create"]}},
-            {
-                "address": runtime_policy_address,
-                "change": {"actions": ["create"], "after": {"policy": json.dumps({
-                    "Statement": [{"Action": "dsql:DbConnect", "Effect": "Allow", "Resource": cluster_arn}]
-                })}},
-            },
-            {
-                "address": terraform_policy_address,
-                "change": {"actions": ["update"], "after": {"policy": json.dumps({
-                    "Statement": [{"Sid": "ConnectAsDsqlAdminForDevelopmentBootstrap", "Action": "dsql:DbConnectAdmin", "Effect": "Allow", "Resource": cluster_arn}]
-                })}},
-            },
-            {"address": 'module.fullstack.terraform_data.app_dsql_role["development"]', "change": {"actions": ["delete", "create"]}},
-        ])
-        VALIDATOR.validate(plan, "development", self.image)
-
-        broad_runtime = copy.deepcopy(plan)
-        runtime_change = next(item for item in broad_runtime["resource_changes"] if item["address"] == runtime_policy_address)
-        runtime_change["change"]["after"]["policy"] = json.dumps({
-            "Statement": [{"Action": "dsql:DbConnect", "Effect": "Allow", "Resource": "*"}]
-        })
-        with self.assertRaisesRegex(ValueError, "cluster-scoped"):
-            VALIDATOR.validate(broad_runtime, "development", self.image)
-
-        wrong_admin_cluster = copy.deepcopy(plan)
-        admin_change = next(item for item in wrong_admin_cluster["resource_changes"] if item["address"] == terraform_policy_address)
-        admin_change["change"]["after"]["policy"] = json.dumps({
-            "Statement": [{
-                "Sid": "ConnectAsDsqlAdminForDevelopmentBootstrap",
-                "Action": "dsql:DbConnectAdmin",
-                "Effect": "Allow",
-                "Resource": "arn:aws:dsql:ap-southeast-2:097922957316:cluster/other",
-            }]
-        })
-        with self.assertRaisesRegex(ValueError, "matching cluster-scoped"):
-            VALIDATOR.validate(wrong_admin_cluster, "development", self.image)
-
-        unrelated_change = copy.deepcopy(plan)
-        unrelated_change["resource_changes"].append({
-            "address": 'module.fullstack.aws_s3_bucket_policy.frontend["development"]',
-            "change": {"actions": ["update"]},
-        })
-        with self.assertRaisesRegex(ValueError, "outside the selected"):
-            VALIDATOR.validate(unrelated_change, "development", self.image)
-
-    def test_rejects_incomplete_dsql_authorization_bundle(self) -> None:
-        plan = self.plan('module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]', ["update"], self.image)
-        plan["resource_changes"].append({
-            "address": 'module.fullstack.aws_iam_role.dsql_runtime["development"]',
-            "change": {"actions": ["create"]},
-        })
-        with self.assertRaisesRegex(ValueError, "incomplete"):
-            VALIDATOR.validate(plan, "development", self.image)
-
-    def test_rejects_production_changes_in_development_authorization_bundle(self) -> None:
-        plan = self.plan('module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]', ["update"], self.image)
-        plan["resource_changes"].append({
-            "address": 'module.fullstack.aws_iam_role.dsql_runtime["production"]',
-            "change": {"actions": ["create"]},
-        })
-        with self.assertRaisesRegex(ValueError, "outside the selected"):
-            VALIDATOR.validate(plan, "development", self.image)
-
+        plan = self.plan(container_address, ["update"], self.image)
+        for address in (
+            'module.fullstack.aws_iam_role.dsql_runtime["development"]',
+            'module.fullstack.aws_iam_role_policy.dsql_runtime["development"]',
+            'module.fullstack.aws_dsql_cluster_policy.api_connect["development"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["development"]',
+            'module.fullstack.aws_iam_role.dsql_runtime["production"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["production"]',
+        ):
+            with self.subTest(address=address):
+                changed = copy.deepcopy(plan)
+                changed["resource_changes"].append({
+                    "address": address,
+                    "change": {"actions": ["update"], "after": {"policy": '{"Statement":[{"Action":"*","Resource":"*"}]}'}}
+                })
+                with self.assertRaisesRegex(ValueError, "outside the selected"):
+                    VALIDATOR.validate(changed, "development", self.image, self.account_id)
+        retargeted = self.plan(container_address, ["update"], self.image)
+        retargeted["resource_changes"][0]["change"]["after"]["container"][0]["environment"][
+            "PAWLOCAL_DSQL_ASSUME_ROLE_ARN"
+        ] = "arn:aws:iam::097922957316:role/pawlocal-production-dsql-runtime"
+        with self.assertRaisesRegex(ValueError, "development DSQL runtime role"):
+            VALIDATOR.validate(retargeted, "development", self.image, self.account_id)
     def test_rejects_wrong_image_and_destroy(self) -> None:
         address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["production"]'
         with self.assertRaisesRegex(ValueError, "image digest"):
-            VALIDATOR.validate(self.plan(address, ["update"], "other"), "production", self.image)
+            VALIDATOR.validate(self.plan(address, ["update"], "other"), "production", self.image, self.account_id)
         with self.assertRaisesRegex(ValueError, "create, update, or replacement"):
-            VALIDATOR.validate(self.plan(address, ["delete"], self.image), "production", self.image)
+            VALIDATOR.validate(self.plan(address, ["delete"], self.image), "production", self.image, self.account_id)
 
     def test_release_workflows_do_not_use_ssh_or_manual_ingress(self) -> None:
         for filename in ("fullstack-release.yml", "deploy-production.yml", "rollback-development.yml"):
@@ -415,12 +378,27 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("user_pool.arn", cognito.group(1))
         self.assertNotIn('resources = ["*"]', cognito.group(1))
 
-    def test_dsql_role_bootstrap_fingerprint_is_line_ending_stable(self) -> None:
-        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        self.assertIn(
-            'sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\\r\\n", "\\n"), "\\n", "\\r\\n"))',
-            text,
+    def test_dsql_bootstrap_is_operator_run_and_release_role_stays_limited(self) -> None:
+        terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        release = re.search(
+            r'data "aws_iam_policy_document" "github_terraform_deploy" \{(.*?)(?=\nresource "aws_iam_role_policy")',
+            terraform,
+            re.DOTALL,
         )
+        self.assertIsNotNone(release)
+        self.assertNotIn("dsql:DbConnectAdmin", release.group(1))
+        marker = re.search(
+            r'resource "terraform_data" "app_dsql_role" \{(.*?)(?=\nresource|\Z)',
+            terraform,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(marker)
+        self.assertNotIn("provisioner", marker.group(1))
+        deploy = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
+        self.assertNotIn("dsql_bootstrap_python", deploy)
+        bootstrap = (ROOT / "ops/bootstrap-development-dsql-role.ps1").read_text(encoding="utf-8")
+        self.assertIn("pawlocal.dsql_role_bootstrap", bootstrap)
+        self.assertIn("dsql_app_iam_principal_arn", bootstrap)
 
     def test_cloudfront_function_code_preserves_live_crlf_bytes(self) -> None:
         expected = "\r\n".join([

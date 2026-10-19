@@ -35,9 +35,17 @@ export TF_VAR_domain_name="$PAWLOCAL_DOMAIN_NAME"
 export TF_VAR_certificate_arn="$PAWLOCAL_CERTIFICATE_ARN"
 export TF_VAR_github_repository="$GITHUB_REPOSITORY"
 export TF_VAR_terraform_state_bucket_name="$PAWLOCAL_TF_STATE_BUCKET"
-export TF_VAR_dsql_bootstrap_python=/usr/bin/python3
 
 current_targets="$(terraform -chdir="$root" output -json environment_targets)"
+aws_account_id="$(CURRENT_TARGETS="$current_targets" python3 - <<'PY'
+import json,os,re
+targets=json.loads(os.environ['CURRENT_TARGETS'])
+account_id=(targets.get('development') or {}).get('aws_account_id')
+if not isinstance(account_id,str) or not re.fullmatch(r'[0-9]{12}',account_id):
+    raise SystemExit('Terraform state has no valid AWS account ID')
+print(account_id)
+PY
+)"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   TARGETS_JSON="$current_targets" python3 - "$environment" "$GITHUB_ENV" <<'PY'
 import json,os,sys
@@ -74,7 +82,7 @@ plan="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-container-${environment}.XXXXXX.tf
 trap 'rm -f "$plan"' EXIT
 terraform -chdir="$root" plan -input=false -lock-timeout=5m -out="$plan"
 terraform -chdir="$root" show -json "$plan" |
-  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image"
+  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image" --aws-account-id "$aws_account_id"
 terraform -chdir="$root" apply -input=false -lock-timeout=5m -auto-approve "$plan"
 service_json="$(aws lightsail get-container-services --service-name "pawlocal-${environment}-api" --query 'containerServices[0]' --output json)"
 printf '%s' "$service_json" | TARGET_IMAGE="$image" python3 -c '
