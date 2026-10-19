@@ -455,6 +455,7 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
         ("password authentication failed", "authentication_rejected"),
         ("could not translate host name", "dns_resolution_failed"),
         ("certificate verify failed: /private/cert.pem", "tls_verification_failed"),
+        ("TLS handshake failed", "tls_connection_failed"),
         ("connection timed out", "connection_timeout"),
         ("opaque driver error", "connection_failure_unknown"),
     ],
@@ -556,6 +557,28 @@ def test_psycopg_ambiguous_message_and_failing_pgconn_getter_stay_safe(monkeypat
         "PARAM_SECRET",
     ):
         assert secret not in encoded
+
+
+def test_generic_tls_exception_is_not_classified_as_certificate_verification():
+    import ssl
+
+    import psycopg
+    from sqlalchemy.exc import OperationalError
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    try:
+        raise ssl.SSLError("generic TLS failure with PRIVATE_HOST")
+    except ssl.SSLError as tls_error:
+        driver = psycopg.OperationalError("driver failed")
+        driver.__cause__ = tls_error
+        wrapped = OperationalError("private query", None, driver)
+
+    fields = safe_exception_log_fields(wrapped)
+
+    assert fields["database_error_classification"] == "tls_connection_failed"
+    assert fields["database_error_classification_source"] == "exception_class"
+    assert "PRIVATE_HOST" not in json.dumps(fields)
 
 
 def test_failed_sql_query_does_not_export_exception_details(monkeypatch):

@@ -279,10 +279,10 @@ def _classify_database_error(
         return "authentication_rejected", "sqlstate"
     if "gaierror" in classes:
         return "dns_resolution_failed", "exception_class"
-    if classes.intersection(
-        {"SSLError", "CertificateError", "SSLCertVerificationError"}
-    ):
+    if classes.intersection({"CertificateError", "SSLCertVerificationError"}):
         return "tls_verification_failed", "exception_class"
+    if "SSLError" in classes:
+        return "tls_connection_failed", "exception_class"
     numbers = [getattr(item, "errno", None) for item in candidates]
     if errno.ECONNREFUSED in numbers:
         return "connection_refused", "os_errno"
@@ -306,8 +306,10 @@ def _classify_database_error(
             or "authentication failed" in message
         ):
             message_classifications.add("authentication_rejected")
-        if "certificate verify failed" in message or "tls handshake" in message:
+        if "certificate verify failed" in message:
             message_classifications.add("tls_verification_failed")
+        elif "tls handshake" in message:
+            message_classifications.add("tls_connection_failed")
         if "connection timed out" in message:
             message_classifications.add("connection_timeout")
         if "connection refused" in message:
