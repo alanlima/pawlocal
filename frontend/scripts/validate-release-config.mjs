@@ -39,17 +39,22 @@ export function validateReleaseSettings(env = process.env) {
 
   const apiBaseUrl = env.VITE_API_BASE_URL?.trim()
   if (!apiBaseUrl) throw new Error('Cloud release builds require an explicit VITE_API_BASE_URL')
-  if (/^https?:\/\//i.test(apiBaseUrl)) {
-    parseHttpsUrl(apiBaseUrl, 'VITE_API_BASE_URL')
-  } else if (
-    !apiBaseUrl.startsWith('/') ||
-    apiBaseUrl.startsWith('//') ||
-    /[?#\s]/.test(apiBaseUrl)
-  ) {
-    throw new Error('VITE_API_BASE_URL must be an absolute HTTPS URL or a same-origin path')
+  let apiUrl
+  try {
+    apiUrl = parseHttpsUrl(apiBaseUrl, 'VITE_API_BASE_URL')
+  } catch {
+    throw new Error('Cloud release VITE_API_BASE_URL must be an absolute HTTPS URL')
   }
-  if (releaseEnvironment === 'production' && apiBaseUrl !== '/api/v1') {
-    throw new Error('Production VITE_API_BASE_URL must be exactly /api/v1')
+  if (apiUrl.pathname.replace(/\/$/, '') !== '/api/v1' || apiUrl.search || apiUrl.hash) {
+    throw new Error(
+      'Cloud release VITE_API_BASE_URL must end with /api/v1 and have no query or fragment',
+    )
+  }
+  const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
+  if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
+    throw new Error(
+      `Cloud ${releaseEnvironment} builds must set VITE_API_BASE_URL to the ${expectedApiHostPrefix}<domain> API hostname`,
+    )
   }
 
   const clientId = env.VITE_COGNITO_CLIENT_ID?.trim()

@@ -151,7 +151,7 @@ Supply these **public client settings separately for development and production*
 | `VITE_RELEASE_ENV`          | Must be `development` or `production` for a cloud release build.                                               |
 | `VITE_USE_MOCK_BACKEND`     | Must be exactly `false` for cloud release builds.                                                              |
 | `VITE_TELEMETRY_ENABLED`    | Must be exactly `false` for the initial cloud release.                                                         |
-| `VITE_API_BASE_URL`         | Development may use `/api/v1` or an absolute HTTPS API URL; production must use exactly the same-origin `/api/v1` path. |
+| `VITE_API_BASE_URL`         | Absolute HTTPS API URL ending in `/api/v1`; use the environment's separate `api-dev.<domain>` or `api.<domain>` host. |
 | `VITE_COGNITO_DOMAIN`       | HTTPS Cognito Hosted UI domain for the selected user pool.                                                     |
 | `VITE_COGNITO_CLIENT_ID`    | Public app-client ID configured for authorization-code flow without a client secret.                           |
 | `VITE_COGNITO_REDIRECT_URI` | Exact callback URL registered with the app client.                                                             |

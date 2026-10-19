@@ -2,24 +2,24 @@
 
 The tracked `infra/terraform/` directory is the sole Terraform root and uses the existing `pawlocal/terraform.tfstate` backend key. It preserves the existing root-state production frontend bucket, CloudFront distribution, and DNS record resource addresses, and calls `fullstack/` as a child module with no backend. The child module creates development frontend resources only. Production frontend publishing uses the root's existing bucket, distribution, and deploy-role outputs. The API has its own `api.pawlocal.<domain>` hostname and Terraform-managed Route 53 A record to the API Lightsail static IP; it does not use the frontend CloudFront distribution. No duplicate production frontend bucket, distribution, or alias is declared.
 
-The owner selected Lightsail + Aurora DSQL and approved the MVP budget. Terraform manages app infrastructure and IAM users; the owner authorized one-off CLI creation of each DSQL access key only after Terraform creates its IAM user. Key values are held in their matching GitHub environment secrets and the requested protected Desktop TXT file, then delivered over SSH stdin to a root-owned runtime credential file on the matching Lightsail instance. They never enter Terraform inputs, outputs, state, plans, repository files, images, user data, or logs. The branch also adds environment-specific Cognito pools/clients to Terraform because cloud builds and API token validation require them. No cloud resources or DSQL credentials have been provisioned. Backup, HA, RPO/RTO, restore, recovery, and rollback are deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44). See the [hosting proposal](stage4-hosting-options.md) for cost and compatibility gates.
+The owner selected Lightsail + Aurora DSQL and approved the MVP budget. The development and production AWS foundation resources are provisioned and converged through Terraform. DSQL app access keys are held in their matching GitHub environment secrets and the requested protected Desktop TXT file; the deployment adapter sends them over SSH stdin to a root-owned runtime credential file on the matching Lightsail instance. They never enter Terraform inputs, outputs, state, plans, repository files, images, user data, or logs. The frontend and backend applications have not yet been deployed. The Terraform change in this workstream adds dedicated, environment-scoped GitHub OIDC roles for temporary Lightsail ingress. Backup, HA, RPO/RTO, restore, recovery, and rollback are deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44). See the [hosting proposal](stage4-hosting-options.md) for cost and compatibility gates.
 
-Issue #43's policy is PR CI, automatic development deployment after successful main CI, and separate manual production promotion of the same backend digest after development verification. The plan restricts SSH to the current workstation's observed IPv4 `/32` (`115.186.228.28/32`), so a standard GitHub-hosted runner cannot reach either Lightsail API. The deploy jobs therefore run only when the matching environment variable `PAWLOCAL_DEPLOY_MODE=github-actions` is configured. Leave it unset for the initial local development deployment; do not configure it until a fixed-egress runner is in place. The local procedure below is for development verification only; production remains gated on a GitHub-recognized dev deployment and fixed-egress promotion runner. Terraform changes are under review and unapplied; no keys, deployments, or seed have been performed. Telemetry stays disabled for the initial release; enablement is deferred to [Issue #59](https://github.com/alanlima/pawlocal/issues/59). Backup, HA, RPO/RTO, restore, recovery, and rollback are outside MVP scope and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44).
+Issue #43's policy is PR CI, automatic development deployment after successful main CI, and separate manual production promotion of the same backend digest after development verification. The GitHub-hosted deploy runner's observed IPv4 `/32` is added only to the selected Lightsail instance by a targeted plan/apply against the existing Terraform root state; a cleanup plan/apply restores the environment-specific baseline CIDRs. SSH remains restricted, and HTTP/HTTPS rules are retained. Development and production deploy jobs share a non-canceling concurrency group. After environment configuration is complete, a manual dispatch on `main` can run the first GitHub Actions release. No local deployment path is authorized. Development seeding requires explicitly selecting the one-shot `seed_development` dispatch input; automatic main pushes never seed. Telemetry stays disabled for the initial release; enablement is deferred to [Issue #59](https://github.com/alanlima/pawlocal/issues/59). Backup, HA, RPO/RTO, restore, recovery, and rollback are outside MVP scope and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44).
 
 ## Architecture
 
 The build output in `frontend/dist/` is stored in a private S3 bucket. CloudFront serves it through Origin Access Control (OAC), redirects HTTP requests to HTTPS, and returns `index.html` for SPA paths. Route 53 A and AAAA alias records map `pawlocal.<configured-domain>` to the current distribution. For the proposed separate dev/prod sites, the naming convention is `pawlocal-dev.<domain>` and `pawlocal.<domain>` respectively; this convention does not configure or authorize DNS, certificates, or distributions. The existing ACM wildcard certificate is supplied by ARN; ACM certificates used by CloudFront must be in `us-east-1`. Terraform does not request or validate a new certificate.
 
-The root domain, frontend certificate ARN, repository identity, immutable GitHub owner/repository IDs, AWS region, restricted SSH CIDRs, and deployment public keys are supplied as local Terraform inputs. The API subdomain certificate is issued by Caddy; Terraform manages its DNS A record to the Lightsail static IP. Do not commit real `terraform.tfvars`, backend configuration, account identifiers, credentials, or other account-specific values. The tracked `terraform.tfvars.example` contains placeholders only. The backend bucket name is supplied to `terraform init` from the operator's local environment; the state key remains `pawlocal/terraform.tfstate`.
+The root domain, frontend certificate ARN, repository identity, immutable GitHub owner/repository IDs, state bucket, environment-specific baseline SSH CIDRs, and deployment public keys are Terraform inputs. The API subdomain certificate is issued by Caddy; Terraform manages its DNS A record to the Lightsail static IP. Do not commit real `terraform.tfvars`, backend configuration, account identifiers, credentials, or other account-specific values. The tracked `terraform.tfvars.example` contains placeholders only. GitHub Actions receives nonsecret Terraform inputs through environment/repository variables and authenticates to AWS through environment-scoped OIDC roles; private SSH and DSQL keys remain GitHub environment secrets.
 
 Existing production frontend resources continue to receive the root provider tags (`component=frontend`, `workload=static-site`). Child-module application resources use a separate provider alias with `component=fullstack-mvp`, `workload=application`, and `environment=mvp`; tags do not change the existing production resource addresses or state ownership. Some AWS resource types do not expose tag attributes.
 
 ## Prerequisites
 
 - Terraform 1.10 or later and AWS credentials with permission for a reviewed Terraform plan/apply against the existing root state.
-- The existing, versioned and encrypted S3 bucket reserved for Terraform state. Supply its name locally; the backend key is `pawlocal/terraform.tfstate` in `ap-southeast-2`. S3 lock files are enabled.
+- The existing, versioned and encrypted S3 bucket reserved for Terraform state. The backend key is `pawlocal/terraform.tfstate` in `ap-southeast-2`; S3 lock files are enabled.
 - A public Route 53 hosted zone, an issued ACM certificate in `us-east-1` covering `pawlocal.<configured-domain>` and `pawlocal-dev.<configured-domain>`, owner-selected restricted SSH CIDRs, and review of the integrated plan before any apply.
-- The account's GitHub Actions OIDC provider and scoped deployment roles. By default, Terraform reads the existing account-wide provider. Do not switch ownership of that provider without a separate reviewed decision. Publishing roles are limited to static object writes and CloudFront invalidation; they do not manage infrastructure resources or DNS.
+- The account's GitHub Actions OIDC provider and scoped app-deploy and Terraform-ingress roles. Terraform creates a separate ingress role for each environment. Those roles can write only the shared root state and lock objects and update SSH ports on their corresponding Lightsail instance. By default, Terraform reads the existing account-wide provider. Do not switch ownership of that provider without a separate reviewed decision.
 - If DSQL audit-event capture is enabled, an owner-selected audit bucket name and positive retention period are required. Capture defaults off until those choices are made. The alert email destination is also unset.
 
 ## Initialize and review Terraform
@@ -42,7 +42,7 @@ terraform validate
 terraform plan -out=pawlocal.tfplan
 ```
 
-The plan must use the existing root backend and must retain the current production resources at their existing Terraform addresses. Verify the production CloudFront distribution remains frontend-only and that the API Route 53 record targets its Lightsail static IP. Reject any plan that proposes replacing or destroying the existing production bucket, distribution, DNS aliases, or state backend. Do not move, import, remove, or manually edit state bindings. Apply is outside this implementation task and requires a separate review of the exact integrated plan and owner authorization.
+The plan must use the existing root backend and must retain the current production resources at their existing Terraform addresses. Verify the production CloudFront distribution remains frontend-only and that the API Route 53 record targets its Lightsail static IP. Reject any plan that proposes replacing or destroying the existing production bucket, distribution, DNS aliases, or state backend. Do not move, import, remove, or manually edit state bindings. Apply only the exact freshly reviewed plan through Terraform using the existing root state and approved owner authorization. Do not mutate AWS infrastructure through the CLI or console.
 
 ## Existing static-site configuration
 
@@ -57,90 +57,23 @@ The following values belong to the existing static-site workflow only; they are 
 
 The legacy static-site workflow is retained separately from the full-stack flow and is not evidence that the full application has been deployed. Do not use it as the Issue #43 release path.
 
-The workflows use separate development and production GitHub environments, validate dev health before marking deployment successful, and require production promotion to reference a verified commit and release manifest. They reuse the immutable backend image digest and build the frontend separately for each environment from the selected commit because Vite embeds public Cognito settings. No client secret is embedded. Production promotions are serialized without canceling an active deployment. Release/deployment records capture commit, image digest, frontend artifact digest, selected database provider, migration runner and identifier, telemetry state, public endpoint health, and a public `GET /api/v1/places` database-query smoke. That query verifies the route returns a valid place-page response and does not claim persistence. An authenticated create-then-read persistence journey remains a manual live-development gate until a Cognito test identity is available. Before configuring publishing variables, obtain values from the integrated Terraform root output `terraform output -json environment_targets`: development uses the child-module targets; production uses the existing root-state production bucket, distribution, and deploy role. The workflows do not run Terraform or alter infrastructure. The first release is deployed locally through the same reviewed adapter because the approved SSH allowlist is the operator workstation `/32`; no deploy-job setting should enable GitHub-hosted deployment until fixed egress is configured.
+The workflows use separate development and production GitHub environments, validate dev health before marking deployment successful, and require production promotion to reference a verified commit and release manifest. They reuse the immutable backend image digest and build the frontend separately for each environment from the selected commit because Vite embeds public Cognito settings. No client secret is embedded. Release records capture commit, image digest, frontend artifact digest, selected database provider, migration runner and identifier, telemetry state, public endpoint health, and a public `GET /api/v1/places` database-query smoke. That query verifies the route returns a valid place-page response and does not claim persistence. An authenticated create-then-read persistence journey remains a live-development gate until a Cognito test identity is available. Terraform outputs expose target configuration, including the per-environment ingress role ARN.
 
-## Initial local deployment procedure
+Before deployment, configure each GitHub environment with `PAWLOCAL_DEPLOY_MODE=github-actions`, `PAWLOCAL_DEPLOY_ROLE_ARN`, `PAWLOCAL_TERRAFORM_ROLE_ARN`, `PAWLOCAL_DEPLOY_ADAPTER_PATH`, target host and known-hosts values, frontend/API/Cognito settings, and the environment's DSQL settings. Also configure the nonsecret Terraform variables needed by the ingress workflow: `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_DOMAIN_NAME`, `PAWLOCAL_CERTIFICATE_ARN`, `PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON`, and `PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON` (the full development/production map). These values must match the approved existing root state and Terraform inputs. Keep SSH private keys and DSQL access keys only in the matching environment secrets.
 
-Use this path only from the workstation whose public address matches the Terraform SSH CIDR. It does not change AWS infrastructure; Terraform remains the sole owner of infrastructure. Required local tools are Git Bash, Docker, AWS CLI authenticated to the account, GitHub CLI authenticated to this repository, Terraform, Node.js, Python, `curl`, and `jq`. The deployment adapter requires a full release manifest, frontend archive, local AWS publishing permission for the target bucket/distribution, GitHub Container Registry read access, the target SSH private key, a verified `known_hosts` entry, and the environment's DSQL access-key variables. Do not enable telemetry.
+For each release, the deploy job obtains its public IPv4 address, validates that it is one IPv4 `/32`, and calls `ops/terraform-lightsail-ingress.sh` against the existing S3 backend with a target limited to `module.fullstack.aws_lightsail_instance_public_ports.api["<environment>"]`. The temporary override is environment-scoped. The Terraform resource keeps public ports 80 and 443 in its configuration while adding the runner only to SSH port 22. After deployment, verification, and the optional development seed, an `always()` cleanup step re-assumes the dedicated Terraform ingress role and applies the baseline CIDRs before reporting deployment success. A cleanup failure fails the job and prevents a successful deployment record.
 
-1. Apply only the independently reviewed plan from the existing root state. After Terraform completes, capture the public target map without sharing sensitive plan output:
+The temporary allow rule has unavoidable recovery limits: GitHub's `always()` step is best effort and cannot run if the hosted runner is forcibly terminated, lost, or unable to authenticate or reach AWS. Terraform's S3 lock protects each plan/apply operation, not the entire interval between opening and restoring the rule; the shared deployment concurrency group serializes these two workflows but does not block a separately run Terraform job. If cleanup cannot complete, the job fails and the owner must inspect the existing root state and use a reviewed Terraform run to restore the baseline before another deployment. No AWS CLI or console firewall edits are permitted.
 
-   ```powershell
-   terraform -chdir=infra/terraform output -json environment_targets | Set-Content -Encoding utf8 $env:TEMP\pawlocal-targets.json
-   $targets = Get-Content -Raw $env:TEMP\pawlocal-targets.json | ConvertFrom-Json
-   ```
+## Deployment policy
 
-2. In AWS Console → Lightsail, open the new API instance's browser SSH session. Run `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there and note the SHA256 fingerprint. From the workstation, run `ssh-keyscan -t ed25519 <static-ip>` and compare its fingerprint with the console value using `ssh-keygen -lf -`. Only use the matching key line as `PAWLOCAL_DEPLOY_KNOWN_HOSTS`; do not accept an unverified first connection.
+Application deployment and the one-off development seed run through GitHub Actions only. AWS infrastructure changes must be made through Terraform using the existing shared root state; direct AWS CLI or console mutations are not permitted. The reviewed Terraform provisioning run is separate from the Actions release workflow and is required to create the ingress roles and install the host seed helper. The deployment workflow uses targeted Terraform plan/apply against that same state only for temporary SSH ingress and its cleanup.
 
-3. After the successful `main` full-stack workflow finishes its CI and image-publish jobs, download its `pawlocal-backend-release` artifact with `gh run download <run-id> --name pawlocal-backend-release --dir release`. This contains the immutable backend image digest and migration identifiers. Do not rebuild the backend image.
-
-4. In Git Bash, choose `environment=development` or `production`, read the corresponding public settings from the Terraform output, and build/package the frontend and complete manifest. This example builds development; replace `development` with `production` for the manual promotion:
-
-   ```bash
-   environment=development
-   target="$(terraform -chdir=infra/terraform output -json environment_targets | jq -c ".${environment}")"
-   export VITE_RELEASE_ENV="$environment" VITE_USE_MOCK_BACKEND=false VITE_TELEMETRY_ENABLED=false
-   export VITE_API_BASE_URL="https://$(jq -r .api_hostname <<<"$target")/api/v1"
-   export VITE_COGNITO_DOMAIN="$(jq -r .cognito_domain <<<"$target")"
-   export VITE_COGNITO_CLIENT_ID="$(jq -r .cognito_client_id <<<"$target")"
-   export VITE_COGNITO_REDIRECT_URI="$(jq -r .cognito_redirect_uri <<<"$target")"
-   export VITE_COGNITO_LOGOUT_URI="$(jq -r .cognito_logout_uri <<<"$target")"
-   export VITE_COGNITO_SCOPES="$(jq -r .cognito_scopes <<<"$target")"
-   export VITE_APP_COMMIT="$(jq -r .commit release/backend-release.json)"
-   (cd frontend && npm ci && npm run build)
-   mkdir -p release
-   tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-     -czf "release/frontend-${environment}.tar.gz" -C frontend/dist .
-   frontend_digest="sha256:$(sha256sum "release/frontend-${environment}.tar.gz" | cut -d ' ' -f1)"
-   jq --arg env "$environment" --arg digest "$frontend_digest" \
-     '. + {frontend:{environment:$env,artifact_digest:$digest}}' \
-     release/backend-release.json > release/release-manifest.json
-   python ops/validate-release-metadata.py --manifest release/release-manifest.json
-   ```
-
-5. Populate and export the target settings in the same Git Bash session. Before setting `PAWLOCAL_DEPLOY_KNOWN_HOSTS`, obtain the SSH host-key fingerprint in the Lightsail browser console and compare it with the `ssh-keyscan` result for the target's `.static_ip` using `ssh-keygen -lf - -E sha256`. Set the SSH private-key variable from the generated local keypair (`dev` or `prod` in the protected plan-input directory). Read the matching DSQL access-key ID and secret key into shell variables with `read -rs`; do not place values in commands, files other than the specifically authorized Desktop copy, or logs.
-
-   ```bash
-   export PAWLOCAL_DEPLOY_HOST="$(jq -r .static_ip <<<"$target")"
-   export PAWLOCAL_FRONTEND_BUCKET="$(jq -r .frontend_bucket <<<"$target")"
-   export PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID="$(jq -r .distribution_id <<<"$target")"
-   export PAWLOCAL_DSQL_ENDPOINT="$(jq -r .dsql_endpoint <<<"$target")"
-   export PAWLOCAL_DSQL_DATABASE_ROLE="$(jq -r .dsql_database_role <<<"$target")"
-   export PAWLOCAL_COGNITO_ISSUER="$(jq -r .cognito_issuer <<<"$target")"
-   export PAWLOCAL_COGNITO_APP_CLIENT_ID="$(jq -r .cognito_client_id <<<"$target")"
-   export PAWLOCAL_PUBLIC_BASE_URL="$(jq -r .frontend_url <<<"$target")"
-   export PAWLOCAL_API_HEALTH_URL="$(jq -r .api_health_url <<<"$target")"
-   export PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY="$(<"$PLAN_INPUT_DIR/$([[ "$environment" == development ]] && echo dev || echo prod)")"
-   export PAWLOCAL_DEPLOY_KNOWN_HOSTS="$(<"$VERIFIED_KNOWN_HOSTS_FILE")"
-   read -rsp 'DSQL access-key ID: ' PAWLOCAL_DSQL_ACCESS_KEY_ID; echo; export PAWLOCAL_DSQL_ACCESS_KEY_ID
-   read -rsp 'DSQL secret access key: ' PAWLOCAL_DSQL_SECRET_ACCESS_KEY; echo; export PAWLOCAL_DSQL_SECRET_ACCESS_KEY
-   export GITHUB_TOKEN="$(gh auth token)" GITHUB_ACTOR="$(gh api user --jq .login)"
-   export AWS_REGION=ap-southeast-2 PAWLOCAL_DATABASE_PROVIDER=aurora_dsql
-   export PAWLOCAL_DEPLOY_ADAPTER_PATH=ops/deployment-adapters/lightsail-dsql.sh
-   ```
-
-   Set `PLAN_INPUT_DIR` to the protected directory containing the generated SSH keypairs. Save the verified SSH key line in a file referenced by `VERIFIED_KNOWN_HOSTS_FILE`; the file must contain the exact target IP and the fingerprint-verified key. Confirm `aws sts get-caller-identity` succeeds before publishing to S3/CloudFront.
-
-   Set `GITHUB_TOKEN` from `gh auth token`, `GITHUB_ACTOR` from `gh api user --jq .login`, `AWS_REGION=ap-southeast-2`, `PAWLOCAL_DATABASE_PROVIDER=aurora_dsql`, and `PAWLOCAL_DEPLOY_ADAPTER_PATH=ops/deployment-adapters/lightsail-dsql.sh`. Then run:
-
-   ```bash
-   bash ops/run-deployment-adapter.sh deploy --environment development --manifest release/release-manifest.json --frontend-archive release/frontend-development.tar.gz
-   bash ops/run-deployment-adapter.sh verify --environment development --manifest release/release-manifest.json --evidence release/development-verification.json
-   ```
-
-   Check the adapter's verified development evidence. Do not repeat this local procedure for production; production promotion stays gated until the protected workflow can reach Lightsail through fixed egress.
-
-6. Review and record the commit, image digest, frontend archive digest, DSQL migration, public frontend/API health, and `/api/v1/places` query evidence. Keep the local secrets in environment variables for the adapter run; never add them to manifests, command arguments, state, repository files, or logs.
-
-This local process does not create a GitHub-hosted successful deployment record. The protected production-promotion workflow therefore remains unavailable until fixed egress is configured for both deploy jobs. Do not promote production manually around that gate without an explicit owner decision changing the release procedure. Do not claim development is live until the adapter's verification passes against public endpoints.
-
-### Access-key rotation
-
-Rotate each environment's DSQL key every 90 days. Use the one-off CLI exception to create a replacement key for the existing Terraform-managed IAM user while the current key remains active. Update that environment's GitHub secrets and protected Desktop credential file, deploy through the approved adapter so the host receives the replacement, and verify the environment's public API and DSQL query. Then deactivate and delete the old key through the CLI, confirm the replacement is the only active key, and record the rotation date without recording key values. Never place access-key secret material in Terraform state or plans. Configure and verify the CloudTrail authentication alert before issuing the first application key; its destination and event-retention choices remain owner inputs.
+If `seed_development` is selected on a development `workflow_dispatch`, the workflow verifies through the public `/api/v1/places` endpoint that both Orleigh Park and Whites Hill Reserve are returned. It uploads the names and verification timestamp as a separate `pawlocal-development-seed-verification` artifact. Push-triggered development deployments do not seed or run this content check.
 
 ## Full-stack release operation and current blockers
 
-A fresh existing-state plan reports 40 creates, 4 in-place updates, and no destroys. An independent plan review confirms production frontend ownership remains at its existing Terraform addresses and the DSQL access key is absent from plan/state. Apply, access-key creation, deployment, and seed have not yet occurred. Telemetry is off, with enablement deferred to Issue #59; Issue #44 owns deferred backup/HA/recovery/rollback review after MVP cloud deployment.
+The current code adds two scoped Terraform-ingress roles and changes the shared SSH input to environment-keyed baseline CIDRs. The latest read-only plan against the existing root state showed replacement of both currently unreachable API Lightsail hosts because their `user_data` changes, plus four ingress-role resources and no other resource changes. This plan has not been applied; the existing hosts and role configuration remain unchanged until the reviewed Terraform apply is run. The app deploy job remains gated until the required Terraform resources are provisioned and the owner configures the documented GitHub variables and role ARNs. A `workflow_dispatch` on `main` can execute the full-stack build and deployment after those settings are ready. Development database seeding is separately gated by a one-shot boolean dispatch input, defaulting to false; automatic pushes never seed. Telemetry is off, with enablement deferred to Issue #59; Issue #44 owns deferred backup/HA/recovery/rollback review after MVP cloud deployment.
 
 ### Intended production promotion
 

@@ -34,7 +34,7 @@ jobs:
       VITE_RELEASE_ENV: development
       VITE_USE_MOCK_BACKEND: "false"
       VITE_TELEMETRY_ENABLED: "false"
-      VITE_API_BASE_URL: /api/v1
+      VITE_API_BASE_URL: https://api-dev.example.invalid/api/v1
       VITE_COGNITO_DOMAIN: https://auth.example.invalid
       VITE_COGNITO_CLIENT_ID: ci-public-client
       VITE_COGNITO_REDIRECT_URI: https://pawlocal-dev.example.invalid/auth/callback
@@ -63,5 +63,5 @@ jobs:
       - name: Set frontend build timestamp
         run: echo "VITE_APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
-      - name: Build mock-backed frontend
+      - name: Build HTTP-mode frontend
         run: npm run build

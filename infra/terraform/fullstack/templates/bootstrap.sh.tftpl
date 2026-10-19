@@ -88,8 +88,38 @@ chmod 0750 /usr/local/sbin/pawlocal-set-app-config
 cat > /usr/local/sbin/pawlocal-deploy <<'PAWLOCAL_DEPLOY'
 #!/bin/bash
 set -euo pipefail
+if [[ $# -eq 2 && "$1" == seed-development ]]; then
+  image="$2"
+  [[ "$image" =~ ^ghcr\.io/[a-z0-9_.-]+/pawlocal-api@sha256:[a-f0-9]{64}$ ]]
+  [[ -s /var/lib/pawlocal/current-release.txt ]]
+  [[ -s /etc/pawlocal/app.env ]]
+  [[ -s /etc/pawlocal/aws-credentials ]]
+  [[ "$(stat -c '%u:%a' /etc/pawlocal/aws-credentials)" == "0:600" ]]
+  grep -Fxq 'environment=development' /var/lib/pawlocal/current-release.txt
+  grep -Fxq "image=$image" /var/lib/pawlocal/current-release.txt
+  grep -Fxq 'provider=aurora_dsql' /var/lib/pawlocal/current-release.txt
+  grep -Fxq 'PAWLOCAL_DATABASE_PROVIDER=aurora_dsql' /etc/pawlocal/app.env
+  grep -Fxq 'AWS_REGION=${aws_region}' /etc/pawlocal/app.env
+  grep -Fxq 'PAWLOCAL_TELEMETRY_ENABLED=false' /etc/pawlocal/app.env
+  [[ "$(docker inspect --format='{{.Config.Image}}' pawlocal-api)" == "$image" ]]
+  database_url="$(sed -n 's/^PAWLOCAL_DATABASE_URL=//p' /etc/pawlocal/app.env)"
+  database_url_regex='^auroradsql\+psycopg://pawlocal_development_app@([A-Za-z0-9.-]+\.dsql\.${aws_region}\.on\.aws)/postgres\?application_name=pawlocal-development$'
+  if [[ ! "$database_url" =~ $database_url_regex ]]; then
+    echo "Development app.env does not contain the expected Aurora DSQL endpoint." >&2
+    exit 2
+  fi
+  expected_endpoint="$${BASH_REMATCH[1]}"
+  docker run --rm --env-file /etc/pawlocal/app.env \
+    -e PAWLOCAL_EXPECTED_DSQL_ENDPOINT="$expected_endpoint" \
+    -e AWS_SHARED_CREDENTIALS_FILE=/run/pawlocal/aws-credentials \
+    -v /etc/pawlocal/aws-credentials:/run/pawlocal/aws-credentials:ro \
+    -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
+    "$image" python -m pawlocal.seed_places --environment development
+  exit 0
+fi
 if [[ $# -ne 4 ]]; then
   echo "Usage: pawlocal-deploy <environment> <image@sha256:digest> <database-provider> <migration-id>" >&2
+  echo "       pawlocal-deploy seed-development <image@sha256:digest>" >&2
   exit 2
 fi
 environment="$1"
@@ -149,7 +179,7 @@ chown root:root /usr/local/sbin/pawlocal-load-image
 chmod 0750 /usr/local/sbin/pawlocal-load-image
 
 cat > /etc/sudoers.d/pawlocal-deploy <<'PAWLOCAL_SUDOERS'
-pawlocal-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pawlocal-deploy *, /usr/local/sbin/pawlocal-load-image *, /usr/local/sbin/pawlocal-set-dsql-credentials, /usr/local/sbin/pawlocal-set-app-config
+pawlocal-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pawlocal-deploy development *, /usr/local/sbin/pawlocal-deploy production *, /usr/local/sbin/pawlocal-deploy seed-development *, /usr/local/sbin/pawlocal-load-image *, /usr/local/sbin/pawlocal-set-dsql-credentials, /usr/local/sbin/pawlocal-set-app-config
 PAWLOCAL_SUDOERS
 chmod 0440 /etc/sudoers.d/pawlocal-deploy
 visudo -cf /etc/sudoers.d/pawlocal-deploy

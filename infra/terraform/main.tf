@@ -280,16 +280,19 @@ module "fullstack" {
     aws = aws.fullstack
   }
 
-  aws_region                 = var.aws_region
-  root_domain                = var.domain_name
-  cloudfront_certificate_arn = var.certificate_arn
-  github_repository          = var.github_repository
-  github_owner_id            = var.github_owner_id
-  github_repository_id       = var.github_repository_id
+  aws_region                  = var.aws_region
+  root_domain                 = var.domain_name
+  cloudfront_certificate_arn  = var.certificate_arn
+  github_repository           = var.github_repository
+  github_owner_id             = var.github_owner_id
+  github_repository_id        = var.github_repository_id
+  terraform_state_bucket_name = var.terraform_state_bucket_name
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   deploy_ssh_public_keys         = var.deploy_ssh_public_keys
   ssh_cidr_blocks                = var.ssh_cidr_blocks
+  temporary_ssh_environment      = var.temporary_ssh_environment
+  temporary_ssh_cidr             = var.temporary_ssh_cidr
   dsql_bootstrap_python          = var.dsql_bootstrap_python
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name

@@ -5,6 +5,7 @@ certificate_arn      = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-
 github_repository    = "owner/repository"
 github_owner_id      = "123456"
 github_repository_id = "1234567890"
+terraform_state_bucket_name = "REPLACE_WITH_EXISTING_STATE_BUCKET"
 environment          = "production"
 
 # The existing root state already manages the account-level GitHub Actions OIDC provider.
@@ -13,7 +14,10 @@ manage_github_oidc_provider = true
 
 # Required inputs for the Lightsail API deployment path. Use restricted, owner-approved
 # SSH ranges; do not use 0.0.0.0/0. Private keys belong in GitHub environment secrets.
-ssh_cidr_blocks = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+ssh_cidr_blocks = {
+  development = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+  production  = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+}
 dsql_bootstrap_python = "C:/path/to/pawlocal/backend/.venv/Scripts/python.exe"
 deploy_ssh_public_keys = {
   development = "REPLACE_WITH_DEV_SSH_PUBLIC_KEY"

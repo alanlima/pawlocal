@@ -6,9 +6,9 @@ if [[ $# -lt 1 ]]; then
   exit 2
 fi
 case "$1" in
-  deploy|verify) ;;
+  deploy|verify|seed) ;;
   *)
-    echo "The deployment adapter only accepts deploy or verify operations." >&2
+    echo "The deployment adapter only accepts deploy, verify, or seed operations." >&2
     exit 2
     ;;
 esac

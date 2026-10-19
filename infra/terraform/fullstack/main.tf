@@ -10,6 +10,12 @@ data "aws_availability_zones" "available" {
 
 locals {
   environments = var.environment_sizes
+  effective_ssh_cidr_blocks = {
+    for environment, cidrs in var.ssh_cidr_blocks : environment => concat(
+      cidrs,
+      var.temporary_ssh_environment == environment ? [var.temporary_ssh_cidr] : []
+    )
+  }
   frontend_environments = {
     development = var.environment_sizes.development
   }
@@ -150,7 +156,7 @@ resource "aws_lightsail_instance_public_ports" "api" {
     ipv6_cidrs = ["::/0"]
   }
   dynamic "port_info" {
-    for_each = var.ssh_cidr_blocks
+    for_each = local.effective_ssh_cidr_blocks[each.key]
     content {
       protocol   = "tcp"
       from_port  = 22
@@ -399,6 +405,94 @@ resource "aws_iam_role_policy" "github_deploy" {
   for_each = local.frontend_environments
   role     = aws_iam_role.github_deploy[each.key].id
   policy   = data.aws_iam_policy_document.github_deploy[each.key].json
+}
+
+# This role is separate from the application deploy role. It can update only
+# the matching environment's Lightsail firewall and the shared root state's
+# exact S3 state and lock objects. The GitHub environment subject prevents
+# development from assuming the production role and vice versa.
+data "aws_iam_policy_document" "github_terraform_ingress_trust" {
+  for_each = local.environments
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.key}"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_terraform_ingress" {
+  for_each           = local.environments
+  name               = "pawlocal-${each.key}-terraform-ingress"
+  assume_role_policy = data.aws_iam_policy_document.github_terraform_ingress_trust[each.key].json
+  description        = "Allows only the matching PawLocal GitHub environment to temporarily update its Lightsail SSH firewall through the shared Terraform state."
+  tags               = merge(local.common_tags, { environment = each.key })
+}
+
+data "aws_iam_policy_document" "github_terraform_ingress" {
+  for_each = local.environments
+
+  statement {
+    sid       = "ReadStateBucketMetadata"
+    actions   = ["s3:GetBucketLocation", "s3:GetBucketVersioning", "s3:ListBucket"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["pawlocal/terraform.tfstate", "pawlocal/terraform.tfstate.tflock"]
+    }
+  }
+
+  statement {
+    sid = "ReadAndWriteOnlyPawLocalRootState"
+    actions = [
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:PutObject",
+    ]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate"]
+  }
+
+  statement {
+    sid       = "ManageOnlyPawLocalRootStateLock"
+    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"]
+  }
+
+  statement {
+    sid       = "ReadLightsailInstanceAndPorts"
+    actions   = ["lightsail:GetInstance", "lightsail:GetInstances", "lightsail:GetInstancePortStates"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "UpdateOnlyThisEnvironmentInstancePorts"
+    actions   = ["lightsail:PutInstancePublicPorts"]
+    resources = [aws_lightsail_instance.api[each.key].arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_terraform_ingress" {
+  for_each = local.environments
+  name     = "pawlocal-${each.key}-terraform-ingress"
+  role     = aws_iam_role.github_terraform_ingress[each.key].id
+  policy   = data.aws_iam_policy_document.github_terraform_ingress[each.key].json
 }
 
 resource "aws_iam_user" "app" {

@@ -151,6 +151,30 @@ PY
   printf 'Deployed %s release %s with image %s; telemetry_enabled=false\n' "$environment" "$commit" "$image_digest"
 }
 
+seed_development() {
+  local environment="$1" manifest="$2"
+  [[ "$environment" == development ]] || die "The one-off seed operation is restricted to development"
+  validate_environment "$environment"
+  [[ -f "$manifest" ]] || die "Release manifest must exist"
+  read -r commit image image_digest migration_runner migration_id < <(read_manifest "$manifest" | tr '\t' ' ')
+  [[ "$migration_runner" == dsql_baseline && "$migration_id" == dsql_0001_initial ]] || die "Unsupported DSQL migration selection"
+  [[ "$image_digest" == "sha256:${image##*@sha256:}" ]] || die "Image digest fields do not match"
+
+  local temp_dir key_file known_hosts
+  temp_dir="$(mktemp -d)"
+  _PAWLOCAL_TEMP_DIR="$temp_dir"
+  prepare_ssh "$temp_dir"
+  key_file="$temp_dir/deploy_key"
+  known_hosts="$temp_dir/known_hosts"
+
+  # The host verifies that this digest is the active development release and
+  # runs the seed module in that same image. Credentials remain in the host's
+  # protected credentials file; no secret is sent back over this SSH command.
+  ssh_command "$key_file" "$known_hosts" \
+    "sudo /usr/local/sbin/pawlocal-deploy seed-development '$image'"
+  printf 'Development seed completed for release %s (%s)\n' "$commit" "$image_digest"
+}
+
 verify() {
   local environment="$1" manifest="$2" evidence="$3"
   validate_environment "$environment"
@@ -223,7 +247,7 @@ PY
 }
 
 main() {
-  [[ $# -ge 3 ]] || die "Usage: $0 <deploy|verify> --environment development|production --manifest <path> [--frontend-archive <path>|--evidence <path>]"
+  [[ $# -ge 3 ]] || die "Usage: $0 <deploy|verify|seed> --environment development|production --manifest <path> [--frontend-archive <path>|--evidence <path>]"
   local operation="$1" environment="" manifest="" extra=""
   shift
   while [[ $# -gt 0 ]]; do
@@ -234,11 +258,15 @@ main() {
       *) die "Unknown argument: $1" ;;
     esac
   done
-  [[ -n "$environment" && -n "$manifest" && -n "$extra" ]] || die "Missing required adapter arguments"
+  [[ -n "$environment" && -n "$manifest" ]] || die "Missing required adapter arguments"
+  if [[ "$operation" != seed ]]; then
+    [[ -n "$extra" ]] || die "Missing required adapter arguments"
+  fi
   case "$operation" in
     deploy) deploy "$environment" "$manifest" "$extra" ;;
     verify) verify "$environment" "$manifest" "$extra" ;;
-    *) die "Operation must be deploy or verify" ;;
+    seed) seed_development "$environment" "$manifest" ;;
+    *) die "Operation must be deploy, verify, or seed" ;;
   esac
 }
 
