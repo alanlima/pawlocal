@@ -34,7 +34,6 @@ export TF_VAR_domain_name="$PAWLOCAL_DOMAIN_NAME"
 export TF_VAR_certificate_arn="$PAWLOCAL_CERTIFICATE_ARN"
 export TF_VAR_github_repository="$GITHUB_REPOSITORY"
 export TF_VAR_terraform_state_bucket_name="$PAWLOCAL_TF_STATE_BUCKET"
-export TF_VAR_manage_github_oidc_provider=false
 export TF_VAR_dsql_bootstrap_python=/usr/bin/python3
 
 current_targets="$(terraform -chdir="$root" output -json environment_targets)"

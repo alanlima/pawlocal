@@ -547,6 +547,12 @@ resource "terraform_data" "app_dsql_role" {
     filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
   ]
 
+  lifecycle {
+    # Keep the existing list position for state compatibility, but runtime
+    # database-engine changes do not alter the SQL role bootstrap operation.
+    ignore_changes = [triggers_replace[4]]
+  }
+
   provisioner "local-exec" {
     working_dir = "${path.module}/../../../backend"
     interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]

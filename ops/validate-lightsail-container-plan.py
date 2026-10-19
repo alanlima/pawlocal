@@ -19,8 +19,8 @@ def validate(plan: dict[str, Any], environment: str, image: str) -> None:
     if any(item.get("address") != expected for item in changes):
         raise ValueError("Terraform plan changes resources outside the selected container deployment")
     change = changes[0]["change"]
-    if change.get("actions") not in (["create"], ["update"]):
-        raise ValueError("Selected container deployment is not a create or update")
+    if change.get("actions") not in (["create"], ["update"], ["delete", "create"], ["create", "delete"]):
+        raise ValueError("Selected container deployment is not a create, update, or replacement")
     containers = (change.get("after") or {}).get("container") or []
     if not any(container.get("image") == image for container in containers):
         raise ValueError("Terraform plan does not contain the selected image digest")

@@ -25,6 +25,10 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]'
         VALIDATOR.validate(self.plan(address, ["update"], self.image), "development", self.image)
 
+    def test_accepts_selected_immutable_container_deployment_replacement(self) -> None:
+        address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["development"]'
+        VALIDATOR.validate(self.plan(address, ["delete", "create"], self.image), "development", self.image)
+
     def test_rejects_unrelated_infrastructure_changes(self) -> None:
         plan = self.plan('module.fullstack.aws_lightsail_container_service.api["development"]', ["update"], self.image)
         with self.assertRaisesRegex(ValueError, "outside the selected"):
@@ -40,7 +44,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         address = 'module.fullstack.aws_lightsail_container_service_deployment_version.api["production"]'
         with self.assertRaisesRegex(ValueError, "image digest"):
             VALIDATOR.validate(self.plan(address, ["update"], "other"), "production", self.image)
-        with self.assertRaisesRegex(ValueError, "create or update"):
+        with self.assertRaisesRegex(ValueError, "create, update, or replacement"):
             VALIDATOR.validate(self.plan(address, ["delete"], self.image), "production", self.image)
 
     def test_release_workflows_do_not_use_ssh_or_manual_ingress(self) -> None:
