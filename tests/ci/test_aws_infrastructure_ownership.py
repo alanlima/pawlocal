@@ -669,6 +669,17 @@ def javascript_process_launch_commands(source: str) -> list[str]:
     commands: list[str] = []
     for match in calls.finditer(source):
         args = match.group(1).strip()
+        array_form = re.match(r"(['\"])(aws|terraform)\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
+        if array_form:
+            executable = array_form.group(2)
+            array_source = array_form.group(3)
+            tokens = re.findall(r"(['\"])(.*?)\1", array_source, re.DOTALL)
+            residual = re.sub(r"(['\"])(.*?)\1", "", array_source, flags=re.DOTALL).strip(" ,\t\r\n")
+            if residual:
+                commands.append("<unresolved-child-process-command>")
+            else:
+                commands.append(executable + " " + " ".join(token[1] for token in tokens))
+            continue
         literal = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
         if literal:
             command = literal.group(2)
@@ -679,16 +690,6 @@ def javascript_process_launch_commands(source: str) -> list[str]:
                 continue
             if re.search(r"(?:^|[\s;&|])(?:aws|terraform)(?:[\s;&|]|$)", command):
                 commands.append(command)
-            continue
-        array_form = re.match(r"(['\"])aws\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
-        if array_form:
-            array_source = array_form.group(2)
-            tokens = re.findall(r"(['\"])(.*?)\1", array_source, re.DOTALL)
-            residual = re.sub(r"(['\"])(.*?)\1", "", array_source, flags=re.DOTALL).strip(" ,\t\r\n")
-            if residual:
-                commands.append("<unresolved-child-process-command>")
-            else:
-                commands.append("aws " + " ".join(token[1] for token in tokens))
             continue
         # A non-literal executable/command or an otherwise unparseable launch
         # argument is unknown and must not disappear from the policy scan.
@@ -1184,6 +1185,18 @@ jobs:
         self.assertEqual(javascript_process_launch_commands(concatenated), ["<unresolved-child-process-command>"])
         self.assertTrue(contains_forbidden_terraform_state_change(dynamic))
         self.assertTrue(contains_forbidden_terraform_state_change(concatenated))
+
+    def test_javascript_terraform_argv_arrays_reach_state_guard(self) -> None:
+        source = '''const cp = require("child_process");
+cp.spawn("terraform", ["state", "rm", "module.example"]);
+cp.execFile("terraform", ["state", "rm", "module.other"]);
+'''
+        commands = javascript_process_launch_commands(source)
+        self.assertEqual(
+            commands,
+            ["terraform state rm module.example", "terraform state rm module.other"],
+        )
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_python_heredoc_in_resolved_workflow_script_uses_ast_guard(self) -> None:
         source = '''jobs:
