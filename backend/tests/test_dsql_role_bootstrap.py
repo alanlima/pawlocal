@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from pawlocal.dsql_role_bootstrap import ensure_app_role
 
 
