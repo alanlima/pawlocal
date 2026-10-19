@@ -685,10 +685,12 @@ def javascript_process_launch_commands(source: str) -> list[str]:
             command = literal.group(2)
             tail = args[literal.end():].lstrip()
             # Command-string concatenation can hide AWS or Terraform operations.
-            if tail.startswith("+"):
+            if tail.startswith("+") or (command in {"aws", "terraform"} and tail.startswith(",")):
                 commands.append("<unresolved-child-process-command>")
                 continue
-            if re.search(r"(?:^|[\s;&|])(?:aws|terraform)(?:[\s;&|]|$)", command):
+            if command in {"aws", "terraform"}:
+                commands.append("<unresolved-child-process-command>")
+            elif re.search(r"(?:^|[\s;&|])(?:aws|terraform)(?:[\s;&|]|$)", command):
                 commands.append(command)
             continue
         # A non-literal executable/command or an otherwise unparseable launch
@@ -1195,6 +1197,17 @@ cp.execFile("terraform", ["state", "rm", "module.other"]);
         self.assertEqual(
             commands,
             ["terraform state rm module.example", "terraform state rm module.other"],
+        )
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_javascript_dynamic_terraform_argv_fails_closed(self) -> None:
+        source = '''const cp = require("child_process");
+cp.spawn("terraform", args);
+cp.execFile("terraform", args);
+'''
+        self.assertEqual(
+            javascript_process_launch_commands(source),
+            ["<unresolved-child-process-command>", "<unresolved-child-process-command>"],
         )
         self.assertTrue(contains_forbidden_terraform_state_change(source))
 
