@@ -159,6 +159,21 @@ verify() {
   local key_file="$temp_dir/deploy_key" known_hosts="$temp_dir/known_hosts"
 
   curl --fail --silent --show-error --location "${PAWLOCAL_API_HEALTH_URL:?}" >/dev/null
+  [[ "$PAWLOCAL_API_HEALTH_URL" == */health ]] || die "PAWLOCAL_API_HEALTH_URL must end with /health to derive the public places query URL"
+  local places_url="${PAWLOCAL_API_HEALTH_URL%/health}/places?page=1&page_size=1"
+  local places_response="$temp_dir/places-response.json"
+  curl --fail --silent --show-error --location --header 'Cache-Control: no-cache' \
+    "$places_url" --output "$places_response"
+  python3 - "$places_response" <<'PY'
+import json,sys
+from pathlib import Path
+
+page = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if not isinstance(page, dict) or not isinstance(page.get("items"), list):
+    raise SystemExit("Public /places query did not return a place-page response")
+if not isinstance(page.get("total"), int) or not isinstance(page.get("page"), int):
+    raise SystemExit("Public /places query returned an invalid place-page response")
+PY
   curl --fail --silent --show-error --location "${PAWLOCAL_PUBLIC_BASE_URL:?}" | grep -qi '<html'
   local release_record
   release_record="$(ssh_command "$key_file" "$known_hosts" "sudo cat /var/lib/pawlocal/current-release.txt")"
@@ -191,6 +206,7 @@ with open(path,"w",encoding="utf-8") as f:
         "migration_id":migration_id,
         "telemetry_enabled":False,
         "public_endpoint_health":{"frontend":True,"api":True},
+        "database_query_smoke":{"route":"/places","result":"valid_place_page"},
         "verified_at":verified_at,
     },f,indent=2)
     f.write("\n")

@@ -48,6 +48,7 @@ def deployment_evidence(manifest: dict, provider: str) -> dict:
         "migration_id": chain["migration_id"],
         "telemetry_enabled": False,
         "public_endpoint_health": {"frontend": True, "api": True},
+        "database_query_smoke": {"route": "/places", "result": "valid_place_page"},
         "verified_at": "2026-10-19T01:02:03Z",
     }
 
@@ -95,6 +96,14 @@ class ReleaseMetadataTests(unittest.TestCase):
         result = self.validate(manifest, evidence)
         self.assertNotEqual(result.returncode, 0)
 
+    def test_evidence_requires_public_database_query_smoke(self) -> None:
+        manifest = release_manifest()
+        evidence = deployment_evidence(manifest, "aurora_dsql")
+        evidence["database_query_smoke"] = {"route": "/places", "result": "not_run"}
+        result = self.validate(manifest, evidence)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("public /places database-query smoke", result.stderr)
+
     def test_release_schemas_describe_provider_and_migration_selection(self) -> None:
         manifest_schema = json.loads((ROOT / "ops" / "release-manifest.schema.json").read_text())
         evidence_schema = json.loads((ROOT / "ops" / "deployment-evidence.schema.json").read_text())
@@ -104,6 +113,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertIn("database_provider", evidence_schema["required"])
         self.assertIn("migration_runner", evidence_schema["required"])
         self.assertIn("migration_id", evidence_schema["required"])
+        self.assertIn("database_query_smoke", evidence_schema["required"])
         self.assertEqual(evidence["database_provider"]["enum"], ["postgresql", "aurora_dsql"])
 
 
