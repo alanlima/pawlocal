@@ -37,17 +37,10 @@ def local_action_script_files(directory: Path) -> list[Path]:
 
 
 def javascript_action_files(directory: Path) -> list[Path]:
-    """Resolve every JavaScript module in local Node actions, confined to the repo."""
+    """Resolve JavaScript modules shipped by local actions, confined to the repo."""
     action_files: set[Path] = set()
     repo_root = ROOT.resolve()
     for metadata_path in composite_action_files(directory):
-        try:
-            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
-            continue
-        runs = metadata.get("runs", {}) if isinstance(metadata, dict) else {}
-        if not isinstance(runs, dict) or not str(runs.get("using", "")).startswith("node"):
-            continue
         action_root = metadata_path.parent.resolve()
         for candidate in action_root.rglob("*"):
             if candidate.suffix.lower() not in {".js", ".cjs", ".mjs"}:
@@ -681,7 +674,7 @@ def javascript_process_launch_commands(source: str) -> list[str]:
             if parts and parts[0] in launch_names:
                 alias_map[parts[-1]] = parts[0]
     names = "|".join((*launch_names, *alias_map))
-    calls = re.compile(rf"(?:\b[A-Za-z_$][\w$]*\s*\.\s*)?(?:{names})\s*\(\s*([^\n)]*)\)")
+    calls = re.compile(rf"(?:\b[A-Za-z_$][\w$]*\s*\.\s*)?(?:{names})\s*\(\s*([^)]*)\)", re.DOTALL)
     commands: list[str] = []
     for match in calls.finditer(source):
         args = match.group(1).strip()
@@ -1224,6 +1217,38 @@ jobs:
         self.assertEqual(javascript_process_launch_commands(concatenated), ["<unresolved-child-process-command>"])
         self.assertTrue(contains_forbidden_terraform_state_change(dynamic))
         self.assertTrue(contains_forbidden_terraform_state_change(concatenated))
+
+    def test_javascript_multiline_child_process_call_is_scanned(self) -> None:
+        source = '''const cp = require("node:child_process");
+cp.execSync(
+  "aws ec2 terminate-instances --instance-ids i-123"
+);
+'''
+        commands = javascript_process_launch_commands(source)
+        self.assertEqual(commands, ["aws ec2 terminate-instances --instance-ids i-123"])
+        self.assertEqual(aws_cli_commands(commands[0]), [("ec2", "terminate-instances")])
+
+    def test_composite_action_node_script_is_scanned(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            action_dir = Path(temp_dir) / "composite-action"
+            action_dir.mkdir()
+            (action_dir / "action.yml").write_text(
+                "runs:\n  using: composite\n  steps:\n    - run: node \"$GITHUB_ACTION_PATH/deploy.js\"\n      shell: bash\n",
+                encoding="utf-8",
+            )
+            deploy = action_dir / "deploy.js"
+            deploy.write_text(
+                'const AWS = require("aws-sdk");\nconst cp = require("child_process");\ncp.execSync("aws ec2 terminate-instances");\n',
+                encoding="utf-8",
+            )
+            scanned = javascript_action_files(Path(temp_dir))
+            self.assertEqual(scanned, [deploy.resolve()])
+            source = deploy.read_text(encoding="utf-8")
+            self.assertIsNotNone(AWS_SDK_USAGE.search(source))
+            self.assertEqual(
+                aws_cli_commands(javascript_process_launch_commands(source)[0]),
+                [("ec2", "terminate-instances")],
+            )
 
     def test_javascript_terraform_argv_arrays_reach_state_guard(self) -> None:
         source = '''const cp = require("child_process");
