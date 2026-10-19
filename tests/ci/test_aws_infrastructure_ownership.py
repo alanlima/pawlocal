@@ -71,6 +71,7 @@ TERRAFORM_INIT_STATE_MIGRATION = re.compile(
     r"[^\n;|)]*[ \t]+(?:-migrate-state|-force-copy)(?:[ \t]|$)"
 )
 UNRESOLVED_SUBPROCESS_COMMAND = "<unresolved-subprocess-command>"
+AWS_SDK_USAGE = re.compile(r"\bboto3\b|\bbotocore\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
 
 
 def contains_forbidden_terraform_state_change(source: str) -> bool:
@@ -86,7 +87,7 @@ def contains_forbidden_terraform_state_change(source: str) -> bool:
             or TERRAFORM_WORKSPACE_STATE_MUTATION.search(command)
             or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(command)
             or TERRAFORM_INIT_STATE_MIGRATION.search(command)
-            for command in python_subprocess_commands(source)
+            for command in python_process_launch_commands(source)
         )
         or any(
             TERRAFORM_STATE_MUTATION.search(script)
@@ -102,25 +103,31 @@ def normalize_shell_continuations(source: str) -> str:
     return re.sub(r"\\\r?\n[ \t]*", " ", source)
 
 
-def python_subprocess_commands(source: str) -> list[str]:
-    """Extract subprocess commands from Python source, failing closed on dynamic argv."""
+def python_process_launch_commands(source: str) -> list[str]:
+    """Extract Python process-launch commands, failing closed on dynamic inputs."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return []
 
     subprocess_modules = {"subprocess"}
-    subprocess_functions = {"run", "Popen", "call", "check_call", "check_output"}
-    aliases: dict[str, list[str]] = {}
+    os_modules = {"os"}
+    subprocess_functions = {"run", "Popen", "call", "check_call", "check_output", "getoutput", "getstatusoutput"}
+    os_functions = {"system", "popen", "startfile", "execv", "execve", "execvp", "execvpe", "execl", "execle", "execlp", "execlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe", "spawnl", "spawnle", "spawnlp", "spawnlpe"}
+    aliases: dict[str, tuple[str, str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name == "subprocess":
                     subprocess_modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+                elif alias.name == "os":
+                    os_modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module in {"subprocess", "os"}:
             for alias in node.names:
-                if alias.name in subprocess_functions:
-                    aliases[alias.asname or alias.name] = [alias.name]
+                if node.module == "subprocess" and alias.name in subprocess_functions:
+                    aliases[alias.asname or alias.name] = ("subprocess", alias.name)
+                elif node.module == "os" and alias.name in os_functions:
+                    aliases[alias.asname or alias.name] = ("os", alias.name)
 
     assigned_argv: dict[str, list[str] | str | None] = {}
     alias_groups: dict[str, set[str]] = {}
@@ -274,14 +281,29 @@ def python_subprocess_commands(source: str) -> list[str]:
                     elif function.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__imul__", "__setitem__", "__delitem__"}:
                         set_argv(target_name, None)
             recognized = False
-            if isinstance(function, ast.Attribute) and function.attr in subprocess_functions:
-                recognized = isinstance(function.value, ast.Name) and function.value.id in subprocess_modules
+            launch_family: str | None = None
+            launch_name: str | None = None
+            if isinstance(function, ast.Attribute):
+                module_name = function.value.id if isinstance(function.value, ast.Name) else None
+                if module_name in subprocess_modules and function.attr in subprocess_functions:
+                    launch_family, launch_name, recognized = "subprocess", function.attr, True
+                elif module_name in os_modules and function.attr in os_functions:
+                    launch_family, launch_name, recognized = "os", function.attr, True
             elif isinstance(function, ast.Name) and function.id in aliases:
+                launch_family, launch_name = aliases[function.id]
                 recognized = True
             if recognized:
                 argument = call.args[0] if call.args else next(
                     (keyword.value for keyword in call.keywords if keyword.arg == "args"), None
                 )
+                if launch_family == "os" and launch_name in {"execv", "execve", "execvp", "execvpe"}:
+                    argument = call.args[1] if len(call.args) > 1 else None
+                elif launch_family == "os" and launch_name in {"spawnv", "spawnve", "spawnvp", "spawnvpe"}:
+                    argument = call.args[2] if len(call.args) > 2 else None
+                elif launch_family == "os" and launch_name in {"execl", "execle", "execlp", "execlpe"}:
+                    argument = ast.List(elts=call.args[1:], ctx=ast.Load()) if len(call.args) > 1 else None
+                elif launch_family == "os" and launch_name in {"spawnl", "spawnle", "spawnlp", "spawnlpe"}:
+                    argument = ast.List(elts=call.args[2:], ctx=ast.Load()) if len(call.args) > 2 else None
                 value = argv_values(argument) if argument is not None else None
                 if isinstance(value, str):
                     commands.append(value)
@@ -393,25 +415,30 @@ def aws_cli_commands(source: str) -> list[tuple[str, str]]:
             commands.append((service, "<unsupported-option-or-missing-command>"))
             continue
         commands.append((service, tokens[operation_index]))
-    for command in python_subprocess_commands(source):
-        if command == UNRESOLVED_SUBPROCESS_COMMAND:
-            commands.append(("<unresolved-subprocess>", "<unresolved-subprocess>"))
-        else:
-            commands.extend(aws_cli_commands(command))
     for script in workflow_run_scripts(source):
         commands.extend(aws_cli_commands(script))
     return commands
 
 
+def python_aws_cli_commands(source: str) -> list[tuple[str, str]]:
+    commands: list[tuple[str, str]] = []
+    for command in python_process_launch_commands(source):
+        if command == UNRESOLVED_SUBPROCESS_COMMAND:
+            commands.append(("<unresolved-subprocess>", "<unresolved-subprocess>"))
+        else:
+            commands.extend(aws_cli_commands(command))
+    return commands
+
+
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
     def test_executable_automation_does_not_mutate_infrastructure_outside_terraform(self) -> None:
-        aws_sdk = re.compile(r"\bboto3\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
         for path in EXECUTION_FILES:
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
-                self.assertIsNone(aws_sdk.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
-                for service, operation in aws_cli_commands(source):
+                self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
+                scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else aws_cli_commands(source)
+                for service, operation in scanned_commands:
                     self.assertIn(
                         (service, operation),
                         ALLOWED_AWS_COMMANDS,
@@ -459,7 +486,30 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
 import subprocess
 subprocess.run(["aws", "ec2", "terminate-instances", "--instance-ids", "i-123"])
 '''
-        self.assertEqual(aws_cli_commands(source), [("ec2", "terminate-instances")])
+        self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
+
+    def test_python_process_launch_apis_are_scanned_and_fail_closed(self) -> None:
+        source = '''
+import os
+import subprocess
+prefix = "aw"
+subprocess.getoutput(prefix + "s ec2 terminate-instances")
+subprocess.getstatusoutput(build_command())
+os.system("terraform state rm module.example")
+os.popen(build_command())
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+        self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
+        static_os_command = 'import os\nos.system("aws ec2 terminate-instances --instance-ids i-123")\n'
+        self.assertEqual(python_aws_cli_commands(static_os_command), [("ec2", "terminate-instances")])
+
+    def test_botocore_sdk_usage_is_rejected(self) -> None:
+        source = '''
+from botocore.session import Session
+client = Session().create_client("ec2")
+client.terminate_instances(InstanceIds=["i-123"])
+'''
+        self.assertIsNotNone(AWS_SDK_USAGE.search(source))
 
     def test_terraform_guard_reads_python_subprocess_argv(self) -> None:
         source = '''
@@ -502,13 +552,13 @@ subprocess.run(argv)
         )
         for source in aws_examples:
             with self.subTest(source=source):
-                self.assertEqual(aws_cli_commands(source), [("ec2", "terminate-instances")])
+                self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
 
     def test_unresolved_python_subprocess_argv_fails_closed(self) -> None:
         source = "import subprocess\nsubprocess.run(build_command())\n"
         self.assertTrue(contains_forbidden_terraform_state_change(source))
         self.assertEqual(
-            aws_cli_commands(source),
+            python_aws_cli_commands(source),
             [("<unresolved-subprocess>", "<unresolved-subprocess>")],
         )
 
