@@ -23,7 +23,7 @@ The selected container sizing defaults are development `micro` (1 GiB) and produ
 - The existing versioned, encrypted state bucket and key `pawlocal/terraform.tfstate` in `ap-southeast-2`, with S3 lock files enabled.
 - A public Route 53 zone, the existing CloudFront ACM certificate in `us-east-1`, repository identity/immutable GitHub IDs, and the environment-scoped OIDC roles.
 - Public GHCR access to `ghcr.io/alanlima/pawlocal-api`.
-- A reviewed integrated migration plan before the first apply. The migration must preserve unrelated production frontend resources and state addresses, and clearly show replacement of the old VM/static-IP resources.
+- The read-only integrated migration plan review recorded below. Regenerate and review a fresh plan before any apply; it must still preserve unrelated production frontend resources and state addresses and replace only the approved VM/static-IP path plus required deployment identity/DNS resources.
 - Live DSQL service-principal/database-role validation before production promotion. Do not treat offline tests or a Terraform plan as proof of runtime DSQL connectivity.
 
 ## Initialize and review Terraform
@@ -47,6 +47,14 @@ terraform plan -out=pawlocal.tfplan
 ```
 
 Review the complete state-backed plan. Reject unrelated replacement/deletion, production frontend resource address changes, or an incorrect API DNS/TLS target. Apply only the exact reviewed plan through Terraform after the required cost/provisioning authorization. Never run `terraform destroy` against this shared root.
+
+### Issue #75 integrated migration plan review (2026-10-19)
+
+A read-only plan was generated against the existing shared S3 state using the same root configuration, Sydney region, current public DNS zone and CloudFront certificate, and a digest-pinned image from a successful main release. It proposed **14 creates, 16 deletes, 2 replacements, 2 in-place updates, and 2 data reads**. No apply or infrastructure mutation was run. The saved plan and JSON were kept outside the repository and are a snapshot only; regenerate before any later apply.
+
+The 16 deletions are the two Lightsail VMs, public-port configurations, static IPs and attachments, IAM app users and their DSQL policies, and temporary-ingress roles and policies. The 14 creates are the two container services, deployments, Lightsail certificates, certificate-validation DNS records, DSQL cluster policies, and environment-scoped Terraform deployment roles and policies. The two `terraform_data.app_dsql_role` replacements rerun the idempotent database-role mapping helper because its source/configuration trigger changed. The two API DNS updates switch each old A record to its service CNAME; the pinned AWS provider plans this as a record update, which sends a delete-old/create-new change batch for the old and new record types.
+
+The plan did not change the existing production frontend bucket, CloudFront distribution, frontend DNS aliases, state backend, account OIDC provider, DSQL clusters, or Cognito pools/clients. No unrelated infrastructure drift or resource-address replacement appeared. The pinned AWS provider's Route 53 record update path batches deletion of the prior record type and creation of the new type in one change batch ([provider v6.69.1 source](https://github.com/hashicorp/terraform-provider-aws/blob/v6.69.1/internal/service/route53/record.go#L3399-L3422)). These observations review the migration shape, but do not authorize applying it or establish live DSQL credentials, connection refresh, or runtime compatibility. The proposed container sizes also exceed the previously approved VM cost estimate; obtain explicit cost/provisioning approval before applying.
 
 ## GitHub release configuration
 
