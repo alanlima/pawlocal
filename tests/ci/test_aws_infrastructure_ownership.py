@@ -120,6 +120,38 @@ def python_subprocess_commands(source: str) -> list[str]:
                     aliases[alias.asname or alias.name] = [alias.name]
 
     assigned_argv: dict[str, list[str] | str | None] = {}
+    alias_groups: dict[str, set[str]] = {}
+
+    def root_name(node: ast.AST) -> str | None:
+        while isinstance(node, (ast.Attribute, ast.Subscript)):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else None
+
+    def detach_alias(name: str) -> None:
+        group = alias_groups.get(name)
+        if group is not None:
+            group.discard(name)
+            for member in group:
+                alias_groups[member] = group
+        alias_groups[name] = {name}
+
+    def set_argv(name: str, value: list[str] | str | None) -> None:
+        group = alias_groups.setdefault(name, {name})
+        for member in group:
+            assigned_argv[member] = value
+
+    def link_alias(name: str, source_name: str) -> None:
+        source_group = alias_groups.setdefault(source_name, {source_name})
+        target_group = alias_groups.get(name, {name})
+        merged = source_group | target_group
+        for member in merged:
+            alias_groups[member] = merged
+            assigned_argv[member] = assigned_argv.get(source_name)
+
+    def invalidate_target(target: ast.AST) -> None:
+        name = root_name(target)
+        if name is not None and name in alias_groups:
+            set_argv(name, None)
 
     def argv_values(node: ast.AST) -> list[str] | str | None:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -155,13 +187,25 @@ def python_subprocess_commands(source: str) -> list[str]:
             value = argv_values(node.value)
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    assigned_argv[target.id] = value
+                    if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
+                        link_alias(target.id, node.value.id)
+                    else:
+                        detach_alias(target.id)
+                        set_argv(target.id, value)
+                else:
+                    invalidate_target(target)
             self.visit(node.value)
 
         def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
             value = argv_values(node.value) if node.value is not None else None
             if isinstance(node.target, ast.Name):
-                assigned_argv[node.target.id] = value
+                if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
+                    link_alias(node.target.id, node.value.id)
+                else:
+                    detach_alias(node.target.id)
+                    set_argv(node.target.id, value)
+            else:
+                invalidate_target(node.target)
             if node.value is not None:
                 self.visit(node.value)
 
@@ -169,7 +213,9 @@ def python_subprocess_commands(source: str) -> list[str]:
             if isinstance(node.target, ast.Name) and isinstance(node.op, ast.Add):
                 left = assigned_argv.get(node.target.id)
                 right = argv_values(node.value)
-                assigned_argv[node.target.id] = left + right if isinstance(left, list) and isinstance(right, list) else None
+                set_argv(node.target.id, left + right if isinstance(left, list) and isinstance(right, list) else None)
+            else:
+                invalidate_target(node.target)
             self.visit(node.value)
 
         def visit_Expr(self, node: ast.Expr) -> None:
@@ -180,9 +226,11 @@ def python_subprocess_commands(source: str) -> list[str]:
                     current = assigned_argv[target.id]
                     incoming = argv_values(call.args[0]) if call.args else None
                     if call.func.attr == "extend":
-                        assigned_argv[target.id] = current + incoming if isinstance(current, list) and isinstance(incoming, list) else None
+                        set_argv(target.id, current + incoming if isinstance(current, list) and isinstance(incoming, list) else None)
                     elif call.func.attr == "append":
-                        assigned_argv[target.id] = current + incoming if isinstance(current, list) and isinstance(incoming, str) else None
+                        set_argv(target.id, current + incoming if isinstance(current, list) and isinstance(incoming, str) else None)
+                    elif call.func.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__setitem__", "__delitem__"}:
+                        set_argv(target.id, None)
             self.visit(node.value)
 
         def visit_Call(self, call: ast.Call) -> None:
@@ -411,6 +459,33 @@ subprocess.run(argv)
             aws_cli_commands(source),
             [("<unresolved-subprocess>", "<unresolved-subprocess>")],
         )
+
+    def test_python_subprocess_mutable_argv_writes_fail_closed(self) -> None:
+        examples = (
+            '''
+import subprocess
+argv = ["terraform", "plan"]
+argv[1:] = ["state", "rm", "module.example"]
+subprocess.run(argv)
+''',
+            '''
+import subprocess
+argv = ["terraform", "plan"]
+alias = argv
+alias[1:] = ["state", "rm", "module.example"]
+subprocess.run(argv)
+''',
+            '''
+import subprocess
+argv = ["terraform", "plan"]
+alias = argv
+alias.command = "state rm module.example"
+subprocess.run(argv)
+''',
+        )
+        for source in examples:
+            with self.subTest(source=source):
+                self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_workflow_scanner_folds_yaml_run_blocks(self) -> None:
         source = '''
