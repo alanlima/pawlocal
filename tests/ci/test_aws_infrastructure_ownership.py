@@ -16,10 +16,15 @@ def workflow_files(directory: Path) -> list[Path]:
     return sorted((*directory.glob("*.yml"), *directory.glob("*.yaml")))
 
 
+def composite_action_files(directory: Path) -> list[Path]:
+    return sorted((*directory.rglob("action.yml"), *directory.rglob("action.yaml")))
+
+
 EXECUTION_FILES = [
     *Path(ROOT / "ops").rglob("*.sh"),
     *Path(ROOT / "ops").rglob("*.py"),
     *workflow_files(Path(ROOT / ".github/workflows")),
+    *composite_action_files(Path(ROOT / ".github/actions")),
 ]
 ALLOWED_AWS_COMMANDS = {
     ("lightsail", "get-container-services"),
@@ -475,15 +480,10 @@ def workflow_run_scripts(source: str) -> list[str]:
     """Return resolved GitHub Actions `run` scalars using a YAML parser."""
     workflow = _parse_workflow(source)
     if workflow is None:
-        return ["<unparseable-workflow>"] if re.search(r"(?m)^jobs:", source) else []
+        return ["<unparseable-workflow>"] if re.search(r"(?m)^(?:jobs|runs):", source) else []
     scripts: list[str] = []
-    jobs = workflow.get("jobs", {})
-    if not isinstance(jobs, dict):
-        return scripts
-    for job in jobs.values():
-        steps = job.get("steps", []) if isinstance(job, dict) else []
-        if isinstance(steps, list):
-            scripts.extend(step["run"] for step in steps if isinstance(step, dict) and isinstance(step.get("run"), str))
+    for steps, _owner in _run_step_groups(workflow):
+        scripts.extend(step["run"] for step in steps if isinstance(step, dict) and isinstance(step.get("run"), str))
     return scripts
 
 
@@ -500,15 +500,9 @@ def workflow_python_scripts(source: str) -> list[str]:
     if workflow is None:
         return []
     scripts: list[str] = []
-    jobs = workflow.get("jobs", {})
     workflow_shell = _default_run_shell(workflow)
-    if not isinstance(jobs, dict):
-        return scripts
-    for job in jobs.values():
-        steps = job.get("steps", []) if isinstance(job, dict) else []
-        if not isinstance(steps, list):
-            continue
-        job_shell = _default_run_shell(job) if isinstance(job, dict) else None
+    for steps, owner in _run_step_groups(workflow):
+        job_shell = _default_run_shell(owner)
         for step in steps:
             if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                 continue
@@ -516,6 +510,21 @@ def workflow_python_scripts(source: str) -> list[str]:
             if isinstance(shell, str) and re.search(r"(?:^|[/\\])python(?:\d+(?:\.\d+)*)?(?:\s|$)", shell.strip()):
                 scripts.append(step["run"])
     return scripts
+
+
+def _run_step_groups(workflow: dict) -> list[tuple[list[object], dict]]:
+    groups: list[tuple[list[object], dict]] = []
+    jobs = workflow.get("jobs", {})
+    if isinstance(jobs, dict):
+        groups.extend(
+            (job["steps"], job)
+            for job in jobs.values()
+            if isinstance(job, dict) and isinstance(job.get("steps"), list)
+        )
+    runs = workflow.get("runs", {})
+    if isinstance(runs, dict) and isinstance(runs.get("steps"), list):
+        groups.append((runs["steps"], workflow))
+    return groups
 
 
 def _default_run_shell(owner: dict) -> str | None:
@@ -538,7 +547,19 @@ def python_process_launch_commands_for_executable(source: str) -> list[str]:
         for heredoc in python_heredoc_scripts(script)
     )
     scripts.extend(python_heredoc_scripts(source))
-    return [command for script in scripts for command in python_process_launch_commands(script)]
+    scripts.extend(python_inline_scripts(source))
+    scripts.extend(
+        inline
+        for script in resolved_workflow_scripts
+        for inline in python_inline_scripts(script)
+    )
+    commands: list[str] = []
+    for script in scripts:
+        if script == "<unresolved-python-command>":
+            commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
+        else:
+            commands.extend(python_process_launch_commands(script))
+    return commands
 
 
 def python_heredoc_scripts(source: str) -> list[str]:
@@ -550,6 +571,35 @@ def python_heredoc_scripts(source: str) -> list[str]:
         end = re.search(rf"(?m)^[ \t]*{delimiter}[ \t]*$", source[start.end():])
         if end:
             scripts.append(source[start.end():start.end() + end.start()])
+    return scripts
+
+
+def python_inline_scripts(source: str) -> list[str]:
+    """Extract static Python -c code and repo-local Python -m modules from shell text."""
+    scripts: list[str] = []
+    normalized = normalize_shell_continuations(source)
+    interpreter = re.compile(r"(?:^|[/\\])python(?:\d+(?:\.\d+)*)?$", re.IGNORECASE)
+    for line in normalized.splitlines():
+        try:
+            tokens = shlex.split(line, posix=True)
+        except ValueError:
+            continue
+        for index, token in enumerate(tokens):
+            if not interpreter.search(token):
+                continue
+            arguments = tokens[index + 1:]
+            for flag_index, flag in enumerate(arguments):
+                if flag in {"-c", "--command"}:
+                    scripts.append(arguments[flag_index + 1] if flag_index + 1 < len(arguments) else "<unresolved-python-command>")
+                    break
+                if flag == "-m" and flag_index + 1 < len(arguments):
+                    module = arguments[flag_index + 1]
+                    module_path = ROOT.joinpath(*module.split("."))
+                    for candidate in (module_path.with_suffix(".py"), module_path / "__main__.py"):
+                        if candidate.is_file():
+                            scripts.append(candidate.read_text(encoding="utf-8"))
+                            break
+                    break
     return scripts
 
 
@@ -963,6 +1013,29 @@ jobs:
     def test_versioned_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
         source = "python3.12 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
         self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
+
+    def test_python_inline_command_and_local_module_use_ast_guard(self) -> None:
+        inline = "python3 -c 'import subprocess; subprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])'\n"
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(inline))
+        terraform_inline = "python -c 'import subprocess; subprocess.run([\"terraform\", \"state\", \"rm\", \"module.example\"])'\n"
+        self.assertTrue(contains_forbidden_terraform_state_change(terraform_inline))
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir:
+            module_path = Path(temp_dir) / "ownership_check_module.py"
+            module_path.write_text('import subprocess\nsubprocess.run(["aws", "ec2", "terminate-instances"])\n', encoding="utf-8")
+            module_name = f"{Path(temp_dir).name}.ownership_check_module"
+            self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(f"python -m {module_name}\n"))
+
+    def test_composite_action_run_scripts_use_the_same_policy(self) -> None:
+        source = "runs:\n  using: composite\n  steps:\n    - name: Python deployment command\n      shell: python3.12\n      run: |\n        import subprocess\n        subprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\n"
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
+
+    def test_composite_action_files_are_discovered(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = Path(temp_dir)
+            (directory / "nested").mkdir()
+            (directory / "action.yml").touch()
+            (directory / "nested" / "action.yaml").touch()
+            self.assertEqual({path.name for path in composite_action_files(directory)}, {"action.yml", "action.yaml"})
 
     def test_python_heredoc_in_resolved_workflow_script_uses_ast_guard(self) -> None:
         source = '''jobs:
