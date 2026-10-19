@@ -3,6 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY backend/pyproject.toml ./pyproject.toml
 COPY backend/pawlocal ./pawlocal
+COPY backend/data ./data
 COPY backend/migrations ./migrations
 COPY backend/alembic.ini ./alembic.ini
 RUN pip install --no-cache-dir .
