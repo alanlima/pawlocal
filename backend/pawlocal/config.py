@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     database_name: str | None = None
     database_user: str | None = None
     database_password: str | None = None
+    release_environment: str | None = None
+    release_image_digest: str | None = None
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = Field(default_factory=list)
     cognito_issuer: str | None = None

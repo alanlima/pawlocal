@@ -57,18 +57,18 @@ class FakeEngine:
 def app_identity():
     return (
         "pawlocal_development_app",
-        "arn:aws:iam::123456789012:user/pawlocal/pawlocal-development-dsql-app",
+        "arn:aws:iam::123456789012:role/aws-reserved/lightsail/ap-southeast-2/containers/pawlocal-development-api",
     )
 
 
-def test_bootstrap_creates_role_maps_user_and_grants_schema(app_identity):
+def test_bootstrap_creates_role_maps_lightsail_principal_and_grants_schema(app_identity):
     engine = FakeEngine([FakeResult(None), FakeResult(None), FakeResult(None)])
 
     ensure_app_role(engine, *app_identity)
 
     assert engine.statements == [
         'CREATE ROLE "pawlocal_development_app" WITH LOGIN',
-        "AWS IAM GRANT pawlocal_development_app TO 'arn:aws:iam::123456789012:user/pawlocal/pawlocal-development-dsql-app'",
+        f"AWS IAM GRANT pawlocal_development_app TO '{app_identity[1]}'",
         'CREATE SCHEMA "pawlocal"',
         'GRANT USAGE, CREATE ON SCHEMA "pawlocal" TO "pawlocal_development_app"',
     ]
@@ -85,7 +85,7 @@ def test_bootstrap_is_idempotent_for_existing_role_and_mapping(app_identity):
     ]
 
 
-def test_bootstrap_rejects_user_mapped_to_another_role(app_identity):
+def test_bootstrap_rejects_principal_mapped_to_another_role(app_identity):
     engine = FakeEngine([FakeResult(1), FakeResult("unexpected_role")])
 
     with pytest.raises(RuntimeError, match="different DSQL database role"):
@@ -124,7 +124,7 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
                 "ap-southeast-2",
                 "--database-role",
                 "pawlocal_development_app",
-                "--iam-user-arn",
+                "--iam-principal-arn",
                 "arn:aws:iam::123456789012:user/pawlocal/app",
             ]
         )
@@ -144,17 +144,34 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
     ]
 
 
+def test_bootstrap_revokes_legacy_user_mapping(app_identity):
+    legacy_user = "arn:aws:iam::123456789012:user/pawlocal/pawlocal-development-dsql-app"
+    engine = FakeEngine(
+        [FakeResult(None), FakeResult(None), FakeResult(app_identity[0]), FakeResult(None)]
+    )
+
+    ensure_app_role(engine, *app_identity, legacy_iam_user_arn=legacy_user)
+
+    assert engine.statements == [
+        'CREATE ROLE "pawlocal_development_app" WITH LOGIN',
+        f"AWS IAM GRANT pawlocal_development_app TO '{app_identity[1]}'",
+        f"AWS IAM REVOKE pawlocal_development_app FROM '{legacy_user}'",
+        'CREATE SCHEMA "pawlocal"',
+        'GRANT USAGE, CREATE ON SCHEMA "pawlocal" TO "pawlocal_development_app"',
+    ]
+
+
 @pytest.mark.parametrize(
-    ("database_role", "iam_user_arn"),
+    ("database_role", "iam_principal_arn"),
     [
         ("bad role", "arn:aws:iam::123456789012:user/app"),
         ("pawlocal_app", "not-an-arn"),
     ],
 )
-def test_bootstrap_validates_identifiers_before_connecting(database_role, iam_user_arn):
+def test_bootstrap_validates_identifiers_before_connecting(database_role, iam_principal_arn):
     engine = FakeEngine([])
 
     with pytest.raises(ValueError):
-        ensure_app_role(engine, database_role, iam_user_arn)
+        ensure_app_role(engine, database_role, iam_principal_arn)
 
     assert engine.statements == []

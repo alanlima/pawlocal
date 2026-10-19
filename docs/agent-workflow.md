@@ -32,4 +32,5 @@ Merge every pull request using **Squash and merge**. This keeps each PR's change
 - Stage 3 cannot be marked complete until Stage 2's gate passes and Stage 3.1 integration evidence has been completed and independently reviewed.
 - Full frontend/API/database persistence is required before Stage 4.
 - Billable cloud resources require explicit human cost approval before provisioning.
+- Terraform configuration and the existing shared Terraform state are the only mechanism for AWS infrastructure lifecycle changes. CLI, SDK, console, shell, and bootstrap code may not mutate AWS infrastructure or Terraform state; AWS application deployments must also be represented by a stateful Terraform resource.
 

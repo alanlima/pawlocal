@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -25,6 +26,8 @@ _configured = False
 _propagator = TraceContextTextMapPropagator()
 _tracer_provider: TracerProvider | None = None
 _logger_provider: LoggerProvider | None = None
+_SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+_SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 
 
 class _SafeJsonFormatter(logging.Formatter):
@@ -47,6 +50,8 @@ class _SafeJsonFormatter(logging.Formatter):
             "trace_id",
             "span_id",
             "error_code",
+            "exception_class",
+            "database_error_code",
         ):
             value = getattr(record, field, None)
             if value is not None:
@@ -127,10 +132,37 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "http_status",
             "duration_ms",
             "error_code",
+            "exception_class",
+            "database_error_code",
         }
     }
     safe_fields.update(current_correlation_fields(span))
     logger.log(level, message, extra=safe_fields)
+
+
+def safe_exception_log_fields(exc: BaseException) -> dict[str, str]:
+    """Return bounded exception identifiers without messages or traceback data."""
+    class_name = type(exc).__name__
+    fields = {
+        "exception_class": (
+            class_name
+            if _SAFE_EXCEPTION_CLASS.fullmatch(class_name)
+            else "UnknownException"
+        )
+    }
+
+    # SQLAlchemy wraps driver exceptions in ``orig``. Read only standardized
+    # SQLSTATE attributes; never inspect exception messages or arbitrary codes.
+    candidates = (exc, getattr(exc, "orig", None))
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        for attribute in ("sqlstate", "pgcode"):
+            value = getattr(candidate, attribute, None)
+            if isinstance(value, str) and _SAFE_SQLSTATE.fullmatch(value.upper()):
+                fields["database_error_code"] = value.upper()
+                return fields
+    return fields
 
 
 def create_api_span(name: str, context):

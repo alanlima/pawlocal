@@ -35,6 +35,9 @@ class _Connection:
         self.engine = engine
         self.transaction_id = None
 
+    def execution_options(self, **_options):
+        return self
+
     @contextmanager
     def begin(self):
         self.transaction_id = self.engine.new_transaction()

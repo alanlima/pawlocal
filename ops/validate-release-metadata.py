@@ -91,6 +91,8 @@ def validate_evidence(
         fail("Deployment evidence commit does not match the release manifest")
     if evidence.get("backend_image_digest") != manifest["backend_image_digest"]:
         fail("Deployment evidence backend digest does not match the release manifest")
+    if evidence.get("running_image_digest") != manifest["backend_image_digest"]:
+        fail("Deployment evidence running image digest does not match the release manifest")
     frontend = manifest.get("frontend")
     if frontend is None or frontend.get("environment") != environment:
         fail("Release manifest does not contain frontend metadata for this environment")

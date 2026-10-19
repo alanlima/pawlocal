@@ -30,3 +30,19 @@ def test_cors_allows_only_the_configured_frontend_origin():
         },
     )
     assert "access-control-allow-origin" not in denied.headers
+
+
+def test_health_exposes_nonsecret_release_identity(client, monkeypatch):
+    from pawlocal.config import settings
+
+    monkeypatch.setattr(settings, "release_environment", "development")
+    monkeypatch.setattr(settings, "release_image_digest", "sha256:" + "a" * 64)
+
+    response = client[0].get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "environment": "development",
+        "image_digest": "sha256:" + "a" * 64,
+    }

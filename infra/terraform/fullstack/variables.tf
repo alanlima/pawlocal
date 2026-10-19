@@ -49,54 +49,19 @@ variable "manage_github_oidc_provider" {
   default     = false
 }
 
-variable "deploy_ssh_public_keys" {
-  description = "Environment-keyed SSH public keys for GitHub deployment users. Private keys are supplied independently as GitHub environment secrets."
+variable "backend_image_digests" {
+  description = "Environment-keyed immutable public GHCR image references for the Lightsail API deployment."
   type        = map(string)
-  sensitive   = true
+  default     = {}
   validation {
-    condition     = alltrue([for k in keys(var.deploy_ssh_public_keys) : contains(["development", "production"], k)])
-    error_message = "Keys may only be development and production."
-  }
-}
-
-variable "ssh_cidr_blocks" {
-  description = "Environment-keyed baseline IPv4 CIDRs allowed to SSH to each Lightsail instance."
-  type        = map(list(string))
-  validation {
-    condition = toset(keys(var.ssh_cidr_blocks)) == toset(["development", "production"]) && alltrue([
-      for cidrs in values(var.ssh_cidr_blocks) : length(cidrs) > 0 && alltrue([
-        for cidr in cidrs : cidr != "0.0.0.0/0" && can(cidrnetmask(cidr))
-      ])
+    condition = alltrue([
+      for image in values(var.backend_image_digests) : can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", image))
     ])
-    error_message = "Provide restricted IPv4 CIDRs for development and production; unrestricted SSH is rejected."
-  }
-}
-
-variable "temporary_ssh_environment" {
-  description = "Environment whose Lightsail SSH allowlist temporarily includes the current GitHub Actions runner."
-  type        = string
-  default     = null
-  nullable    = true
-  validation {
-    condition     = var.temporary_ssh_environment == null ? true : contains(["development", "production"], var.temporary_ssh_environment)
-    error_message = "temporary_ssh_environment must be development or production when set."
-  }
-}
-
-variable "temporary_ssh_cidr" {
-  description = "The current GitHub Actions runner public IPv4 address as a single /32."
-  type        = string
-  default     = null
-  nullable    = true
-  validation {
-    condition = var.temporary_ssh_cidr == null ? true : (
-      can(cidrnetmask(var.temporary_ssh_cidr)) && can(regex("/32$", var.temporary_ssh_cidr))
-    )
-    error_message = "temporary_ssh_cidr must be a single IPv4 /32 when set."
+    error_message = "Backend images must be public ghcr.io/alanlima/pawlocal-api references pinned to a sha256 digest."
   }
   validation {
-    condition     = (var.temporary_ssh_environment == null) ? var.temporary_ssh_cidr == null : (var.temporary_ssh_cidr != null && can(regex("/32$", var.temporary_ssh_cidr)))
-    error_message = "temporary_ssh_environment and temporary_ssh_cidr must either both be set or both be null."
+    condition     = alltrue([for environment in keys(var.backend_image_digests) : contains(["development", "production"], environment)])
+    error_message = "Backend image keys may only be development and production."
   }
 }
 
@@ -137,15 +102,23 @@ variable "dsql_auth_alert_email" {
 }
 
 variable "environment_sizes" {
-  description = "Lightsail plans per environment. Defaults match the $7 development plus $12 production pricing scenario; sizes require post-deploy load review."
+  description = "Lightsail Container Service power and scale per environment."
   type = map(object({
-    bundle_id     = string
-    hostname      = string
-    api_name      = string
-    database_role = string
+    container_power = string
+    scale           = number
+    hostname        = string
+    api_name        = string
+    database_role   = string
   }))
   default = {
-    development = { bundle_id = "micro_3_2", hostname = "pawlocal-dev", api_name = "api-dev", database_role = "pawlocal_development_app" }
-    production  = { bundle_id = "small_3_2", hostname = "pawlocal", api_name = "api", database_role = "pawlocal_production_app" }
+    development = { container_power = "micro", scale = 1, hostname = "pawlocal-dev", api_name = "api-dev", database_role = "pawlocal_development_app" }
+    production  = { container_power = "medium", scale = 1, hostname = "pawlocal", api_name = "api", database_role = "pawlocal_production_app" }
+  }
+
+  validation {
+    condition = alltrue([
+      for config in values(var.environment_sizes) : contains(["nano", "micro", "small", "medium", "large", "xlarge"], config.container_power) && config.scale >= 1 && config.scale <= 20 && floor(config.scale) == config.scale
+    ])
+    error_message = "Use a supported Lightsail Container Service power and an integer scale from 1 to 20."
   }
 }

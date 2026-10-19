@@ -4,18 +4,8 @@ data "aws_route53_zone" "root" {
 }
 
 data "aws_caller_identity" "current" {}
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 locals {
   environments = var.environment_sizes
-  effective_ssh_cidr_blocks = {
-    for environment, cidrs in var.ssh_cidr_blocks : environment => concat(
-      cidrs,
-      var.temporary_ssh_environment == environment ? [var.temporary_ssh_cidr] : []
-    )
-  }
   frontend_environments = {
     development = var.environment_sizes.development
   }
@@ -30,26 +20,15 @@ locals {
     workload   = "application"
   }
 
-  caddyfile = <<-CADDY
-    {
-      email {$ACME_EMAIL}
-    }
-    {$API_HOSTNAME} {
-      encode zstd gzip
-      reverse_proxy pawlocal-api:8000
-    }
-  CADDY
+  api_hostnames = {
+    for environment, config in local.environments : environment => "${config.api_name}.${trimsuffix(var.root_domain, ".")}"
+  }
 
-  instance_bootstrap = { for environment, config in local.environments : environment => templatefile("${path.module}/templates/bootstrap.sh.tftpl", {
-    environment       = environment
-    aws_region        = var.aws_region
-    api_hostname      = "${config.api_name}.${trimsuffix(var.root_domain, ".")}"
-    frontend_hostname = "${config.hostname}.${trimsuffix(var.root_domain, ".")}"
-    database_role     = config.database_role
-    deploy_public_key = var.deploy_ssh_public_keys[environment]
-    cognito_issuer    = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.app[environment].id}"
-    cognito_client_id = aws_cognito_user_pool_client.app[environment].id
-  }) }
+  # Container service deployment config is Terraform state. The image is an
+  # immutable public GHCR digest, and the environment map contains no secrets.
+  backend_images = {
+    for environment in keys(local.environments) : environment => lookup(var.backend_image_digests, environment, null)
+  }
 }
 
 resource "random_id" "bucket_suffix" {
@@ -108,75 +87,126 @@ resource "aws_dsql_cluster" "app" {
   }
 }
 
-resource "aws_lightsail_instance" "api" {
-  for_each          = local.environments
-  name              = "pawlocal-${each.key}-api"
-  availability_zone = data.aws_availability_zones.available.names[0]
-  blueprint_id      = "amazon_linux_2023"
-  bundle_id         = each.value.bundle_id
-  user_data         = local.instance_bootstrap[each.key]
-
-  lifecycle {
-    precondition {
-      condition     = contains(keys(var.deploy_ssh_public_keys), each.key)
-      error_message = "A deployment public key is required for each environment."
-    }
-  }
-
-  depends_on = [aws_dsql_cluster.app]
-}
-
-resource "aws_lightsail_static_ip" "api" {
+resource "aws_lightsail_certificate" "api" {
   for_each = local.environments
-  name     = "pawlocal-${each.key}-api-ip"
+  # AWS rejected the original service-derived names as already existing, even
+  # though they were absent from the certificate listing. Use migration names.
+  name        = "pawlocal-${each.key}-api-migration-20261019"
+  domain_name = local.api_hostnames[each.key]
+  tags        = merge(local.common_tags, { environment = each.key })
 }
 
-resource "aws_lightsail_static_ip_attachment" "api" {
-  for_each       = local.environments
-  static_ip_name = aws_lightsail_static_ip.api[each.key].name
-  instance_name  = aws_lightsail_instance.api[each.key].name
+resource "aws_route53_record" "api_certificate_validation" {
+  for_each = local.environments
+  zone_id  = data.aws_route53_zone.root.zone_id
+  name     = one(aws_lightsail_certificate.api[each.key].domain_validation_options).resource_record_name
+  type     = one(aws_lightsail_certificate.api[each.key].domain_validation_options).resource_record_type
+  records  = [one(aws_lightsail_certificate.api[each.key].domain_validation_options).resource_record_value]
+  ttl      = 60
 }
 
-resource "aws_lightsail_instance_public_ports" "api" {
-  for_each      = local.environments
-  instance_name = aws_lightsail_instance.api[each.key].name
+resource "aws_lightsail_container_service" "api" {
+  for_each    = local.environments
+  name        = "pawlocal-${each.key}-api"
+  power       = each.value.container_power
+  scale       = each.value.scale
+  is_disabled = false
 
-  port_info {
-    protocol          = "tcp"
-    from_port         = 80
-    to_port           = 80
-    cidrs             = ["0.0.0.0/0"]
-    ipv6_cidrs        = ["::/0"]
-    cidr_list_aliases = []
-  }
-  port_info {
-    protocol          = "tcp"
-    from_port         = 443
-    to_port           = 443
-    cidrs             = ["0.0.0.0/0"]
-    ipv6_cidrs        = ["::/0"]
-    cidr_list_aliases = []
-  }
-  dynamic "port_info" {
-    for_each = local.effective_ssh_cidr_blocks[each.key]
-    content {
-      protocol          = "tcp"
-      from_port         = 22
-      to_port           = 22
-      cidrs             = [port_info.value]
-      ipv6_cidrs        = []
-      cidr_list_aliases = []
+  public_domain_names {
+    certificate {
+      certificate_name = aws_lightsail_certificate.api[each.key].name
+      domain_names     = [local.api_hostnames[each.key]]
     }
   }
+
+  depends_on = [aws_route53_record.api_certificate_validation]
+}
+
+resource "aws_lightsail_container_service_deployment_version" "api" {
+  for_each = {
+    for environment, config in local.environments : environment => config
+    if local.backend_images[environment] != null
+  }
+
+  depends_on   = [aws_dsql_cluster_policy.api_connect]
+  service_name = aws_lightsail_container_service.api[each.key].name
+
+  container {
+    container_name = "pawlocal-api"
+    image          = local.backend_images[each.key]
+    environment = {
+      AWS_REGION                     = var.aws_region
+      PAWLOCAL_RELEASE_ENVIRONMENT   = each.key
+      PAWLOCAL_RELEASE_IMAGE_DIGEST  = split("@", local.backend_images[each.key])[1]
+      PAWLOCAL_DATABASE_PROVIDER     = "aurora_dsql"
+      PAWLOCAL_DATABASE_URL          = "auroradsql+psycopg://${each.value.database_role}@${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws/postgres?application_name=pawlocal-${each.key}"
+      PAWLOCAL_COGNITO_ISSUER        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.app[each.key].id}"
+      PAWLOCAL_COGNITO_APP_CLIENT_ID = aws_cognito_user_pool_client.app[each.key].id
+      PAWLOCAL_CORS_ORIGINS          = "[\"https://${each.value.hostname}.${trimsuffix(var.root_domain, ".")}\"]"
+      PAWLOCAL_TELEMETRY_ENABLED     = "false"
+      OTEL_SDK_DISABLED              = "true"
+    }
+    ports = {
+      "8000" = "HTTP"
+    }
+  }
+
+  public_endpoint {
+    container_name = "pawlocal-api"
+    container_port = 8000
+
+    health_check {
+      path                = "/health"
+      interval_seconds    = 30
+      timeout_seconds     = 5
+      healthy_threshold   = 2
+      unhealthy_threshold = 3
+      success_codes       = "200"
+    }
+  }
+}
+
+resource "aws_dsql_cluster_policy" "api_connect" {
+  for_each   = local.environments
+  identifier = aws_dsql_cluster.app[each.key].identifier
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DelegateToAccountIdentities"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "dsql:DbConnectAdmin"
+        Resource  = aws_dsql_cluster.app[each.key].arn
+      },
+      {
+        Sid       = "AllowLightsailServiceIdentity"
+        Effect    = "Allow"
+        Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }
+        Action    = "dsql:DbConnect"
+        Resource  = aws_dsql_cluster.app[each.key].arn
+        Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
+      }
+    ]
+  })
 }
 
 resource "aws_route53_record" "api" {
   for_each = local.environments
   zone_id  = data.aws_route53_zone.root.zone_id
-  name     = "${each.value.api_name}.${trimsuffix(var.root_domain, ".")}"
-  type     = "A"
+  name     = local.api_hostnames[each.key]
+  type     = "CNAME"
   ttl      = 60
-  records  = [aws_lightsail_static_ip.api[each.key].ip_address]
+  records  = [trimprefix(trimsuffix(aws_lightsail_container_service.api[each.key].url, "/"), "https://")]
+
+  lifecycle {
+    precondition {
+      condition     = local.backend_images[each.key] != null
+      error_message = "Set the same digest-pinned backend image for both environments before changing API DNS."
+    }
+  }
+
+  depends_on = [aws_lightsail_container_service_deployment_version.api]
 }
 
 resource "aws_cloudfront_distribution" "app" {
@@ -359,7 +389,7 @@ locals {
 }
 
 data "aws_iam_policy_document" "github_deploy_trust" {
-  for_each = local.frontend_environments
+  for_each = local.environments
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
@@ -410,50 +440,69 @@ resource "aws_iam_role_policy" "github_deploy" {
   policy   = data.aws_iam_policy_document.github_deploy[each.key].json
 }
 
-# This role is separate from the application deploy role. It can update only
-# the matching environment's Lightsail firewall and the shared root state's
-# exact S3 state and lock objects. The GitHub environment subject prevents
-# development from assuming the production role and vice versa.
-data "aws_iam_policy_document" "github_terraform_ingress_trust" {
-  for_each = local.environments
-
-  statement {
-    effect  = "Allow"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [local.oidc_provider_arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.key}"]
-    }
-  }
-}
-
-resource "aws_iam_role" "github_terraform_ingress" {
+# This role can refresh the shared application's Terraform state and publish a
+# deployment only to its matching container service. All infrastructure create,
+# update, and delete permissions remain outside the release role.
+resource "aws_iam_role" "github_terraform_deploy" {
   for_each           = local.environments
-  name               = "pawlocal-${each.key}-terraform-ingress"
-  assume_role_policy = data.aws_iam_policy_document.github_terraform_ingress_trust[each.key].json
-  description        = "Allows only the matching PawLocal GitHub environment to temporarily update its Lightsail SSH firewall through the shared Terraform state."
-  tags               = merge(local.common_tags, { environment = each.key })
+  name               = "pawlocal-${each.key}-terraform-deploy"
+  assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
+  description        = "Terraform state-backed release deployment for the PawLocal ${each.key} Lightsail container service."
 }
 
-data "aws_iam_policy_document" "github_terraform_ingress" {
+data "aws_iam_policy_document" "github_terraform_deploy" {
   for_each = local.environments
 
   statement {
-    sid       = "ReadStateBucketMetadata"
-    actions   = ["s3:GetBucketLocation", "s3:GetBucketVersioning", "s3:ListBucket"]
+    sid    = "ReadApplicationInfrastructureForTerraformRefresh"
+    effect = "Allow"
+    actions = [
+      "acm:Describe*", "acm:List*",
+      "cloudfront:Get*", "cloudfront:List*",
+      "cognito-idp:Describe*", "cognito-idp:List*",
+      "dsql:Get*", "dsql:List*",
+      "events:Describe*", "events:List*",
+      "iam:Get*", "iam:List*",
+      "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments",
+      "lightsail:GetCertificates", "lightsail:GetDomains", "lightsail:GetInstances",
+      "lightsail:GetStaticIps", "lightsail:GetContainerServicePowers",
+      "lightsail:GetContainerServiceBundles",
+      "route53:Get*", "route53:List*",
+      "sns:Get*", "sns:List*",
+      "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:ListTags",
+      "tag:GetResources"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ReadPawLocalBucketConfiguration"
+    effect = "Allow"
+    actions = [
+      "s3:GetBucket*", "s3:GetEncryptionConfiguration",
+      "s3:GetLifecycleConfiguration", "s3:GetBucketPolicy",
+      "s3:GetBucketOwnershipControls", "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetBucketLocation"
+    ]
+    resources = ["arn:aws:s3:::pawlocal-*"]
+  }
+
+  statement {
+    sid    = "LockAndUpdateSharedTerraformState"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
+    ]
+    resources = [
+      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate",
+      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"
+    ]
+  }
+
+  statement {
+    sid       = "ListSharedTerraformStatePrefix"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
     resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
     condition {
       test     = "StringLike"
@@ -463,106 +512,54 @@ data "aws_iam_policy_document" "github_terraform_ingress" {
   }
 
   statement {
-    sid = "ReadAndWriteOnlyPawLocalRootState"
-    actions = [
-      "s3:GetObject",
-      "s3:GetObjectVersion",
-      "s3:PutObject",
-    ]
-    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate"]
+    sid       = "ReadSharedTerraformStateBucketLocation"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
   }
 
   statement {
-    sid       = "ManageOnlyPawLocalRootStateLock"
-    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
-    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"]
-  }
-
-  statement {
-    sid       = "ReadLightsailInstanceAndPorts"
-    actions   = ["lightsail:GetInstance", "lightsail:GetInstances", "lightsail:GetInstancePortStates"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "ReadTerraformRefreshDependencies"
-    actions   = ["ec2:DescribeAvailabilityZones"]
-    resources = ["*"]
-  }
-
-  statement {
-    sid       = "ReadTerraformRefreshResources"
-    actions   = ["dsql:GetCluster", "dsql:GetVpcEndpointServiceName"]
-    resources = [for cluster in aws_dsql_cluster.app : cluster.arn]
-  }
-
-  statement {
-    sid       = "ReadTerraformRefreshUserPools"
-    actions   = ["cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient"]
-    resources = [for pool in aws_cognito_user_pool.app : pool.arn]
-  }
-
-  statement {
-    sid       = "UpdateOnlyThisEnvironmentInstancePorts"
-    actions   = ["lightsail:PutInstancePublicPorts", "lightsail:CloseInstancePublicPorts"]
-    resources = [aws_lightsail_instance.api[each.key].arn]
+    sid       = "DeployOnlyThisContainerService"
+    effect    = "Allow"
+    actions   = ["lightsail:CreateContainerServiceDeployment"]
+    resources = [aws_lightsail_container_service.api[each.key].arn]
   }
 }
 
-resource "aws_iam_role_policy" "github_terraform_ingress" {
+resource "aws_iam_role_policy" "github_terraform_deploy" {
   for_each = local.environments
-  name     = "pawlocal-${each.key}-terraform-ingress"
-  role     = aws_iam_role.github_terraform_ingress[each.key].id
-  policy   = data.aws_iam_policy_document.github_terraform_ingress[each.key].json
+  name     = "pawlocal-${each.key}-terraform-container-release"
+  role     = aws_iam_role.github_terraform_deploy[each.key].id
+  policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
 }
 
-resource "aws_iam_user" "app" {
-  for_each = local.environments
-  name     = "pawlocal-${each.key}-dsql-app"
-  path     = "/pawlocal/"
-}
-
-data "aws_iam_policy_document" "app_dsql_connect" {
-  for_each = local.environments
-  statement {
-    sid       = "ConnectAsApplicationRole"
-    actions   = ["dsql:DbConnect"]
-    resources = [aws_dsql_cluster.app[each.key].arn]
-    condition {
-      test     = "StringEquals"
-      variable = "dsql:DbUser"
-      values   = [local.environments[each.key].database_role]
-    }
-  }
-}
-
-resource "aws_iam_user_policy" "app_dsql_connect" {
-  for_each = local.environments
-  user     = aws_iam_user.app[each.key].name
-  policy   = data.aws_iam_policy_document.app_dsql_connect[each.key].json
-}
-
-# Aurora DSQL database roles and IAM mappings are SQL state, not AWS API
-# resources. Provision them through Terraform using the apply operator's current
-# short-lived/local AWS identity; never pass an auth token through Terraform.
+# Aurora DSQL database roles and IAM mappings are SQL state rather than AWS API
+# resources. terraform_data records the idempotent bootstrap operation in the
+# same Terraform state; the helper uses the operator's short-lived AWS identity.
 resource "terraform_data" "app_dsql_role" {
   for_each = local.environments
 
   triggers_replace = [
     aws_dsql_cluster.app[each.key].arn,
-    aws_iam_user.app[each.key].arn,
+    aws_lightsail_container_service.api[each.key].principal_arn,
     each.value.database_role,
     filesha256("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"),
     filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
   ]
 
+  lifecycle {
+    # Keep the existing list position for state compatibility, but runtime
+    # database-engine changes do not alter the SQL role bootstrap operation.
+    ignore_changes = [triggers_replace[4]]
+  }
+
   provisioner "local-exec" {
     working_dir = "${path.module}/../../../backend"
     interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]
-    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-user-arn '${aws_iam_user.app[each.key].arn}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
+    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-principal-arn '${aws_lightsail_container_service.api[each.key].principal_arn}' --legacy-iam-user-arn 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/pawlocal/pawlocal-${each.key}-dsql-app'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
   }
 
-  depends_on = [aws_iam_user_policy.app_dsql_connect]
+  depends_on = [aws_dsql_cluster_policy.api_connect]
 }
 
 resource "aws_s3_bucket" "cloudtrail" {

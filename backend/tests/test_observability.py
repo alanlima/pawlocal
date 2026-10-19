@@ -172,9 +172,14 @@ def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypat
     from pawlocal.api import routes
     from pawlocal.main import app
 
+    class DatabaseConnectError(RuntimeError):
+        sqlstate = "08001"
+
     class BrokenQueries:
         def search(self, **_filters):
-            raise RuntimeError("private backend failure detail")
+            raise DatabaseConnectError(
+                "private backend failure detail; SELECT * FROM private_table"
+            )
 
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -193,6 +198,13 @@ def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypat
         api_logger.removeHandler(handler)
 
     assert response.status_code == 500
+    response_json = response.json()
+    assert response_json == {
+        "code": "internal_error",
+        "message": "Request could not be completed",
+    }
+    assert "private backend failure detail" not in json.dumps(response_json)
+    assert "SELECT * FROM private_table" not in json.dumps(response_json)
     span = next(
         span for span in exporter.get_finished_spans() if span.kind.name == "SERVER"
     )
@@ -204,7 +216,49 @@ def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypat
         if "API request completed" in line
     )
     assert completed_log["error_code"] == "unhandled_api_error"
+    assert completed_log["exception_class"] == "DatabaseConnectError"
+    assert completed_log["database_error_code"] == "08001"
     assert "private backend failure detail" not in captured.getvalue()
+    assert "SELECT * FROM private_table" not in captured.getvalue()
+
+
+def test_exception_log_fields_reject_non_sqlstate_values():
+    from pawlocal.observability import safe_exception_log_fields
+
+    class ErrorWithUnsafeCode(RuntimeError):
+        sqlstate = "08001 private-value"
+        pgcode = "not-a-sqlstate"
+
+    fields = safe_exception_log_fields(ErrorWithUnsafeCode("private message"))
+
+    assert fields == {"exception_class": "ErrorWithUnsafeCode"}
+
+
+@pytest.mark.parametrize(
+    ("driver_pgcode", "expected_fields"),
+    [
+        ("08006", {"exception_class": "OperationalError", "database_error_code": "08006"}),
+        ("08006-private", {"exception_class": "OperationalError"}),
+    ],
+)
+def test_exception_log_fields_read_only_validated_sqlalchemy_orig_pgcode(
+    driver_pgcode, expected_fields
+):
+    from sqlalchemy.exc import OperationalError
+
+    class DriverError(Exception):
+        pgcode = driver_pgcode
+
+    wrapped = OperationalError(
+        "statement text must not be logged",
+        None,
+        DriverError("private driver message"),
+        hide_parameters=True,
+    )
+
+    from pawlocal.observability import safe_exception_log_fields
+
+    assert safe_exception_log_fields(wrapped) == expected_fields
 
 
 def test_failed_sql_query_does_not_export_exception_details(monkeypatch):

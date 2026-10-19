@@ -152,8 +152,13 @@ def _execute_one_ddl(engine: Engine, statement: str) -> None:
             # for, and the next idempotent migration statement can proceed.
             job_id = result.scalar_one_or_none() if is_async_index else None
         if job_id:
-            with connection.begin():
-                wait_result = connection.execute(
+            # Aurora DSQL requires wait_for_job to run outside a transaction
+            # block, so use a fresh autocommit connection for the procedure.
+            with engine.connect() as wait_connection:
+                wait_connection = wait_connection.execution_options(
+                    isolation_level="AUTOCOMMIT"
+                )
+                wait_result = wait_connection.execute(
                     text("CALL sys.wait_for_job(:job_id)"), {"job_id": job_id}
                 )
                 completed = wait_result.scalar_one()
