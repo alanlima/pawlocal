@@ -44,13 +44,15 @@ publish_frontend() {
   else
     die "Environment must be development or production"
   fi
-  local app_dir
-  app_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/pawlocal-frontend.XXXXXX")"
-  trap 'rm -rf "$app_dir"' EXIT
-  tar -xzf "$archive" -C "$app_dir"
-  aws s3 sync "$app_dir" "s3://${bucket}/" --delete --no-progress
-  aws s3 cp "$archive" "s3://${bucket}/releases/${commit}/${digest#sha256:}.tar.gz" --no-progress
-  aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' >/dev/null
+  (
+    local app_dir
+    app_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/pawlocal-frontend.XXXXXX")"
+    trap 'rm -rf -- "$app_dir"' EXIT
+    tar -xzf "$archive" -C "$app_dir"
+    aws s3 sync "$app_dir" "s3://${bucket}/" --delete --no-progress
+    aws s3 cp "$archive" "s3://${bucket}/releases/${commit}/${digest#sha256:}.tar.gz" --no-progress
+    aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' >/dev/null
+  )
   printf 'Published %s frontend artifact %s\n' "$environment" "$digest"
 }
 
