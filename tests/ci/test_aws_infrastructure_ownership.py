@@ -21,9 +21,9 @@ def composite_action_files(directory: Path) -> list[Path]:
     return sorted((*directory.rglob("action.yml"), *directory.rglob("action.yaml")))
 
 
-def javascript_action_entrypoint_files(directory: Path) -> list[Path]:
-    """Resolve local JavaScript action entrypoints without allowing path escape."""
-    entrypoints: set[Path] = set()
+def javascript_action_files(directory: Path) -> list[Path]:
+    """Resolve every JavaScript module in local Node actions, confined to the repo."""
+    action_files: set[Path] = set()
     repo_root = ROOT.resolve()
     for metadata_path in composite_action_files(directory):
         try:
@@ -33,14 +33,14 @@ def javascript_action_entrypoint_files(directory: Path) -> list[Path]:
         runs = metadata.get("runs", {}) if isinstance(metadata, dict) else {}
         if not isinstance(runs, dict) or not str(runs.get("using", "")).startswith("node"):
             continue
-        for key in ("main", "pre", "post"):
-            entry = runs.get(key)
-            if not isinstance(entry, str) or not entry.strip() or "${{" in entry:
+        action_root = metadata_path.parent.resolve()
+        for candidate in action_root.rglob("*"):
+            if candidate.suffix.lower() not in {".js", ".cjs", ".mjs"}:
                 continue
-            candidate = (metadata_path.parent / entry).resolve()
-            if candidate.is_relative_to(repo_root) and candidate.is_file():
-                entrypoints.add(candidate)
-    return sorted(entrypoints)
+            resolved = candidate.resolve()
+            if resolved.is_relative_to(repo_root) and resolved.is_relative_to(action_root) and resolved.is_file():
+                action_files.add(resolved)
+    return sorted(action_files)
 
 
 EXECUTION_FILES = [
@@ -48,7 +48,7 @@ EXECUTION_FILES = [
     *Path(ROOT / "ops").rglob("*.py"),
     *workflow_files(Path(ROOT / ".github/workflows")),
     *composite_action_files(Path(ROOT / ".github/actions")),
-    *javascript_action_entrypoint_files(Path(ROOT / ".github/actions")),
+    *javascript_action_files(Path(ROOT / ".github/actions")),
 ]
 ALLOWED_AWS_COMMANDS = {
     ("lightsail", "get-container-services"),
@@ -1161,13 +1161,18 @@ jobs:
                 encoding="utf-8",
             )
             (action_dir / "index.js").write_text(
-                'const AWS = require("aws-sdk");\nconst cp = require("node:child_process");\ncp.execSync("aws ec2 terminate-instances --instance-ids i-123");\n',
+                'const AWS = require("aws-sdk");\nrequire("./deploy.js");\nconst cp = require("node:child_process");\ncp.execSync("aws ec2 terminate-instances --instance-ids i-123");\n',
                 encoding="utf-8",
             )
             (action_dir / "scripts").mkdir()
             (action_dir / "scripts" / "pre.js").write_text("module.exports = {};\n", encoding="utf-8")
-            entries = javascript_action_entrypoint_files(Path(temp_dir))
-            self.assertEqual({path.name for path in entries}, {"index.js", "pre.js"})
+            (action_dir / "deploy.js").write_text(
+                'const cp = require("node:child_process"); cp.execSync("aws ec2 terminate-instances");\n',
+                encoding="utf-8",
+            )
+            entries = javascript_action_files(Path(temp_dir))
+            self.assertEqual({path.name for path in entries}, {"index.js", "pre.js", "deploy.js"})
+            self.assertIn(("ec2", "terminate-instances"), aws_cli_commands(javascript_process_launch_commands((action_dir / "deploy.js").read_text(encoding="utf-8"))[0]))
             index_source = (action_dir / "index.js").read_text(encoding="utf-8")
             self.assertIsNotNone(AWS_SDK_USAGE.search(index_source))
             self.assertEqual(

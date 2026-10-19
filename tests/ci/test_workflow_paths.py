@@ -107,6 +107,16 @@ class WorkflowPathTests(unittest.TestCase):
                     expected_workflows,
                 )
 
+    def test_local_action_changes_trigger_workflow_validation(self) -> None:
+        self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actions/**"), 2)
+        for path in (
+            ".github/actions/deploy/action.yml",
+            ".github/actions/deploy/index.js",
+            ".github/actions/deploy/lib/publish.js",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(matches("workflow-validation.yml", path))
+
     def test_workflow_changes_trigger_validation_and_affected_frontend_check(self) -> None:
         path = ".github/workflows/frontend-production-deploy.yml"
         self.assertTrue(matches("workflow-validation.yml", path))

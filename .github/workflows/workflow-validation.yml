@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/**"
+      - ".github/actions/**"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - ".github/workflows/**"
+      - ".github/actions/**"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"
