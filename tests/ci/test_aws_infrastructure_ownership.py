@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 import shlex
@@ -20,11 +21,34 @@ def composite_action_files(directory: Path) -> list[Path]:
     return sorted((*directory.rglob("action.yml"), *directory.rglob("action.yaml")))
 
 
+def javascript_action_entrypoint_files(directory: Path) -> list[Path]:
+    """Resolve local JavaScript action entrypoints without allowing path escape."""
+    entrypoints: set[Path] = set()
+    repo_root = ROOT.resolve()
+    for metadata_path in composite_action_files(directory):
+        try:
+            metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        runs = metadata.get("runs", {}) if isinstance(metadata, dict) else {}
+        if not isinstance(runs, dict) or not str(runs.get("using", "")).startswith("node"):
+            continue
+        for key in ("main", "pre", "post"):
+            entry = runs.get(key)
+            if not isinstance(entry, str) or not entry.strip() or "${{" in entry:
+                continue
+            candidate = (metadata_path.parent / entry).resolve()
+            if candidate.is_relative_to(repo_root) and candidate.is_file():
+                entrypoints.add(candidate)
+    return sorted(entrypoints)
+
+
 EXECUTION_FILES = [
     *Path(ROOT / "ops").rglob("*.sh"),
     *Path(ROOT / "ops").rglob("*.py"),
     *workflow_files(Path(ROOT / ".github/workflows")),
     *composite_action_files(Path(ROOT / ".github/actions")),
+    *javascript_action_entrypoint_files(Path(ROOT / ".github/actions")),
 ]
 ALLOWED_AWS_COMMANDS = {
     ("lightsail", "get-container-services"),
@@ -111,6 +135,14 @@ def contains_forbidden_terraform_state_change(source: str) -> bool:
             or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(command)
             or TERRAFORM_INIT_STATE_MIGRATION.search(command)
             for command in python_process_launch_commands_for_executable(source)
+        )
+        or any(
+            command == "<unresolved-child-process-command>"
+            or TERRAFORM_STATE_MUTATION.search(command)
+            or TERRAFORM_WORKSPACE_STATE_MUTATION.search(command)
+            or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(command)
+            or TERRAFORM_INIT_STATE_MIGRATION.search(command)
+            for command in javascript_process_launch_commands(source)
         )
     )
 
@@ -619,6 +651,43 @@ def python_inline_scripts(source: str) -> list[str]:
     return scripts
 
 
+def javascript_process_launch_commands(source: str) -> list[str]:
+    """Extract statically visible child_process commands; mark dynamic calls unresolved."""
+    if not re.search(r"(?:require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\)|from\s+['\"](?:node:)?child_process['\"]|import\s+['\"](?:node:)?child_process['\"])", source):
+        return []
+    launch_names = ("exec", "execSync", "spawn", "spawnSync", "execFile", "execFileSync")
+    alias_map: dict[str, str] = {}
+    for match in re.finditer(r"\b(exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*:\s*([A-Za-z_$][\w$]*)", source):
+        alias_map[match.group(2)] = match.group(1)
+    for match in re.finditer(r"\bimport\s*\{([^}]+)\}\s*from\s*['\"](?:node:)?child_process['\"]", source):
+        for item in match.group(1).split(","):
+            parts = re.split(r"\s+as\s+", item.strip())
+            if parts and parts[0] in launch_names:
+                alias_map[parts[-1]] = parts[0]
+    names = "|".join((*launch_names, *alias_map))
+    calls = re.compile(rf"(?:\b[A-Za-z_$][\w$]*\s*\.\s*)?(?:{names})\s*\(\s*([^\n)]*)\)")
+    commands: list[str] = []
+    for match in calls.finditer(source):
+        args = match.group(1).strip()
+        literal = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
+        if literal:
+            command = literal.group(2)
+            if re.search(r"(?:^|[\s;&|])aws(?:[\s;&|]|$)", command):
+                commands.append(command)
+            continue
+        array_form = re.match(r"(['\"])aws\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
+        if array_form:
+            tokens = re.findall(r"(['\"])(.*?)\1", array_form.group(2), re.DOTALL)
+            commands.append("aws " + " ".join(token[1] for token in tokens))
+            continue
+        first = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
+        if first and first.group(2) == "aws":
+            commands.append("<unresolved-child-process-command>")
+        elif re.search(r"\$\{|\bprocess\.env\b", args):
+            commands.append("<unresolved-child-process-command>")
+    return commands
+
+
 def aws_cli_commands(source: str) -> list[tuple[str, str]]:
     normalized = normalize_shell_continuations(source)
     commands: list[tuple[str, str]] = []
@@ -702,7 +771,13 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
+                js_commands = javascript_process_launch_commands(source) if path.suffix in {".js", ".cjs", ".mjs"} else []
                 scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else [*aws_cli_commands(source), *python_aws_cli_commands(source)]
+                for command in js_commands:
+                    if command == "<unresolved-child-process-command>":
+                        scanned_commands.append(("<unresolved-child-process>", "<unresolved-child-process>"))
+                    else:
+                        scanned_commands.extend(aws_cli_commands(command))
                 for service, operation in scanned_commands:
                     self.assertIn(
                         (service, operation),
@@ -1062,6 +1137,37 @@ jobs:
             (directory / "action.yml").touch()
             (directory / "nested" / "action.yaml").touch()
             self.assertEqual({path.name for path in composite_action_files(directory)}, {"action.yml", "action.yaml"})
+
+    def test_node_composite_action_entrypoints_are_scanned_and_confined(self) -> None:
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp_dir, tempfile.TemporaryDirectory(dir=ROOT.parent) as outside_dir:
+            action_dir = Path(temp_dir) / "action"
+            action_dir.mkdir()
+            outside_path = Path(outside_dir) / "outside.js"
+            outside_path.write_text('require("aws-sdk");\n', encoding="utf-8")
+            escaped_entry = os.path.relpath(outside_path, action_dir).replace("\\", "/")
+            (action_dir / "action.yml").write_text(
+                f"runs:\n  using: node20\n  main: index.js\n  pre: scripts/pre.js\n  post: {escaped_entry}\n",
+                encoding="utf-8",
+            )
+            (action_dir / "index.js").write_text(
+                'const AWS = require("aws-sdk");\nconst cp = require("node:child_process");\ncp.execSync("aws ec2 terminate-instances --instance-ids i-123");\n',
+                encoding="utf-8",
+            )
+            (action_dir / "scripts").mkdir()
+            (action_dir / "scripts" / "pre.js").write_text("module.exports = {};\n", encoding="utf-8")
+            entries = javascript_action_entrypoint_files(Path(temp_dir))
+            self.assertEqual({path.name for path in entries}, {"index.js", "pre.js"})
+            index_source = (action_dir / "index.js").read_text(encoding="utf-8")
+            self.assertIsNotNone(AWS_SDK_USAGE.search(index_source))
+            self.assertEqual(
+                javascript_process_launch_commands(index_source),
+                ["aws ec2 terminate-instances --instance-ids i-123"],
+            )
+            self.assertTrue(
+                contains_forbidden_terraform_state_change(
+                    'const cp = require("child_process"); cp.execSync("terraform state rm module.example");'
+                )
+            )
 
     def test_python_heredoc_in_resolved_workflow_script_uses_ast_guard(self) -> None:
         source = '''jobs:
