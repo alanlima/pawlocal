@@ -4,6 +4,7 @@ from time import perf_counter
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from pawlocal.api.routes import router
@@ -19,6 +20,22 @@ from pawlocal.observability import (
 )
 
 configure_observability()
+
+
+def add_cors_middleware(app: FastAPI, origins: list[str]) -> None:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Request-ID",
+            "traceparent",
+            "tracestate",
+        ],
+    )
 
 
 @asynccontextmanager
@@ -40,6 +57,7 @@ app = FastAPI(
     },
 )
 app.include_router(router, prefix=settings.api_prefix)
+add_cors_middleware(app, settings.cors_origins)
 
 
 @app.middleware("http")

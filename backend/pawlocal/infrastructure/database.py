@@ -94,7 +94,7 @@ def _create_dsql_engine(url: URL) -> Engine:
             "dependencies before selecting this database."
         ) from exc
 
-    return create_dsql_engine(
+    engine = create_dsql_engine(
         host=url.host,
         user=url.username,
         driver="psycopg",
@@ -102,6 +102,13 @@ def _create_dsql_engine(url: URL) -> Engine:
         application_name=url.query.get("application_name", "pawlocal"),
         pool_pre_ping=True,
     )
+    event.listen(engine, "begin", _set_dsql_search_path)
+    return engine
+
+
+def _set_dsql_search_path(connection) -> None:
+    """Keep unqualified DSQL model and migration SQL inside the app schema."""
+    connection.exec_driver_sql("SET LOCAL search_path TO pawlocal")
 
 
 engine = create_database_engine(settings.sqlalchemy_url)

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     database_user: str | None = None
     database_password: str | None = None
     api_prefix: str = "/api/v1"
+    cors_origins: list[str] = Field(default_factory=list)
     cognito_issuer: str | None = None
     cognito_app_client_id: str | None = None
     cognito_resource_audience: str | None = None

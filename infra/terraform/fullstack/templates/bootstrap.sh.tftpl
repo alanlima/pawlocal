@@ -40,7 +40,7 @@ set -euo pipefail
 umask 077
 IFS= read -r id_line
 IFS= read -r secret_line
-if [[ ! "$id_line" =~ ^aws_access_key_id=[A-Z0-9]{16,128}$ ]] || [[ ! "$secret_line" =~ ^aws_secret_access_key=[A-Za-z0-9/+=]{32,256}$ ]]; then
+if [[ ! "$id_line" =~ ^aws_access_key_id=([A-Z0-9]{16,128})$ ]] || [[ ! "$secret_line" =~ ^aws_secret_access_key=([A-Za-z0-9/+=]{32,256})$ ]]; then
   echo "Credential input did not match the expected format." >&2
   exit 2
 fi
@@ -49,7 +49,8 @@ tmp="$(mktemp /etc/pawlocal/aws-credentials.XXXXXX)"
 trap 'rm -f "$tmp"' EXIT
 {
   printf '[default]\n'
-  printf '%s\n' "$id_line" "$secret_line"
+  printf '%s\n' "$id_line"
+  printf '%s\n' "$secret_line"
 } > "$tmp"
 chown root:root "$tmp"
 chmod 0600 "$tmp"
@@ -67,13 +68,15 @@ IFS= read -r provider
 IFS= read -r region
 IFS= read -r endpoint
 IFS= read -r role
-if [[ "$provider" != "aurora_dsql" || "$region" != "${aws_region}" || ! "$endpoint" =~ ^[a-zA-Z0-9.-]+\.dsql\.${aws_region}\.on\.aws$ || "$role" != "${database_role}" ]]; then
+IFS= read -r cognito_issuer
+IFS= read -r cognito_client_id
+if [[ "$provider" != "aurora_dsql" || "$region" != "${aws_region}" || ! "$endpoint" =~ ^[a-zA-Z0-9.-]+\.dsql\.${aws_region}\.on\.aws$ || "$role" != "${database_role}" || "$cognito_issuer" != "${cognito_issuer}" || "$cognito_client_id" != "${cognito_client_id}" ]]; then
   echo "Application configuration did not match the selected DSQL target." >&2
   exit 2
 fi
 tmp="$(mktemp /etc/pawlocal/app.env.XXXXXX)"
 trap 'rm -f "$tmp"' EXIT
-printf 'PAWLOCAL_DATABASE_PROVIDER=%s\nAWS_REGION=%s\nAWS_PROFILE=default\nPAWLOCAL_DATABASE_URL=auroradsql+psycopg://%s@%s/postgres?application_name=pawlocal-%s\nPAWLOCAL_TELEMETRY_ENABLED=false\nOTEL_SDK_DISABLED=true\n' "$provider" "$region" "$role" "$endpoint" "${environment}" > "$tmp"
+printf 'PAWLOCAL_DATABASE_PROVIDER=%s\nAWS_REGION=%s\nPAWLOCAL_DATABASE_URL=auroradsql+psycopg://%s@%s/postgres?application_name=pawlocal-%s\nPAWLOCAL_COGNITO_ISSUER=%s\nPAWLOCAL_COGNITO_APP_CLIENT_ID=%s\nPAWLOCAL_CORS_ORIGINS=["https://${frontend_hostname}"]\nPAWLOCAL_TELEMETRY_ENABLED=false\nOTEL_SDK_DISABLED=true\n' "$provider" "$region" "$role" "$endpoint" "${environment}" "$cognito_issuer" "$cognito_client_id" > "$tmp"
 chown root:root "$tmp"
 chmod 0600 "$tmp"
 mv -f "$tmp" /etc/pawlocal/app.env
@@ -104,15 +107,15 @@ export PAWLOCAL_BACKEND_DIGEST="sha256:$${image##*@sha256:}"
 docker image inspect "$image" >/dev/null
 docker run --rm --env-file /etc/pawlocal/app.env \
   -e AWS_SHARED_CREDENTIALS_FILE=/run/pawlocal/aws-credentials \
-  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
   -v /etc/pawlocal/aws-credentials:/run/pawlocal/aws-credentials:ro \
+  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
   "$image" python -m pawlocal.dsql_migrate
 docker rm -f pawlocal-api >/dev/null 2>&1 || true
 docker run -d --name pawlocal-api --restart unless-stopped --network pawlocal --network-alias pawlocal-api \
   --env-file /etc/pawlocal/app.env \
   -e AWS_SHARED_CREDENTIALS_FILE=/run/pawlocal/aws-credentials \
-  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
   -v /etc/pawlocal/aws-credentials:/run/pawlocal/aws-credentials:ro \
+  -e PAWLOCAL_TELEMETRY_ENABLED=false -e OTEL_SDK_DISABLED=true \
   --health-cmd "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\"" \
   --health-interval 30s --health-timeout 5s --health-retries 3 --health-start-period 30s \
   "$image"

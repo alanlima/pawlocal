@@ -49,6 +49,8 @@ validate_environment() {
       need PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
       need PAWLOCAL_DSQL_ENDPOINT
       need PAWLOCAL_DSQL_DATABASE_ROLE
+      need PAWLOCAL_COGNITO_ISSUER
+      need PAWLOCAL_COGNITO_APP_CLIENT_ID
       need PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY
       need PAWLOCAL_DEPLOY_KNOWN_HOSTS
       ;;
@@ -58,6 +60,8 @@ validate_environment() {
       need PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
       need PAWLOCAL_DSQL_ENDPOINT
       need PAWLOCAL_DSQL_DATABASE_ROLE
+      need PAWLOCAL_COGNITO_ISSUER
+      need PAWLOCAL_COGNITO_APP_CLIENT_ID
       need PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY
       need PAWLOCAL_DEPLOY_KNOWN_HOSTS
       ;;
@@ -69,6 +73,8 @@ validate_environment() {
   [[ "$AWS_REGION" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || die "AWS_REGION is not a supported region name"
   [[ "$PAWLOCAL_DSQL_ENDPOINT" =~ ^[a-zA-Z0-9.-]+\.dsql\.${AWS_REGION}\.on\.aws$ ]] || die "PAWLOCAL_DSQL_ENDPOINT does not match the configured AWS region"
   [[ "$PAWLOCAL_DSQL_DATABASE_ROLE" =~ ^[a-zA-Z_][a-zA-Z0-9_]{0,62}$ ]] || die "PAWLOCAL_DSQL_DATABASE_ROLE is invalid"
+  [[ "$PAWLOCAL_COGNITO_ISSUER" =~ ^https://cognito-idp\.${AWS_REGION}\.amazonaws\.com/${AWS_REGION}_[A-Za-z0-9]+$ ]] || die "PAWLOCAL_COGNITO_ISSUER does not match the configured AWS region"
+  [[ "$PAWLOCAL_COGNITO_APP_CLIENT_ID" =~ ^[A-Za-z0-9]+$ ]] || die "PAWLOCAL_COGNITO_APP_CLIENT_ID is invalid"
 }
 
 prepare_ssh() {
@@ -96,6 +102,8 @@ deploy() {
   validate_environment "$environment"
   need PAWLOCAL_DSQL_ACCESS_KEY_ID
   need PAWLOCAL_DSQL_SECRET_ACCESS_KEY
+  [[ "$PAWLOCAL_DSQL_ACCESS_KEY_ID" =~ ^[A-Z0-9]{16,128}$ ]] || die "PAWLOCAL_DSQL_ACCESS_KEY_ID is invalid"
+  [[ "$PAWLOCAL_DSQL_SECRET_ACCESS_KEY" =~ ^[A-Za-z0-9/+=]{32,256}$ ]] || die "PAWLOCAL_DSQL_SECRET_ACCESS_KEY is invalid"
   [[ -f "$manifest" && -f "$frontend_archive" ]] || die "Manifest and frontend archive must exist"
   read -r commit image image_digest migration_runner migration_id < <(read_manifest "$manifest" | tr '\t' ' ')
   [[ "$migration_runner" == dsql_baseline ]] || die "Unsupported DSQL migration runner"
@@ -122,12 +130,12 @@ PY
   docker pull "$image" >/dev/null
   docker save "$image" | ssh_command "$key_file" "$known_hosts" "sudo /usr/local/sbin/pawlocal-load-image '$image'"
 
-  # These two restricted root-owned runtime files are written over SSH stdin; key values
-  # never appear in a command argument, artifact, image, Terraform input, or log.
+  # The key values travel only over SSH stdin. They never appear in an argument,
+  # Terraform value, release artifact, or command output.
   printf 'aws_access_key_id=%s\naws_secret_access_key=%s\n' \
     "$PAWLOCAL_DSQL_ACCESS_KEY_ID" "$PAWLOCAL_DSQL_SECRET_ACCESS_KEY" |
     ssh_command "$key_file" "$known_hosts" "sudo /usr/local/sbin/pawlocal-set-dsql-credentials"
-  printf '%s\n%s\n%s\n%s\n' aurora_dsql "$AWS_REGION" "$PAWLOCAL_DSQL_ENDPOINT" "$PAWLOCAL_DSQL_DATABASE_ROLE" |
+  printf '%s\n%s\n%s\n%s\n%s\n%s\n' aurora_dsql "$AWS_REGION" "$PAWLOCAL_DSQL_ENDPOINT" "$PAWLOCAL_DSQL_DATABASE_ROLE" "$PAWLOCAL_COGNITO_ISSUER" "$PAWLOCAL_COGNITO_APP_CLIENT_ID" |
     ssh_command "$key_file" "$known_hosts" "sudo /usr/local/sbin/pawlocal-set-app-config"
 
   local app_dir

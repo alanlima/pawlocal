@@ -18,7 +18,7 @@ concurrency:
 jobs:
   validate-release:
     name: Validate development-verified release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -126,7 +126,7 @@ jobs:
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
-      PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+      PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
       PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
       PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
       PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
@@ -138,6 +138,8 @@ jobs:
       PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
       PAWLOCAL_DSQL_ENDPOINT: ${{ vars.PAWLOCAL_DSQL_ENDPOINT }}
       PAWLOCAL_DSQL_DATABASE_ROLE: ${{ vars.PAWLOCAL_DSQL_DATABASE_ROLE }}
+      PAWLOCAL_COGNITO_ISSUER: ${{ vars.PAWLOCAL_COGNITO_ISSUER }}
+      PAWLOCAL_COGNITO_APP_CLIENT_ID: ${{ vars.PAWLOCAL_COGNITO_APP_CLIENT_ID }}
       PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
     permissions:
@@ -270,13 +272,13 @@ jobs:
           FRONTEND_ARCHIVE: release/frontend-production.tar.gz
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
           PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
           PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
           PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
+          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
           PAWLOCAL_DSQL_ACCESS_KEY_ID: ${{ secrets.PAWLOCAL_DSQL_ACCESS_KEY_ID }}
           PAWLOCAL_DSQL_SECRET_ACCESS_KEY: ${{ secrets.PAWLOCAL_DSQL_SECRET_ACCESS_KEY }}
-          PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY }}
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: bash ops/run-deployment-adapter.sh deploy --environment production --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
@@ -287,7 +289,7 @@ jobs:
           EVIDENCE_FILE: release/production-verification.json
           PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-          PAWLOCAL_DATABASE_PROVIDER: ${{ vars.PAWLOCAL_DATABASE_PROVIDER }}
+          PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
           PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
           PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
           PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
