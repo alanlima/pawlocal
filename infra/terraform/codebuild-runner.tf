@@ -220,6 +220,8 @@ resource "aws_iam_role" "codebuild_runner" {
 }
 
 data "aws_iam_policy_document" "codebuild_runner" {
+  count = var.enable_codebuild_runner ? 1 : 0
+
   statement {
     sid       = "WriteBuildLogs"
     effect    = "Allow"
@@ -293,7 +295,7 @@ resource "aws_iam_role_policy" "codebuild_runner" {
   count  = var.enable_codebuild_runner ? 1 : 0
   name   = "pawlocal-codebuild-deploy-runner"
   role   = aws_iam_role.codebuild_runner[0].id
-  policy = data.aws_iam_policy_document.codebuild_runner.json
+  policy = var.enable_codebuild_runner ? data.aws_iam_policy_document.codebuild_runner[0].json : null
 }
 
 resource "aws_codebuild_project" "github_runner" {
