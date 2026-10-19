@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 
@@ -23,7 +24,29 @@ ALLOWED_AWS_COMMANDS = {
     ("s3", "cp"),
     ("cloudfront", "create-invalidation"),
 }
-AWS_CLI_COMMAND = re.compile(r"\baws\s+([a-z0-9-]+)\s+([a-z0-9-]+)\b")
+AWS_CLI_START = re.compile(r"\baws(?=[ \t])")
+AWS_OPTIONS_WITH_VALUES = {
+    "--ca-bundle",
+    "--cli-binary-format",
+    "--cli-connect-timeout",
+    "--cli-read-timeout",
+    "--color",
+    "--endpoint-url",
+    "--output",
+    "--profile",
+    "--query",
+    "--region",
+}
+AWS_BOOLEAN_OPTIONS = {
+    "--cli-auto-prompt",
+    "--debug",
+    "--no-cli-auto-prompt",
+    "--no-cli-pager",
+    "--no-paginate",
+    "--no-sign-request",
+    "--no-verify-ssl",
+    "--version",
+}
 TERRAFORM_GLOBAL_OPTIONS = (
     r"(?:[ \t]+-[A-Za-z0-9][A-Za-z0-9-]*"
     r"(?:=(?:\"[^\"]*\"|'[^']*'|[^\s]+))?"
@@ -49,7 +72,59 @@ def normalize_shell_continuations(source: str) -> str:
 
 
 def aws_cli_commands(source: str) -> list[tuple[str, str]]:
-    return AWS_CLI_COMMAND.findall(normalize_shell_continuations(source))
+    normalized = normalize_shell_continuations(source)
+    commands: list[tuple[str, str]] = []
+    for match in AWS_CLI_START.finditer(normalized):
+        tail = normalized[match.end():]
+        quote = None
+        escaped = False
+        end = len(tail)
+        for index, char in enumerate(tail):
+            if escaped:
+                escaped = False
+            elif char == "\\" and quote != "'":
+                escaped = True
+            elif quote:
+                if char == quote:
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char in "\n;|)" or (char == "&" and index + 1 < len(tail) and tail[index + 1] == "&"):
+                end = index
+                break
+        try:
+            tokens = shlex.split(tail[:end], posix=True)
+        except ValueError:
+            commands.append(("<unparsed>", "<unparsed>"))
+            continue
+
+        def skip_global_options(index: int) -> int | None:
+            while index < len(tokens) and tokens[index].startswith("--"):
+                option, separator, _ = tokens[index].partition("=")
+                if option in AWS_BOOLEAN_OPTIONS:
+                    index += 1
+                elif option in AWS_OPTIONS_WITH_VALUES:
+                    if separator:
+                        index += 1
+                    elif index + 1 < len(tokens):
+                        index += 2
+                    else:
+                        return None
+                else:
+                    return None
+            return index
+
+        service_index = skip_global_options(0)
+        if service_index is None or service_index >= len(tokens):
+            commands.append(("<unsupported-option>", "<missing-command>"))
+            continue
+        service = tokens[service_index]
+        operation_index = skip_global_options(service_index + 1)
+        if operation_index is None or operation_index >= len(tokens):
+            commands.append((service, "<unsupported-option-or-missing-command>"))
+            continue
+        commands.append((service, tokens[operation_index]))
+    return commands
 
 
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
@@ -75,6 +150,21 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
             "aws " + "\\" + "\n  ec2 " + "\\" + "\n  terminate-instances --instance-ids i-123"
         )
         self.assertEqual(aws_cli_commands(split_service_and_operation), [("ec2", "terminate-instances")])
+
+    def test_aws_cli_scanner_handles_global_options(self) -> None:
+        commands = (
+            'aws --region "$AWS_REGION" ec2 terminate-instances --instance-ids i-123',
+            "aws --profile deploy --region=ap-southeast-2 s3api put-bucket-policy",
+            'aws lightsail --region "$AWS_REGION" get-container-services',
+        )
+        expected = (
+            ("ec2", "terminate-instances"),
+            ("s3api", "put-bucket-policy"),
+            ("lightsail", "get-container-services"),
+        )
+        for command, pair in zip(commands, expected, strict=True):
+            with self.subTest(command=command):
+                self.assertEqual(aws_cli_commands(command), [pair])
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
