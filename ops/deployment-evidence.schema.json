@@ -42,7 +42,7 @@
       "additionalProperties": false,
       "required": ["route", "result"],
       "properties": {
-        "route": { "const": "/places" },
+        "route": { "const": "/api/v1/places" },
         "result": { "const": "valid_place_page" }
       }
     },

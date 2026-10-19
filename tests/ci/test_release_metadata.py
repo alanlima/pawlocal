@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import ast
 import subprocess
 import sys
 import tempfile
+import importlib.util
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "ops" / "validate-release-metadata.py"
+API_URL_HELPER = ROOT / "ops" / "api_smoke_url.py"
 
 
 def release_manifest(environment: str = "development") -> dict:
@@ -48,7 +51,7 @@ def deployment_evidence(manifest: dict, provider: str) -> dict:
         "migration_id": chain["migration_id"],
         "telemetry_enabled": False,
         "public_endpoint_health": {"frontend": True, "api": True},
-        "database_query_smoke": {"route": "/places", "result": "valid_place_page"},
+        "database_query_smoke": {"route": "/api/v1/places", "result": "valid_place_page"},
         "verified_at": "2026-10-19T01:02:03Z",
     }
 
@@ -99,10 +102,46 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_evidence_requires_public_database_query_smoke(self) -> None:
         manifest = release_manifest()
         evidence = deployment_evidence(manifest, "aurora_dsql")
-        evidence["database_query_smoke"] = {"route": "/places", "result": "not_run"}
+        evidence["database_query_smoke"] = {"route": "/api/v1/places", "result": "not_run"}
         result = self.validate(manifest, evidence)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("public /places database-query smoke", result.stderr)
+        self.assertIn("public /api/v1/places database-query smoke", result.stderr)
+
+    def test_places_query_url_uses_configured_api_prefix_and_route(self) -> None:
+        spec = importlib.util.spec_from_file_location("api_smoke_url", API_URL_HELPER)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        config_tree = ast.parse((ROOT / "backend" / "pawlocal" / "config.py").read_text())
+        settings = next(
+            node for node in config_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Settings"
+        )
+        api_prefix = next(
+            node.value.value for node in settings.body
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "api_prefix"
+            and isinstance(node.value, ast.Constant)
+        )
+        routes_tree = ast.parse((ROOT / "backend" / "pawlocal" / "api" / "routes.py").read_text())
+        route_path = next(
+            arg.value for node in ast.walk(routes_tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and node.args
+            and isinstance((arg := node.args[0]), ast.Constant)
+            and arg.value == "/places"
+        )
+        self.assertEqual(module.API_PREFIX, api_prefix)
+        self.assertEqual(route_path, "/places")
+        self.assertEqual(
+            module.places_query_url("https://api.example.test/health"),
+            f"https://api.example.test{api_prefix}{route_path}?page=1&page_size=1",
+        )
 
     def test_release_schemas_describe_provider_and_migration_selection(self) -> None:
         manifest_schema = json.loads((ROOT / "ops" / "release-manifest.schema.json").read_text())

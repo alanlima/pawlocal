@@ -159,8 +159,8 @@ verify() {
   local key_file="$temp_dir/deploy_key" known_hosts="$temp_dir/known_hosts"
 
   curl --fail --silent --show-error --location "${PAWLOCAL_API_HEALTH_URL:?}" >/dev/null
-  [[ "$PAWLOCAL_API_HEALTH_URL" == */health ]] || die "PAWLOCAL_API_HEALTH_URL must end with /health to derive the public places query URL"
-  local places_url="${PAWLOCAL_API_HEALTH_URL%/health}/places?page=1&page_size=1"
+  local places_url
+  places_url="$(python3 ops/api_smoke_url.py "$PAWLOCAL_API_HEALTH_URL")" || die "Could not derive the public places query URL"
   local places_response="$temp_dir/places-response.json"
   curl --fail --silent --show-error --location --header 'Cache-Control: no-cache' \
     "$places_url" --output "$places_response"
@@ -206,7 +206,7 @@ with open(path,"w",encoding="utf-8") as f:
         "migration_id":migration_id,
         "telemetry_enabled":False,
         "public_endpoint_health":{"frontend":True,"api":True},
-        "database_query_smoke":{"route":"/places","result":"valid_place_page"},
+        "database_query_smoke":{"route":"/api/v1/places","result":"valid_place_page"},
         "verified_at":verified_at,
     },f,indent=2)
     f.write("\n")
