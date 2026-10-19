@@ -232,10 +232,10 @@ resource "aws_dsql_cluster_policy" "api_connect" {
       merge({
         Sid       = "AllowLightsailServiceIdentity"
         Effect    = "Allow"
-        Principal = { AWS = local.dsql_app_principal_arns[each.key] }
+        Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }
         Action    = "dsql:DbConnect"
         Resource  = aws_dsql_cluster.app[each.key].arn
-        }, each.key == "development" ? {} : {
+        }, {
         Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
       })
     ]
