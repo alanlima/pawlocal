@@ -310,6 +310,8 @@ def python_process_launch_commands(source: str) -> list[str]:
                     commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 else:
                     aliases.pop(node.target.id, None)
+                    if isinstance(node.value, ast.Call):
+                        aliases[node.target.id] = None
                     if node.value is not None and callable_reference(node.value):
                         commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 if isinstance(node.value, ast.Name) and node.value.id in alias_groups:
@@ -372,6 +374,9 @@ def python_process_launch_commands(source: str) -> list[str]:
         def visit_Call(self, call: ast.Call) -> None:
             function = call.func
             if isinstance(function, ast.Call):
+                commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
+                return
+            if isinstance(function, ast.Subscript):
                 commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 return
             if launchable(function) is None and callable_reference(function):
@@ -709,6 +714,16 @@ async_run("aws", "s3api", "put-bucket-policy")
         source = "import os\ndef get_launcher():\n    return os.system\nlaunch = get_launcher()\nlaunch('terraform state rm module.example')\n"
         self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
         self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_annotated_call_result_and_container_callable_fail_closed(self) -> None:
+        examples = (
+            "import os\nfrom typing import Callable\ndef get_launcher():\n    return os.system\nlaunch: Callable = get_launcher()\nlaunch('terraform state rm module.example')\n",
+            "import os\ndef get_handlers():\n    return [os.system]\nhandlers = get_handlers()\nhandlers[0]('terraform state rm module.example')\n",
+        )
+        for source in examples:
+            with self.subTest(source=source):
+                self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
+                self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_direct_imported_launch_alias_remains_supported(self) -> None:
         source = "from subprocess import run as launch\nlaunch(['aws', 'ec2', 'terminate-instances'])\n"
