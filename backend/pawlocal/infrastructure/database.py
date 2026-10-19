@@ -111,7 +111,11 @@ def _create_dsql_engine(url: URL) -> Engine:
 
 def _set_dsql_search_path(connection) -> None:
     """Keep unqualified DSQL model and migration SQL inside the app schema."""
-    if connection.get_execution_options().get("isolation_level") == "AUTOCOMMIT":
+    get_execution_options = getattr(connection, "get_execution_options", None)
+    if (
+        get_execution_options
+        and get_execution_options().get("isolation_level") == "AUTOCOMMIT"
+    ):
         return
     connection.exec_driver_sql("SET LOCAL search_path TO pawlocal")
 
