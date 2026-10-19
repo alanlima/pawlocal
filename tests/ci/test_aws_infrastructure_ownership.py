@@ -652,7 +652,7 @@ def python_inline_scripts(source: str) -> list[str]:
 
 
 def javascript_process_launch_commands(source: str) -> list[str]:
-    """Extract statically visible child_process commands; mark dynamic calls unresolved."""
+    """Extract static child_process commands; mark dynamic launch args unresolved."""
     if not re.search(r"(?:require\s*\(\s*['\"](?:node:)?child_process['\"]\s*\)|from\s+['\"](?:node:)?child_process['\"]|import\s+['\"](?:node:)?child_process['\"])", source):
         return []
     launch_names = ("exec", "execSync", "spawn", "spawnSync", "execFile", "execFileSync")
@@ -672,19 +672,27 @@ def javascript_process_launch_commands(source: str) -> list[str]:
         literal = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
         if literal:
             command = literal.group(2)
-            if re.search(r"(?:^|[\s;&|])aws(?:[\s;&|]|$)", command):
+            tail = args[literal.end():].lstrip()
+            # Command-string concatenation can hide AWS or Terraform operations.
+            if tail.startswith("+"):
+                commands.append("<unresolved-child-process-command>")
+                continue
+            if re.search(r"(?:^|[\s;&|])(?:aws|terraform)(?:[\s;&|]|$)", command):
                 commands.append(command)
             continue
         array_form = re.match(r"(['\"])aws\1\s*,\s*\[([^]]*)\]", args, re.DOTALL)
         if array_form:
-            tokens = re.findall(r"(['\"])(.*?)\1", array_form.group(2), re.DOTALL)
-            commands.append("aws " + " ".join(token[1] for token in tokens))
+            array_source = array_form.group(2)
+            tokens = re.findall(r"(['\"])(.*?)\1", array_source, re.DOTALL)
+            residual = re.sub(r"(['\"])(.*?)\1", "", array_source, flags=re.DOTALL).strip(" ,\t\r\n")
+            if residual:
+                commands.append("<unresolved-child-process-command>")
+            else:
+                commands.append("aws " + " ".join(token[1] for token in tokens))
             continue
-        first = re.match(r"(['\"])(.*?)\1", args, re.DOTALL)
-        if first and first.group(2) == "aws":
-            commands.append("<unresolved-child-process-command>")
-        elif re.search(r"\$\{|\bprocess\.env\b", args):
-            commands.append("<unresolved-child-process-command>")
+        # A non-literal executable/command or an otherwise unparseable launch
+        # argument is unknown and must not disappear from the policy scan.
+        commands.append("<unresolved-child-process-command>")
     return commands
 
 
@@ -1168,6 +1176,14 @@ jobs:
                     'const cp = require("child_process"); cp.execSync("terraform state rm module.example");'
                 )
             )
+
+    def test_javascript_dynamic_process_commands_fail_closed(self) -> None:
+        dynamic = 'const cp = require("node:child_process"); cp.execSync(command);'
+        concatenated = 'const cp = require("child_process"); cp.execSync("terraform " + suffix);'
+        self.assertEqual(javascript_process_launch_commands(dynamic), ["<unresolved-child-process-command>"])
+        self.assertEqual(javascript_process_launch_commands(concatenated), ["<unresolved-child-process-command>"])
+        self.assertTrue(contains_forbidden_terraform_state_change(dynamic))
+        self.assertTrue(contains_forbidden_terraform_state_change(concatenated))
 
     def test_python_heredoc_in_resolved_workflow_script_uses_ast_guard(self) -> None:
         source = '''jobs:
