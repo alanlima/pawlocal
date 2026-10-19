@@ -500,7 +500,12 @@ def test_psycopg_connection_timeout_class_is_classified_without_message_matching
 
     from pawlocal.observability import safe_exception_log_fields
 
-    driver = psycopg.errors.ConnectionTimeout("OPAQUE_PRIVATE_DRIVER_MESSAGE")
+    # Use the exception class name without requiring this class to exist in
+    # every psycopg 3.2 release allowed by pyproject.toml. The classifier must
+    # remain compatible with deployments whose driver exposes this class, and
+    # the opaque message proves classification comes from the class name.
+    connection_timeout_type = type("ConnectionTimeout", (psycopg.OperationalError,), {})
+    driver = connection_timeout_type("OPAQUE_PRIVATE_DRIVER_MESSAGE")
     wrapped = OperationalError(
         "private SQL statement", {"value": "PARAM_SECRET"}, driver
     )
