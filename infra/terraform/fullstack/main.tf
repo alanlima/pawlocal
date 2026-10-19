@@ -10,6 +10,9 @@ data "aws_availability_zones" "available" {
 
 locals {
   environments = var.environment_sizes
+  frontend_environments = {
+    development = var.environment_sizes.development
+  }
   github_owner = split("/", var.github_repository)[0]
   github_repo  = split("/", var.github_repository)[1]
 
@@ -41,24 +44,24 @@ locals {
 }
 
 resource "random_id" "bucket_suffix" {
-  for_each    = local.environments
+  for_each    = local.frontend_environments
   byte_length = 3
 }
 
 resource "aws_s3_bucket" "frontend" {
-  for_each      = local.environments
+  for_each      = local.frontend_environments
   bucket        = "pawlocal-${each.key}-${random_id.bucket_suffix[each.key].hex}"
   force_destroy = false
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   bucket   = aws_s3_bucket.frontend[each.key].id
   rule { object_ownership = "BucketOwnerEnforced" }
 }
 
 resource "aws_s3_bucket_public_access_block" "frontend" {
-  for_each                = local.environments
+  for_each                = local.frontend_environments
   bucket                  = aws_s3_bucket.frontend[each.key].id
   block_public_acls       = true
   block_public_policy     = true
@@ -67,7 +70,7 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   bucket   = aws_s3_bucket.frontend[each.key].id
   rule {
     apply_server_side_encryption_by_default {
@@ -77,7 +80,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
-  for_each                          = local.environments
+  for_each                          = local.frontend_environments
   name                              = "pawlocal-${each.key}-frontend-oac"
   description                       = "Private S3 origin for PawLocal ${each.key}"
   origin_access_control_origin_type = "s3"
@@ -161,7 +164,7 @@ resource "aws_route53_record" "api" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
-  for_each            = local.environments
+  for_each            = local.frontend_environments
   enabled             = true
   comment             = "PawLocal ${each.key} full-stack app"
   default_root_object = "index.html"
@@ -233,7 +236,7 @@ resource "aws_cloudfront_distribution" "app" {
 }
 
 resource "aws_cloudfront_function" "spa" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   name     = "pawlocal-${each.key}-spa-routing"
   runtime  = "cloudfront-js-1.0"
   comment  = "Route frontend paths to the SPA entrypoint without rewriting API responses."
@@ -250,7 +253,7 @@ resource "aws_cloudfront_function" "spa" {
 }
 
 data "aws_iam_policy_document" "frontend_bucket" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   statement {
     sid    = "CloudFrontRead"
     effect = "Allow"
@@ -269,13 +272,13 @@ data "aws_iam_policy_document" "frontend_bucket" {
 }
 
 resource "aws_s3_bucket_policy" "frontend" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   bucket   = aws_s3_bucket.frontend[each.key].id
   policy   = data.aws_iam_policy_document.frontend_bucket[each.key].json
 }
 
 resource "aws_route53_record" "frontend_a" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   zone_id  = data.aws_route53_zone.root.zone_id
   name     = "${each.value.hostname}.${trimsuffix(var.root_domain, ".")}"
   type     = "A"
@@ -287,7 +290,7 @@ resource "aws_route53_record" "frontend_a" {
 }
 
 resource "aws_route53_record" "frontend_aaaa" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   zone_id  = data.aws_route53_zone.root.zone_id
   name     = "${each.value.hostname}.${trimsuffix(var.root_domain, ".")}"
   type     = "AAAA"
@@ -314,7 +317,7 @@ locals {
 }
 
 data "aws_iam_policy_document" "github_deploy_trust" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
@@ -335,13 +338,13 @@ data "aws_iam_policy_document" "github_deploy_trust" {
 }
 
 resource "aws_iam_role" "github_deploy" {
-  for_each           = local.environments
+  for_each           = local.frontend_environments
   name               = "pawlocal-${each.key}-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
 }
 
 data "aws_iam_policy_document" "github_deploy" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   statement {
     sid       = "ListFrontendBucket"
     actions   = ["s3:ListBucket"]
@@ -360,7 +363,7 @@ data "aws_iam_policy_document" "github_deploy" {
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
-  for_each = local.environments
+  for_each = local.frontend_environments
   role     = aws_iam_role.github_deploy[each.key].id
   policy   = data.aws_iam_policy_document.github_deploy[each.key].json
 }
@@ -393,8 +396,31 @@ resource "aws_iam_user_policy" "app_dsql_connect" {
 
 resource "aws_s3_bucket" "cloudtrail" {
   count         = var.enable_dsql_auth_event_capture ? 1 : 0
-  bucket        = "pawlocal-dsql-audit-${data.aws_caller_identity.current.account_id}-${var.aws_region}"
+  bucket        = var.dsql_auth_audit_bucket_name
   force_destroy = false
+
+  lifecycle {
+    precondition {
+      condition     = var.dsql_auth_audit_bucket_name != null && var.dsql_auth_audit_bucket_name != "" && var.dsql_auth_retention_days != null && var.dsql_auth_retention_days > 0
+      error_message = "Set an owner-selected dsql_auth_audit_bucket_name and positive dsql_auth_retention_days when DSQL event capture is enabled."
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  count  = var.enable_dsql_auth_event_capture && var.dsql_auth_retention_days != null ? 1 : 0
+  bucket = aws_s3_bucket.cloudtrail[0].id
+
+  rule {
+    id     = "owner-selected-retention"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = var.dsql_auth_retention_days
+    }
+  }
+
 }
 
 resource "aws_s3_bucket_public_access_block" "cloudtrail" {

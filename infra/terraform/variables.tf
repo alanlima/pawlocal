@@ -72,3 +72,53 @@ variable "manage_github_oidc_provider" {
   type        = bool
   default     = false
 }
+
+variable "deploy_ssh_public_keys" {
+  description = "Environment-keyed SSH public keys for API deployment. Private keys are supplied independently as GitHub environment secrets."
+  type        = map(string)
+  sensitive   = true
+  validation {
+    condition     = alltrue([for k in keys(var.deploy_ssh_public_keys) : contains(["development", "production"], k)])
+    error_message = "Keys may only be development and production."
+  }
+}
+
+variable "ssh_cidr_blocks" {
+  description = "Restricted IPv4 CIDRs allowed to SSH to each Lightsail instance. Owner must choose the allowed network ranges."
+  type        = list(string)
+  validation {
+    condition     = length(var.ssh_cidr_blocks) > 0 && alltrue([for cidr in var.ssh_cidr_blocks : cidr != "0.0.0.0/0"])
+    error_message = "Provide at least one restricted IPv4 CIDR; unrestricted SSH is rejected."
+  }
+}
+
+variable "enable_dsql_auth_event_capture" {
+  description = "Enable CloudTrail capture of DSQL DbConnect data events; this is security auditing, not application telemetry."
+  type        = bool
+  default     = false
+}
+
+variable "dsql_auth_audit_bucket_name" {
+  description = "Owner-selected destination S3 bucket name for DSQL authentication audit events. Required when event capture is enabled."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "dsql_auth_retention_days" {
+  description = "Owner-selected number of days to retain DSQL authentication audit objects. Required when event capture is enabled."
+  type        = number
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.dsql_auth_retention_days == null || (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
+    error_message = "When specified, dsql_auth_retention_days must be a positive whole number of days."
+  }
+}
+
+variable "dsql_auth_alert_email" {
+  description = "Optional owner-selected email recipient for DSQL authentication event alerts. SNS requires recipient confirmation."
+  type        = string
+  default     = null
+}

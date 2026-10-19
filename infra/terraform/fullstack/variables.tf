@@ -66,7 +66,26 @@ variable "ssh_cidr_blocks" {
 variable "enable_dsql_auth_event_capture" {
   description = "Capture DSQL DbConnect data events in a dedicated CloudTrail trail. Adds metered data-event and storage charges; this is security audit logging, not application telemetry."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "dsql_auth_audit_bucket_name" {
+  description = "Owner-selected S3 bucket name for DSQL authentication audit events; required when event capture is enabled."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "dsql_auth_retention_days" {
+  description = "Owner-selected retention in days for DSQL authentication audit objects; required when event capture is enabled."
+  type        = number
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.dsql_auth_retention_days == null || (var.dsql_auth_retention_days > 0 && floor(var.dsql_auth_retention_days) == var.dsql_auth_retention_days)
+    error_message = "When specified, dsql_auth_retention_days must be a positive whole number of days."
+  }
 }
 
 variable "dsql_auth_alert_email" {

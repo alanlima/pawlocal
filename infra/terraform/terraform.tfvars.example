@@ -10,3 +10,17 @@ environment          = "production"
 # Keep false to use the account's existing shared GitHub Actions OIDC provider.
 # Set true only when the account does not already have that provider.
 manage_github_oidc_provider = false
+
+# Required inputs for the Lightsail API deployment path. Use restricted, owner-approved
+# SSH ranges; do not use 0.0.0.0/0. Private keys belong in GitHub environment secrets.
+ssh_cidr_blocks = ["REPLACE_WITH_OWNER_APPROVED_CIDR"]
+deploy_ssh_public_keys = {
+  development = "REPLACE_WITH_DEV_SSH_PUBLIC_KEY"
+  production  = "REPLACE_WITH_PROD_SSH_PUBLIC_KEY"
+}
+
+# DSQL audit capture is disabled until the owner selects a destination and retention.
+enable_dsql_auth_event_capture = false
+# dsql_auth_audit_bucket_name = "owner-selected-globally-unique-bucket"
+# dsql_auth_retention_days    = <owner-selected-positive-whole-number>
+# dsql_auth_alert_email       = "operator@example.org"
