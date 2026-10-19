@@ -8,7 +8,10 @@ function releaseSettings(environment = 'development') {
     VITE_RELEASE_ENV: environment,
     VITE_USE_MOCK_BACKEND: 'false',
     VITE_TELEMETRY_ENABLED: 'false',
-    VITE_API_BASE_URL: '/api/v1',
+    VITE_API_BASE_URL:
+      environment === 'production'
+        ? 'https://api.example.test/api/v1'
+        : 'https://api-dev.example.test/api/v1',
     VITE_COGNITO_DOMAIN: 'https://pawlocal-test.auth.ap-southeast-2.amazoncognito.com',
     VITE_COGNITO_CLIENT_ID: 'public-app-client',
     VITE_COGNITO_REDIRECT_URI: 'https://pawlocal-dev.example.test/auth/callback',
@@ -53,15 +56,20 @@ test('rejects an invalid or insecure API URL', () => {
   }
 })
 
-test('production API URL must use the documented same-origin /api/v1 path', () => {
-  for (const value of ['https://dev-api.example.test/api/v1', '/api/v2']) {
+test('cloud release API URL must use its environment API subdomain and /api/v1 path', () => {
+  for (const [environment, value] of [
+    ['production', 'https://api-dev.example.test/api/v1'],
+    ['development', 'https://api.example.test/api/v1'],
+    ['production', 'https://api.example.test/api/v2'],
+    ['production', '/api/v1'],
+  ]) {
     assert.throws(
       () =>
         validateReleaseSettings({
-          ...releaseSettings('production'),
+          ...releaseSettings(environment),
           VITE_API_BASE_URL: value,
         }),
-      /Production VITE_API_BASE_URL must be exactly \/api\/v1/,
+      /VITE_API_BASE_URL/,
     )
   }
 })

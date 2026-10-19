@@ -123,6 +123,9 @@ jobs:
     needs: validate-release
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: pawlocal-lightsail-deploy
+      cancel-in-progress: false
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
@@ -142,6 +145,14 @@ jobs:
       PAWLOCAL_COGNITO_APP_CLIENT_ID: ${{ vars.PAWLOCAL_COGNITO_APP_CLIENT_ID }}
       PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
     permissions:
       actions: read
       contents: read
@@ -175,7 +186,7 @@ jobs:
           test "$PAWLOCAL_DATABASE_PROVIDER" = "$PAWLOCAL_EXPECTED_DATABASE_PROVIDER"
 
       - name: Require the environment-specific OIDC role
-        run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN"
+        run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN" && test -n "$PAWLOCAL_TERRAFORM_ROLE_ARN"
 
       - name: Configure AWS credentials with GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -266,6 +277,47 @@ jobs:
               description: 'Production promotion started',
             })
 
+      - name: Set up Terraform for temporary Lightsail ingress
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Capture this runner IPv4 address
+        id: runner-ip
+        run: |
+          runner_ip="$(curl --fail --silent --show-error https://api.ipify.org)"
+          python3 - "$runner_ip" <<'PY'
+          import ipaddress, sys
+          try:
+              address = ipaddress.ip_address(sys.argv[1])
+          except ValueError as exc:
+              raise SystemExit(f"Invalid runner IPv4 response: {exc}")
+          if address.version != 4:
+              raise SystemExit("Expected an IPv4 runner egress address")
+          print(f"::add-mask::{address}")
+          PY
+          echo "runner_cidr=${runner_ip}/32" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Terraform ingress role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalProdIngress-${{ github.run_id }}
+
+      - name: Temporarily allow this runner through Terraform
+        id: enable-ingress
+        env:
+          PAWLOCAL_RUNNER_IPV4_CIDR: ${{ steps.runner-ip.outputs.runner_cidr }}
+        run: bash ops/terraform-lightsail-ingress.sh open production
+
+      - name: Restore the production deployment role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalProdDeploy-${{ github.run_id }}
+
       - name: Deploy exact backend digest and production frontend through the environment adapter
         env:
           RELEASE_MANIFEST: release/production-release-manifest.json
@@ -322,6 +374,20 @@ jobs:
             release/production-verification.json
           if-no-files-found: error
           retention-days: 90
+
+      - name: Reconfigure Terraform ingress role for cleanup
+        if: ${{ always() && steps.enable-ingress.outcome != 'skipped' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: PawLocalProdIngressCleanup-${{ github.run_id }}
+
+      - name: Restore production SSH ingress through Terraform
+        if: ${{ always() && steps.enable-ingress.outcome != 'skipped' }}
+        env:
+          PAWLOCAL_RUNNER_IPV4_CIDR: ${{ steps.runner-ip.outputs.runner_cidr }}
+        run: bash ops/terraform-lightsail-ingress.sh restore production
 
       - name: Mark production deployment successful
         if: success()

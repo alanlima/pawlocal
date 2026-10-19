@@ -67,6 +67,15 @@ variable "github_repository_id" {
   }
 }
 
+variable "terraform_state_bucket_name" {
+  description = "Existing S3 bucket that stores the shared PawLocal Terraform root state."
+  type        = string
+  validation {
+    condition     = length(trimspace(var.terraform_state_bucket_name)) > 0
+    error_message = "terraform_state_bucket_name must name the existing Terraform state bucket."
+  }
+}
+
 variable "manage_github_oidc_provider" {
   description = "Keep Terraform ownership of the GitHub OIDC provider already managed by the existing root state."
   type        = bool
@@ -84,11 +93,43 @@ variable "deploy_ssh_public_keys" {
 }
 
 variable "ssh_cidr_blocks" {
-  description = "Restricted IPv4 CIDRs allowed to SSH to each Lightsail instance. Owner must choose the allowed network ranges."
-  type        = list(string)
+  description = "Environment-keyed baseline IPv4 CIDRs allowed to SSH to each Lightsail instance."
+  type        = map(list(string))
   validation {
-    condition     = length(var.ssh_cidr_blocks) > 0 && alltrue([for cidr in var.ssh_cidr_blocks : cidr != "0.0.0.0/0"])
-    error_message = "Provide at least one restricted IPv4 CIDR; unrestricted SSH is rejected."
+    condition = toset(keys(var.ssh_cidr_blocks)) == toset(["development", "production"]) && alltrue([
+      for cidrs in values(var.ssh_cidr_blocks) : length(cidrs) > 0 && alltrue([
+        for cidr in cidrs : cidr != "0.0.0.0/0" && can(cidrnetmask(cidr))
+      ])
+    ])
+    error_message = "Provide restricted IPv4 CIDRs for development and production; unrestricted SSH is rejected."
+  }
+}
+
+variable "temporary_ssh_environment" {
+  description = "Environment whose Lightsail SSH allowlist temporarily includes the current GitHub Actions runner. Null leaves both baseline allowlists unchanged."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.temporary_ssh_environment == null || contains(["development", "production"], var.temporary_ssh_environment)
+    error_message = "temporary_ssh_environment must be development or production when set."
+  }
+}
+
+variable "temporary_ssh_cidr" {
+  description = "The current GitHub Actions runner public IPv4 address as a single /32. Used only for the selected deployment environment."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition = var.temporary_ssh_cidr == null || (
+      can(cidrnetmask(var.temporary_ssh_cidr)) && can(regex("/32$", var.temporary_ssh_cidr))
+    )
+    error_message = "temporary_ssh_cidr must be a single IPv4 /32 when set."
+  }
+  validation {
+    condition     = (var.temporary_ssh_environment == null) == (var.temporary_ssh_cidr == null)
+    error_message = "temporary_ssh_environment and temporary_ssh_cidr must either both be set or both be null."
   }
 }
 
