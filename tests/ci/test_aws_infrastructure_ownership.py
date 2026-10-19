@@ -25,7 +25,9 @@ ALLOWED_AWS_COMMANDS = {
     ("s3", "cp"),
     ("cloudfront", "create-invalidation"),
 }
-AWS_CLI_START = re.compile(r"(?<![\w.-])(?:aws|\"aws\"|'aws')(?=[ \t])")
+AWS_CLI_START = re.compile(
+    r"(?<![\w.-])(?:aws|\"aws\"|'aws'|\"[^\"\r\n]*[/\\]aws\"|'[^'\r\n]*[/\\]aws')(?=[ \t])"
+)
 AWS_OPTIONS_WITH_VALUES = {
     "--ca-bundle",
     "--cli-binary-format",
@@ -442,8 +444,14 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
                 self.assertEqual(aws_cli_commands(command), [pair])
 
     def test_aws_cli_scanner_handles_quoted_executable(self) -> None:
-        command = '"aws" ec2 terminate-instances --instance-ids i-123'
-        self.assertEqual(aws_cli_commands(command), [("ec2", "terminate-instances")])
+        commands = (
+            '"aws" ec2 terminate-instances --instance-ids i-123',
+            '"/usr/local/bin/aws" ec2 terminate-instances --instance-ids i-123',
+            "'/opt/aws cli/bin/aws' ec2 terminate-instances --instance-ids i-123",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(aws_cli_commands(command), [("ec2", "terminate-instances")])
 
     def test_aws_cli_scanner_reads_python_subprocess_argv(self) -> None:
         source = '''
