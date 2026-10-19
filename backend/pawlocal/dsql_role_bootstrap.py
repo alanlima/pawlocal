@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             user="admin",
             driver="psycopg",
             dbname="postgres",
+            sslmode="verify-full",
             sslrootcert=certifi.where(),
             application_name="pawlocal-terraform-role-bootstrap",
             pool_pre_ping=True,

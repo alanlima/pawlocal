@@ -159,6 +159,7 @@ def test_dsql_engine_delegates_to_aws_connector_using_role_and_default_chain(
             "user": "pawlocal_dev",
             "driver": "psycopg",
             "dbname": "postgres",
+            "sslmode": "verify-full",
             "sslrootcert": certifi.where(),
             "application_name": "pawlocal-dev",
             "pool_pre_ping": True,

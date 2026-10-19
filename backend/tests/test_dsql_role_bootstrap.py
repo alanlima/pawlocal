@@ -134,6 +134,7 @@ def test_bootstrap_uses_certifi_root_bundle_and_admin_role(monkeypatch):
             "user": "admin",
             "driver": "psycopg",
             "dbname": "postgres",
+                "sslmode": "verify-full",
             "sslrootcert": certifi.where(),
             "application_name": "pawlocal-terraform-role-bootstrap",
             "pool_pre_ping": True,

@@ -100,6 +100,7 @@ def _create_dsql_engine(url: URL) -> Engine:
         user=url.username,
         driver="psycopg",
         dbname=url.database,
+        sslmode="verify-full",
         sslrootcert=certifi.where(),
         application_name=url.query.get("application_name", "pawlocal"),
         pool_pre_ping=True,
