@@ -19,7 +19,6 @@ backend_image_digests = {
   development = "ghcr.io/alanlima/pawlocal-api@sha256:cc54cd9dab3b0e2210ad07e8f01d3e4dc9b0e4036a9ff826661e046f29598873"
   production  = "ghcr.io/alanlima/pawlocal-api@sha256:cc54cd9dab3b0e2210ad07e8f01d3e4dc9b0e4036a9ff826661e046f29598873"
 }
-dsql_bootstrap_python = "C:/path/to/pawlocal/backend/.venv/Scripts/python.exe"
 
 # DSQL audit capture is disabled until the owner selects a destination and retention.
 enable_dsql_auth_event_capture = false

@@ -8,6 +8,8 @@ output "environment_targets" {
     api_container_service_url  = aws_lightsail_container_service.api[name].url
     api_container_service_arn  = aws_lightsail_container_service.api[name].arn
     api_runtime_principal_arn  = aws_lightsail_container_service.api[name].principal_arn
+    dsql_app_iam_principal_arn = local.dsql_app_principal_arns[name]
+    aws_account_id             = data.aws_caller_identity.current.account_id
     api_backend_image          = local.backend_images[name]
     frontend_bucket            = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].bucket : null
     distribution_id            = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].id : null

@@ -292,7 +292,6 @@ module "fullstack" {
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   backend_image_digests          = var.backend_image_digests
-  dsql_bootstrap_python          = var.dsql_bootstrap_python
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name
   dsql_auth_retention_days       = var.dsql_auth_retention_days

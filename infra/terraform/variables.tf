@@ -98,15 +98,6 @@ variable "backend_image_digests" {
   }
 }
 
-variable "dsql_bootstrap_python" {
-  description = "Absolute path to the Python interpreter with backend dependencies installed; used by Terraform's DSQL role bootstrap local-exec."
-  type        = string
-  validation {
-    condition     = length(trimspace(var.dsql_bootstrap_python)) > 0
-    error_message = "dsql_bootstrap_python must name the configured backend Python interpreter."
-  }
-}
-
 variable "enable_dsql_auth_event_capture" {
   description = "Enable CloudTrail capture of DSQL DbConnect data events; this is security auditing, not application telemetry."
   type        = bool

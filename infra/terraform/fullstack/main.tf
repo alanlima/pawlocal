@@ -627,9 +627,9 @@ resource "aws_iam_role_policy" "github_terraform_deploy" {
   policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
 }
 
-# Aurora DSQL database roles and IAM mappings are SQL state rather than AWS API
-# resources. terraform_data records the idempotent bootstrap operation in the
-# same Terraform state; the helper uses the operator's short-lived AWS identity.
+# Keep the database-role mapping inputs visible in Terraform plans without
+# executing SQL from a Terraform provisioner. An authorized local operator runs
+# ops/bootstrap-development-dsql-role.ps1 after applying a reviewed dev plan.
 resource "terraform_data" "app_dsql_role" {
   for_each = local.environments
 
@@ -637,27 +637,14 @@ resource "terraform_data" "app_dsql_role" {
     aws_dsql_cluster.app[each.key].arn,
     local.dsql_app_principal_arns[each.key],
     each.value.database_role,
-    # Keep the existing state fingerprint stable across Windows CRLF and Linux
-    # LF checkouts. The role bootstrap is text; canonicalize it to CRLF before
-    # hashing so the tracked operation does not rerun solely due to checkout EOLs.
+    # Preserve the legacy marker fingerprints to avoid unrelated replacements.
     sha256(replace(replace(file("${path.module}/../../../backend/pawlocal/dsql_role_bootstrap.py"), "\r\n", "\n"), "\n", "\r\n")),
     filesha256("${path.module}/../../../backend/pawlocal/infrastructure/database.py"),
   ]
 
   lifecycle {
-    # The principal ARN changes only in development for this migration. Avoid
-    # re-running the shared SQL bootstrap in production; future deliberate
-    # bootstrap changes should update the role mapping trigger explicitly.
     ignore_changes = [triggers_replace[3], triggers_replace[4]]
   }
-
-  provisioner "local-exec" {
-    working_dir = "${path.module}/../../../backend"
-    interpreter = ["PowerShell", "-NoProfile", "-NonInteractive", "-Command"]
-    command     = "& '${replace(var.dsql_bootstrap_python, "'", "''")}' -m pawlocal.dsql_role_bootstrap --endpoint '${aws_dsql_cluster.app[each.key].identifier}.dsql.${var.aws_region}.on.aws' --region '${var.aws_region}' --database-role '${each.value.database_role}' --iam-principal-arn '${local.dsql_app_principal_arns[each.key]}' --legacy-iam-user-arn 'arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/pawlocal/pawlocal-${each.key}-dsql-app' --legacy-iam-principal-arn '${aws_lightsail_container_service.api[each.key].principal_arn}'; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"
-  }
-
-  depends_on = [aws_dsql_cluster_policy.api_connect, aws_iam_role_policy.dsql_runtime]
 }
 
 resource "aws_s3_bucket" "cloudtrail" {
