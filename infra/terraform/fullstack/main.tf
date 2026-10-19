@@ -518,6 +518,17 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
     resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
   }
 
+  dynamic "statement" {
+    for_each = each.key == "development" ? [true] : []
+
+    content {
+      sid       = "ReadPawLocalFrontendBucketReplicationForTerraformRefresh"
+      effect    = "Allow"
+      actions   = ["s3:GetReplicationConfiguration"]
+      resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+    }
+  }
+
   statement {
     sid    = "LockAndUpdateSharedTerraformState"
     effect = "Allow"
