@@ -28,6 +28,7 @@ _tracer_provider: TracerProvider | None = None
 _logger_provider: LoggerProvider | None = None
 _SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
+_MAX_EXCEPTION_CHAIN_DEPTH = 5
 
 
 class _SafeJsonFormatter(logging.Formatter):
@@ -51,6 +52,8 @@ class _SafeJsonFormatter(logging.Formatter):
             "span_id",
             "error_code",
             "exception_class",
+            "exception_chain",
+            "os_error_number",
             "database_error_code",
         ):
             value = getattr(record, field, None)
@@ -133,6 +136,8 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
             "duration_ms",
             "error_code",
             "exception_class",
+            "exception_chain",
+            "os_error_number",
             "database_error_code",
         }
     }
@@ -140,8 +145,14 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
     logger.log(level, message, extra=safe_fields)
 
 
-def safe_exception_log_fields(exc: BaseException) -> dict[str, str]:
-    """Return bounded exception identifiers without messages or traceback data."""
+def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:
+    """Return bounded exception identifiers without messages or traceback data.
+
+    Database drivers often wrap an operating-system failure. Record only
+    exception type names, validated SQLSTATEs, and integer OS error numbers so
+    connection failures can be distinguished without exporting driver text,
+    SQL, parameters, endpoint values, or credentials.
+    """
     class_name = type(exc).__name__
     fields = {
         "exception_class": (
@@ -151,18 +162,65 @@ def safe_exception_log_fields(exc: BaseException) -> dict[str, str]:
         )
     }
 
-    # SQLAlchemy wraps driver exceptions in ``orig``. Read only standardized
-    # SQLSTATE attributes; never inspect exception messages or arbitrary codes.
-    candidates = (exc, getattr(exc, "orig", None))
+    # SQLAlchemy wraps the DB driver exception in ``orig``; drivers may then
+    # chain socket/DNS/provider exceptions via __cause__ or __context__. Follow
+    # that linear chain (preferring explicit causes), and retain identities
+    # only, never exception text or tracebacks.
+    candidates: list[BaseException] = []
+    seen: set[int] = set()
+    candidate: BaseException | None = exc
+    while candidate is not None and len(candidates) < _MAX_EXCEPTION_CHAIN_DEPTH:
+        if id(candidate) in seen:
+            break
+        seen.add(id(candidate))
+        candidates.append(candidate)
+        original = getattr(candidate, "orig", None)
+        cause = getattr(candidate, "__cause__", None)
+        context = getattr(candidate, "__context__", None)
+        next_candidate = original if isinstance(original, BaseException) else None
+        if next_candidate is None or id(next_candidate) in seen:
+            next_candidate = cause if isinstance(cause, BaseException) else None
+        context_is_visible = not getattr(candidate, "__suppress_context__", False)
+        if (
+            next_candidate is None
+            and context_is_visible
+            and isinstance(context, BaseException)
+        ):
+            next_candidate = context
+        candidate = next_candidate
+
+    fields["exception_chain"] = [_safe_exception_class(item) for item in candidates[1:]]
+
     for candidate in candidates:
-        if candidate is None:
-            continue
         for attribute in ("sqlstate", "pgcode"):
             value = getattr(candidate, attribute, None)
             if isinstance(value, str) and _SAFE_SQLSTATE.fullmatch(value.upper()):
                 fields["database_error_code"] = value.upper()
-                return fields
+                break
+        if "database_error_code" in fields:
+            break
+
+    # errno is a numeric OS error identifier (for example ECONNREFUSED or
+    # ETIMEDOUT); reject booleans, non-integers, and out-of-range values.
+    for candidate in candidates:
+        value = getattr(candidate, "errno", None)
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and -(2**31) <= value < 2**31
+        ):
+            fields["os_error_number"] = value
+            break
     return fields
+
+
+def _safe_exception_class(exc: BaseException) -> str:
+    class_name = type(exc).__name__
+    return (
+        class_name
+        if _SAFE_EXCEPTION_CLASS.fullmatch(class_name)
+        else "UnknownException"
+    )
 
 
 def create_api_span(name: str, context):
