@@ -135,7 +135,19 @@ def validate(plan: dict[str, Any], operation: str, environment: str, runner_cidr
         after_blocks = _port_blocks(after)
         if _ssh_cidrs(after_blocks) != baseline_set:
             raise ValueError("Restore-only recreation must install exactly the baseline SSH CIDRs")
-        _web_ports(after_blocks)
+        expected_web_ports = {
+            port: [_normalize({
+                "protocol": "tcp",
+                "from_port": port,
+                "to_port": port,
+                "cidrs": ["0.0.0.0/0"],
+                "ipv6_cidrs": ["::/0"],
+                "cidr_list_aliases": [],
+            })]
+            for port in (80, 443)
+        }
+        if _web_ports(after_blocks) != expected_web_ports:
+            raise ValueError("Restore-only recreation must restore exactly one unchanged public TCP/80 and TCP/443 rule")
         if any(
             _matches_exact_tcp(block, port) and (block.get("cidr_list_aliases") or [])
             for block in after_blocks for port in (80, 443)

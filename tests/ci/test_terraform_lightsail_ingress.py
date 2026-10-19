@@ -144,6 +144,19 @@ class TerraformLightsailIngressTests(unittest.TestCase):
         plan = self._plan(None, restore_state, actions=["create"])
         PLAN_VALIDATOR.validate(plan, "restore", "development", runner, baseline_json)
 
+        for web443 in (["192.0.2.3/32"], ["0.0.0.0/0"]):
+            altered = self._firewall(baseline["development"], web443)
+            if web443 == ["0.0.0.0/0"]:
+                altered["port_info"].append({
+                    "protocol": "tcp", "from_port": 443, "to_port": 443,
+                    "cidrs": ["0.0.0.0/0"], "ipv6_cidrs": ["::/0"], "cidr_list_aliases": [],
+                })
+            with self.assertRaisesRegex(ValueError, "exactly one unchanged"):
+                PLAN_VALIDATOR.validate(
+                    self._plan(None, altered, actions=["create"]),
+                    "restore", "development", runner, baseline_json,
+                )
+
     def test_plan_validator_rejects_zero_updates_and_changes_to_web_or_other_rules(self) -> None:
         baseline = {"development": ["198.51.100.8/32"], "production": ["198.51.100.8/32"]}
         baseline_json = json.dumps(baseline)
