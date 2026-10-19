@@ -294,35 +294,59 @@ def _classify_database_error(
             "os_errno" if errno.ETIMEDOUT in numbers else "exception_class",
         )
 
-    # Phrase matching is limited to a short, in-memory prefix of the actual
-    # psycopg exception's first argument. It only selects an enum constant.
-    message_classifications: set[str] = set()
+    # Driver and libpq diagnostics stay in memory. They are bounded before
+    # matching and can only select fixed enum values; neither string is logged.
+    diagnostic_messages: list[tuple[str, str]] = []
     for item in driver_candidates:
         args = getattr(item, "args", ())
-        message = args[0] if args and isinstance(args[0], str) else ""
-        message = message[:2048].lower()
+        driver_message = args[0] if args and isinstance(args[0], str) else ""
+        if driver_message:
+            diagnostic_messages.append(
+                ("driver_message_pattern", driver_message[:2048].lower())
+            )
+        pgconn = _safe_attribute(item, "pgconn")
+        pgconn_message = _safe_attribute(pgconn, "error_message")
+        if isinstance(pgconn_message, bytes):
+            pgconn_message = pgconn_message[:2048].decode("utf-8", errors="replace")
+        if isinstance(pgconn_message, str) and pgconn_message:
+            diagnostic_messages.append(
+                ("pgconn_error_message_pattern", pgconn_message[:2048].lower())
+            )
+
+    message_classifications: set[str] = set()
+    message_sources: set[str] = set()
+    for source, message in diagnostic_messages:
+        matches: set[str] = set()
         if "failed to generate authentication token" in message:
-            message_classifications.add("token_generation_failed")
+            matches.add("token_generation_failed")
         if (
             "password authentication failed" in message
             or "authentication failed" in message
         ):
-            message_classifications.add("authentication_rejected")
+            matches.add("authentication_rejected")
         if "certificate verify failed" in message:
-            message_classifications.add("tls_verification_failed")
+            matches.add("tls_verification_failed")
         elif "tls handshake" in message:
-            message_classifications.add("tls_connection_failed")
+            matches.add("tls_connection_failed")
         if "connection timed out" in message or "connection timeout expired" in message:
-            message_classifications.add("connection_timeout")
+            matches.add("connection_timeout")
         if "connection refused" in message:
-            message_classifications.add("connection_refused")
+            matches.add("connection_refused")
         if (
             "could not translate host name" in message
             or "name or service not known" in message
         ):
-            message_classifications.add("dns_resolution_failed")
+            matches.add("dns_resolution_failed")
+        if matches:
+            message_classifications.update(matches)
+            message_sources.add(source)
     if len(message_classifications) == 1:
-        return next(iter(message_classifications)), "driver_message_pattern"
+        source = (
+            "pgconn_error_message_pattern"
+            if "pgconn_error_message_pattern" in message_sources
+            else "driver_message_pattern"
+        )
+        return next(iter(message_classifications)), source
     if len(message_classifications) > 1:
         return "connection_failure_unknown", "ambiguous_driver_message"
     return "connection_failure_unknown", "fallback"
