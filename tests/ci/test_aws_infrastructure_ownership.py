@@ -579,27 +579,43 @@ def python_inline_scripts(source: str) -> list[str]:
     scripts: list[str] = []
     normalized = normalize_shell_continuations(source)
     interpreter = re.compile(r"(?:^|[/\\])python(?:\d+(?:\.\d+)*)?$", re.IGNORECASE)
-    for line in normalized.splitlines():
-        try:
-            tokens = shlex.split(line, posix=True)
-        except ValueError:
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        # Malformed shell quoting around a visible Python -c command is unknown,
+        # so fail closed instead of treating it as absent.
+        if re.search(r"(?i)(?:^|[\s;&|])(?:['\"])?(?:[^\s;&|/\\]+[/\\])?python(?:\d+(?:\.\d+)*)?['\"]?\s+.*(?:^|\s)-c(?:\s|$)", normalized):
+            return ["<unresolved-python-command>"]
+        return scripts
+
+    for index, token in enumerate(tokens):
+        if not interpreter.search(token):
             continue
-        for index, token in enumerate(tokens):
-            if not interpreter.search(token):
-                continue
-            arguments = tokens[index + 1:]
-            for flag_index, flag in enumerate(arguments):
-                if flag in {"-c", "--command"}:
-                    scripts.append(arguments[flag_index + 1] if flag_index + 1 < len(arguments) else "<unresolved-python-command>")
+        arguments = tokens[index + 1:]
+        for flag_index, flag in enumerate(arguments):
+            if flag in {"-c", "--command"}:
+                if flag_index + 1 >= len(arguments) or arguments[flag_index + 1] in {";", "|", "&", "||", "&&"}:
+                    scripts.append("<unresolved-python-command>")
                     break
-                if flag == "-m" and flag_index + 1 < len(arguments):
-                    module = arguments[flag_index + 1]
-                    module_path = ROOT.joinpath(*module.split("."))
-                    for candidate in (module_path.with_suffix(".py"), module_path / "__main__.py"):
-                        if candidate.is_file():
-                            scripts.append(candidate.read_text(encoding="utf-8"))
-                            break
-                    break
+                payload = arguments[flag_index + 1]
+                try:
+                    ast.parse(payload)
+                except SyntaxError:
+                    scripts.append("<unresolved-python-command>")
+                else:
+                    scripts.append(payload)
+                break
+            if flag == "-m" and flag_index + 1 < len(arguments):
+                module = arguments[flag_index + 1]
+                module_path = ROOT.joinpath(*module.split("."))
+                for candidate in (module_path.with_suffix(".py"), module_path / "__main__.py"):
+                    if candidate.is_file():
+                        scripts.append(candidate.read_text(encoding="utf-8"))
+                        break
+                break
     return scripts
 
 
@@ -1024,6 +1040,16 @@ jobs:
             module_path.write_text('import subprocess\nsubprocess.run(["aws", "ec2", "terminate-instances"])\n', encoding="utf-8")
             module_name = f"{Path(temp_dir).name}.ownership_check_module"
             self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(f"python -m {module_name}\n"))
+
+    def test_multiline_python_inline_command_preserves_quoted_source(self) -> None:
+        source = "python3 -c 'import subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])'\n"
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
+
+    def test_dynamic_python_inline_command_fails_closed(self) -> None:
+        source = 'python3 -c "$SCRIPT"\n'
+        self.assertIn(("<unresolved-subprocess>", "<unresolved-subprocess>"), python_aws_cli_commands(source))
+        terraform_source = 'python3 -c "$SCRIPT"\n'
+        self.assertTrue(contains_forbidden_terraform_state_change(terraform_source))
 
     def test_composite_action_run_scripts_use_the_same_policy(self) -> None:
         source = "runs:\n  using: composite\n  steps:\n    - name: Python deployment command\n      shell: python3.12\n      run: |\n        import subprocess\n        subprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\n"
