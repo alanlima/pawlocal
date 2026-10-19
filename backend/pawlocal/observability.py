@@ -292,15 +292,6 @@ def _classify_database_error(
             "os_errno" if errno.ETIMEDOUT in numbers else "exception_class",
         )
 
-    for item in driver_candidates:
-        pgconn = _safe_attribute(item, "pgconn")
-        if (
-            _safe_attribute(pgconn, "needs_password") is True
-            and _safe_attribute(pgconn, "used_password") is False
-        ):
-            # This libpq state is a provider clue, not a complete diagnosis.
-            return "credential_provider_missing", "pgconn_hint"
-
     # Phrase matching is limited to a short, in-memory prefix of the actual
     # psycopg exception's first argument. It only selects an enum constant.
     message_classifications: set[str] = set()

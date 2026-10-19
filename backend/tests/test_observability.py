@@ -413,13 +413,15 @@ def test_exception_log_fields_capture_innermost_provider_error_without_text():
 
 
 def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
+    import errno
+
     import psycopg
     from sqlalchemy.exc import OperationalError
 
     from pawlocal.observability import safe_exception_log_fields
 
     try:
-        raise ConnectionRefusedError(10061, "private endpoint sentinel")
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "private endpoint sentinel")
     except ConnectionRefusedError as socket_error:
         try:
             raise psycopg.OperationalError("private driver detail") from socket_error
@@ -436,7 +438,7 @@ def test_psycopg_connection_error_logs_bounded_os_code_without_sqlstate():
     assert fields == {
         "exception_class": "OperationalError",
         "exception_chain": ["OperationalError", "ConnectionRefusedError"],
-        "os_error_number": 10061,
+        "os_error_number": errno.ECONNREFUSED,
         "database_error_classification": "connection_refused",
         "database_error_classification_source": "os_errno",
         "database_pgconn_available": False,
@@ -507,8 +509,8 @@ def test_psycopg_pgconn_auth_flags_are_boolean_hints_only(monkeypatch):
 
     fields = safe_exception_log_fields(wrapped)
 
-    assert fields["database_error_classification"] == "credential_provider_missing"
-    assert fields["database_error_classification_source"] == "pgconn_hint"
+    assert fields["database_error_classification"] == "authentication_rejected"
+    assert fields["database_error_classification_source"] == "driver_message_pattern"
     assert fields["database_pgconn_available"] is True
     assert fields["database_auth_needs_password"] is True
     assert fields["database_auth_used_password"] is False
