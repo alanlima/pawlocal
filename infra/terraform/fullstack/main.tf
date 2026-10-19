@@ -512,6 +512,13 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
   }
 
   statement {
+    sid       = "ReadPawLocalFrontendBucketAccelerationForTerraformRefresh"
+    effect    = "Allow"
+    actions   = ["s3:GetAccelerateConfiguration"]
+    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+  }
+
+  statement {
     sid    = "LockAndUpdateSharedTerraformState"
     effect = "Allow"
     actions = [
