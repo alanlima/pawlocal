@@ -56,17 +56,18 @@ publish_frontend() {
   printf 'Published %s frontend artifact %s\n' "$environment" "$digest"
 }
 
-verify_release() {
+verify_release() (
   local environment="$1" manifest="$2" evidence="$3"
   need PAWLOCAL_API_HEALTH_URL
   need PAWLOCAL_PUBLIC_BASE_URL
   [[ -f "$manifest" ]] || die "Release manifest must exist"
   validate_manifest "$manifest"
-  local health_response
+  local health_response response running_image_digest places_url
+  health_response=""
+  response=""
+  trap '[[ -z "${health_response:-}" ]] || rm -f -- "$health_response"; [[ -z "${response:-}" ]] || rm -f -- "$response"' EXIT
   health_response="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-health.XXXXXX")"
-  trap 'rm -f "$health_response"' EXIT
   curl --fail --silent --show-error --location "$PAWLOCAL_API_HEALTH_URL" --output "$health_response"
-  local running_image_digest
   running_image_digest="$(python3 - "$health_response" "$environment" "$manifest" <<'PY'
 import json,sys
 from pathlib import Path
@@ -81,10 +82,8 @@ if health.get('image_digest') != expected:
 print(health['image_digest'])
 PY
 )"
-  local places_url response
   places_url="$(python3 ops/api_smoke_url.py "$PAWLOCAL_API_HEALTH_URL")"
   response="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-api-smoke.XXXXXX")"
-  trap 'rm -f "$response"' EXIT
   curl --fail --silent --show-error --location --header 'Cache-Control: no-cache' "$places_url" --output "$response"
   python3 - "$response" <<'PY'
 import json,sys
@@ -118,7 +117,7 @@ Path(evidence_path).write_text(json.dumps({
 },indent=2)+'\n',encoding='utf-8')
 PY
   python3 ops/validate-release-metadata.py --manifest "$manifest" --evidence "$evidence" --environment "$environment" --database-provider aurora_dsql
-}
+)
 
 operation="${1:-}"
 shift || true
