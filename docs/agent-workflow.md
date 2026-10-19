@@ -2,27 +2,49 @@
 
 ## Responsibilities
 
-- **Orchestrator:** Plans stages, confirms issue/branch linkage, coordinates handoffs, integrates changes and enforces approval gates. It does not expand scope or silently bypass review.
-- **Frontend engineer:** Owns React/TypeScript UI, typed service contracts, mock/HTTP adapters, client behavior and frontend tests.
-- **Backend engineer:** Owns FastAPI, OpenAPI alignment, use cases, domain rules, SQLAlchemy/Alembic, auth and backend tests.
-- **Platform engineer:** Owns Compose, telemetry, CI/CD, hosting evaluation and Terraform. No paid provisioning without explicit human approval.
-- **Reviewer:** Independently checks requirements, architecture, tests, security, telemetry and acceptance evidence. Review does not authorize merge.
+- **Orchestrator:** Owns scope, issue readiness, assignments, coordination, integration checks, and project gates. It delegates implementation to the specialist who owns the changed boundary and does not silently bypass review or expand scope.
+- **Frontend engineer:** Owns React/TypeScript UI, typed service contracts, mock/HTTP adapters, client behavior, and frontend tests.
+- **Backend engineer:** Owns FastAPI, OpenAPI alignment, use cases, domain rules, SQLAlchemy/Alembic, auth, and backend tests.
+- **Platform engineer:** Owns Compose, telemetry, CI/CD, hosting evaluation, and Terraform. No paid provisioning without explicit human approval.
+- **Reviewer:** Independently checks requirements, architecture, tests, security, telemetry, and acceptance evidence. Review does not authorize merge.
 
-## Handoff protocol
+Agent profiles in `agents/profiles/` define each role's focus. They do not grant permissions beyond the current task, repository, and explicit user authorization.
 
-1. Read `AGENTS.md`, `product-spec.md`, `openapi.yaml`, the architecture decision log and the relevant agent profile.
-2. Link work to an issue with context and acceptance criteria; branch from the repository's agreed base.
-3. State scope, touched boundaries, assumptions, checks and evidence in the handoff/PR.
-4. Review contract and documentation impacts alongside code. Keep changes within the approved stage.
-5. Report checks actually run; do not claim unrun checks. Do not merge without required approval.
+## Orchestrator lifecycle
 
-## GitHub descriptions and merge history
+1. **Frame:** Convert the request into a user outcome, target environment, scope, exclusions, observable acceptance criteria, and approval boundaries. Use project documents to resolve ordinary implementation choices; raise material scope, cost, risk, or product decisions to the owner.
+2. **Inspect:** Read `AGENTS.md`, the relevant specifications and decisions, agent profiles, linked issues/PRs, current branch and worktree state, and available runtime evidence. Reuse an existing issue only when it covers the request and its criteria; otherwise create a focused issue.
+3. **Prepare:** Check the rendered issue description against [`issue-pr-descriptions.md`](issue-pr-descriptions.md), apply a project-stage and work-type label, and confirm dependencies and gates. Assign an issue-linked branch/worktree to one accountable specialist owner.
+4. **Delegate:** Send the owner the handoff packet below. Split work across agents only when ownership boundaries, dependencies, and merge order are clear. The orchestrator remains responsible for cross-agent coordination and the final acceptance decision.
+5. **Coordinate:** Request progress at meaningful milestones and when an external dependency may change the plan. Agents report promptly when blocked. The orchestrator records material decisions and evidence in the issue/PR and keeps unrelated work moving where possible.
+6. **Integrate:** Check the returned change against the issue, inspect the diff and applicable docs/contracts, verify reported checks and runtime evidence, and confirm security/privacy and stage-gate implications. Do not claim a check or live state that was not observed.
+7. **Review:** Assign an independent reviewer who did not implement the change. Require findings tied to acceptance criteria and precise locations, or an explicit no-findings report. The implementation owner addresses findings; the orchestrator verifies each resolution and checks new PR comments before completion.
+8. **Complete:** Ensure the PR links the issue, the rendered description is accurate, required checks/reviews pass, and acceptance evidence is recorded. Obtain explicit human approval for approval-gated work. Merge only when authorized and required gates pass, using squash merge. Close the issue only after its acceptance criteria are verified.
 
-Before creating or editing a GitHub issue or pull request, the orchestrator reviews the rendered description for heading/list formatting, concise and non-duplicated text, accurate scope and status, and evidence that supports each claim. Remove unused template prompts so small issues and PRs stay concise. Use the reusable structures and review checklist in [`issue-pr-descriptions.md`](issue-pr-descriptions.md).
+## Handoff packet and return
 
-Merge every pull request using **Squash and merge**. This keeps each PR's change as one commit on `main`; do not use merge commits or rebase-and-merge. Enforce this under GitHub repository settings by enabling squash merging and disabling merge commits and rebase merging. Do not rewrite existing commit history.
+Each assignment includes:
 
-## Gates
+- Issue URL, desired outcome, acceptance criteria, status, and dependencies.
+- Relevant repository documents, prior decisions, logs or runtime evidence, including uncertainty.
+- In-scope systems/files, target environment, and explicit exclusions.
+- Required branch/worktree and any file or agent coordination constraints.
+- Expected checks/evidence and actions that require owner approval.
+- Return format: summary, changed files, decisions, exact commands/check results, PR link, unresolved findings/comments, live status, and blockers.
+
+The specialist reports blockers with the concrete evidence, decision needed, candidate paths, and whether independent tasks can continue. The orchestrator records the decision in the linked issue, assigns follow-up work, or asks the owner when the choice changes scope or crosses an approval boundary.
+
+## Review and issue/PR descriptions
+
+The orchestrator checks the rendered Markdown before creating or editing an issue or PR. Confirm readable headings/lists, concise nonduplicated text, accurate scope and status, and evidence that supports each claim. Remove irrelevant template sections. Follow [`issue-pr-descriptions.md`](issue-pr-descriptions.md).
+
+Reviewers assess independently and do not merge. The orchestrator must monitor issue/PR comments at agent handoffs and before closing the work, and ensure each material finding is answered or explicitly left open with a reason. Tests do not replace required browser, deployment, or human review evidence.
+
+## GitHub and merge history
+
+All implementation follows the GitHub workflow in `AGENTS.md`: issue with acceptance criteria and labels, linked branch, relevant checks, PR, review, evidence, and approved merge. Do not commit implementation directly to `main`. Use **Squash and merge** so each PR adds one commit to `main`; repository settings should allow squash and disable merge commits and rebase merging. Do not rewrite existing history.
+
+## Gates and approvals
 
 - Stage 0 docs and plan require human review before Stage 1.
 - Stage 2 and Stage 3 specifications require human approval before either implementation workstream begins. Each workstream also needs an open GitHub issue with scope and acceptance criteria.
@@ -31,6 +53,15 @@ Merge every pull request using **Squash and merge**. This keeps each PR's change
 - Stage 3.1 starts only after Stage 2 is complete and reviewed. It uses its own worktree coordinated with Stage 3, can proceed while Stage 3 continues, and reconciles/verifies the combined Compose stack.
 - Stage 3 cannot be marked complete until Stage 2's gate passes and Stage 3.1 integration evidence has been completed and independently reviewed.
 - Full frontend/API/database persistence is required before Stage 4.
-- Billable cloud resources require explicit human cost approval before provisioning.
+- Billable cloud resources require explicit human cost approval before provisioning. No issue, plan, successful test, or prior approval for a different change supplies that approval.
 - Terraform configuration and the existing shared Terraform state are the only mechanism for AWS infrastructure lifecycle changes. CLI, SDK, console, shell, and bootstrap code may not mutate AWS infrastructure or Terraform state; AWS application deployments must also be represented by a stateful Terraform resource.
 
+## Agent completion record
+
+Before marking assigned work complete, the orchestrator records in GitHub:
+
+- What was changed and how each acceptance criterion was verified.
+- Commands/checks actually run and their results; link CI or runtime evidence where available.
+- Independent review outcome and disposition of all comments.
+- Current deployment/runtime state, separately from code and CI status.
+- Remaining blockers, approval needs, and explicit follow-up issue links.
