@@ -264,9 +264,11 @@ def python_subprocess_commands(source: str) -> list[str]:
                     incoming = argv_values(call.args[0]) if call.args else None
                     if function.attr == "extend":
                         set_argv(target_name, current + incoming if isinstance(current, list) and isinstance(incoming, list) else None)
+                    elif function.attr == "__iadd__":
+                        set_argv(target_name, current + incoming if isinstance(current, list) and isinstance(incoming, list) else None)
                     elif function.attr == "append":
                         set_argv(target_name, current + incoming if isinstance(current, list) and isinstance(incoming, str) else None)
-                    elif function.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__setitem__", "__delitem__"}:
+                    elif function.attr in {"insert", "pop", "remove", "clear", "reverse", "sort", "__imul__", "__setitem__", "__delitem__"}:
                         set_argv(target_name, None)
             recognized = False
             if isinstance(function, ast.Attribute) and function.attr in subprocess_functions:
@@ -285,6 +287,10 @@ def python_subprocess_commands(source: str) -> list[str]:
                 else:
                     commands.append(UNRESOLVED_SUBPROCESS_COMMAND)
                 return
+            for argument in [*call.args, *(keyword.value for keyword in call.keywords)]:
+                for child in ast.walk(argument):
+                    if isinstance(child, ast.Name) and child.id in alias_groups:
+                        set_argv(child.id, None)
             self.generic_visit(call)
 
         def visit_Delete(self, node: ast.Delete) -> None:
@@ -542,6 +548,26 @@ subprocess.run(argv)
 '''
         self.assertTrue(contains_forbidden_terraform_state_change(conditional))
         self.assertTrue(contains_forbidden_terraform_state_change(nested_mutator))
+
+    def test_python_subprocess_unknown_helper_mutation_fails_closed(self) -> None:
+        source = '''
+import subprocess
+def mutate(argv):
+    argv[1:] = ["state", "rm", "module.example"]
+argv = ["terraform", "plan"]
+mutate(argv)
+subprocess.run(argv)
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_python_subprocess_dunder_inplace_add_is_tracked(self) -> None:
+        source = '''
+import subprocess
+argv = ["terraform"]
+argv.__iadd__(["state", "rm", "module.example"])
+subprocess.run(argv)
+'''
+        self.assertTrue(contains_forbidden_terraform_state_change(source))
 
     def test_workflow_scanner_folds_yaml_run_blocks(self) -> None:
         source = '''
