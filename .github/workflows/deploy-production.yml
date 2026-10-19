@@ -150,16 +150,16 @@ jobs:
       id-token: write
       packages: read
     steps:
+      - name: Check out selected release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_commit }}
+
       - name: Check out current deployment tooling
         uses: actions/checkout@v4
         with:
           ref: ${{ github.workflow_sha }}
           path: deployment-tools
-
-      - name: Check out selected release source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.release_commit }}
 
       - name: Download development-verified release artifacts
         uses: actions/download-artifact@v4

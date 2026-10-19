@@ -177,7 +177,9 @@ class WorkflowPathTests(unittest.TestCase):
 
     def test_historical_production_promotion_uses_current_deployment_tooling(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text(encoding="utf-8")
-        self.assertIn("name: Check out current deployment tooling", workflow)
+        release_checkout = workflow.index("name: Check out selected release source")
+        tooling_checkout = workflow.index("name: Check out current deployment tooling")
+        self.assertLess(release_checkout, tooling_checkout)
         self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
         self.assertIn("path: deployment-tools", workflow)
         self.assertIn("ref: ${{ inputs.release_commit }}", workflow)
