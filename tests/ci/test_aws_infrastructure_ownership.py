@@ -7,6 +7,8 @@ import shlex
 import tempfile
 import unittest
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -71,7 +73,7 @@ TERRAFORM_INIT_STATE_MIGRATION = re.compile(
     r"[^\n;|)]*[ \t]+(?:-migrate-state|-force-copy)(?:[ \t]|$)"
 )
 UNRESOLVED_SUBPROCESS_COMMAND = "<unresolved-subprocess-command>"
-AWS_SDK_USAGE = re.compile(r"\bboto3\b|\bbotocore\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
+AWS_SDK_USAGE = re.compile(r"\b(?:aioboto3|aiobotocore|boto3|botocore)\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
 
 
 def contains_forbidden_terraform_state_change(source: str) -> bool:
@@ -90,11 +92,20 @@ def contains_forbidden_terraform_state_change(source: str) -> bool:
             for command in python_process_launch_commands(source)
         )
         or any(
-            TERRAFORM_STATE_MUTATION.search(script)
+            script == "<unparseable-workflow>"
+            or TERRAFORM_STATE_MUTATION.search(script)
             or TERRAFORM_WORKSPACE_STATE_MUTATION.search(script)
             or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(script)
             or TERRAFORM_INIT_STATE_MIGRATION.search(script)
             for script in workflow_run_scripts(source)
+        )
+        or any(
+            command == UNRESOLVED_SUBPROCESS_COMMAND
+            or TERRAFORM_STATE_MUTATION.search(command)
+            or TERRAFORM_WORKSPACE_STATE_MUTATION.search(command)
+            or TERRAFORM_TOP_LEVEL_STATE_MUTATION.search(command)
+            or TERRAFORM_INIT_STATE_MIGRATION.search(command)
+            for command in python_process_launch_commands_for_executable(source)
         )
     )
 
@@ -461,38 +472,68 @@ def python_process_launch_commands(source: str) -> list[str]:
 
 
 def workflow_run_scripts(source: str) -> list[str]:
-    """Read YAML block scalars under `run:` and apply folded/literal semantics."""
-    lines = source.splitlines()
+    """Return resolved GitHub Actions `run` scalars using a YAML parser."""
+    workflow = _parse_workflow(source)
+    if workflow is None:
+        return ["<unparseable-workflow>"] if re.search(r"(?m)^jobs:", source) else []
     scripts: list[str] = []
-    run_block = re.compile(r"^(?P<indent>[ \t]*)run:[ \t]*(?P<style>[>|])(?:[+-]?[1-9]?|[1-9]?[+-]?)[ \t]*(?:#.*)?$")
-    index = 0
-    while index < len(lines):
-        match = run_block.match(lines[index])
-        if not match:
-            index += 1
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict):
+        return scripts
+    for job in jobs.values():
+        steps = job.get("steps", []) if isinstance(job, dict) else []
+        if isinstance(steps, list):
+            scripts.extend(step["run"] for step in steps if isinstance(step, dict) and isinstance(step.get("run"), str))
+    return scripts
+
+
+def _parse_workflow(source: str) -> dict | None:
+    try:
+        workflow = yaml.safe_load(source)
+    except yaml.YAMLError:
+        return None
+    return workflow if isinstance(workflow, dict) else None
+
+
+def workflow_python_scripts(source: str) -> list[str]:
+    workflow = _parse_workflow(source)
+    if workflow is None:
+        return []
+    scripts: list[str] = []
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict):
+        return scripts
+    for job in jobs.values():
+        steps = job.get("steps", []) if isinstance(job, dict) else []
+        if not isinstance(steps, list):
             continue
-        parent_indent = len(match.group("indent").expandtabs(8))
-        index += 1
-        body: list[str] = []
-        content_indent: int | None = None
-        while index < len(lines):
-            line = lines[index]
-            if line.strip() == "":
-                body.append("")
-                index += 1
+        for step in steps:
+            if not isinstance(step, dict) or not isinstance(step.get("run"), str):
                 continue
-            indent = len(line) - len(line.lstrip(" \t"))
-            if indent <= parent_indent:
-                break
-            if content_indent is None:
-                content_indent = indent
-            body.append(line[content_indent:] if len(line) >= content_indent else "")
-            index += 1
-        scalar = "\n".join(body)
-        if match.group("style") == ">":
-            scalar = re.sub(r"(?<!\n)\n(?!\n)", " ", scalar)
-        if scalar.strip():
-            scripts.append(scalar)
+            shell = step.get("shell", "bash")
+            if isinstance(shell, str) and re.match(r"^python(?:3)?(?:\s|$)", shell.strip()):
+                scripts.append(step["run"])
+    return scripts
+
+
+def python_process_launch_commands_for_workflow(source: str) -> list[str]:
+    return [command for script in workflow_python_scripts(source) for command in python_process_launch_commands(script)]
+
+
+def python_process_launch_commands_for_executable(source: str) -> list[str]:
+    scripts = [source, *python_heredoc_scripts(source), *workflow_python_scripts(source)]
+    return [command for script in scripts for command in python_process_launch_commands(script)]
+
+
+def python_heredoc_scripts(source: str) -> list[str]:
+    """Extract Python heredocs embedded in shell helpers for AST policy scanning."""
+    starts = re.compile(r"(?im)^[^\n]*\bpython(?:3)?\b[^\n]*<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?[^\n]*\n")
+    scripts: list[str] = []
+    for start in starts.finditer(source):
+        delimiter = re.escape(start.group(1))
+        end = re.search(rf"(?m)^[ \t]*{delimiter}[ \t]*$", source[start.end():])
+        if end:
+            scripts.append(source[start.end():start.end() + end.start()])
     return scripts
 
 
@@ -550,13 +591,21 @@ def aws_cli_commands(source: str) -> list[tuple[str, str]]:
             continue
         commands.append((service, tokens[operation_index]))
     for script in workflow_run_scripts(source):
+        if script == "<unparseable-workflow>":
+            commands.append(("<unparseable-workflow>", "<unparseable-workflow>"))
+            continue
         commands.extend(aws_cli_commands(script))
+    for command in python_process_launch_commands_for_workflow(source):
+        if command == UNRESOLVED_SUBPROCESS_COMMAND:
+            commands.append(("<unresolved-subprocess>", "<unresolved-subprocess>"))
+        else:
+            commands.extend(aws_cli_commands(command))
     return commands
 
 
 def python_aws_cli_commands(source: str) -> list[tuple[str, str]]:
     commands: list[tuple[str, str]] = []
-    for command in python_process_launch_commands(source):
+    for command in python_process_launch_commands_for_executable(source):
         if command == UNRESOLVED_SUBPROCESS_COMMAND:
             commands.append(("<unresolved-subprocess>", "<unresolved-subprocess>"))
         else:
@@ -571,7 +620,7 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
-                scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else aws_cli_commands(source)
+                scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else [*aws_cli_commands(source), *python_aws_cli_commands(source)]
                 for service, operation in scanned_commands:
                     self.assertIn(
                         (service, operation),
@@ -644,6 +693,11 @@ client = Session().create_client("ec2")
 client.terminate_instances(InstanceIds=["i-123"])
 '''
         self.assertIsNotNone(AWS_SDK_USAGE.search(source))
+
+    def test_async_aws_sdk_usage_is_rejected(self) -> None:
+        for source in ("import aioboto3\n", "from aiobotocore.session import get_session\n"):
+            with self.subTest(source=source):
+                self.assertIsNotNone(AWS_SDK_USAGE.search(source))
 
     def test_posix_spawn_and_asyncio_subprocess_apis_are_scanned(self) -> None:
         source = '''
@@ -864,6 +918,18 @@ jobs:
         self.assertEqual(len(scripts), 2)
         self.assertIn(("ec2", "terminate-instances"), aws_cli_commands(source))
         self.assertTrue(contains_forbidden_terraform_state_change(source))
+
+    def test_workflow_scanner_resolves_multiline_plain_run_values(self) -> None:
+        source = "jobs:\n  deploy:\n    steps:\n      - name: AWS\n        run: aws\n          ec2 terminate-instances --instance-ids i-123\n"
+        self.assertIn(("ec2", "terminate-instances"), aws_cli_commands(source))
+
+    def test_python_shell_workflow_steps_use_ast_guard(self) -> None:
+        source = 'jobs:\n  deploy:\n    steps:\n      - name: Python command\n        shell: python\n        run: |\n          import subprocess\n          subprocess.run(["aws", "ec2", "terminate-instances"])\n'
+        self.assertIn(("ec2", "terminate-instances"), python_aws_cli_commands(source))
+
+    def test_python_heredocs_in_shell_helpers_use_ast_guard(self) -> None:
+        source = "python3 - <<'PY'\nimport subprocess\nsubprocess.run([\"aws\", \"ec2\", \"terminate-instances\"])\nPY\n"
+        self.assertEqual(python_aws_cli_commands(source), [("ec2", "terminate-instances")])
 
     def test_workflow_discovery_includes_yml_and_yaml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

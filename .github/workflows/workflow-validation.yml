@@ -36,6 +36,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Install pinned YAML parser for policy tests
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
       - name: Install pinned actionlint release
         env:
           ACTIONLINT_VERSION: 1.7.12
