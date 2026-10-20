@@ -187,8 +187,13 @@ def _find_conflicts(session: Session, seed: SeedPlace):
         .where(func.lower(PlaceRecord.name) == seed.name.casefold())
         .options(selectinload(PlaceRecord.facility_records))
     ).all()
-    if any(row.id != seed.id for row in by_name):
-        raise RuntimeError(f"seed name conflict for {seed.name}")
+    conflicting_ids = [row.id for row in by_name if row.id != seed.id]
+    if conflicting_ids:
+        existing_id = conflicting_ids[0]
+        raise RuntimeError(
+            f"seed name conflict for {seed.name}: catalog ID {seed.id} differs "
+            f"from existing ID {existing_id}; review and migrate references explicitly"
+        )
     if len(by_name) > 1:
         raise RuntimeError(f"multiple database records conflict with {seed.name}")
     return by_id

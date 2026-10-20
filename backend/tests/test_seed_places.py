@@ -1,6 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -174,23 +174,35 @@ def test_seed_does_not_delete_records_removed_from_catalog(seed_engine):
         assert session.get(PlaceRecord, orphaned_id) is not None
 
 
-def test_seed_fails_closed_on_name_conflict_before_any_insert(seed_engine):
+def test_seed_fails_closed_on_legacy_id_conflict_before_any_write(seed_engine):
     from sqlalchemy.orm import Session
 
+    legacy_rows = [
+        (UUID("639a0c12-6e38-4ea0-a1d0-4caabbe4bd01"), PLACES[0]),
+        (UUID("edcd490d-6c79-487a-8c3d-0af495e9d902"), PLACES[1]),
+    ]
     with Session(seed_engine) as session, session.begin():
-        session.add(
-            PlaceRecord(
-                id=uuid4(),
-                name=PLACES[1].name,
-                category="dog_park",
-                area="Other",
-                is_published=True,
+        for legacy_id, seed in legacy_rows:
+            session.add(
+                PlaceRecord(
+                    id=legacy_id,
+                    name=seed.name,
+                    category=seed.category,
+                    area=seed.area,
+                    is_published=True,
+                )
             )
-        )
-    with pytest.raises(RuntimeError, match="name conflict"):
+
+    with pytest.raises(RuntimeError, match="review and migrate references explicitly"):
         seed_with_engine(seed_engine, "development")
+
     with Session(seed_engine) as session:
-        assert session.get(PlaceRecord, PLACES[0].id) is None
+        assert all(
+            session.get(PlaceRecord, legacy_id) is not None
+            for legacy_id, _ in legacy_rows
+        )
+        assert all(session.get(PlaceRecord, seed.id) is None for _, seed in legacy_rows)
+        assert session.query(PlaceRecord).count() == len(legacy_rows)
 
 
 def test_seed_updates_existing_stable_id_content(seed_engine):
