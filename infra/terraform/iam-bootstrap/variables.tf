@@ -37,7 +37,7 @@ variable "github_repository_id" {
 }
 
 variable "manage_github_oidc_provider" {
-  description = "Initially false while the existing root owns the provider; set true after the approved recovery destroy so this state creates it."
+  description = "Keep false while the existing application root owns the provider. Set true only after a separately approved Terraform ownership transfer."
   type        = bool
   default     = false
 }

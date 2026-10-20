@@ -1,5 +1,4 @@
 data "aws_caller_identity" "current" {}
-data "aws_partition" "current" {}
 
 data "aws_iam_openid_connect_provider" "github" {
   count = var.manage_github_oidc_provider ? 0 : 1
@@ -111,12 +110,7 @@ locals {
   }
   role_definitions = merge(
     { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environment = "${env}-plan" } },
-    { for env, _ in local.environments : "${env}-apply" => { environment = env, purpose = "apply", role_name = "pawlocal-${env}-terraform-apply", subject_environment = "${env}-apply" } },
-    {
-      recovery-plan                  = { environment = "recovery", purpose = "plan", role_name = "pawlocal-terraform-recovery-plan", subject_environment = "terraform-recovery-plan" }
-      recovery-apply                 = { environment = "recovery", purpose = "apply", role_name = "pawlocal-terraform-recovery-apply", subject_environment = "terraform-recovery-apply" }
-      recovery-dsql-protection-apply = { environment = "recovery", purpose = "apply", role_name = "pawlocal-terraform-recovery-dsql-protection-apply", subject_environment = "terraform-recovery-dsql-protection-apply" }
-    }
+    { for env, _ in local.environments : "${env}-apply" => { environment = env, purpose = "apply", role_name = "pawlocal-${env}-terraform-apply", subject_environment = "${env}-apply" } }
   )
   readonly_discovery_actions = [
     "acm:DescribeCertificate", "acm:ListCertificates",
@@ -197,10 +191,7 @@ data "aws_iam_policy_document" "role_permissions" {
       ] : [
       "s3:GetObject", "s3:PutObject"
     ]
-    resources = each.value.environment == "recovery" ? [
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate",
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"
-      ] : [
+    resources = [
       "arn:aws:s3:::${var.terraform_state_bucket_name}/${local.environments[each.value.environment].state_key}",
       "arn:aws:s3:::${var.terraform_state_bucket_name}/${local.environments[each.value.environment].state_key}.tflock"
     ]
@@ -210,7 +201,7 @@ data "aws_iam_policy_document" "role_permissions" {
     sid       = "AcquireAndReleaseOnlyTheAssignedStateLock"
     effect    = "Allow"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = [each.value.environment == "recovery" ? "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock" : "arn:aws:s3:::${var.terraform_state_bucket_name}/${local.environments[each.value.environment].state_key}.tflock"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/${local.environments[each.value.environment].state_key}.tflock"]
   }
 
   statement {
@@ -221,9 +212,7 @@ data "aws_iam_policy_document" "role_permissions" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values = each.value.environment == "recovery" ? [
-        "pawlocal/terraform.tfstate", "pawlocal/terraform.tfstate.tflock"
-        ] : [
+      values = [
         local.environments[each.value.environment].state_key,
         "${local.environments[each.value.environment].state_key}.tflock"
       ]
@@ -349,7 +338,7 @@ data "aws_iam_policy_document" "role_permissions" {
     }
   }
 
-  # Other application and recovery mutations remain absent until their
+  # Other application mutations remain absent until their
   # per-action resource and condition scopes are independently verified.
 }
 
