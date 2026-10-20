@@ -192,6 +192,15 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('"cloudfront:GetOriginAccessControl"', bootstrap)
         self.assertNotIn("pawlocal-production-terraform-deploy", bootstrap)
 
+    def test_apply_runs_only_after_a_successful_direct_plan(self) -> None:
+        source = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
+        apply_header = source.split("\n  apply:\n", 1)[1].split("\n    steps:\n", 1)[0]
+
+        self.assertIn("needs: plan", apply_header)
+        self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' }}", apply_header)
+        self.assertNotIn("always()", apply_header)
+        self.assertNotIn("production-eligibility", apply_header)
+
     def test_release_workflows_call_matching_environment_root_workflow(self) -> None:
         development = (ROOT / ".github/workflows/fullstack-release.yml").read_text(encoding="utf-8")
         production = (ROOT / ".github/workflows/deploy-production.yml").read_text(encoding="utf-8")
