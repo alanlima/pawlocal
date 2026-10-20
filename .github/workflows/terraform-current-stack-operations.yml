@@ -202,39 +202,7 @@ jobs:
           }
           python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$PLAN_STAGE" == destroy-prepare ]]; then
-            python - "$RUNNER_TEMP/terraform-plan.json" <<'PY'
-          import json, os, sys
-          allowed = {
-              "aws_s3_bucket.site",
-              'module.fullstack.aws_s3_bucket.frontend["development"]',
-              'module.fullstack.aws_s3_bucket.frontend["production"]',
-              'module.fullstack.aws_dsql_cluster.app["development"]',
-              'module.fullstack.aws_dsql_cluster.app["production"]',
-          }
-          with open(sys.argv[1], encoding="utf-8") as source:
-              changes = json.load(source).get("resource_changes", [])
-          unexpected = []
-          for item in changes:
-              actions = item.get("change", {}).get("actions", [])
-              if actions == ["no-op"]:
-                  continue
-              before = item.get("change", {}).get("before") or {}
-              after = item.get("change", {}).get("after") or {}
-              address = item.get("address", "")
-              old = dict(before) if isinstance(before, dict) else before
-              new = dict(after) if isinstance(after, dict) else after
-              if isinstance(old, dict):
-                  old.pop("force_destroy", None)
-              if isinstance(new, dict):
-                  new.pop("force_destroy", None)
-              if address not in allowed or actions != ["update"] or old != new or after.get("force_destroy") is not True:
-                  unexpected.append((address, actions))
-          if unexpected:
-              print("Teardown preparation plan includes changes beyond force_destroy settings:", file=sys.stderr)
-              for address, actions in unexpected:
-                  print(f"- {address}: {actions}", file=sys.stderr)
-              raise SystemExit(1)
-          PY
+            python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard
           fi
 
       - name: Bind exact plan metadata
