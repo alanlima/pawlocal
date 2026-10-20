@@ -37,7 +37,7 @@ variable "github_repository_id" {
 }
 
 variable "manage_github_oidc_provider" {
-  description = "Keep false while the existing application root owns the provider. Set true only after a separately approved Terraform ownership transfer."
+  description = "Whether this bootstrap state manages the shared GitHub OIDC provider. Set true with import_existing_github_oidc_provider only after the application root has detached it using a reviewed removed block with destroy=false."
   type        = bool
   default     = false
 }
@@ -145,5 +145,15 @@ variable "oac_create_environment" {
   validation {
     condition     = contains(["", "development", "production"], var.oac_create_environment)
     error_message = "oac_create_environment must be empty, development, or production."
+  }
+}
+
+variable "import_existing_github_oidc_provider" {
+  description = "Set true only after the application root has used its reviewed removed block with destroy=false; Terraform then imports the existing fixed GitHub OIDC provider into this bootstrap state."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.import_existing_github_oidc_provider || var.manage_github_oidc_provider
+    error_message = "import_existing_github_oidc_provider requires manage_github_oidc_provider=true."
   }
 }

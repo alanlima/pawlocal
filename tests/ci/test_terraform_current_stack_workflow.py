@@ -127,9 +127,15 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 end = start + 1 + next_job.start() if next_job else len(source)
                 job = source[start:end]
                 self.assertIn(f"environment: {environment}", job)
-                credential_step = job.index("uses: aws-actions/configure-aws-credentials@v4")
-                self.assertIn("aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}", job)
-                self.assertIn("aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}", job)
+                credential_step = job.index("uses: aws-actions/configure-aws-credentials@v5")
+                self.assertIn("id-token: write", job)
+                expected_role = (
+                    "PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN"
+                    if environment == "infrastructure-plan"
+                    else "PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN"
+                )
+                self.assertIn(f"role-to-assume: ${{{{ vars.{expected_role} }}}}", job)
+                self.assertIn("allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}", job)
                 account_check = job.index("steps.aws-credentials.outputs.aws-account-id")
                 terraform_calls = [
                     position

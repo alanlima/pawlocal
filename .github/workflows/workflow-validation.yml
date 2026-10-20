@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/**"
       - ".github/actions/**"
+      - ".github/scripts/**"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"
@@ -16,6 +17,7 @@ on:
     paths:
       - ".github/workflows/**"
       - ".github/actions/**"
+      - ".github/scripts/**"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"

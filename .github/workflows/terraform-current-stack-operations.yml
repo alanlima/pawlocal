@@ -55,10 +55,14 @@ jobs:
     needs: validate-request
     runs-on: ubuntu-latest
     environment: infrastructure-plan
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
       plan_stage: ${{ steps.metadata.outputs.plan_stage }}
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -70,7 +74,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: ${{ inputs.operation == 'destroy' && 'true' || 'false' }}
     steps:
@@ -92,10 +95,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -208,7 +211,7 @@ jobs:
           PY
           fi
 
-      - name: Bind and upload exact plan for one day
+      - name: Bind exact plan metadata
         id: metadata
         working-directory: infra/terraform
         shell: bash
@@ -238,23 +241,16 @@ jobs:
               target.write(f"plan_stage={stage}\n")
           PY
           printf 'Exact plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
-          # This repository is public. Encrypt the binary plan so the artifact
-          # contains no readable Terraform state/configuration values. The AWS
-          # secret key stays in the Environment secret store and is never written
-          # to Terraform inputs, metadata, logs, or the artifact.
-          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
-            -pass env:AWS_SECRET_ACCESS_KEY -in tfplan -out tfplan.enc
 
-      - name: Upload exact saved plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: pawlocal-terraform-${{ inputs.operation }}-${{ steps.plan.outputs.plan_stage }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            infra/terraform/tfplan.enc
-            infra/terraform/plan-metadata.json
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
+      - name: Upload exact saved plan to private transfer bucket
+        working-directory: infra/terraform
+        shell: bash
+        env:
+          PLAN_STAGE: ${{ steps.plan.outputs.plan_stage }}
+        run: |
+          test -n "$PLAN_TRANSFER_BUCKET"
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r ../../.github/scripts/requirements-terraform-plan-transfer.txt
+          python ../../.github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${PLAN_STAGE}" tfplan plan-metadata.json
 
   apply:
     name: Apply reviewed exact plan
@@ -264,7 +260,9 @@ jobs:
     environment: infrastructure-apply
     permissions:
       contents: read
+      id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -276,7 +274,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "false"
     steps:
@@ -286,18 +283,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Download exact plan
-        uses: actions/download-artifact@v4
-        with:
-          name: pawlocal-terraform-apply-apply-${{ github.run_id }}-${{ github.run_attempt }}
-          path: plan
-
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -312,14 +303,18 @@ jobs:
             exit 1
           }
 
+      - name: Download exact plan from private transfer bucket
+        shell: bash
+        run: |
+          test -n "$PLAN_TRANSFER_BUCKET"
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${{ needs.plan.outputs.plan_stage }}" plan plan-metadata.json
+
       - name: Verify plan metadata and digest
         shell: bash
         env:
           EXPECTED_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
         run: |
-          test -n "$AWS_SECRET_ACCESS_KEY"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
           python - "$EXPECTED_SHA256" <<'PY'
           import hashlib, json, os, pathlib, sys
           expected = {
@@ -371,7 +366,9 @@ jobs:
     environment: infrastructure-apply
     permissions:
       contents: read
+      id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -383,7 +380,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -393,18 +389,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Download teardown preparation plan
-        uses: actions/download-artifact@v4
-        with:
-          name: pawlocal-terraform-destroy-destroy-prepare-${{ github.run_id }}-${{ github.run_attempt }}
-          path: plan
-
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -419,14 +409,18 @@ jobs:
             exit 1
           }
 
+      - name: Download exact plan from private transfer bucket
+        shell: bash
+        run: |
+          test -n "$PLAN_TRANSFER_BUCKET"
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${{ needs.plan.outputs.plan_stage }}" plan plan-metadata.json
+
       - name: Verify plan metadata and digest
         shell: bash
         env:
           EXPECTED_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
         run: |
-          test -n "$AWS_SECRET_ACCESS_KEY"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
           python - "$EXPECTED_SHA256" <<'PY'
           import hashlib, json, os, pathlib, sys
           expected = {
@@ -475,9 +469,13 @@ jobs:
     needs: prepare-destroy
     runs-on: ubuntu-latest
     environment: infrastructure-plan
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -489,7 +487,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -501,10 +498,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -560,7 +557,7 @@ jobs:
           }
           python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-destroy-plan.json" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Bind and upload exact destroy plan
+      - name: Bind exact destroy plan metadata
         id: metadata
         working-directory: infra/terraform
         shell: bash
@@ -581,19 +578,14 @@ jobs:
               target.write(f"plan_sha256={sys.argv[1]}\n")
           PY
           printf 'Exact destroy plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
-          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
-            -pass env:AWS_SECRET_ACCESS_KEY -in tfplan -out tfplan.enc
 
-      - name: Upload exact destroy plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: pawlocal-terraform-destroy-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            infra/terraform/tfplan.enc
-            infra/terraform/destroy-plan-metadata.json
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
+      - name: Upload exact destroy plan to private transfer bucket
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          test -n "$PLAN_TRANSFER_BUCKET"
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r ../../.github/scripts/requirements-terraform-plan-transfer.txt
+          python ../../.github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/destroy" tfplan destroy-plan-metadata.json
 
   destroy:
     name: Apply reviewed full-stack destroy
@@ -603,7 +595,9 @@ jobs:
     environment: infrastructure-apply
     permissions:
       contents: read
+      id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -615,7 +609,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -625,18 +618,12 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Download exact destroy plan
-        uses: actions/download-artifact@v4
-        with:
-          name: pawlocal-terraform-destroy-${{ github.run_id }}-${{ github.run_attempt }}
-          path: plan
-
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -651,14 +638,18 @@ jobs:
             exit 1
           }
 
+      - name: Download exact destroy plan from private transfer bucket
+        shell: bash
+        run: |
+          test -n "$PLAN_TRANSFER_BUCKET"
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/destroy" plan destroy-plan-metadata.json
+
       - name: Verify exact destroy plan metadata and digest
         shell: bash
         env:
           EXPECTED_SHA256: ${{ needs.destroy-plan.outputs.plan_sha256 }}
         run: |
-          test -n "$AWS_SECRET_ACCESS_KEY"
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
           python - "$EXPECTED_SHA256" <<'PY'
           import hashlib, json, os, pathlib, sys
           expected = {

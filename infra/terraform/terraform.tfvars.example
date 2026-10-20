@@ -8,10 +8,6 @@ github_repository_id = "1234567890"
 terraform_state_bucket_name = "REPLACE_WITH_EXISTING_STATE_BUCKET"
 environment          = "production"
 
-# The existing root state already manages the account-level GitHub Actions OIDC provider.
-# Keep true so Terraform retains ownership at the existing root state address.
-manage_github_oidc_provider = true
-
 # Provide digest-pinned images from the same verified release for the first
 # state-backed migration. Subsequent dev and prod releases update this input
 # through the Terraform deployment workflow.

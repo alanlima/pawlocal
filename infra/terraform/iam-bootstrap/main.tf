@@ -362,3 +362,11 @@ resource "aws_iam_role_policy" "github_terraform" {
   role   = aws_iam_role.github_terraform[each.key].id
   policy = data.aws_iam_policy_document.role_permissions[each.key].json
 }
+
+import {
+  for_each = var.import_existing_github_oidc_provider ? {
+    existing = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/token.actions.githubusercontent.com"
+  } : {}
+  to = aws_iam_openid_connect_provider.github[0]
+  id = each.value
+}
