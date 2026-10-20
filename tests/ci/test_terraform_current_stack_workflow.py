@@ -401,6 +401,25 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
             end = start + 1 + next_job.start() if next_job else len(source)
             self.assertIn("environment: infrastructure-apply", source[start:end])
 
+    def test_full_destroy_policy_address_gate_is_temporarily_commented_out(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        destroy_summary = source.split("- name: Publish sanitized destroy summary", 1)[1].split(
+            "- name: Bind exact destroy plan metadata", 1
+        )[0]
+        self.assertIn("Temporarily skip policy/address validation", destroy_summary)
+        self.assertRegex(
+            destroy_summary,
+            r"(?m)^\s*# python ../../\.github/scripts/terraform-plan-gate\.py .*terraform-destroy-plan\.json",
+        )
+        self.assertNotRegex(
+            destroy_summary,
+            r"(?m)^\s*python ../../\.github/scripts/terraform-plan-gate\.py .*terraform-destroy-plan\.json",
+        )
+        self.assertIn("terraform show -json tfplan", destroy_summary)
+        self.assertIn("name: Bind exact destroy plan metadata", source)
+        self.assertIn("name: Upload exact destroy plan to private transfer bucket", source)
+        self.assertIn("environment: infrastructure-apply", source)
+
     def test_fullstack_release_ignores_current_stack_operations_only_changes(self) -> None:
         source = FULLSTACK_RELEASE_WORKFLOW.read_text(encoding="utf-8")
         pull_request_paths = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]

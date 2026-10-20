@@ -240,17 +240,16 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertNotIn("private-policy-body-marker", result.stdout)
         self.assertNotIn("private-id", result.stdout)
 
-    def test_oidc_provider_stays_app_root_owned_until_later_transfer(self) -> None:
+    def test_oidc_provider_is_retained_for_bootstrap_owned_github_actions(self) -> None:
         source = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
         variables = (ROOT / "infra/terraform/variables.tf").read_text(encoding="utf-8")
         policy_design = (ROOT / "infra/terraform/iam-bootstrap/POLICY_DESIGN.md").read_text(encoding="utf-8")
-        self.assertIn('resource "aws_iam_openid_connect_provider" "github"', source)
-        resource_start = source.index('resource "aws_iam_openid_connect_provider" "github"')
-        resource_end = source.index("locals {", resource_start)
-        self.assertNotIn("count", source[resource_start:resource_end])
-        self.assertIn("aws_iam_openid_connect_provider.github.arn", source)
-        self.assertNotIn("removed {\n  from = aws_iam_openid_connect_provider.github", source)
+        self.assertIn('data "aws_iam_openid_connect_provider" "github"', source)
+        self.assertIn("from = aws_iam_openid_connect_provider.github", source)
+        self.assertIn("destroy = false", source)
+        self.assertIn("data.aws_iam_openid_connect_provider.github.arn", source)
         self.assertNotIn('variable "manage_github_oidc_provider"', variables)
+        self.assertIn("import the provider", source)
         self.assertIn("After the bootstrap has imported the publisher roles", policy_design)
 
     def test_workflow_runs_refresh_only_before_the_destroy_preparation_plan(self) -> None:

@@ -188,13 +188,22 @@ resource "aws_route53_record" "site_aaaa" {
   }
 }
 
-resource "aws_iam_openid_connect_provider" "github" {
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+# Keep GitHub OIDC available for the bootstrap-owned Terraform roles while the
+# application root is destroyed. A later bootstrap plan can import the provider.
+removed {
+  from = aws_iam_openid_connect_provider.github
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 locals {
-  github_oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
+  github_oidc_provider_arn = data.aws_iam_openid_connect_provider.github.arn
 }
 
 data "aws_iam_policy_document" "github_deploy_assume_role" {
