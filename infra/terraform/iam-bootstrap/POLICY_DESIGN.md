@@ -33,7 +33,9 @@ This draft preserves the existing environment-isolation requirement and selects 
 
 The identity state key is `pawlocal/identity/terraform.tfstate`. Its plan role can read the exact development and production state objects for foundation outputs and can write only its own lock; its apply role can write only the identity state and lock. Both use an identity-specific saved-plan prefix.
 
-The identity apply role can manage only three fixed app role ARNs: development and production frontend publisher roles, and the development DSQL runtime role. It cannot create or edit policy documents, attach arbitrary managed policies, change the permissions boundary, pass roles, or delete roles. It can attach/detach only the matching bootstrap-owned managed policy to each exact role. Every role it creates must use the bootstrap-owned `pawlocal-app-role-boundary` policy.
+The IAM bootstrap state owns the three application roles and their trust documents: development and production frontend publisher roles trust only their exact GitHub Environment OIDC subject, and the development DSQL runtime role trusts the exact Lightsail principal plus the `development-seed` OIDC subject. The runtime role is created only after its exact Lightsail `principal_arn` is supplied from the foundation output. All three roles receive the bootstrap-owned `pawlocal-app-role-boundary` at creation.
+
+The identity apply role cannot create roles, change trust documents, set or remove permissions boundaries, pass roles, or delete roles. It can attach/detach only the matching bootstrap-owned managed policy to each exact role. This keeps GitHub trust and role ownership in the separately controlled bootstrap state while the identity state owns only policy attachments.
 
 The bootstrap-owned fixed policies grant only:
 
@@ -47,7 +49,7 @@ After environment foundation outputs exist, pass the exact bucket, distribution,
 
 - Aurora DSQL automatically creates the service-linked role `AWSServiceRoleForAuroraDsql` when a cluster is first created. The bootstrap state manages it with `aws_iam_service_linked_role`; it is excluded from app roles and legacy recovery ownership. If it already exists, set `import_existing_dsql_service_linked_role=true` for the reviewed bootstrap plan. A conditional Terraform `import` block targets the fixed service-linked-role ARN; leave the variable false when the role does not exist. Review the import plan before applying.
 - The Lightsail create grants use `Resource="*"` with request tags because those create APIs do not support a resource ARN or a create-time name condition. The fixed MVP budget and protected apply approval remain required; a tighter IAM boundary is not available for that create call.
-- The existing fullstack module still defines app IAM roles in PR #113's current code. Environment applies cannot succeed until that ownership is removed and the identity root consumes the foundation outputs as designed.
+- The existing fullstack module still defines app IAM roles in PR #113's current code. The planned recovery destroy must remove these legacy roles before bootstrap creates the new bootstrap-owned roles. Environment applies cannot succeed until the identity root consumes bootstrap role and policy outputs and manages only policy attachments.
 - No recovery/delete role grants are included. Exact legacy resource IDs, DSQL deletion protection handling, and non-empty/versioned S3 cleanup require a separate reviewed plan.
 - GitHub's immutable OIDC subject customization and GitHub Environment protections must be verified before publishing role ARNs.
 

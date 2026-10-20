@@ -122,6 +122,16 @@ variable "development_dsql_cluster_arn" {
   }
 }
 
+variable "development_lightsail_principal_arn" {
+  description = "Exact principal_arn output from the development Lightsail container service. Leave empty until the foundation exists; bootstrap then creates the runtime role with exact Lightsail and development-seed trust."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.development_lightsail_principal_arn == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", var.development_lightsail_principal_arn))
+    error_message = "development_lightsail_principal_arn must be empty or an IAM role ARN returned as the exact Lightsail principal_arn."
+  }
+}
+
 variable "import_existing_dsql_service_linked_role" {
   description = "Set true for the reviewed bootstrap plan when AWS already has AWSServiceRoleForAuroraDsql; Terraform will import its fixed ARN instead of creating a duplicate. Leave false when the role does not exist."
   type        = bool
