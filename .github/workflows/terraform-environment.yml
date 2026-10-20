@@ -49,7 +49,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TERRAFORM_VERSION: 1.10.5
+  TERRAFORM_VERSION: 1.14.3
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}

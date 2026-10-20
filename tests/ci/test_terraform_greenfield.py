@@ -24,6 +24,25 @@ def load_module(path: Path, name: str):
 
 
 class GreenfieldTerraformTests(unittest.TestCase):
+    def test_active_terraform_roots_and_workflows_pin_the_local_review_version(self) -> None:
+        version = "1.14.3"
+        for relative_path in (
+            "infra/terraform/iam-bootstrap/versions.tf",
+            "infra/terraform/environments/development/versions.tf",
+            "infra/terraform/environments/production/versions.tf",
+            "infra/terraform/modules/pawlocal-environment/versions.tf",
+        ):
+            with self.subTest(path=relative_path):
+                source = (ROOT / relative_path).read_text(encoding="utf-8")
+                self.assertIn(f'required_version = "= {version}"', source)
+
+        environment_workflow = (ROOT / ".github/workflows/terraform-environment.yml").read_text(
+            encoding="utf-8"
+        )
+        ci_workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
+        self.assertIn(f"TERRAFORM_VERSION: {version}", environment_workflow)
+        self.assertIn(f"terraform_version: {version}", ci_workflow)
+
     def test_roots_and_backend_keys_are_explicit_and_distinct(self) -> None:
         for environment in ("development", "production"):
             root = ROOT / f"infra/terraform/environments/{environment}"
