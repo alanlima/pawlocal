@@ -6,11 +6,8 @@ on:
       confirm_seed:
         description: "Confirm that this run may seed the development Aurora DSQL database"
         required: true
-        type: choice
-        options:
-          - NO
-          - YES
-        default: NO
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,7 +20,7 @@ concurrency:
 jobs:
   seed:
     name: Seed and verify development records
-    if: github.ref == 'refs/heads/main' && inputs.confirm_seed == 'YES'
+    if: github.ref == 'refs/heads/main' && inputs.confirm_seed == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: development-seed
@@ -47,7 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "Seed workflow must run from main." >&2; exit 1; }
-          [[ "$CONFIRM_SEED" == "YES" ]] || { echo "Explicit seed confirmation is required." >&2; exit 1; }
+          [[ "$CONFIRM_SEED" == "true" ]] || { echo "Explicit seed confirmation is required." >&2; exit 1; }
           [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]] || { echo "Development AWS account ID is missing or invalid." >&2; exit 1; }
           [[ "$PAWLOCAL_DSQL_SEED_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-development-dsql-runtime" ]] || { echo "Seed role must be the development DSQL runtime role in the configured account." >&2; exit 1; }
           [[ "$PAWLOCAL_DSQL_ENDPOINT" =~ ^[a-z0-9-]+\.dsql\.ap-southeast-2\.on\.aws$ ]] || { echo "Endpoint must be an Aurora DSQL endpoint in ap-southeast-2." >&2; exit 1; }
