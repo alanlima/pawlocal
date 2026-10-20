@@ -16,9 +16,8 @@ Set the following Environment variables in **both** environments:
 - `PAWLOCAL_TF_STATE_BUCKET` — existing Terraform state bucket.
 - `PAWLOCAL_DOMAIN_NAME` — current Route 53 zone name.
 - `PAWLOCAL_CERTIFICATE_ARN` — current CloudFront certificate ARN.
-- `PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON` — development/production public key map matching the current state.
-- `PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON` — development/production CIDR map matching the current state.
-- `PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON` — development/production immutable image digest map matching the current state.
+
+Do not configure SSH public-key/CIDR maps or a backend image digest map for these workflows. The current Terraform root no longer declares the SSH inputs. After `terraform init`, each AWS-enabled job reads `terraform output -json environment_targets`, extracts the development and production `api_backend_image` values, validates that both are immutable PawLocal GHCR digests, and exports `TF_VAR_backend_image_digests` for the following Terraform command. This requires the existing state to contain the `environment_targets` output; if that output is absent or invalid, the workflow stops before planning or applying.
 
 Set these Environment secrets in **both** environments, using the same values:
 

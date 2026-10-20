@@ -69,10 +69,7 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
       TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: ${{ inputs.operation == 'destroy' && 'true' || 'false' }}
@@ -92,17 +89,6 @@ jobs:
           test -n "$PAWLOCAL_TF_STATE_BUCKET"
           test -n "$TF_VAR_domain_name"
           test -n "$TF_VAR_certificate_arn"
-          test -n "$TF_VAR_backend_image_digests"
-          python - <<'PY'
-          import json, os
-          for name in ("TF_VAR_deploy_ssh_public_keys", "TF_VAR_ssh_cidr_blocks", "TF_VAR_backend_image_digests"):
-              value = json.loads(os.environ[name])
-              if not isinstance(value, dict):
-                  raise SystemExit(f"{name} must be a JSON object")
-          for name in ("TF_VAR_deploy_ssh_public_keys", "TF_VAR_ssh_cidr_blocks"):
-              if set(json.loads(os.environ[name])) != {"development", "production"}:
-                  raise SystemExit(f"{name} must contain development and production")
-          PY
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
@@ -143,6 +129,16 @@ jobs:
               echo 'Terraform initialization failed; raw provider output was withheld.' >&2
               exit 1
             }
+
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
 
       - name: Create the requested plan
         id: plan
@@ -279,10 +275,7 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
       TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "false"
@@ -355,6 +348,16 @@ jobs:
         shell: bash
         run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
 
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
+
       - name: Apply exact reviewed plan
         working-directory: infra/terraform
         shell: bash
@@ -379,10 +382,7 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
       TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
@@ -454,6 +454,16 @@ jobs:
         shell: bash
         run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
 
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
+
       - name: Apply exact teardown preparation plan
         working-directory: infra/terraform
         shell: bash
@@ -478,10 +488,7 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
       TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
@@ -518,7 +525,7 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Initialize and plan full destruction
+      - name: Initialize existing combined state
         working-directory: infra/terraform
         shell: bash
         run: |
@@ -531,6 +538,21 @@ jobs:
               echo 'Terraform initialization failed; raw provider output was withheld.' >&2
               exit 1
             }
+
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
+
+      - name: Plan full destruction
+        working-directory: infra/terraform
+        shell: bash
+        run: |
           if ! terraform plan -destroy -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-destroy-plan.log" 2>&1; then
             echo 'Terraform destroy planning failed; raw provider output was withheld.' >&2
             exit 1
@@ -602,10 +624,7 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
-      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
       TF_VAR_manage_github_oidc_provider: "true"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
@@ -676,6 +695,16 @@ jobs:
         working-directory: infra/terraform
         shell: bash
         run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
+
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
 
       - name: Apply exact reviewed destroy plan
         working-directory: infra/terraform
