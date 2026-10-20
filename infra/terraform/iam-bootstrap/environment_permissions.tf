@@ -191,6 +191,28 @@ data "aws_iam_policy_document" "environment_service_apply" {
   }
 
   statement {
+    sid       = "TagAccountCloudFrontDistributionsForMVP"
+    effect    = "Allow"
+    actions   = ["cloudfront:TagResource"]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [each.key]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
+  }
+
+  statement {
     sid    = "UpdateOnlyTaggedEnvironmentCloudFrontResources"
     effect = "Allow"
     actions = [
