@@ -416,6 +416,8 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
             r"(?m)^\s*python ../../\.github/scripts/terraform-plan-gate\.py .*terraform-destroy-plan\.json",
         )
         self.assertIn("terraform show -json tfplan", destroy_summary)
+        self.assertIn("terraform-destroy-summary.py", destroy_summary)
+        self.assertIn("This inventory reports actions only", destroy_summary)
         self.assertIn("name: Bind exact destroy plan metadata", source)
         self.assertIn("name: Upload exact destroy plan to private transfer bucket", source)
         self.assertIn("environment: infrastructure-apply", source)
