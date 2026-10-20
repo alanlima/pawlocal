@@ -82,6 +82,12 @@ variable "manage_github_oidc_provider" {
   default     = true
 }
 
+variable "force_destroy_on_teardown" {
+  description = "Allow an explicitly approved Terraform teardown to empty app-owned S3 buckets and remove Aurora DSQL clusters with deletion protection enabled. Leave false for normal operation."
+  type        = bool
+  default     = false
+}
+
 variable "backend_image_digests" {
   description = "Environment-keyed immutable public GHCR image references. Development and production must use the same digest when promoting a release."
   type        = map(string)

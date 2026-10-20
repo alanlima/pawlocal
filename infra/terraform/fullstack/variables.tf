@@ -71,6 +71,12 @@ variable "backend_image_digests" {
   }
 }
 
+variable "force_destroy_on_teardown" {
+  description = "Allow an explicitly approved Terraform teardown to empty app-owned S3 buckets and remove Aurora DSQL clusters with deletion protection enabled. Leave false for normal operation."
+  type        = bool
+  default     = false
+}
+
 variable "enable_dsql_auth_event_capture" {
   description = "Capture DSQL DbConnect data events in a dedicated CloudTrail trail. Adds metered data-event and storage charges; this is security audit logging, not application telemetry."
   type        = bool

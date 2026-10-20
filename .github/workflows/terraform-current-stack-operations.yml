@@ -1,0 +1,683 @@
+name: Terraform current stack operations
+run-name: PawLocal Terraform ${{ inputs.operation }} on the combined stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Apply the current root or tear down the current combined stack.
+        required: true
+        type: choice
+        options:
+          - apply
+          - destroy
+      confirmation:
+        description: Type APPLY PAWLOCAL or DESTROY PAWLOCAL to match the selected operation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# This temporary workflow owns the existing combined-state root only. Do not
+# cancel an active Terraform operation or run environment promotion here.
+concurrency:
+  # Match the release and rollback jobs that also apply against this state.
+  group: pawlocal-lightsail-deploy
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.10.5
+  TF_STATE_KEY: pawlocal/terraform.tfstate
+
+jobs:
+  validate-request:
+    name: Validate protected operation request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main and matching confirmation
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo 'This workflow may only run from main.' >&2
+            exit 1
+          }
+          case "$OPERATION:$CONFIRMATION" in
+            apply:'APPLY PAWLOCAL'|destroy:'DESTROY PAWLOCAL') ;;
+            *) echo 'Confirmation does not match the selected operation.' >&2; exit 1 ;;
+          esac
+
+  plan:
+    name: Plan apply or teardown preparation
+    needs: validate-request
+    runs-on: ubuntu-latest
+    environment: infrastructure-plan
+    outputs:
+      plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      plan_stage: ${{ steps.metadata.outputs.plan_stage }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_dsql_bootstrap_python: /usr/bin/python3
+      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
+      TF_VAR_manage_github_oidc_provider: "true"
+      TF_VAR_enable_dsql_auth_event_capture: "false"
+      TF_VAR_force_destroy_on_teardown: ${{ inputs.operation == 'destroy' && 'true' || 'false' }}
+    steps:
+      - name: Check out the dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate required environment configuration
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$AWS_REGION"
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          test -n "$PAWLOCAL_TF_STATE_BUCKET"
+          test -n "$TF_VAR_domain_name"
+          test -n "$TF_VAR_certificate_arn"
+          test -n "$TF_VAR_backend_image_digests"
+          python - <<'PY'
+          import json, os
+          for name in ("TF_VAR_deploy_ssh_public_keys", "TF_VAR_ssh_cidr_blocks", "TF_VAR_backend_image_digests"):
+              value = json.loads(os.environ[name])
+              if not isinstance(value, dict):
+                  raise SystemExit(f"{name} must be a JSON object")
+          for name in ("TF_VAR_deploy_ssh_public_keys", "TF_VAR_ssh_cidr_blocks"):
+              if set(json.loads(os.environ[name])) != {"development", "production"}:
+                  raise SystemExit(f"{name} must contain development and production")
+          PY
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize existing combined state
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='encrypt=true' \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
+              exit 1
+            }
+
+      - name: Create the requested plan
+        id: plan
+        working-directory: infra/terraform
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          if [[ "$OPERATION" == apply ]]; then
+            plan_stage=apply
+          else
+            # This first approved apply records the provider's teardown-only
+            # force_destroy behavior in state. It does not delete resources.
+            plan_stage=destroy-prepare
+          fi
+          if ! terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-plan.log" 2>&1; then
+            echo 'Terraform planning failed; raw provider output was withheld.' >&2
+            exit 1
+          fi
+          echo "plan_stage=$plan_stage" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sanitized resource and action summary
+        working-directory: infra/terraform
+        shell: bash
+        env:
+          PLAN_MODE: ${{ steps.plan.outputs.plan_stage == 'destroy' && 'destroy' || 'apply' }}
+          PLAN_STAGE: ${{ steps.plan.outputs.plan_stage }}
+        run: |
+          terraform show -json tfplan > "$RUNNER_TEMP/terraform-plan.json" 2>"$RUNNER_TEMP/terraform-show.log" || {
+            echo 'Terraform plan could not be safely rendered; raw output was withheld.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$PLAN_STAGE" == destroy-prepare ]]; then
+            python - "$RUNNER_TEMP/terraform-plan.json" <<'PY'
+          import json, os, sys
+          allowed = {
+              "aws_s3_bucket.site",
+              'module.fullstack.aws_s3_bucket.frontend["development"]',
+              'module.fullstack.aws_s3_bucket.frontend["production"]',
+              'module.fullstack.aws_dsql_cluster.app["development"]',
+              'module.fullstack.aws_dsql_cluster.app["production"]',
+          }
+          with open(sys.argv[1], encoding="utf-8") as source:
+              changes = json.load(source).get("resource_changes", [])
+          unexpected = []
+          for item in changes:
+              actions = item.get("change", {}).get("actions", [])
+              if actions == ["no-op"]:
+                  continue
+              before = item.get("change", {}).get("before") or {}
+              after = item.get("change", {}).get("after") or {}
+              address = item.get("address", "")
+              old = dict(before) if isinstance(before, dict) else before
+              new = dict(after) if isinstance(after, dict) else after
+              if isinstance(old, dict):
+                  old.pop("force_destroy", None)
+              if isinstance(new, dict):
+                  new.pop("force_destroy", None)
+              if address not in allowed or actions != ["update"] or old != new or after.get("force_destroy") is not True:
+                  unexpected.append((address, actions))
+          if unexpected:
+              print("Teardown preparation plan includes changes beyond force_destroy settings:", file=sys.stderr)
+              for address, actions in unexpected:
+                  print(f"- {address}: {actions}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+          fi
+
+      - name: Bind and upload exact plan for one day
+        id: metadata
+        working-directory: infra/terraform
+        shell: bash
+        env:
+          PLAN_STAGE: ${{ steps.plan.outputs.plan_stage }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
+          python - "$PLAN_STAGE" "$OPERATION" "$digest" <<'PY'
+          import json, os, sys
+          stage, operation, digest = sys.argv[1:]
+          value = {
+              "stage": stage,
+              "operation": operation,
+              "sha256": digest,
+              "commit": os.environ["GITHUB_SHA"],
+              "repository_id": os.environ["GITHUB_REPOSITORY_ID"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "state_key": os.environ["TF_STATE_KEY"],
+              "account_id": os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
+          }
+          with open("plan-metadata.json", "w", encoding="utf-8") as target:
+              json.dump(value, target, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as target:
+              target.write(f"plan_sha256={digest}\n")
+              target.write(f"plan_stage={stage}\n")
+          PY
+          printf 'Exact plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          # This repository is public. Encrypt the binary plan so the artifact
+          # contains no readable Terraform state/configuration values. The AWS
+          # secret key stays in the Environment secret store and is never written
+          # to Terraform inputs, metadata, logs, or the artifact.
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -pass env:AWS_SECRET_ACCESS_KEY -in tfplan -out tfplan.enc
+
+      - name: Upload exact saved plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-terraform-${{ inputs.operation }}-${{ steps.plan.outputs.plan_stage }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            infra/terraform/tfplan.enc
+            infra/terraform/plan-metadata.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  apply:
+    name: Apply reviewed exact plan
+    if: inputs.operation == 'apply'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: infrastructure-apply
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_dsql_bootstrap_python: /usr/bin/python3
+      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
+      TF_VAR_manage_github_oidc_provider: "true"
+      TF_VAR_enable_dsql_auth_event_capture: "false"
+      TF_VAR_force_destroy_on_teardown: "false"
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download exact plan
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-terraform-apply-apply-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
+
+      - name: Verify plan metadata and digest
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
+          python - "$EXPECTED_SHA256" <<'PY'
+          import hashlib, json, os, pathlib, sys
+          expected = {
+              "stage": "apply", "operation": "apply", "commit": os.environ["GITHUB_SHA"],
+              "repository_id": os.environ["GITHUB_REPOSITORY_ID"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "state_key": os.environ["TF_STATE_KEY"],
+              "account_id": os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
+          }
+          path = pathlib.Path("plan/plan-metadata.json")
+          metadata = json.loads(path.read_text(encoding="utf-8"))
+          if any(metadata.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Saved plan metadata does not match this approved run")
+          digest = hashlib.sha256(pathlib.Path("plan/tfplan").read_bytes()).hexdigest()
+          if digest != sys.argv[1] or digest != metadata.get("sha256"):
+              raise SystemExit("Saved Terraform plan digest mismatch")
+          PY
+
+      - name: Set up Terraform and initialize current state
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize existing combined state
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
+
+      - name: Apply exact reviewed plan
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform apply -input=false -lock-timeout=5m -auto-approve ../../plan/tfplan
+
+  prepare-destroy:
+    name: Apply approved teardown preparation
+    if: inputs.operation == 'destroy'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: infrastructure-apply
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_dsql_bootstrap_python: /usr/bin/python3
+      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
+      TF_VAR_manage_github_oidc_provider: "true"
+      TF_VAR_enable_dsql_auth_event_capture: "false"
+      TF_VAR_force_destroy_on_teardown: "true"
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download teardown preparation plan
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-terraform-destroy-destroy-prepare-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
+
+      - name: Verify plan metadata and digest
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
+          python - "$EXPECTED_SHA256" <<'PY'
+          import hashlib, json, os, pathlib, sys
+          expected = {
+              "stage": "destroy-prepare", "operation": "destroy", "commit": os.environ["GITHUB_SHA"],
+              "repository_id": os.environ["GITHUB_REPOSITORY_ID"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "state_key": os.environ["TF_STATE_KEY"],
+              "account_id": os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
+          }
+          metadata = json.loads(pathlib.Path("plan/plan-metadata.json").read_text(encoding="utf-8"))
+          if any(metadata.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Saved plan metadata does not match this approved run")
+          digest = hashlib.sha256(pathlib.Path("plan/tfplan").read_bytes()).hexdigest()
+          if digest != sys.argv[1] or digest != metadata.get("sha256"):
+              raise SystemExit("Saved Terraform plan digest mismatch")
+          PY
+
+      - name: Set up Terraform and initialize current state
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize existing combined state
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
+
+      - name: Apply exact teardown preparation plan
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform apply -input=false -lock-timeout=5m -auto-approve ../../plan/tfplan
+
+  destroy-plan:
+    name: Plan destruction of the combined stack
+    if: inputs.operation == 'destroy'
+    needs: prepare-destroy
+    runs-on: ubuntu-latest
+    environment: infrastructure-plan
+    outputs:
+      plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_dsql_bootstrap_python: /usr/bin/python3
+      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
+      TF_VAR_manage_github_oidc_provider: "true"
+      TF_VAR_enable_dsql_auth_event_capture: "false"
+      TF_VAR_force_destroy_on_teardown: "true"
+    steps:
+      - name: Check out the same approved commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize and plan full destruction
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='encrypt=true' \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
+              exit 1
+            }
+          if ! terraform plan -destroy -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-destroy-plan.log" 2>&1; then
+            echo 'Terraform destroy planning failed; raw provider output was withheld.' >&2
+            exit 1
+          fi
+
+      - name: Publish sanitized destroy summary
+        working-directory: infra/terraform
+        shell: bash
+        env:
+          PLAN_MODE: destroy
+        run: |
+          terraform show -json tfplan > "$RUNNER_TEMP/terraform-destroy-plan.json" 2>"$RUNNER_TEMP/terraform-show.log" || {
+            echo 'Terraform destroy plan could not be safely rendered; raw output was withheld.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-destroy-plan.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bind and upload exact destroy plan
+        id: metadata
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
+          python - "$digest" <<'PY'
+          import json, os, sys
+          value = {
+              "stage": "destroy", "operation": "destroy", "sha256": sys.argv[1],
+              "commit": os.environ["GITHUB_SHA"], "repository_id": os.environ["GITHUB_REPOSITORY_ID"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "state_key": os.environ["TF_STATE_KEY"],
+              "account_id": os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
+          }
+          with open("destroy-plan-metadata.json", "w", encoding="utf-8") as target:
+              json.dump(value, target, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as target:
+              target.write(f"plan_sha256={sys.argv[1]}\n")
+          PY
+          printf 'Exact destroy plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -pass env:AWS_SECRET_ACCESS_KEY -in tfplan -out tfplan.enc
+
+      - name: Upload exact destroy plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: pawlocal-terraform-destroy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            infra/terraform/tfplan.enc
+            infra/terraform/destroy-plan-metadata.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  destroy:
+    name: Apply reviewed full-stack destroy
+    if: inputs.operation == 'destroy'
+    needs: destroy-plan
+    runs-on: ubuntu-latest
+    environment: infrastructure-apply
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_deploy_ssh_public_keys: ${{ vars.PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON }}
+      TF_VAR_ssh_cidr_blocks: ${{ vars.PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON }}
+      TF_VAR_dsql_bootstrap_python: /usr/bin/python3
+      TF_VAR_backend_image_digests: ${{ vars.PAWLOCAL_BACKEND_IMAGE_DIGESTS_JSON }}
+      TF_VAR_manage_github_oidc_provider: "true"
+      TF_VAR_enable_dsql_auth_event_capture: "false"
+      TF_VAR_force_destroy_on_teardown: "true"
+    steps:
+      - name: Check out the destroy-plan commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download exact destroy plan
+        uses: actions/download-artifact@v4
+        with:
+          name: pawlocal-terraform-destroy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
+
+      - name: Verify exact destroy plan metadata and digest
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ needs.destroy-plan.outputs.plan_sha256 }}
+        run: |
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass env:AWS_SECRET_ACCESS_KEY -in plan/tfplan.enc -out plan/tfplan
+          python - "$EXPECTED_SHA256" <<'PY'
+          import hashlib, json, os, pathlib, sys
+          expected = {
+              "stage": "destroy", "operation": "destroy", "commit": os.environ["GITHUB_SHA"],
+              "repository_id": os.environ["GITHUB_REPOSITORY_ID"], "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"], "state_key": os.environ["TF_STATE_KEY"],
+              "account_id": os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
+          }
+          metadata = json.loads(pathlib.Path("plan/destroy-plan-metadata.json").read_text(encoding="utf-8"))
+          if any(metadata.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Saved destroy plan metadata does not match this approved run")
+          digest = hashlib.sha256(pathlib.Path("plan/tfplan").read_bytes()).hexdigest()
+          if digest != sys.argv[1] or digest != metadata.get("sha256"):
+              raise SystemExit("Saved Terraform destroy plan digest mismatch")
+          PY
+
+      - name: Set up Terraform and initialize current state
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize existing combined state
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform init -input=false -reconfigure -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
+
+      - name: Apply exact reviewed destroy plan
+        working-directory: infra/terraform
+        shell: bash
+        run: terraform apply -input=false -lock-timeout=5m -auto-approve ../../plan/tfplan
