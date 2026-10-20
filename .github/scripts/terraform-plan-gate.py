@@ -41,9 +41,15 @@ def find_account(module):
     return None
 
 
-actual_account = find_account(plan.get("planned_values", {}).get("root_module", {}))
+account_values = (
+    plan.get("prior_state", {}).get("values", {}).get("root_module", {})
+    if mode == "destroy"
+    else plan.get("planned_values", {}).get("root_module", {})
+)
+actual_account = find_account(account_values)
 if actual_account != expected_account:
-    raise SystemExit("Terraform resolved a different AWS account than configured")
+    source = "prior Terraform state" if mode == "destroy" else "planned values"
+    raise SystemExit(f"Terraform {source} has a different or missing AWS account than configured")
 
 
 def declared_resource_names(folder):

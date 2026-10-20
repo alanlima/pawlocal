@@ -1,6 +1,6 @@
 # Current-stack Terraform Actions
 
-This temporary workflow operates the existing combined Terraform root at `infra/terraform/` and its current state key, `pawlocal/terraform.tfstate`. It has no development-to-production promotion path. Use it only from `main`.
+This temporary workflow operates the existing combined Terraform root at `infra/terraform/` and its current state key, `pawlocal/terraform.tfstate`. It has no development-to-production promotion path. Use it only from `main`. It shares the `pawlocal-lightsail-deploy` GitHub Actions concurrency group with the full-stack development release, production promotion, and development rollback jobs, so none can invalidate a saved plan during an approval wait.
 
 ## GitHub Environment configuration
 
@@ -36,7 +36,7 @@ Use an AWS principal authorized to read and update the existing Terraform state 
 
 The repository is public, so workflow artifacts are downloadable by anyone with repository read access. Before upload, the workflow encrypts each binary plan with AES-256-CBC and PBKDF2, using `AWS_SECRET_ACCESS_KEY` as the passphrase. That secret stays in the Environment secret store and is not written into the plan metadata or artifact. The apply job decrypts the plan in its ephemeral runner and verifies its SHA-256 against the separate workflow job output before applying it. Artifacts expire after one day.
 
-Before a plan can be uploaded for approval, a shared gate requires Terraform to mark it applyable and complete, rejects errors or deferred changes, and verifies the target AWS account. The destroy plan must contain only deletions from resources declared in the current root or its `fullstack` module. Its review summary includes selected non-secret AWS identifiers (such as resource IDs, ARNs, bucket names, and cluster identifiers) so the owner can confirm the physical targets before approving. Unknown Terraform addresses or deletions without a reviewable identifier stop the workflow.
+Before a plan can be uploaded for approval, a shared gate requires Terraform to mark it applyable and complete, rejects errors or deferred changes, and verifies the target AWS account. Apply plans are checked against the caller identity in their planned values; full destroy plans are checked against the caller identity in the plan's prior state because their planned values represent an empty state. The destroy plan must contain only deletions from resources declared in the current root or its `fullstack` module. Its review summary includes selected non-secret AWS identifiers (such as resource IDs, ARNs, bucket names, and cluster identifiers) so the owner can confirm the physical targets before approving. Unknown Terraform addresses or deletions without a reviewable identifier stop the workflow.
 
 Plans are bound to the run, attempt, commit, operation, account, and state key, and applied with Terraform backend locking. The workflow invokes no AWS CLI and makes no infrastructure change outside Terraform.
 

@@ -22,7 +22,8 @@ permissions:
 # This temporary workflow owns the existing combined-state root only. Do not
 # cancel an active Terraform operation or run environment promotion here.
 concurrency:
-  group: pawlocal-infrastructure
+  # Match the release and rollback jobs that also apply against this state.
+  group: pawlocal-lightsail-deploy
   cancel-in-progress: false
 
 env:
