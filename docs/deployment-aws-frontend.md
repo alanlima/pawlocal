@@ -1,10 +1,12 @@
-# AWS deployment and full-stack release status
+# Historical AWS deployment and full-stack release record (non-actionable)
 
-The tracked `infra/terraform/` directory is the sole Terraform root and uses the existing `pawlocal/terraform.tfstate` S3 backend. It retains the existing production frontend bucket, CloudFront distribution, DNS records, and account GitHub OIDC provider in the same state. The `fullstack/` module has no backend of its own. Development and production APIs use separate Lightsail Container Services and Aurora DSQL clusters. Both frontend sites use private S3 buckets behind CloudFront Origin Access Control (OAC); visitors use the public CloudFront-backed domain rather than direct S3 URLs.
+> **Do not use this file as the Issue #135 deployment runbook.** It records the former combined-state implementation and dated runtime observations. The later legacy teardown was partial, so these statements do not establish current AWS resources, state ownership, or service availability. Issue #135 will define new bootstrap, development, and production roots and operator commands after implementation and review.
+
+At the time of this record, the tracked `infra/terraform/` directory was the sole Terraform root and used the `pawlocal/terraform.tfstate` S3 backend. The former `fullstack/` module had no backend of its own. This ownership model is superseded by DEC-008 and must not be reused for Issue #135.
 
 The owner accepted the Lightsail Container Service design through Issue #75 and explicitly authorized its state-backed AWS apply on 2026-10-19 after reviewing the estimated USD $50/month container cost before other stack costs and transfer. The migration replaced the Lightsail VM/static-IP API path with container services, managed endpoint TLS, Route 53 CNAME records, public digest-pinned GHCR images, and Terraform-managed deployment versions. Both Aurora DSQL clean-install baselines are recorded in the `pawlocal` schema and both API health routes and deployment digests are verified. Database-backed place queries still return HTTP 500, so live DSQL runtime compatibility, credential refresh, and the database query smoke criterion remain open. Two unused CLI-created DSQL access keys were deleted after CloudTrail and IAM checks.
 
-## AWS infrastructure ownership rule
+## Historical AWS infrastructure ownership rule
 
 Terraform configuration and the existing shared Terraform state are the only mechanism for creating, changing, replacing, or deleting AWS infrastructure. This covers compute and app deployments, databases, identity, DNS, certificates, networking, IAM, storage, and monitoring. AWS console, CLI, SDK, shell, and bootstrap scripts must not mutate infrastructure or Terraform state. Do not manually edit, import, or remove state bindings. CI may build and publish immutable artifacts; any AWS-side application deployment must be represented by a Terraform resource in the shared state. Runtime secrets must not be stored in Terraform state. An infrastructure migration requires a complete reviewed plan and explicit cost/provisioning approval.
 
@@ -30,7 +32,7 @@ Each backend image reference is pinned to a public GHCR SHA-256 digest. Developm
 
 The selected container sizing defaults are development `micro` (1 GiB) and production `medium` (2 GiB), scale one each. The API image and runtime configuration contain no AWS access keys or other secrets. Terraform records the image/deployment configuration; no CLI deployment command is used.
 
-## Prerequisites
+## Historical prerequisites
 
 - The existing versioned, encrypted state bucket and key `pawlocal/terraform.tfstate` in `ap-southeast-2`, with S3 lock files enabled.
 - A public Route 53 zone, the existing CloudFront ACM certificate in `us-east-1`, repository identity/immutable GitHub IDs, and the environment-scoped OIDC roles.
@@ -38,9 +40,9 @@ The selected container sizing defaults are development `micro` (1 GiB) and produ
 - The read-only integrated migration plan review recorded below. Regenerate and review a fresh plan before any apply; it must still preserve unrelated production frontend resources and state addresses and replace only the approved VM/static-IP path plus required deployment identity/DNS resources.
 - Live DSQL service-principal/database-role validation before production promotion. Do not treat offline tests or a Terraform plan as proof of runtime DSQL connectivity.
 
-## Initialize and review Terraform
+## Historical initialization and plan review
 
-From PowerShell at the repository root:
+The following command block is retained only to identify the former process. Do not run it for Issue #135.
 
 ```powershell
 Copy-Item infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
@@ -68,7 +70,7 @@ The 16 deletions are the two Lightsail VMs, public-port configurations, static I
 
 The apply preserved the existing production frontend bucket, CloudFront distribution, frontend DNS aliases, state backend, account OIDC provider, DSQL clusters, and Cognito pools/clients. It removed the two API VMs, their public-port configurations and static IPs, the legacy app IAM users/policies, and temporary-ingress roles/policies. It created both container services and active deployment versions using the same image digest, `sha256:cc54cd9dab3b0e2210ad07e8f01d3e4dc9b0e4036a9ff826661e046f29598873`, plus Lightsail certificates, validation records, DSQL cluster policies, and scoped Terraform deployment roles. Both public `/health` routes returned HTTP 200. Both `/api/v1/places?limit=1` queries returned HTTP 500, so DSQL runtime compatibility, credential refresh, and the database-backed smoke criterion remain unverified. The migration was authorized in the owner’s Issue #75 comment. The pinned AWS provider's Route 53 record update path batches deletion of the prior record type and creation of the new type in one change batch ([provider v6.69.1 source](https://github.com/hashicorp/terraform-provider-aws/blob/v6.69.1/internal/service/route53/record.go#L3399-L3422)).
 
-## GitHub release configuration
+## Historical GitHub release configuration
 
 Development and production environments provide `AWS_REGION`, `PAWLOCAL_DEPLOY_ROLE_ARN`, `PAWLOCAL_TERRAFORM_ROLE_ARN`, `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_DOMAIN_NAME`, `PAWLOCAL_CERTIFICATE_ARN`, frontend bucket/distribution IDs, API health/public URLs, DSQL nonsecret configuration, and public Cognito settings. The Terraform role needs access to the existing state and the reads/actions required to plan and deploy only the environment's Lightsail container deployment. The frontend role is limited to publishing frontend artifacts and invalidating its distribution. Do not configure SSH private keys or DSQL access-key secrets for these workflows.
 
@@ -76,7 +78,7 @@ The release script uses the Terraform state output as the source of the other en
 
 Public verification checks the frontend HTML, API health endpoint, and a valid public places-page response. This is a query smoke, not proof of authenticated create/read persistence. Release evidence records the commit, backend image digest, frontend artifact digest, DSQL migration identifier, telemetry setting, and smoke results. Development seeding is currently disabled until a container-compatible, audited mechanism is implemented; no SSH fallback is allowed.
 
-## Release rollback and recovery
+## Historical release rollback and recovery
 
 For an application-release failure, stop further promotion and identify the last previously verified development deployment. In **Actions → Roll Back Development Release**, dispatch from `main` with that release's full commit SHA. The workflow requires a successful main-branch release run, a successful development deployment record, and an unexpired release artifact; it reapplies the exact recorded backend image and frontend archive through the existing Terraform state and then runs public health/query checks. If verification fails, keep promotion stopped and record the release digest and failing checks.
 
@@ -84,7 +86,7 @@ For production, use **Deploy Production** with the commit of the previously succ
 
 These procedures restore application versions only. They do not roll back DSQL schema/data, recover lost database content, or guarantee recovery from infrastructure failure. Keep migrations backward-compatible during promotion; if the failure involves data/schema state or both previous images fail, stop and follow the approved recovery decision/runbook under [Issue #44](https://github.com/alanlima/pawlocal/issues/44). Terraform-managed infrastructure migration rollback requires a separately reviewed state-backed plan and explicit approval; never use manual state edits or out-of-band AWS changes.
 
-## Costs and cleanup
+## Historical costs and cleanup
 
 The selected Lightsail Container Service powers are estimated at USD $10/month for development micro and $40/month for production medium (USD $50 total), each at scale one and including the published transfer allowance. The owner authorized this migration after seeing that estimate. It excludes the existing frontend, DSQL usage, backups/audit events, taxes, and transfer overage; monitor actual account costs and recheck before changing service sizes or adding resources.
 
