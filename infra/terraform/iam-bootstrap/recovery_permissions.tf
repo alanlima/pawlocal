@@ -7,7 +7,7 @@ variable "enable_legacy_recovery_destroy" {
 }
 
 variable "legacy_recovery_resource_arns" {
-  description = "Exact resource ARNs and DNS names from the reviewed legacy destroy plan. Leave empty until that inventory is known."
+  description = "Exact resource ARNs and DNS name/type pairs from the reviewed legacy destroy plan. Leave empty until that inventory is known."
   type = object({
     frontend_buckets             = list(string)
     cloudfront_distributions     = list(string)
@@ -17,7 +17,7 @@ variable "legacy_recovery_resource_arns" {
     lightsail_container_services = list(string)
     lightsail_certificates       = list(string)
     cognito_user_pools           = list(string)
-    route53_record_names         = list(string)
+    route53_records              = list(object({ name = string, type = string }))
   })
   default = {
     frontend_buckets             = []
@@ -28,7 +28,7 @@ variable "legacy_recovery_resource_arns" {
     lightsail_container_services = []
     lightsail_certificates       = []
     cognito_user_pools           = []
-    route53_record_names         = []
+    route53_records              = []
   }
   validation {
     condition = alltrue(flatten([
@@ -54,9 +54,9 @@ variable "legacy_recovery_resource_arns" {
       length(distinct(var.legacy_recovery_resource_arns.lightsail_container_services)) == length(var.legacy_recovery_resource_arns.lightsail_container_services),
       length(distinct(var.legacy_recovery_resource_arns.lightsail_certificates)) == length(var.legacy_recovery_resource_arns.lightsail_certificates),
       length(distinct(var.legacy_recovery_resource_arns.cognito_user_pools)) == length(var.legacy_recovery_resource_arns.cognito_user_pools),
-      length(distinct(var.legacy_recovery_resource_arns.route53_record_names)) == length(var.legacy_recovery_resource_arns.route53_record_names)
+      length(distinct(var.legacy_recovery_resource_arns.route53_records)) == length(var.legacy_recovery_resource_arns.route53_records)
     ])
-    error_message = "Recovery inventory entries must be distinct; duplicate ARNs or DNS names are not accepted."
+    error_message = "Recovery inventory entries must be distinct; duplicate ARNs or DNS name/type pairs are not accepted."
   }
   validation {
     condition = alltrue([
@@ -80,10 +80,10 @@ variable "legacy_recovery_resource_arns" {
   }
   validation {
     condition = alltrue([
-      for name in var.legacy_recovery_resource_arns.route53_record_names :
-      name == lower(name) && !strcontains(name, "*") && !strcontains(name, "?") && endswith(name, ".${trimsuffix(var.domain_name, ".")}")
+      for record in var.legacy_recovery_resource_arns.route53_records :
+      record.name == lower(record.name) && record.name == trimsuffix(record.name, ".") && !strcontains(record.name, "*") && !strcontains(record.name, "?") && endswith(record.name, ".${trimsuffix(var.domain_name, ".")}") && contains(["A", "AAAA", "CNAME"], record.type)
     ])
-    error_message = "Recovery DNS names must be exact lowercase names under the configured domain."
+    error_message = "Recovery DNS entries must be exact lowercase names under the configured domain and use A, AAAA, or CNAME records."
   }
   validation {
     condition = !var.enable_legacy_recovery_destroy || (
@@ -95,9 +95,27 @@ variable "legacy_recovery_resource_arns" {
       length(var.legacy_recovery_resource_arns.lightsail_container_services) == 2 &&
       length(var.legacy_recovery_resource_arns.lightsail_certificates) == 2 &&
       length(var.legacy_recovery_resource_arns.cognito_user_pools) == 2 &&
-      length(var.legacy_recovery_resource_arns.route53_record_names) == 6
+      length(var.legacy_recovery_resource_arns.route53_records) == 8 &&
+      alltrue([for expected in [
+        { name = "pawlocal.${trimsuffix(var.domain_name, ".")}", type = "A" },
+        { name = "pawlocal.${trimsuffix(var.domain_name, ".")}", type = "AAAA" },
+        { name = "pawlocal-dev.${trimsuffix(var.domain_name, ".")}", type = "A" },
+        { name = "pawlocal-dev.${trimsuffix(var.domain_name, ".")}", type = "AAAA" },
+        { name = "api-dev.${trimsuffix(var.domain_name, ".")}", type = "CNAME" },
+        { name = "api.${trimsuffix(var.domain_name, ".")}", type = "CNAME" }
+      ] : contains(var.legacy_recovery_resource_arns.route53_records, expected)]) &&
+      length([for record in var.legacy_recovery_resource_arns.route53_records : record if !contains([
+        "pawlocal.${trimsuffix(var.domain_name, ".")}|A",
+        "pawlocal.${trimsuffix(var.domain_name, ".")}|AAAA",
+        "pawlocal-dev.${trimsuffix(var.domain_name, ".")}|A",
+        "pawlocal-dev.${trimsuffix(var.domain_name, ".")}|AAAA",
+        "api-dev.${trimsuffix(var.domain_name, ".")}|CNAME",
+        "api.${trimsuffix(var.domain_name, ".")}|CNAME"
+      ], "${record.name}|${record.type}")]) == 2 &&
+      length([for record in var.legacy_recovery_resource_arns.route53_records : record if record.type == "CNAME" && endswith(record.name, ".api-dev.${trimsuffix(var.domain_name, ".")}") && can(regex("^_[A-Za-z0-9-]+$", trimsuffix(record.name, ".api-dev.${trimsuffix(var.domain_name, ".")}")))]) == 1 &&
+      length([for record in var.legacy_recovery_resource_arns.route53_records : record if record.type == "CNAME" && endswith(record.name, ".api.${trimsuffix(var.domain_name, ".")}") && can(regex("^_[A-Za-z0-9-]+$", trimsuffix(record.name, ".api.${trimsuffix(var.domain_name, ".")}")))]) == 1
     )
-    error_message = "Destroy grants require the complete tracked inventory: three frontend buckets/CDNs/OACs/functions; two each DSQL, Lightsail services/certificates, Cognito pools; and six DNS record names."
+    error_message = "Destroy grants require all tracked resources and exactly eight distinct DNS name/type pairs: the six fixed app records plus one exact CNAME validation record for each API certificate."
   }
 }
 
@@ -205,25 +223,29 @@ data "aws_iam_policy_document" "legacy_recovery_destroy" {
     actions   = ["cognito-idp:DeleteUserPool", "cognito-idp:DeleteUserPoolClient", "cognito-idp:DeleteUserPoolDomain"]
     resources = var.legacy_recovery_resource_arns.cognito_user_pools
   }
-  statement {
-    sid       = "DeleteOnlyReviewedLegacyDNSRecords"
-    effect    = "Allow"
-    actions   = ["route53:ChangeResourceRecordSets"]
-    resources = ["arn:aws:route53:::hostedzone/${var.route53_zone_id}"]
-    condition {
-      test     = "ForAllValues:StringEquals"
-      variable = "route53:ChangeResourceRecordSetsActions"
-      values   = ["DELETE"]
-    }
-    condition {
-      test     = "ForAllValues:StringEquals"
-      variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
-      values   = var.legacy_recovery_resource_arns.route53_record_names
-    }
-    condition {
-      test     = "ForAllValues:StringEquals"
-      variable = "route53:ChangeResourceRecordSetsRecordTypes"
-      values   = ["A", "AAAA", "CNAME"]
+  dynamic "statement" {
+    for_each = var.legacy_recovery_resource_arns.route53_records
+    iterator = record
+    content {
+      sid       = "DeleteReviewedLegacyDNSRecord${record.key}"
+      effect    = "Allow"
+      actions   = ["route53:ChangeResourceRecordSets"]
+      resources = ["arn:aws:route53:::hostedzone/${var.route53_zone_id}"]
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsActions"
+        values   = ["DELETE"]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+        values   = [record.value.name]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsRecordTypes"
+        values   = [record.value.type]
+      }
     }
   }
   statement {
