@@ -28,7 +28,7 @@ resource "random_id" "site_bucket_suffix" {
 
 resource "aws_s3_bucket" "site" {
   bucket        = "${local.name_prefix}-${random_id.site_bucket_suffix.hex}"
-  force_destroy = false
+  force_destroy = var.force_destroy_on_teardown
 }
 
 resource "aws_s3_bucket_ownership_controls" "site" {
@@ -292,6 +292,7 @@ module "fullstack" {
   # The existing root state owns the account-level provider; the child module reads it.
   manage_github_oidc_provider    = false
   backend_image_digests          = var.backend_image_digests
+  force_destroy_on_teardown      = var.force_destroy_on_teardown
   enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
   dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name
   dsql_auth_retention_days       = var.dsql_auth_retention_days
