@@ -15,6 +15,15 @@ on:
         description: Type APPLY PAWLOCAL or DESTROY PAWLOCAL to match the selected operation.
         required: true
         type: string
+      allow_expected_destroy_preparation_changes:
+        description: Allow the owner-approved teardown preparation changes for this destroy run only.
+        required: false
+        default: false
+        type: boolean
+      destroy_preparation_change_confirmation:
+        description: Type ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES only when enabling the destroy-only exception.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -40,6 +49,8 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           CONFIRMATION: ${{ inputs.confirmation }}
+          ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES: ${{ inputs.allow_expected_destroy_preparation_changes }}
+          DESTROY_PREPARATION_CHANGE_CONFIRMATION: ${{ inputs.destroy_preparation_change_confirmation }}
         run: |
           [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
             echo 'This workflow may only run from main.' >&2
@@ -49,6 +60,19 @@ jobs:
             apply:'APPLY PAWLOCAL'|destroy:'DESTROY PAWLOCAL') ;;
             *) echo 'Confirmation does not match the selected operation.' >&2; exit 1 ;;
           esac
+          if [[ "$ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES" == true ]]; then
+            [[ "$OPERATION" == destroy ]] || {
+              echo 'The teardown-preparation exception is available only for destroy.' >&2
+              exit 1
+            }
+            [[ "$DESTROY_PREPARATION_CHANGE_CONFIRMATION" == 'ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES' ]] || {
+              echo 'The teardown-preparation exception requires its exact typed confirmation.' >&2
+              exit 1
+            }
+          elif [[ -n "$DESTROY_PREPARATION_CHANGE_CONFIRMATION" ]]; then
+            echo 'The teardown-preparation confirmation requires the exception input to be enabled.' >&2
+            exit 1
+          fi
 
   plan:
     name: Plan apply or teardown preparation
@@ -227,9 +251,25 @@ jobs:
               "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
           fi
           python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$PLAN_STAGE" == destroy-prepare ]]; then
-            python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard
-          fi
+
+      - name: Enforce strict teardown-preparation change guard
+        if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes != true
+        working-directory: infra/terraform
+        shell: bash
+        run: python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard
+
+      - name: Confirm owner-approved teardown-preparation exception
+        if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes == true
+        shell: bash
+        env:
+          OPERATION: ${{ inputs.operation }}
+          CONFIRMATION: ${{ inputs.destroy_preparation_change_confirmation }}
+        run: |
+          [[ "$OPERATION" == destroy && "$CONFIRMATION" == 'ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES' ]] || {
+            echo 'The teardown-preparation exception confirmation is invalid.' >&2
+            exit 1
+          }
+          echo 'Owner-confirmed teardown-preparation updates will be reviewed in the protected apply environment.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Bind exact plan metadata
         id: metadata
@@ -543,9 +583,19 @@ jobs:
         shell: bash
         run: terraform apply -input=false -lock-timeout=5m -auto-approve ../../plan/tfplan
 
+      - name: Stop for publisher-role IAM bootstrap handoff
+        if: inputs.allow_expected_destroy_preparation_changes == true
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          ### Next required step before full destroy
+
+          This run applied only the approved teardown-preparation plan. Full destroy was intentionally skipped. Use the isolated IAM-bootstrap Terraform state to import the development and production publisher roles with `import_existing_frontend_publish_roles=true` and the exact four frontend bucket/distribution ARN inputs. Review and apply that saved bootstrap plan through its approved bootstrap procedure. Then dispatch this workflow again with the teardown-preparation exception disabled; the new run will create a fresh destroy plan and retain the `infrastructure-apply` approval gate.
+          EOF
+
   destroy-plan:
     name: Plan destruction of the combined stack
-    if: inputs.operation == 'destroy'
+    if: inputs.operation == 'destroy' && inputs.allow_expected_destroy_preparation_changes != true
     needs: prepare-destroy
     runs-on: ubuntu-latest
     environment: infrastructure-plan

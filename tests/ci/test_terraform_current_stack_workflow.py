@@ -376,6 +376,40 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 self.assertLess(credential_step, account_check)
                 self.assertLess(account_check, min(terraform_calls))
 
+    def test_destroy_preparation_exception_is_opt_in_typed_and_destroy_only(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        dispatch_inputs = source.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
+        self.assertIn("allow_expected_destroy_preparation_changes:", dispatch_inputs)
+        self.assertIn("default: false", dispatch_inputs)
+        self.assertIn("type: boolean", dispatch_inputs)
+        self.assertIn("destroy_preparation_change_confirmation:", dispatch_inputs)
+        self.assertIn("ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES", dispatch_inputs)
+        self.assertIn("ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES", source)
+        self.assertIn("The teardown-preparation exception is available only for destroy.", source)
+        self.assertIn("The teardown-preparation exception requires its exact typed confirmation.", source)
+
+    def test_exception_skips_only_preparation_guard_and_defers_full_destroy(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "python ../../.github/scripts/terraform-plan-gate.py \"$RUNNER_TEMP/terraform-plan.json\" >> \"$GITHUB_STEP_SUMMARY\"",
+            source,
+        )
+        self.assertIn(
+            "if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes != true",
+            source,
+        )
+        self.assertIn(
+            "if: inputs.operation == 'destroy' && inputs.allow_expected_destroy_preparation_changes != true",
+            source,
+        )
+        self.assertIn("Stop for publisher-role IAM bootstrap handoff", source)
+        self.assertIn("import_existing_frontend_publish_roles=true", source)
+        for job_name in ("prepare-destroy", "destroy"):
+            start = source.index(f"  {job_name}:\n")
+            next_job = re.search(r"(?m)^  [a-z][a-z-]+:\s*$", source[start + 1 :])
+            end = start + 1 + next_job.start() if next_job else len(source)
+            self.assertIn("environment: infrastructure-apply", source[start:end])
+
     def test_fullstack_release_ignores_current_stack_operations_only_changes(self) -> None:
         source = FULLSTACK_RELEASE_WORKFLOW.read_text(encoding="utf-8")
         pull_request_paths = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
