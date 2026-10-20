@@ -404,6 +404,10 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         )
         self.assertIn("Stop for publisher-role IAM bootstrap handoff", source)
         self.assertIn("import_existing_frontend_publish_roles=true", source)
+        self.assertIn("pawlocal-development-github-deploy", source)
+        self.assertIn("pawlocal-production-github-deploy", source)
+        self.assertIn("pawlocal-development-dsql-runtime", source)
+        self.assertIn("do not include it in this handoff", source)
         for job_name in ("prepare-destroy", "destroy"):
             start = source.index(f"  {job_name}:\n")
             next_job = re.search(r"(?m)^  [a-z][a-z-]+:\s*$", source[start + 1 :])

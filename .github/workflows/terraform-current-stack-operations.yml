@@ -590,7 +590,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           ### Next required step before full destroy
 
-          This run applied only the approved teardown-preparation plan. Full destroy was intentionally skipped. Use the isolated IAM-bootstrap Terraform state to import the development and production publisher roles with `import_existing_frontend_publish_roles=true` and the exact four frontend bucket/distribution ARN inputs. Review and apply that saved bootstrap plan through its approved bootstrap procedure. Then dispatch this workflow again with the teardown-preparation exception disabled; the new run will create a fresh destroy plan and retain the `infrastructure-apply` approval gate.
+          This run applied only the approved teardown-preparation plan. Full destroy was intentionally skipped. Complete the staged Terraform handoff for the GitHub OIDC frontend publisher roles `pawlocal-development-github-deploy` and `pawlocal-production-github-deploy`: import them into the isolated IAM-bootstrap state with `import_existing_frontend_publish_roles=true` and the exact four frontend bucket/distribution ARN inputs, then review and apply that saved bootstrap plan through its approved procedure. Keep the development application runtime role `pawlocal-development-dsql-runtime` managed by the fullstack app module; do not include it in this handoff or set `development_lightsail_principal_arn` for this stage. Then dispatch this workflow again with the teardown-preparation exception disabled; the new run will create a fresh destroy plan and retain the `infrastructure-apply` approval gate.
           EOF
 
   destroy-plan:
