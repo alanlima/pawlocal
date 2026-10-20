@@ -138,8 +138,8 @@ variable "import_existing_dsql_service_linked_role" {
   default     = false
 }
 
-variable "import_existing_frontend_publish_roles" {
-  description = "Leave false for the first bootstrap apply so this state creates neither of the existing frontend publisher roles. Set true only after the protected combined application root has detached both roles with removed blocks using destroy=false; a later bootstrap plan will then import and manage their trust and permissions boundaries."
+variable "import_existing_development_deploy_role" {
+  description = "Set true only for the reviewed bootstrap plan that declaratively imports the verified existing pawlocal-development-github-deploy role. Production is created normally; no application resource is imported."
   type        = bool
   default     = false
 }

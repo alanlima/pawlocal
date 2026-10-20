@@ -172,6 +172,7 @@ resource "aws_iam_role" "github_terraform" {
   name                 = each.value.role_name
   assume_role_policy   = data.aws_iam_policy_document.role_trust[each.key].json
   description          = "PawLocal Terraform ${each.value.purpose} role for ${each.value.environment}."
+  permissions_boundary = each.value.purpose == "apply" ? aws_iam_policy.environment_apply_boundary[each.value.environment].arn : null
   max_session_duration = 3600
   tags = {
     project     = "pawlocal"
@@ -324,37 +325,44 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
-    for_each = each.value.environment == "development" && (var.development_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "development")) ? [true] : each.value.environment == "production" && (var.production_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "production")) ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "ReadOnlyAssignedEnvironmentOAC"
+      sid       = "ManageOnlyMatchingEnvironmentPolicies"
       effect    = "Allow"
-      actions   = ["cloudfront:GetOriginAccessControl", "cloudfront:GetOriginAccessControlConfig"]
-      resources = [each.value.environment == "development" ? (each.value.purpose == "apply" && var.oac_create_environment == "development" ? "*" : var.development_oac_arn) : (each.value.purpose == "apply" && var.oac_create_environment == "production" ? "*" : var.production_oac_arn)]
+      actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:SetDefaultPolicyVersion"]
+      resources = local.environment_application_policy_arns[each.value.environment]
     }
   }
 
   dynamic "statement" {
-    for_each = each.value.purpose == "apply" && each.value.environment == var.oac_create_environment ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "CreateCloudFrontOriginAccessControl"
+      sid       = "AttachOnlyMatchingApplicationPolicyToApplyRole"
       effect    = "Allow"
-      actions   = ["cloudfront:CreateOriginAccessControl"]
-      resources = ["*"]
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-terraform-apply"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = [local.environment_application_policy_arns[each.value.environment][0]]
+      }
     }
   }
 
   dynamic "statement" {
-    for_each = each.value.purpose == "apply" && each.value.environment == "development" && var.development_oac_arn != "" ? [true] : each.value.purpose == "apply" && each.value.environment == "production" && var.production_oac_arn != "" ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "UpdateOrDeleteAssignedEnvironmentOAC"
+      sid       = "AttachOnlyMatchingPublishPolicyToPublishRole"
       effect    = "Allow"
-      actions   = ["cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl"]
-      resources = [each.value.environment == "development" ? var.development_oac_arn : var.production_oac_arn]
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-github-deploy"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = [local.environment_application_policy_arns[each.value.environment][1]]
+      }
     }
   }
-
-  # Other application mutations remain absent until their
-  # per-action resource and condition scopes are independently verified.
 }
 
 resource "aws_iam_role_policy" "github_terraform" {

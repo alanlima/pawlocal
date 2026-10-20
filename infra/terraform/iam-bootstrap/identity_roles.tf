@@ -34,7 +34,7 @@ locals {
       subject     = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:production"
     }
   }
-  managed_identity_app_role_specs = var.import_existing_frontend_publish_roles ? local.identity_app_role_specs : {}
+  managed_identity_app_role_specs = local.identity_app_role_specs
 }
 
 data "aws_iam_policy_document" "identity_app_role_trust" {
@@ -78,9 +78,11 @@ resource "aws_iam_role" "identity_app" {
 }
 
 import {
-  for_each = local.managed_identity_app_role_specs
-  to       = aws_iam_role.identity_app[each.key]
-  id       = each.value.name
+  for_each = var.import_existing_development_deploy_role ? {
+    development_frontend = local.identity_app_role_specs.development_frontend.name
+  } : {}
+  to = aws_iam_role.identity_app[each.key]
+  id = each.value
 }
 
 data "aws_iam_policy_document" "development_runtime_trust" {
