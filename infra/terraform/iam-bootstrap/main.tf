@@ -283,9 +283,9 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
-    for_each = each.value.purpose == "plan" ? [true] : []
+    for_each = contains(["development-plan", "production-plan"], each.key) ? [true] : []
     content {
-      sid    = "ReadExactApplyRolesForPromotionCheck"
+      sid    = "ReadMatchingExactApplyRoleForPromotionCheck"
       effect = "Allow"
       actions = [
         "iam:GetRole",
@@ -294,8 +294,7 @@ data "aws_iam_policy_document" "role_permissions" {
         "iam:ListAttachedRolePolicies"
       ]
       resources = [
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-terraform-apply",
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-apply"
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-terraform-apply"
       ]
     }
   }
