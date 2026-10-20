@@ -589,7 +589,7 @@ jobs:
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           ### IAM/bootstrap ownership deferred until recreation
 
-          Existing `destroy = false` lifecycle blocks continue to protect any GitHub publisher role released from the app state. IAM/bootstrap ownership work is deferred until recreation. The development application runtime role remains managed by the fullstack app module and is handled by the full destroy plan.
+          The existing `destroy = false` lifecycle block leaves the development GitHub publisher role in AWS when the app state releases it; this destroy does not remove that role. IAM/bootstrap ownership work is deferred until recreation. The development application runtime role remains managed by the fullstack app module and is handled by the full destroy plan.
           EOF
 
   destroy-plan:

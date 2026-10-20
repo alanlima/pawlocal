@@ -404,7 +404,8 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         )
         self.assertIn("Note deferred IAM bootstrap ownership work", source)
         self.assertIn("IAM/bootstrap ownership deferred until recreation", source)
-        self.assertIn("Existing `destroy = false` lifecycle blocks", source)
+        self.assertIn("destroy = false` lifecycle block leaves the development GitHub publisher role in AWS", source)
+        self.assertIn("this destroy does not remove that role", source)
         self.assertIn("handled by the full destroy plan", source)
         for job_name in ("prepare-destroy", "destroy"):
             start = source.index(f"  {job_name}:\n")
