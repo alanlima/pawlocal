@@ -422,15 +422,14 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         self.assertIn("name: Upload exact destroy plan to private transfer bucket", source)
         self.assertIn("environment: infrastructure-apply", source)
 
-    def test_fullstack_release_ignores_current_stack_operations_only_changes(self) -> None:
+    def test_legacy_fullstack_release_is_manual_and_fail_closed(self) -> None:
         source = FULLSTACK_RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        pull_request_paths = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
-        push_paths = source.split("  push:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
-        operations_workflow = '"!.github/workflows/terraform-current-stack-operations.yml"'
-        self.assertIn(operations_workflow, pull_request_paths)
-        self.assertIn(operations_workflow, push_paths)
-        self.assertIn('"!.github/workflows/fullstack-release.yml"', push_paths)
-        self.assertNotIn('"!.github/workflows/fullstack-release.yml"', pull_request_paths)
+        self.assertIn("  workflow_dispatch:", source)
+        self.assertNotIn("  pull_request:", source)
+        self.assertNotIn("  push:", source)
+        self.assertIn("Legacy combined-state deployment is disabled", source)
+        self.assertNotIn("configure-aws-credentials", source)
+        self.assertNotIn("terraform", source.lower().split("echo", 1)[0])
 
 
 if __name__ == "__main__":
