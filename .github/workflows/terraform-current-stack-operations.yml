@@ -29,7 +29,6 @@ concurrency:
 env:
   TERRAFORM_VERSION: 1.10.5
   TF_STATE_KEY: pawlocal/terraform.tfstate
-  PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
 
 jobs:
   validate-request:
@@ -63,6 +62,7 @@ jobs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
       plan_stage: ${{ steps.metadata.outputs.plan_stage }}
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -262,6 +262,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -367,6 +368,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -473,6 +475,7 @@ jobs:
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -594,6 +597,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
