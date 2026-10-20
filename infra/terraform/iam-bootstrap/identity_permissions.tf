@@ -24,6 +24,10 @@ locals {
       cluster_arn      = local.identity_production_cluster_arn
     }
   }
+  identity_app_role_boundary_descriptions = {
+    development = "Permissions ceiling for the three fixed PawLocal app identity roles."
+    production  = "Permissions ceiling for fixed PawLocal production publisher and runtime identity roles."
+  }
 }
 
 resource "aws_iam_service_linked_role" "dsql" {
@@ -113,7 +117,7 @@ resource "aws_iam_policy" "identity_app_role_boundary" {
   for_each = local.identity_environment_resources
 
   name        = each.key == "development" ? "pawlocal-app-role-boundary" : "pawlocal-${each.key}-app-role-boundary"
-  description = "Permissions ceiling for fixed PawLocal ${each.key} publisher and runtime identity roles."
+  description = local.identity_app_role_boundary_descriptions[each.key]
   policy      = data.aws_iam_policy_document.identity_app_role_boundary[each.key].json
 }
 
