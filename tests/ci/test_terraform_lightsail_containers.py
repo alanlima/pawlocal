@@ -25,16 +25,34 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     image = "ghcr.io/alanlima/pawlocal-api@sha256:" + "a" * 64
     account_id = "097922957316"
 
-    def test_dsql_cluster_policy_restores_lightsail_principal_and_db_user_condition(self) -> None:
+    def test_dsql_cluster_policy_uses_environment_runtime_principal_and_db_user_condition(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
         cluster_policy = terraform.split('resource "aws_dsql_cluster_policy" "api_connect" {', 1)[1].split('\n}', 1)[0]
         runtime_policy = terraform.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[1].split('\n}', 1)[0]
 
         self.assertIn('Action    = "dsql:DbConnectAdmin"', cluster_policy)
-        self.assertIn('Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }', cluster_policy)
+        self.assertIn('Principal = { AWS = local.dsql_app_principal_arns[each.key] }', cluster_policy)
         self.assertIn('Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }', cluster_policy)
+        app_principals = terraform.split("dsql_app_principal_arns = {", 1)[1].split("\n  }", 1)[0]
+        self.assertRegex(
+            app_principals,
+            r'environment\s*==\s*"development"\s*\?\s*'
+            r'aws_iam_role\.dsql_runtime\[environment\]\.arn\s*:\s*'
+            r'aws_lightsail_container_service\.api\[environment\]\.principal_arn',
+        )
         self.assertIn('Action   = "dsql:DbConnect"', runtime_policy)
         self.assertIn('Resource = aws_dsql_cluster.app[each.key].arn', runtime_policy)
+
+    def test_seed_workflow_oidc_trust_is_limited_to_development_environment(self) -> None:
+        terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        trust = terraform.split('data "aws_iam_policy_document" "dsql_runtime_trust" {', 1)[1]
+        trust = trust.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[0]
+
+        self.assertIn('for_each = each.key == "development" ? [1] : []', trust)
+        self.assertIn('actions = ["sts:AssumeRoleWithWebIdentity"]', trust)
+        self.assertIn('"token.actions.githubusercontent.com:aud"', trust)
+        self.assertIn('"token.actions.githubusercontent.com:sub"', trust)
+        self.assertIn(':environment:development-seed', trust)
 
     @staticmethod
     def plan(address: str, actions: list[str], image: str) -> dict:
@@ -356,12 +374,14 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertNotIn('resources = ["*"]', acceleration_read.group(1))
 
         replication_read = re.search(
-            r'dynamic\s+"statement"\s*\{(.*?ReadPawLocalFrontendBucketReplicationForTerraformRefresh.*?)\n  \}',
+            r'dynamic\s+"statement"\s*\{\s*for_each = each.key == "development" \? \[true\] : \[\]\s*content \{\s*sid\s*=\s*"ReadPawLocalFrontendBucketReplicationForTerraformRefresh"(.*?)\n    \}',
             text,
             re.DOTALL,
         )
         self.assertIsNotNone(replication_read)
-        self.assertIn('for_each = each.key == "development" ? [true] : []', replication_read.group(1))
+        self.assertIn(
+            'for_each = each.key == "development" ? [true] : []', text
+        )
         self.assertIn('actions   = ["s3:GetReplicationConfiguration"]', replication_read.group(1))
         self.assertIn('aws_s3_bucket.frontend["development"].arn', replication_read.group(1))
         self.assertIn("var.additional_frontend_bucket_arns", replication_read.group(1))

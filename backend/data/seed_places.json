@@ -1,0 +1,24 @@
+[
+  {
+    "id": "f430a637-2273-4fe9-a62a-48dca84dd5d1",
+    "name": "Orleigh Park",
+    "category": "dog_park",
+    "area": "Brisbane City",
+    "address": "68 Hill End Terrace, West End Qld 4101",
+    "description": "Brisbane City Council identifies an off-leash dog park at Orleigh Park. Source: Brisbane City Council, Orleigh Park; checked 2026-10-19: https://www.brisbane.qld.gov.au/parks-and-recreation/parks-and-greenspaces/book-a-park-site/orleigh-park",
+    "dog_access_rules": "Brisbane City Council identifies an off-leash dog park at this park.",
+    "facilities": [],
+    "is_published": true
+  },
+  {
+    "id": "3852c859-2fe2-40c1-a259-1c081cdfd102",
+    "name": "Whites Hill Reserve",
+    "category": "dog_park",
+    "area": "Brisbane City",
+    "address": "258 Boundary Road, Camp Hill Qld 4152",
+    "description": "Brisbane City Council identifies a dog park within Whites Hill Reserve. The Council page says dogs must be leashed in the reserve and may be off-leash only in the dog park. Source: Brisbane City Council, Whites Hill Reserve; checked 2026-10-19: https://www.brisbane.qld.gov.au/parks-and-recreation/bushland-and-wetlands/find-reserves-and-forests/whites-hill-reserve",
+    "dog_access_rules": "Dogs must be leashed in the reserve; off-leash access is only in the dog park.",
+    "facilities": [],
+    "is_published": true
+  }
+]

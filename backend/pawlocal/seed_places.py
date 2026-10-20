@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import func, select, text
@@ -17,44 +19,99 @@ from sqlalchemy.orm import Session, selectinload
 class SeedPlace:
     id: UUID
     name: str
+    category: str
     area: str
     address: str
     description: str
     dog_access_rules: str
+    facilities: tuple[str, ...]
+    is_published: bool
 
 
-PLACES = (
-    SeedPlace(
-        id=UUID("639a0c12-6e38-4ea0-a1d0-4caabbe4bd01"),
-        name="Orleigh Park",
-        area="Brisbane City",
-        address="68 Hill End Terrace, West End Qld 4101",
-        description=(
-            "Brisbane City Council identifies an off-leash dog park at Orleigh Park. "
-            "Source: Brisbane City Council, Orleigh Park; checked 2026-10-19: "
-            "https://www.brisbane.qld.gov.au/parks-and-recreation/parks-and-greenspaces/"
-            "book-a-park-site/orleigh-park"
-        ),
-        dog_access_rules="Brisbane City Council identifies an off-leash dog park at this park.",
-    ),
-    SeedPlace(
-        id=UUID("edcd490d-6c79-487a-8c3d-0af495e9d902"),
-        name="Whites Hill Reserve",
-        area="Brisbane City",
-        address="258 Boundary Road, Camp Hill Qld 4152",
-        description=(
-            "Brisbane City Council identifies a dog park within Whites Hill Reserve. "
-            "The Council page says dogs must be leashed in the reserve and may be off-leash "
-            "only in the dog park. Source: Brisbane City Council, Whites Hill Reserve; "
-            "checked 2026-10-19: "
-            "https://www.brisbane.qld.gov.au/parks-and-recreation/bushland-and-wetlands/"
-            "find-reserves-and-forests/whites-hill-reserve"
-        ),
-        dog_access_rules=(
-            "Dogs must be leashed in the reserve; off-leash access is only in the dog park."
-        ),
-    ),
-)
+DEFAULT_CATALOG = Path(__file__).resolve().parents[1] / "data/seed_places.json"
+_SEED_FIELDS = {
+    "id",
+    "name",
+    "category",
+    "area",
+    "address",
+    "description",
+    "dog_access_rules",
+    "facilities",
+    "is_published",
+}
+_PLACE_CATEGORIES = {"dog_park", "beach", "walk", "hiking_area", "cafe"}
+
+
+def load_catalog(path: str | Path = DEFAULT_CATALOG) -> tuple[SeedPlace, ...]:
+    """Load and validate the repository-owned seed catalog."""
+    catalog_path = Path(path)
+    try:
+        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not read seed catalog {catalog_path}: {exc}") from exc
+    if not isinstance(payload, list) or not payload:
+        raise ValueError("seed catalog must be a non-empty JSON array")
+
+    places: list[SeedPlace] = []
+    seen_ids: set[UUID] = set()
+    seen_names: set[str] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, dict) or set(item) != _SEED_FIELDS:
+            raise ValueError(
+                f"catalog row {index + 1} must contain exactly: "
+                + ", ".join(sorted(_SEED_FIELDS))
+            )
+        try:
+            place_id = UUID(item["id"])
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError(f"catalog row {index + 1} has an invalid UUID") from exc
+        strings = ("name", "area", "category")
+        if any(
+            not isinstance(item[field], str) or not item[field].strip()
+            for field in strings
+        ):
+            raise ValueError(f"catalog row {index + 1} has an empty required field")
+        if item["category"] not in _PLACE_CATEGORIES:
+            raise ValueError(f"catalog row {index + 1} has an unsupported category")
+        for field in ("address", "description", "dog_access_rules"):
+            if item[field] is not None and not isinstance(item[field], str):
+                raise ValueError(
+                    f"catalog row {index + 1} field {field} must be text or null"
+                )
+        facilities = item["facilities"]
+        if not isinstance(facilities, list) or any(
+            not isinstance(value, str) for value in facilities
+        ):
+            raise ValueError(
+                f"catalog row {index + 1} facilities must be a string array"
+            )
+        if len(set(facilities)) != len(facilities):
+            raise ValueError(f"catalog row {index + 1} facilities must be unique")
+        if not isinstance(item["is_published"], bool):
+            raise TypeError(f"catalog row {index + 1} is_published must be boolean")
+        normalized_name = item["name"].casefold()
+        if place_id in seen_ids or normalized_name in seen_names:
+            raise ValueError(
+                f"catalog contains duplicate ID or normalized name at row {index + 1}"
+            )
+        seen_ids.add(place_id)
+        seen_names.add(normalized_name)
+        places.append(
+            SeedPlace(
+                id=place_id,
+                name=item["name"],
+                category=item["category"],
+                area=item["area"],
+                address=item["address"],
+                description=item["description"],
+                dog_access_rules=item["dog_access_rules"],
+                facilities=tuple(facilities),
+                is_published=item["is_published"],
+            )
+        )
+    return tuple(places)
+
 
 _DSQL_APP_SCHEMA = "pawlocal"
 
@@ -107,15 +164,13 @@ def _matches(record, seed: SeedPlace) -> bool:
     return (
         record.id == seed.id
         and record.name == seed.name
-        and record.category == "dog_park"
+        and record.category == seed.category
         and record.area == seed.area
         and record.address == seed.address
         and record.description == seed.description
         and record.dog_access_rules == seed.dog_access_rules
-        and record.facilities == []
-        and record.average_rating is None
-        and record.source_updated_at is None
-        and record.is_published is True
+        and record.facilities == list(seed.facilities)
+        and record.is_published == seed.is_published
     )
 
 
@@ -132,19 +187,26 @@ def _find_conflicts(session: Session, seed: SeedPlace):
         .where(func.lower(PlaceRecord.name) == seed.name.casefold())
         .options(selectinload(PlaceRecord.facility_records))
     ).all()
-    if by_id is not None and not _matches(by_id, seed):
-        raise RuntimeError(f"seed ID conflict for {seed.name} ({seed.id})")
-    if any(row.id != seed.id for row in by_name):
-        raise RuntimeError(f"seed name conflict for {seed.name}")
+    conflicting_ids = [row.id for row in by_name if row.id != seed.id]
+    if conflicting_ids:
+        existing_id = conflicting_ids[0]
+        raise RuntimeError(
+            f"seed name conflict for {seed.name}: catalog ID {seed.id} differs "
+            f"from existing ID {existing_id}; review and migrate references explicitly"
+        )
     if len(by_name) > 1:
         raise RuntimeError(f"multiple database records conflict with {seed.name}")
     return by_id
 
 
 def seed_with_engine(
-    engine, environment: str, *, confirm_production: bool = False
+    engine,
+    environment: str,
+    *,
+    confirm_production: bool = False,
+    places: tuple[SeedPlace, ...] | None = None,
 ) -> list[str]:
-    """Insert missing records in individual transactions and verify exact content.
+    """Upsert catalog-owned fields by stable ID; never delete absent rows.
 
     This lower-level entry point accepts an injected engine for isolated tests.
     Only ``main`` creates an engine, after validating the explicit DSQL target.
@@ -160,13 +222,18 @@ def seed_with_engine(
 
     SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
-    # Preflight every stable ID and normalized name before any write.
+    places = places if places is not None else load_catalog()
+    if not places:
+        raise ValueError("seed catalog must not be empty")
+
+    # Preflight every stable ID and normalized name before any write. A name
+    # conflict still fails closed; only a matching stable ID is updateable.
     with SessionLocal() as session:
-        for seed in PLACES:
+        for seed in places:
             _find_conflicts(session, seed)
 
     outcomes: list[str] = []
-    for seed in PLACES:
+    for seed in places:
         with SessionLocal.begin() as session:
             existing = _find_conflicts(session, seed)
             if existing is None:
@@ -174,24 +241,33 @@ def seed_with_engine(
                     PlaceRecord(
                         id=seed.id,
                         name=seed.name,
-                        category="dog_park",
+                        category=seed.category,
                         area=seed.area,
                         address=seed.address,
                         description=seed.description,
                         dog_access_rules=seed.dog_access_rules,
-                        facilities=[],
-                        average_rating=None,
-                        source_updated_at=None,
-                        is_published=True,
+                        facilities=list(seed.facilities),
+                        is_published=seed.is_published,
                     )
                 )
                 outcomes.append(f"inserted {seed.name}")
             else:
-                outcomes.append(f"already present {seed.name}")
+                changed = not _matches(existing, seed)
+                existing.name = seed.name
+                existing.category = seed.category
+                existing.area = seed.area
+                existing.address = seed.address
+                existing.description = seed.description
+                existing.dog_access_rules = seed.dog_access_rules
+                existing.facilities = list(seed.facilities)
+                existing.is_published = seed.is_published
+                outcomes.append(
+                    ("updated " if changed else "already present ") + seed.name
+                )
 
     # Read back the exact seeded records after all per-record transactions.
     with SessionLocal() as session:
-        for seed in PLACES:
+        for seed in places:
             record = session.scalar(
                 select(PlaceRecord)
                 .where(PlaceRecord.id == seed.id)
@@ -208,12 +284,14 @@ def main(argv: list[str] | None = None) -> int:
         "--environment", required=True, choices=("development", "production")
     )
     parser.add_argument("--confirm-production", action="store_true")
+    parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     args = parser.parse_args(argv)
 
     try:
         from pawlocal.config import settings
 
         url = settings.sqlalchemy_url
+        places = load_catalog(args.catalog)
         validate_target(
             url,
             args.environment,
@@ -230,11 +308,12 @@ def main(argv: list[str] | None = None) -> int:
                 engine,
                 args.environment,
                 confirm_production=args.confirm_production,
+                places=places,
             ):
                 print(outcome)
         finally:
             engine.dispose()
-    except (RuntimeError, ValueError) as exc:
+    except (RuntimeError, TypeError, ValueError) as exc:
         print(f"seed aborted: {exc}", file=sys.stderr)
         return 2
     return 0

@@ -139,19 +139,48 @@ resource "aws_lightsail_container_service" "api" {
 resource "aws_iam_role" "dsql_runtime" {
   for_each = local.dsql_runtime_environments
 
-  name = "pawlocal-${each.key}-dsql-runtime"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid    = "AllowLightsailContainerService"
-      Effect = "Allow"
-      Principal = {
-        AWS = aws_lightsail_container_service.api[each.key].principal_arn
+  name               = "pawlocal-${each.key}-dsql-runtime"
+  assume_role_policy = data.aws_iam_policy_document.dsql_runtime_trust[each.key].json
+  description        = "Refreshable Aurora DSQL connection role for PawLocal ${each.key} Lightsail API."
+}
+
+data "aws_iam_policy_document" "dsql_runtime_trust" {
+  for_each = local.dsql_runtime_environments
+
+  statement {
+    sid     = "AllowLightsailContainerService"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = [aws_lightsail_container_service.api[each.key].principal_arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.key == "development" ? [1] : []
+    content {
+      sid     = "AllowDevelopmentSeedWorkflow"
+      effect  = "Allow"
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+      principals {
+        type        = "Federated"
+        identifiers = [local.oidc_provider_arn]
       }
-      Action = "sts:AssumeRole"
-    }]
-  })
-  description = "Refreshable Aurora DSQL connection role for PawLocal ${each.key} Lightsail API."
+      condition {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:aud"
+        values   = ["sts.amazonaws.com"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "token.actions.githubusercontent.com:sub"
+        values = [
+          "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:development-seed"
+        ]
+      }
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "dsql_runtime" {
@@ -229,15 +258,14 @@ resource "aws_dsql_cluster_policy" "api_connect" {
         Action    = "dsql:DbConnectAdmin"
         Resource  = aws_dsql_cluster.app[each.key].arn
       },
-      merge({
-        Sid       = "AllowLightsailServiceIdentity"
+      {
+        Sid       = each.key == "development" ? "AllowDevelopmentDsqlRuntimeRole" : "AllowLightsailServiceIdentity"
         Effect    = "Allow"
-        Principal = { AWS = aws_lightsail_container_service.api[each.key].principal_arn }
+        Principal = { AWS = local.dsql_app_principal_arns[each.key] }
         Action    = "dsql:DbConnect"
         Resource  = aws_dsql_cluster.app[each.key].arn
-        }, {
         Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
-      })
+      }
     ]
   })
 }
