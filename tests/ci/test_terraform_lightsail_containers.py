@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -28,22 +29,19 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     def test_development_dsql_connection_uses_identity_policy_not_cluster_grant(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
         cluster_policy = terraform.split('resource "aws_dsql_cluster_policy" "api_connect" {', 1)[1].split('\n}', 1)[0]
-        runtime_policy = terraform.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[1].split('\n}', 1)[0]
+        identity = (ROOT / "infra/terraform/identity/main.tf").read_text(encoding="utf-8")
+        identity_output = (ROOT / "infra/terraform/identity/outputs.tf").read_text(encoding="utf-8")
 
         self.assertIn('Action    = "dsql:DbConnectAdmin"', cluster_policy)
         self.assertIn('each.key == "production" ?', cluster_policy)
         self.assertNotIn('Sid       = "AllowDevelopmentDsqlRuntimeRole"', cluster_policy)
-        self.assertIn('Principal = { AWS = local.dsql_app_principal_arns[each.key] }', cluster_policy)
+        self.assertIn('Principal = { AWS = var.dsql_runtime_role_arn }', cluster_policy)
         self.assertIn('Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }', cluster_policy)
-        app_principals = terraform.split("dsql_app_principal_arns = {", 1)[1].split("\n  }", 1)[0]
-        self.assertRegex(
-            app_principals,
-            r'environment\s*==\s*"development"\s*\?\s*'
-            r'aws_iam_role\.dsql_runtime\[environment\]\.arn\s*:\s*'
-            r'aws_lightsail_container_service\.api\[environment\]\.principal_arn',
-        )
-        self.assertIn('Action   = "dsql:DbConnect"', runtime_policy)
-        self.assertIn('Resource = aws_dsql_cluster.app[each.key].arn', runtime_policy)
+        self.assertIn('development_runtime  = "pawlocal-development-dsql-runtime"', identity)
+        self.assertIn('development_dsql_runtime = data.aws_iam_role.app["development_runtime"].arn', identity_output)
+        self.assertNotIn('resource "aws_iam_role"', identity)
+        self.assertNotIn('resource "aws_iam_role_policy"', identity)
+        self.assertIn('resource "aws_iam_role_policy_attachment" "app"', identity)
 
     def test_production_dsql_cluster_connection_grant_remains_explicit(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
@@ -55,15 +53,12 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn(': []', cluster_policy)
 
     def test_seed_workflow_oidc_trust_is_limited_to_development_environment(self) -> None:
-        terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        trust = terraform.split('data "aws_iam_policy_document" "dsql_runtime_trust" {', 1)[1]
-        trust = trust.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[0]
-
-        self.assertIn('for_each = each.key == "development" ? [1] : []', trust)
-        self.assertIn('actions = ["sts:AssumeRoleWithWebIdentity"]', trust)
-        self.assertIn('"token.actions.githubusercontent.com:aud"', trust)
-        self.assertIn('"token.actions.githubusercontent.com:sub"', trust)
-        self.assertIn(':environment:development-seed', trust)
+        identity = (ROOT / "infra/terraform/identity/main.tf").read_text(encoding="utf-8")
+        seed_workflow = (ROOT / ".github/workflows/development-dsql-seed.yml").read_text(encoding="utf-8")
+        self.assertIn('development_runtime  = "pawlocal-development-dsql-runtime"', identity)
+        self.assertIn("environment: development-seed", seed_workflow)
+        self.assertNotIn('resource "aws_iam_role"', identity)
+        self.assertNotIn("assume_role_policy", identity)
 
     @staticmethod
     def plan(address: str, actions: list[str], image: str) -> dict:
@@ -142,79 +137,47 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     def test_container_release_records_running_image_digest(self) -> None:
         deploy = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
         adapter = (ROOT / "ops/deployment-adapters/lightsail-dsql.sh").read_text(encoding="utf-8")
-        self.assertIn("get-container-services", deploy)
-        self.assertIn("currentDeployment", deploy)
+        self.assertIn('root="$script_dir/../infra/terraform/environments/$environment"', deploy)
+        self.assertIn('"key=pawlocal/$environment/terraform.tfstate"', deploy)
+        self.assertIn('verify-lightsail-container-deployment.py', deploy)
         self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8"))
         self.assertIn("running_image_digest", adapter)
 
-    def test_deploy_adapter_cleans_frontend_temp_dir_after_publication(self) -> None:
-        if os.name == "nt":
-            self.skipTest("Adapter subprocess paths are exercised by the Ubuntu CI runner")
-        bash = shutil.which("bash")
-        if bash is None:
-            self.skipTest("Bash is required to exercise the deployment adapter")
-
+    def test_frontend_publisher_uses_reviewed_data_plane_operations_without_temp_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
-            test_repo = temp / "repo"
-            for relative_path in (
-                "ops/run-deployment-adapter.sh",
-                "ops/deployment-adapters/lightsail-dsql.sh",
-                "ops/validate-release-metadata.py",
-            ):
-                source_path = ROOT / relative_path
-                target_path = test_repo / relative_path
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_path.write_bytes(source_path.read_bytes().replace(b"\r\n", b"\n"))
-                if target_path.suffix == ".sh":
-                    target_path.chmod(0o755)
-            manifest = {
-                "schema_version": 2,
-                "commit": "a" * 40,
-                "backend_image": f"ghcr.io/alanlima/pawlocal-api@sha256:{'b' * 64}",
-                "backend_image_digest": f"sha256:{'b' * 64}",
-                "migration_chains": {
-                    "postgresql": {"runner": "alembic", "migration_id": "0007_normalize_place_facilities"},
-                    "aurora_dsql": {"runner": "dsql_baseline", "migration_id": "dsql_0001_initial"},
-                },
-                "telemetry_enabled": False,
-                "frontend": {
-                    "environment": "development",
-                    "artifact_digest": "sha256:" + "0" * 64,
-                },
-            }
-            manifest_path = temp / "manifest.json"
             archive_path = temp / "frontend.tar.gz"
-            source = temp / "dist"
-            source.mkdir()
-            (source / "index.html").write_text("<html></html>", encoding="utf-8")
+            from io import BytesIO
             with tarfile.open(archive_path, "w:gz") as archive:
-                archive.add(source / "index.html", arcname="index.html")
-            manifest["frontend"]["artifact_digest"] = "sha256:" + hashlib.sha256(archive_path.read_bytes()).hexdigest()
-            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-            fake_bin = temp / "bin"
-            fake_bin.mkdir()
-            aws_log = temp / "aws.log"
-            aws = fake_bin / "aws"
-            aws.write_text(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AWS_CALL_LOG\"\n",
+                content = b"<html>pawlocal</html>"
+                item = tarfile.TarInfo("index.html")
+                item.size = len(content)
+                archive.addfile(item, BytesIO(content))
+            fake_sdk = temp / "boto3.py"
+            fake_sdk.write_text(
+                '''import json, os
+class Paginator:
+    def paginate(self, **kwargs): return [{"Contents": [{"Key": "stale.js"}]}]
+class Client:
+    def __init__(self, service): self.service = service
+    def get_paginator(self, name): return Paginator()
+    def delete_objects(self, **kwargs): log("delete_objects", kwargs)
+    def put_object(self, **kwargs): log("put_object", {**kwargs, "Body": "<body>"})
+    def create_invalidation(self, **kwargs): log("create_invalidation", kwargs)
+def log(operation, value):
+    with open(os.environ["FAKE_AWS_LOG"], "a") as output: output.write(json.dumps([operation, value], default=str) + "\\n")
+def client(service, **kwargs): return Client(service)
+''',
                 encoding="utf-8",
             )
-            aws.chmod(0o755)
+            commit = "a" * 40
+            digest = "sha256:" + hashlib.sha256(archive_path.read_bytes()).hexdigest()
             environment = os.environ.copy()
-            environment.update({
-                "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
-                "AWS_CALL_LOG": str(aws_log),
-                "RUNNER_TEMP": directory,
-                "PAWLOCAL_DEPLOY_ADAPTER_PATH": "ops/deployment-adapters/lightsail-dsql.sh",
-                "PAWLOCAL_FRONTEND_BUCKET": "test-frontend-bucket",
-                "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID": "test-distribution",
-            })
+            environment.update({"PYTHONPATH": str(temp), "FAKE_AWS_LOG": str(temp / "aws.jsonl")})
             result = subprocess.run(
-                [bash, "ops/run-deployment-adapter.sh", "deploy", "--environment", "development",
-                 "--manifest", str(manifest_path), "--frontend-archive", str(archive_path)],
-                cwd=test_repo,
+                [sys.executable, str(ROOT / "ops/publish-frontend-artifact.py"), "--archive", str(archive_path),
+                 "--bucket", "pawlocal-dev-test", "--distribution-id", "E123ABC", "--commit", commit, "--digest", digest],
+                cwd=ROOT,
                 env=environment,
                 capture_output=True,
                 text=True,
@@ -222,14 +185,11 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("Published development frontend artifact", result.stdout)
-            self.assertNotIn("app_dir: unbound variable", result.stderr)
-            calls = aws_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(calls), 3)
-            self.assertTrue(calls[0].startswith("s3 sync "))
-            self.assertTrue(calls[1].startswith("s3 cp "))
-            self.assertTrue(calls[2].startswith("cloudfront create-invalidation "))
-            self.assertEqual(list(temp.glob("pawlocal-frontend.*")), [])
+            self.assertIn("Published verified frontend artifact", result.stdout)
+            calls = [json.loads(line)[0] for line in (temp / "aws.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(calls, ["delete_objects", "put_object", "put_object", "create_invalidation"])
+            self.assertTrue({"frontend.tar.gz", "boto3.py", "aws.jsonl"}.issubset({path.name for path in temp.iterdir()}))
+            self.assertFalse(any(path.name.startswith("pawlocal-") for path in temp.iterdir()))
 
     def test_verify_adapter_reports_query_500_without_cleanup_error(self) -> None:
         if os.name == "nt":
@@ -350,85 +310,23 @@ class TerraformLightsailContainerTests(unittest.TestCase):
                 text,
             )
 
-    def test_terraform_release_role_scopes_cloudfront_and_cognito_refresh_reads(self) -> None:
-        text = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        frontend_publish = re.search(
-            r'sid\s*=\s*"ListFrontendBucket"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(frontend_publish)
-        self.assertIn('"s3:ListBucket"', frontend_publish.group(1))
-        self.assertIn("aws_s3_bucket.frontend[each.key].arn", frontend_publish.group(1))
-        self.assertNotIn('resources = ["*"]', frontend_publish.group(1))
-
-        terraform_bucket_read = re.search(
-            r'sid\s*=\s*"ListPawLocalFrontendBucketsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(terraform_bucket_read)
-        self.assertIn('"s3:ListBucket"', terraform_bucket_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', terraform_bucket_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", terraform_bucket_read.group(1))
-        self.assertNotIn('resources = ["*"]', terraform_bucket_read.group(1))
-
-        acceleration_read = re.search(
-            r'sid\s*=\s*"ReadPawLocalFrontendBucketAccelerationForTerraformRefresh"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(acceleration_read)
-        self.assertIn('"s3:GetAccelerateConfiguration"', acceleration_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', acceleration_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", acceleration_read.group(1))
-        self.assertNotIn('resources = ["*"]', acceleration_read.group(1))
-
-        replication_read = re.search(
-            r'dynamic\s+"statement"\s*\{\s*for_each = each.key == "development" \? \[true\] : \[\]\s*content \{\s*sid\s*=\s*"ReadPawLocalFrontendBucketReplicationForTerraformRefresh"(.*?)\n    \}',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(replication_read)
-        self.assertIn(
-            'for_each = each.key == "development" ? [true] : []', text
-        )
-        self.assertIn('actions   = ["s3:GetReplicationConfiguration"]', replication_read.group(1))
-        self.assertIn('aws_s3_bucket.frontend["development"].arn', replication_read.group(1))
-        self.assertIn("var.additional_frontend_bucket_arns", replication_read.group(1))
-        self.assertNotIn('resources = ["*"]', replication_read.group(1))
-        root_module = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
-        self.assertIn("additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]", root_module)
-
-        cloudfront = re.search(
-            r'sid\s*=\s*"DescribePawLocalSpaFunctionsForTerraformRefresh"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        cognito = re.search(
-            r'sid\s*=\s*"ReadPawLocalUserPoolMfaForTerraformRefresh"(.*?)(?=\n  statement|\n})',
-            text,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(cloudfront)
-        self.assertIn('"cloudfront:DescribeFunction"', cloudfront.group(1))
-        self.assertIn("function.arn", cloudfront.group(1))
-        self.assertIn("pawlocal-production-spa-routing", cloudfront.group(1))
-        self.assertNotIn('resources = ["*"]', cloudfront.group(1))
-        self.assertIsNotNone(cognito)
-        self.assertIn('"cognito-idp:GetUserPoolMfaConfig"', cognito.group(1))
-        self.assertIn("user_pool.arn", cognito.group(1))
-        self.assertNotIn('resources = ["*"]', cognito.group(1))
+    def test_environment_terraform_owns_app_resources_and_identity_stage_only_attaches_fixed_policies(self) -> None:
+        fullstack = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        identity = (ROOT / "infra/terraform/identity/main.tf").read_text(encoding="utf-8")
+        for resource in ('resource "aws_iam_role"', 'resource "aws_iam_role_policy"'):
+            self.assertNotIn(resource, fullstack)
+            self.assertNotIn(resource, identity)
+        self.assertIn('resource "aws_iam_role_policy_attachment" "app"', identity)
+        self.assertIn('data "aws_iam_role" "app"', identity)
+        self.assertIn('local.bootstrap.identity_managed_policy_arns', identity)
+        self.assertIn('local.bootstrap.identity_app_role_arns[each.key]', identity)
+        self.assertNotIn("assume_role_policy", identity)
+        self.assertNotIn('resource "aws_iam_policy"', identity)
 
     def test_dsql_bootstrap_is_operator_run_and_release_role_stays_limited(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        release = re.search(
-            r'data "aws_iam_policy_document" "github_terraform_deploy" \{(.*?)(?=\nresource "aws_iam_role_policy")',
-            terraform,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(release)
-        self.assertNotIn("dsql:DbConnectAdmin", release.group(1))
+        self.assertNotIn('resource "aws_iam_role"', terraform)
+        self.assertNotIn('resource "aws_iam_role_policy"', terraform)
         marker = re.search(
             r'resource "terraform_data" "app_dsql_role" \{(.*?)(?=\nresource|\Z)',
             terraform,
@@ -438,9 +336,9 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertNotIn("provisioner", marker.group(1))
         deploy = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
         self.assertNotIn("dsql_bootstrap_python", deploy)
-        bootstrap = (ROOT / "ops/bootstrap-development-dsql-role.ps1").read_text(encoding="utf-8")
-        self.assertIn("pawlocal.dsql_role_bootstrap", bootstrap)
-        self.assertIn("dsql_app_iam_principal_arn", bootstrap)
+        identity = (ROOT / "infra/terraform/identity/main.tf").read_text(encoding="utf-8")
+        self.assertIn('development_runtime  = "pawlocal-development-dsql-runtime"', identity)
+        self.assertIn('resource "aws_iam_role_policy_attachment" "app"', identity)
 
     def test_cloudfront_function_code_preserves_live_crlf_bytes(self) -> None:
         expected = "\r\n".join([

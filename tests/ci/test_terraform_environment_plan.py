@@ -91,22 +91,30 @@ class TerraformEnvironmentPlanTests(unittest.TestCase):
 
 
 class TerraformWorkflowGateTests(unittest.TestCase):
-    def test_workflow_is_explicitly_blocked_before_any_aws_or_terraform_action(self):
+    def test_workflow_plans_first_then_uses_protected_exact_plan_apply(self):
         workflow = (ROOT / ".github/workflows/terraform-infrastructure-deploy.yml").read_text()
-        self.assertIn("bootstrap-blocker", workflow)
-        self.assertIn("No authorized GitHub Actions Terraform bootstrap role", workflow)
-        self.assertNotIn("id-token: write", workflow)
-        self.assertNotIn("configure-aws-credentials", workflow)
-        self.assertNotIn("terraform plan", workflow)
-        self.assertNotIn("terraform apply", workflow)
-        self.assertNotIn("upload-artifact", workflow)
+        plan = workflow.index("development-plan:")
+        policy_check = workflow.index("development-apply-policy-check:")
+        apply = workflow.index("development-apply:")
+        self.assertLess(plan, policy_check)
+        self.assertLess(policy_check, apply)
+        self.assertIn("environment: development-apply", workflow[apply:])
+        self.assertIn("terraform plan", workflow)
+        self.assertIn("terraform apply -input=false -lock-timeout=5m -auto-approve tfplan", workflow)
+        self.assertIn("terraform-plan-object.py upload", workflow)
+        self.assertIn("terraform-plan-object.py download", workflow)
+        self.assertIn("Verify development CloudFront apply policy", workflow)
+        self.assertNotIn("bootstrap-blocker", workflow)
 
     def test_removed_environment_plan_roles_cannot_create_prod_role_in_dev_plan(self):
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
-        outputs = (ROOT / "infra/terraform/fullstack/outputs.tf").read_text(encoding="utf-8")
+        identity = (ROOT / "infra/terraform/identity/main.tf").read_text(encoding="utf-8")
         self.assertNotIn('resource "aws_iam_role" "github_terraform_plan"', terraform)
         self.assertNotIn('resource "aws_iam_role_policy" "github_terraform_plan"', terraform)
-        self.assertNotIn("terraform_plan_role_arn", outputs)
+        self.assertNotIn('resource "aws_iam_role"', terraform)
+        self.assertNotIn('resource "aws_iam_role"', identity)
+        self.assertNotIn('resource "aws_iam_role_policy"', identity)
+        self.assertIn('resource "aws_iam_role_policy_attachment" "app"', identity)
 
     def test_validator_cli_rejects_shared_policy_change(self):
         plan = {"resource_changes": [resource('module.fullstack.aws_iam_policy.example["development"]', ["update"])]}

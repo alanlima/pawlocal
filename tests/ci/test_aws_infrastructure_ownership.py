@@ -135,6 +135,93 @@ TERRAFORM_INIT_STATE_MIGRATION = re.compile(
 UNRESOLVED_SUBPROCESS_COMMAND = "<unresolved-subprocess-command>"
 AWS_SDK_USAGE = re.compile(r"\b(?:aioboto3|aiobotocore|boto3|botocore)\b|(?:require\s*\(|from\s+)[\"']?aws-sdk|@aws-sdk/")
 
+# SDK use is checked by operation, not by package name. These are the current
+# reviewed operations: IAM/Lightsail inspection, private saved-plan object
+# transfer, and frontend artifact publication. Terraform remains the only
+# mechanism that creates or changes AWS infrastructure resources.
+AWS_SDK_READS = {
+    ("iam", "get_role"), ("iam", "get_role_policy"),
+    ("iam", "list_role_policies"), ("iam", "list_attached_role_policies"),
+    ("iam", "list_open_id_connect_providers"),
+    ("iam", "get_open_id_connect_provider"), ("iam", "list_roles"),
+    ("lightsail", "get_container_services"),
+}
+AWS_SDK_DATA_OPERATIONS = {
+    "ops/terraform-plan-object.py": {("s3", "put_object"), ("s3", "get_object")},
+    "ops/publish-frontend-artifact.py": {
+        ("s3", "get_paginator"), ("s3", "paginate"), ("s3", "put_object"), ("s3", "delete_objects"),
+        ("cloudfront", "create_invalidation"),
+    },
+}
+
+
+def aws_sdk_operations(source: str) -> list[tuple[str, str]]:
+    """Return statically identifiable boto3 client operations; fail closed on dynamic client calls."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    clients: dict[str, str | None] = {}
+    operations: list[tuple[str, str]] = []
+    boto3_names = {"boto3"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                if item.name == "boto3":
+                    boto3_names.add(item.asname or "boto3")
+
+    def client_service(expression: ast.AST) -> str | None:
+        if isinstance(expression, ast.Name):
+            return clients.get(expression.id)
+        if (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == "client"
+            and isinstance(expression.func.value, ast.Name)
+            and expression.func.value.id in boto3_names
+            and expression.args
+            and isinstance(expression.args[0], ast.Constant)
+            and isinstance(expression.args[0].value, str)
+        ):
+            return expression.args[0].value
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            service: str | None = None
+            if isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute):
+                if value.func.attr == "client" and isinstance(value.func.value, ast.Name) and value.func.value.id == "boto3":
+                    if value.args and isinstance(value.args[0], ast.Constant) and isinstance(value.args[0].value, str):
+                        service = value.args[0].value
+                    else:
+                        service = None
+                elif value.func.attr == "get_paginator" and isinstance(value.func.value, ast.Name):
+                    service = clients.get(value.func.value.id)
+                    operations.append((service or "<dynamic>", "get_paginator"))
+            for target in targets:
+                if isinstance(target, ast.Name) and (
+                    isinstance(value, ast.Call)
+                    and isinstance(value.func, ast.Attribute)
+                    and value.func.attr in {"client", "get_paginator"}
+                ):
+                    clients[target.id] = service
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        owner = node.func.value
+        if isinstance(owner, ast.Name) and owner.id in boto3_names and node.func.attr == "client":
+            continue
+        service = client_service(owner)
+        if service is not None or (isinstance(owner, ast.Name) and owner.id in clients):
+            operations.append((service or "<dynamic>", node.func.attr))
+    return operations
+
+
+def forbidden_aws_sdk_operations(path: Path, source: str) -> list[tuple[str, str]]:
+    allowed = AWS_SDK_READS | AWS_SDK_DATA_OPERATIONS.get(path.relative_to(ROOT).as_posix(), set())
+    return [operation for operation in aws_sdk_operations(source) if operation not in allowed]
+
 
 def contains_forbidden_terraform_state_change(source: str) -> bool:
     normalized = normalize_shell_continuations(source)
@@ -839,7 +926,9 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
-                self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
+                sdk_sources = workflow_python_scripts(source) if path.suffix in {".yml", ".yaml"} else [source]
+                forbidden_sdk = [operation for snippet in sdk_sources for operation in forbidden_aws_sdk_operations(path, snippet)]
+                self.assertEqual(forbidden_sdk, [], "AWS SDK infrastructure mutations are not permitted outside Terraform")
                 js_commands = javascript_process_launch_commands(source) if path.suffix in {".js", ".cjs", ".mjs"} else []
                 scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else [*aws_cli_commands(source), *python_aws_cli_commands(source)]
                 for command in js_commands:
@@ -919,6 +1008,32 @@ client = Session().create_client("ec2")
 client.terminate_instances(InstanceIds=["i-123"])
 '''
         self.assertIsNotNone(AWS_SDK_USAGE.search(source))
+
+    def test_read_only_sdk_and_private_plan_transfer_are_allowed_but_resource_mutations_are_not(self) -> None:
+        read_only = '''
+import boto3
+iam = boto3.client("iam")
+iam.get_role_policy(RoleName="pawlocal-dev", PolicyName="permissions")
+'''
+        plan_transfer = '''
+import boto3
+s3 = boto3.client("s3")
+s3.put_object(Bucket=bucket, Key=key, Body=plan)
+s3.get_object(Bucket=bucket, Key=key)
+'''
+        unsafe = '''
+import boto3
+s3 = boto3.client("s3")
+s3.create_bucket(Bucket="unreviewed")
+'''
+        direct_unsafe = '''
+import boto3 as aws
+aws.client("ec2").terminate_instances(InstanceIds=["i-123"])
+'''
+        self.assertEqual(forbidden_aws_sdk_operations(ROOT / "ops/verify-terraform-bootstrap-oac-handoff.py", read_only), [])
+        self.assertEqual(forbidden_aws_sdk_operations(ROOT / "ops/terraform-plan-object.py", plan_transfer), [])
+        self.assertEqual(forbidden_aws_sdk_operations(ROOT / "ops/terraform-plan-object.py", unsafe), [("s3", "create_bucket")])
+        self.assertEqual(forbidden_aws_sdk_operations(ROOT / "ops/terraform-plan-object.py", direct_unsafe), [("ec2", "terminate_instances")])
 
     def test_async_aws_sdk_usage_is_rejected(self) -> None:
         for source in ("import aioboto3\n", "from aiobotocore.session import get_session\n"):

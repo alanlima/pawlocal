@@ -97,7 +97,12 @@ def list_all(iam: Any, operation: str, role_name: str, key: str) -> list[Any]:
         kwargs: dict[str, Any] = {"RoleName": role_name}
         if marker:
             kwargs["Marker"] = marker
-        response = getattr(iam, operation)(**kwargs)
+        if operation == "list_role_policies":
+            response = iam.list_role_policies(**kwargs)
+        elif operation == "list_attached_role_policies":
+            response = iam.list_attached_role_policies(**kwargs)
+        else:
+            raise ValueError("Unsupported IAM inspection operation")
         page = response.get(key)
         if not isinstance(page, list):
             raise ValueError("IAM role policy listing returned an unsupported response")

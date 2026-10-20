@@ -90,33 +90,37 @@ def verify_metadata(stored: dict[str, str], expected: dict[str, str]) -> None:
         raise ValueError("Stored plan metadata does not match this workflow run and commit")
 
 
-def upload(args: argparse.Namespace) -> None:
+def upload_plan_object(args: argparse.Namespace) -> None:
     scoped_key(args.bucket, args.key, args.environment)
     metadata = expected_metadata(args)
     plan_path = Path(args.file)
-    digest = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    plan_bytes = plan_path.read_bytes()
+    digest_hasher = hashlib.sha256(plan_bytes)
+    digest = digest_hasher.hexdigest()
     if digest != args.sha256:
         raise ValueError("Local saved-plan digest does not match the workflow output")
 
     client = make_client()
+    encoded_metadata = json.dumps(metadata, sort_keys=True)
+    encoded_metadata_bytes = encoded_metadata.encode("utf-8")
     client.put_object(
         Bucket=args.bucket,
         Key=args.key,
-        Body=plan_path.read_bytes(),
+        Body=plan_bytes,
         ServerSideEncryption="AES256",
         Metadata={key.replace("_", "-"): value for key, value in metadata.items()},
     )
     client.put_object(
         Bucket=args.bucket,
         Key=metadata_key(args.key),
-        Body=json.dumps(metadata, sort_keys=True).encode("utf-8"),
+        Body=encoded_metadata_bytes,
         ContentType="application/json",
         ServerSideEncryption="AES256",
     )
     print(f"Stored private plan object {args.key}; sha256={digest}")
 
 
-def download(args: argparse.Namespace) -> None:
+def download_plan_object(args: argparse.Namespace) -> None:
     scoped_key(args.bucket, args.key, args.environment)
     metadata = expected_metadata(args)
     client = make_client()
@@ -126,7 +130,8 @@ def download(args: argparse.Namespace) -> None:
 
     response = client.get_object(Bucket=args.bucket, Key=args.key)
     body = response["Body"].read()
-    digest = hashlib.sha256(body).hexdigest()
+    digest_hasher = hashlib.sha256(body)
+    digest = digest_hasher.hexdigest()
     if digest != args.sha256:
         raise ValueError("Downloaded plan digest does not match the reviewed plan")
 
@@ -147,7 +152,10 @@ def main() -> None:
     args = parse_args()
     if args.command in {"upload", "download"}:
         expected_metadata(args)
-    {"upload": upload, "download": download}[args.command](args)
+    if args.command == "upload":
+        upload_plan_object(args)
+    else:
+        download_plan_object(args)
 
 
 if __name__ == "__main__":
