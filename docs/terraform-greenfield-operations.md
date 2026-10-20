@@ -72,7 +72,9 @@ The independent reviewer must confirm:
 
 - the existing populated bootstrap resources remain under their current addresses unless the change intentionally replaces a prior inline application permission with the new boundary/baseline model;
 - exactly three state-backed former bootstrap app-specific managed policies (development frontend, production frontend, and development runtime) are planned for deletion through their declarative `removed` blocks, leaving the environment states as their sole replacements/owners;
+- exactly two legacy `environment_service_apply` inline role policies are planned for deletion as the intentional removal of prior inline application authority now replaced by the boundary/environment-owned policy model;
 - the defensive `identity_production_runtime` removed address is absent from the populated bootstrap state and therefore produces no fourth deletion or other planned change;
+- no other resource is deleted or replaced;
 - the only imports are the existing GitHub OIDC provider, the verified development publisher role, and the already-existing fixed DSQL service-linked role selected by the explicit flags;
 - no application resource is imported;
 - the development publisher role is updated in place, not replaced or deleted;

@@ -80,6 +80,17 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('identity_app_role_boundary["production"].arn', roles)
         self.assertIn('to   = aws_iam_policy.identity_app_role_boundary["development"]', permissions)
 
+    def test_existing_development_identity_boundary_keeps_state_compatible_description(self) -> None:
+        permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("identity_app_role_boundary_descriptions = {", permissions)
+        self.assertIn(
+            'development = "Permissions ceiling for the three fixed PawLocal app identity roles."',
+            permissions,
+        )
+        self.assertIn("description = local.identity_app_role_boundary_descriptions[each.key]", permissions)
+
     def test_bootstrap_removes_duplicate_app_policies_and_environment_roots_are_sole_owners(self) -> None:
         bootstrap_permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(
             encoding="utf-8"

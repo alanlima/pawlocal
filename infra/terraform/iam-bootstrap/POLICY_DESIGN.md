@@ -29,6 +29,8 @@ Bootstrap declaratively imports only the read-only-inventory-verified developmen
 
 The three app-specific managed policies present in the populated bootstrap state (development frontend, production frontend, and development runtime) have explicit `removed` blocks with `destroy = true`; the reviewed bootstrap plan must delete exactly those three policies rather than preserve duplicate ownership. The additional `identity_production_runtime` removed address is defensive because that resource existed only on an unapplied change and must be a no-op against the populated state. Bootstrap retains only identity, trust, baseline, boundary, and shared plan-transfer ownership. Environment roots are the sole owners of application, frontend-publish, and runtime policies and matching attachments.
 
+The reviewed bootstrap plan must also delete exactly the two legacy `environment_service_apply` inline role policies. Those deletions intentionally remove the former inline application authority now replaced by bootstrap boundaries and environment-owned policies. The existing development app-role boundary keeps its state-compatible description so the policy updates in place; no other delete or replacement is allowed.
+
 Development and production runtime roles are created only after bootstrap receives the exact Lightsail `principal_arn` from the matching foundation output. Each boundary contains only that environment's exact DSQL cluster ARN handed back through reviewed bootstrap inputs. The environment root creates the exact DSQL connection policy and attachment. This staged handoff avoids wildcard cross-environment runtime access and manual state operations.
 
 ## Saved plan handling
