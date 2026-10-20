@@ -16,6 +16,74 @@ state_key = os.environ["TF_STATE_KEY"]
 with plan_path.open(encoding="utf-8") as source:
     plan = json.load(source)
 
+
+def destroy_preparation_guard(plan):
+    """Allow only force_destroy updates, reporting safe paths for rejected changes."""
+    allowed = {
+        "aws_s3_bucket.site",
+        'module.fullstack.aws_s3_bucket.frontend["development"]',
+        'module.fullstack.aws_s3_bucket.frontend["production"]',
+        'module.fullstack.aws_dsql_cluster.app["development"]',
+        'module.fullstack.aws_dsql_cluster.app["production"]',
+    }
+    unexpected = []
+
+    def top_level_changed_paths(before, after):
+        if not isinstance(before, dict):
+            before = {}
+        if not isinstance(after, dict):
+            after = {}
+        paths = []
+        for key in sorted(set(before) | set(after), key=str):
+            if key == "force_destroy" or before.get(key) == after.get(key):
+                continue
+            # Terraform schema attribute names are safe to show. Avoid arbitrary
+            # map keys, values, and nested paths, which could contain identifiers.
+            safe_key = key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(key)) else "<other>"
+            paths.append(f"$.{safe_key}")
+        return paths
+
+    for item in plan.get("resource_changes", []):
+        change = item.get("change", {})
+        actions = change.get("actions", [])
+        if actions == ["no-op"] or not actions:
+            continue
+        if item.get("mode") == "data" and actions == ["read"]:
+            continue
+
+        before = change.get("before") or {}
+        after = change.get("after") or {}
+        old = dict(before) if isinstance(before, dict) else before
+        new = dict(after) if isinstance(after, dict) else after
+        if isinstance(old, dict):
+            old.pop("force_destroy", None)
+        if isinstance(new, dict):
+            new.pop("force_destroy", None)
+        address = item.get("address", "")
+        allowed_update = (
+            address in allowed
+            and actions == ["update"]
+            and old == new
+            and isinstance(after, dict)
+            and after.get("force_destroy") is True
+        )
+        if not allowed_update:
+            paths = top_level_changed_paths(before, after)
+            resource_label = address if known_address(address) else "<unlisted resource>"
+            safe_actions = [
+                action if action in {"create", "read", "update", "delete", "forget", "import", "no-op"} else "<other>"
+                for action in actions
+                if isinstance(action, str)
+            ]
+            unexpected.append((resource_label, safe_actions, paths))
+
+    if unexpected:
+        print("Teardown preparation plan includes changes beyond force_destroy settings:", file=sys.stderr)
+        for index, (resource_label, actions, paths) in enumerate(unexpected, start=1):
+            print(f"- change {index}: resource={resource_label}; actions={','.join(actions) or '<none>'}; changed attribute paths={', '.join(paths) or '<none>'}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 if plan.get("applyable") is not True:
     raise SystemExit("Terraform plan is not marked applyable")
 if plan.get("complete") is not True:
@@ -122,6 +190,11 @@ def known_address(address):
         if re.fullmatch(re.escape(name) + suffix, resource_address):
             return True
     return False
+
+
+if len(sys.argv) > 2 and sys.argv[2] == "--destroy-prepare-guard":
+    destroy_preparation_guard(plan)
+    raise SystemExit(0)
 
 
 changes = []
