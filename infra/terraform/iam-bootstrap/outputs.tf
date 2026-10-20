@@ -1,5 +1,5 @@
 output "terraform_role_arns" {
-  description = "GitHub OIDC Terraform plan, apply and recovery role ARNs. These identifiers are safe for GitHub Environment variables."
+  description = "GitHub OIDC Terraform plan, apply, and recovery role ARNs. These identifiers are safe for GitHub Environment variables."
   value       = { for key, role in aws_iam_role.github_terraform : key => role.arn }
 }
 

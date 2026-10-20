@@ -1,4 +1,5 @@
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 
 data "aws_iam_openid_connect_provider" "github" {
   count = var.manage_github_oidc_provider ? 0 : 1
@@ -112,8 +113,9 @@ locals {
     { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environment = "${env}-plan" } },
     { for env, _ in local.environments : "${env}-apply" => { environment = env, purpose = "apply", role_name = "pawlocal-${env}-terraform-apply", subject_environment = "${env}-apply" } },
     {
-      recovery-plan  = { environment = "recovery", purpose = "plan", role_name = "pawlocal-terraform-recovery-plan", subject_environment = "terraform-recovery-plan" }
-      recovery-apply = { environment = "recovery", purpose = "apply", role_name = "pawlocal-terraform-recovery-apply", subject_environment = "terraform-recovery-apply" }
+      recovery-plan                  = { environment = "recovery", purpose = "plan", role_name = "pawlocal-terraform-recovery-plan", subject_environment = "terraform-recovery-plan" }
+      recovery-apply                 = { environment = "recovery", purpose = "apply", role_name = "pawlocal-terraform-recovery-apply", subject_environment = "terraform-recovery-apply" }
+      recovery-dsql-protection-apply = { environment = "recovery", purpose = "apply", role_name = "pawlocal-terraform-recovery-dsql-protection-apply", subject_environment = "terraform-recovery-dsql-protection-apply" }
     }
   )
   readonly_discovery_actions = [
