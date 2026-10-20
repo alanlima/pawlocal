@@ -10,6 +10,7 @@ on:
       - "requirements.txt"
       - "docker-compose.yml"
       - ".github/workflows/**"
+      - "!.github/workflows/terraform-current-stack-operations.yml"
       - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
@@ -24,6 +25,8 @@ on:
       - "requirements.txt"
       - "docker-compose.yml"
       - ".github/workflows/**"
+      - "!.github/workflows/terraform-current-stack-operations.yml"
+      - "!.github/workflows/fullstack-release.yml"
       - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
