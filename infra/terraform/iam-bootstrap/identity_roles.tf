@@ -18,8 +18,8 @@ locals {
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-dsql-runtime"
   ]
   identity_app_role_arns = {
-    development_frontend = aws_iam_role.identity_app["development_frontend"].arn
-    production_frontend  = aws_iam_role.identity_app["production_frontend"].arn
+    development_frontend = try(aws_iam_role.identity_app["development_frontend"].arn, null)
+    production_frontend  = try(aws_iam_role.identity_app["production_frontend"].arn, null)
     development_runtime  = var.development_lightsail_principal_arn == "" ? null : aws_iam_role.development_runtime[0].arn
   }
   identity_app_role_specs = {
@@ -34,10 +34,11 @@ locals {
       subject     = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:production"
     }
   }
+  managed_identity_app_role_specs = var.import_existing_frontend_publish_roles ? local.identity_app_role_specs : {}
 }
 
 data "aws_iam_policy_document" "identity_app_role_trust" {
-  for_each = local.identity_app_role_specs
+  for_each = local.managed_identity_app_role_specs
 
   statement {
     sid     = "ExactGitHubEnvironmentSubject"
@@ -61,7 +62,7 @@ data "aws_iam_policy_document" "identity_app_role_trust" {
 }
 
 resource "aws_iam_role" "identity_app" {
-  for_each = local.identity_app_role_specs
+  for_each = local.managed_identity_app_role_specs
 
   name                 = each.value.name
   description          = each.value.description
@@ -77,7 +78,7 @@ resource "aws_iam_role" "identity_app" {
 }
 
 import {
-  for_each = var.import_existing_frontend_publish_roles ? local.identity_app_role_specs : {}
+  for_each = local.managed_identity_app_role_specs
   to       = aws_iam_role.identity_app[each.key]
   id       = each.value.name
 }
@@ -335,6 +336,6 @@ output "identity_managed_policy_arns" {
 }
 
 output "identity_app_role_arns" {
-  description = "Bootstrap-owned application role ARNs; identity state may attach only the fixed policies to these roles."
+  description = "Bootstrap-owned application role ARNs; frontend publisher ARNs are null until the second bootstrap stage imports them."
   value       = local.identity_app_role_arns
 }
