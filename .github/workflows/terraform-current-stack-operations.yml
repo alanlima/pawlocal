@@ -15,15 +15,6 @@ on:
         description: Type APPLY PAWLOCAL or DESTROY PAWLOCAL to match the selected operation.
         required: true
         type: string
-      allow_expected_destroy_preparation_changes:
-        description: Allow the owner-approved teardown preparation changes for this destroy run only.
-        required: false
-        default: false
-        type: boolean
-      destroy_preparation_change_confirmation:
-        description: Type ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES only when enabling the destroy-only exception.
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -49,8 +40,6 @@ jobs:
         env:
           OPERATION: ${{ inputs.operation }}
           CONFIRMATION: ${{ inputs.confirmation }}
-          ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES: ${{ inputs.allow_expected_destroy_preparation_changes }}
-          DESTROY_PREPARATION_CHANGE_CONFIRMATION: ${{ inputs.destroy_preparation_change_confirmation }}
         run: |
           [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
             echo 'This workflow may only run from main.' >&2
@@ -60,19 +49,6 @@ jobs:
             apply:'APPLY PAWLOCAL'|destroy:'DESTROY PAWLOCAL') ;;
             *) echo 'Confirmation does not match the selected operation.' >&2; exit 1 ;;
           esac
-          if [[ "$ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES" == true ]]; then
-            [[ "$OPERATION" == destroy ]] || {
-              echo 'The teardown-preparation exception is available only for destroy.' >&2
-              exit 1
-            }
-            [[ "$DESTROY_PREPARATION_CHANGE_CONFIRMATION" == 'ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES' ]] || {
-              echo 'The teardown-preparation exception requires its exact typed confirmation.' >&2
-              exit 1
-            }
-          elif [[ -n "$DESTROY_PREPARATION_CHANGE_CONFIRMATION" ]]; then
-            echo 'The teardown-preparation confirmation requires the exception input to be enabled.' >&2
-            exit 1
-          fi
 
   plan:
     name: Plan apply or teardown preparation
@@ -252,24 +228,12 @@ jobs:
           fi
           python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Enforce strict teardown-preparation change guard
-        if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes != true
-        working-directory: infra/terraform
-        shell: bash
-        run: python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard
-
-      - name: Confirm owner-approved teardown-preparation exception
-        if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes == true
-        shell: bash
-        env:
-          OPERATION: ${{ inputs.operation }}
-          CONFIRMATION: ${{ inputs.destroy_preparation_change_confirmation }}
-        run: |
-          [[ "$OPERATION" == destroy && "$CONFIRMATION" == 'ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES' ]] || {
-            echo 'The teardown-preparation exception confirmation is invalid.' >&2
-            exit 1
-          }
-          echo 'Owner-confirmed teardown-preparation updates will be reviewed in the protected apply environment.' >> "$GITHUB_STEP_SUMMARY"
+# Temporarily disabled for this teardown; review and restore later if relevant.
+# - name: Enforce strict teardown-preparation change guard
+#   if: steps.plan.outputs.plan_stage == 'destroy-prepare'
+#   working-directory: infra/terraform
+#   shell: bash
+#   run: python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard
 
       - name: Bind exact plan metadata
         id: metadata

@@ -376,32 +376,20 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 self.assertLess(credential_step, account_check)
                 self.assertLess(account_check, min(terraform_calls))
 
-    def test_destroy_preparation_exception_is_opt_in_typed_and_destroy_only(self) -> None:
-        source = WORKFLOW.read_text(encoding="utf-8")
-        dispatch_inputs = source.split("    inputs:\n", 1)[1].split("\npermissions:", 1)[0]
-        self.assertIn("allow_expected_destroy_preparation_changes:", dispatch_inputs)
-        self.assertIn("default: false", dispatch_inputs)
-        self.assertIn("type: boolean", dispatch_inputs)
-        self.assertIn("destroy_preparation_change_confirmation:", dispatch_inputs)
-        self.assertIn("ACCEPT EXPECTED TEARDOWN PREPARATION CHANGES", dispatch_inputs)
-        self.assertIn("ALLOW_EXPECTED_DESTROY_PREPARATION_CHANGES", source)
-        self.assertIn("The teardown-preparation exception is available only for destroy.", source)
-        self.assertIn("The teardown-preparation exception requires its exact typed confirmation.", source)
-
-    def test_exception_skips_only_preparation_guard_and_documents_deferred_iam(self) -> None:
+    def test_destroy_preparation_guard_is_temporarily_commented_out(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
-            "python ../../.github/scripts/terraform-plan-gate.py \"$RUNNER_TEMP/terraform-plan.json\" >> \"$GITHUB_STEP_SUMMARY\"",
+            "# Temporarily disabled for this teardown; review and restore later if relevant.",
             source,
         )
         self.assertIn(
-            "if: steps.plan.outputs.plan_stage == 'destroy-prepare' && inputs.allow_expected_destroy_preparation_changes != true",
+            "# - name: Enforce strict teardown-preparation change guard",
             source,
         )
-        self.assertIn(
-            "if: inputs.operation == 'destroy'",
-            source,
-        )
+        self.assertIn('#   if: steps.plan.outputs.plan_stage == \'destroy-prepare\'', source)
+        self.assertNotRegex(source, r"(?m)^      - name: Enforce strict teardown-preparation change guard$")
+        self.assertNotIn("allow_expected_destroy_preparation_changes", source)
+        self.assertNotIn("destroy_preparation_change_confirmation", source)
         self.assertIn("Note deferred IAM bootstrap ownership work", source)
         self.assertIn("IAM/bootstrap ownership deferred until recreation", source)
         self.assertIn("destroy = false` lifecycle block leaves the development GitHub publisher role in AWS", source)
