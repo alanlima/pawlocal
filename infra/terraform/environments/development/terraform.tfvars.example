@@ -1,0 +1,7 @@
+root_domain                 = "example.com"
+cloudfront_certificate_arn  = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+github_repository           = "owner/repository"
+github_owner_id             = "123456"
+github_repository_id        = "1234567890"
+terraform_state_bucket_name = "REPLACE_WITH_EXISTING_STATE_BUCKET"
+backend_image_digest        = "ghcr.io/alanlima/pawlocal-api@sha256:0000000000000000000000000000000000000000000000000000000000000000"

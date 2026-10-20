@@ -124,7 +124,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     concurrency:
-      group: pawlocal-lightsail-deploy
+      group: pawlocal-infrastructure
       cancel-in-progress: false
     env:
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}

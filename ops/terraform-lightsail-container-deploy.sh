@@ -23,10 +23,10 @@ print(image)
 PY
 )"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-root="$script_dir/../infra/terraform"
+root="$script_dir/../infra/terraform/environments/$environment"
 terraform -chdir="$root" init -input=false -reconfigure \
   -backend-config="bucket=$PAWLOCAL_TF_STATE_BUCKET" \
-  -backend-config='key=pawlocal/terraform.tfstate' \
+  -backend-config="key=pawlocal/$environment/terraform.tfstate" \
   -backend-config="region=$AWS_REGION" \
   -backend-config='encrypt=true' \
   -backend-config='use_lockfile=true'
@@ -37,10 +37,11 @@ export TF_VAR_github_repository="$GITHUB_REPOSITORY"
 export TF_VAR_terraform_state_bucket_name="$PAWLOCAL_TF_STATE_BUCKET"
 
 current_targets="$(terraform -chdir="$root" output -json environment_targets)"
-aws_account_id="$(CURRENT_TARGETS="$current_targets" python3 - <<'PY'
+aws_account_id="$(CURRENT_TARGETS="$current_targets" python3 - "$environment" <<'PY'
 import json,os,re
+import sys
 targets=json.loads(os.environ['CURRENT_TARGETS'])
-account_id=(targets.get('development') or {}).get('aws_account_id')
+account_id=(targets.get(sys.argv[1]) or {}).get('aws_account_id')
 if not isinstance(account_id,str) or not re.fullmatch(r'[0-9]{12}',account_id):
     raise SystemExit('Terraform state has no valid AWS account ID')
 print(account_id)
@@ -66,35 +67,23 @@ PY
 fi
 export TF_VAR_backend_image_digests="$(CURRENT_TARGETS="$current_targets" python3 - "$environment" "$image" <<'PY'
 import json,os,sys
-current=json.loads(os.environ['CURRENT_TARGETS'])
 target,release_image=sys.argv[1:]
-images={}
-for env in ('development','production'):
-    value=current[env].get('api_backend_image')
-    if not isinstance(value,str) or '@sha256:' not in value:
-        raise SystemExit(f'{env} has no Terraform-tracked backend image; complete the reviewed initial migration first')
-    images[env]=release_image if env==target else value
-print(json.dumps(images,separators=(',',':')))
+print(json.dumps({target:release_image},separators=(',',':')))
 PY
 )"
 
 plan="$(mktemp "${RUNNER_TEMP:-/tmp}/pawlocal-container-${environment}.XXXXXX.tfplan")"
 trap 'rm -f "$plan"' EXIT
-terraform -chdir="$root" plan -input=false -lock-timeout=5m -out="$plan"
-terraform -chdir="$root" show -json "$plan" |
-  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image" --aws-account-id "$aws_account_id"
-terraform -chdir="$root" apply -input=false -lock-timeout=5m -auto-approve "$plan"
-service_json="$(aws lightsail get-container-services --service-name "pawlocal-${environment}-api" --query 'containerServices[0]' --output json)"
-printf '%s' "$service_json" | TARGET_IMAGE="$image" python3 -c '
-import json,os,sys
-service=json.load(sys.stdin)
-deployment=service.get("currentDeployment") or {}
-containers=deployment.get("containers") or {}
-container=containers.get("pawlocal-api") or {}
-if service.get("state") != "RUNNING" or deployment.get("state") != "ACTIVE":
-    raise SystemExit("Lightsail service does not report a running active deployment")
-if container.get("image") != os.environ["TARGET_IMAGE"]:
-    raise SystemExit("Lightsail active deployment image does not match the selected release digest")
-'
-printf '%s\n' "Verified active Lightsail $environment service image digest"
+if ! terraform -chdir="$root" plan -input=false -lock-timeout=5m -no-color -out="$plan" > "${RUNNER_TEMP:-/tmp}/pawlocal-release-plan.txt" 2>&1; then
+  die "Terraform container deployment plan failed; raw output was withheld"
+fi
+if ! terraform -chdir="$root" show -json "$plan" 2>"${RUNNER_TEMP:-/tmp}/pawlocal-release-show-error.txt" |
+  python3 "$script_dir/validate-lightsail-container-plan.py" --environment "$environment" --image "$image" --aws-account-id "$aws_account_id"; then
+  die "Terraform container deployment review failed; raw output was withheld"
+fi
+if ! terraform -chdir="$root" apply -input=false -lock-timeout=5m -auto-approve "$plan" > "${RUNNER_TEMP:-/tmp}/pawlocal-release-apply.txt" 2>&1; then
+  die "Terraform container deployment apply failed; raw output was withheld"
+fi
+python3 -m pip install --disable-pip-version-check boto3==1.35.99
+python3 "$script_dir/verify-lightsail-container-deployment.py" --environment "$environment" --image "$image"
 printf 'Terraform recorded and deployed %s image %s\n' "$environment" "$image"

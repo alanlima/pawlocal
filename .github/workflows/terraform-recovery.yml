@@ -1,0 +1,159 @@
+name: Terraform legacy state recovery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-infrastructure
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.10.5
+
+jobs:
+  validate-ref:
+    name: Restrict recovery to main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'Terraform recovery may only be dispatched from main.' >&2
+            exit 1
+          fi
+
+  recovery-plan:
+    name: Plan destruction of the legacy shared state
+    needs: validate-ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      plan_sha256: ${{ steps.digest.outputs.plan_sha256 }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_RECOVERY_PLAN_ROLE_ARN }}
+      TF_PLAN_OBJECT_KEY: plans/recovery/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+    steps:
+      - name: Check out the dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify recovery role and required configuration
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$AWS_REGION"
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-terraform-recovery-plan$ ]]
+          test -n "$PAWLOCAL_TF_STATE_BUCKET"
+          test -n "$PAWLOCAL_TF_PLAN_BUCKET"
+          test -n "$TF_VAR_domain_name"
+          test -n "$TF_VAR_certificate_arn"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure legacy state recovery plan role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-legacy-recovery-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Initialize the legacy shared state and create a destroy plan
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true'
+          if ! terraform plan -destroy -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-recovery-plan-output.txt" 2>&1; then
+            echo 'Recovery plan failed; raw Terraform output was withheld from this public workflow log.' >&2
+            exit 1
+          fi
+
+      - name: Publish value-free legacy teardown plan summary
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo '## Legacy shared-state Terraform recovery'
+            echo
+            echo "Commit: `${GITHUB_SHA}`"
+            echo 'This is a proposed destroy plan for the old shared dev/prod application resources. Recovery apply is currently blocked pending independent IAM policy review and exact resource inventory.'
+            echo 'The external Terraform backend bucket is explicitly rejected if it appears in the destroy plan.'
+            if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-recovery-show-error.txt" | python ../../ops/terraform-recovery-plan-review.py --state-bucket-name "$PAWLOCAL_TF_STATE_BUCKET"; then
+              echo 'Recovery plan review could not be safely rendered; raw output was withheld.' >&2
+              exit 1
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Calculate saved recovery-plan digest
+        id: digest
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
+          echo "plan_sha256=${digest}" >> "$GITHUB_OUTPUT"
+          echo 'Saved recovery-plan SHA-256 calculated.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact recovery plan to the private S3 prefix
+        env:
+          PLAN_SHA256: ${{ steps.digest.outputs.plan_sha256 }}
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/terraform-plan-object.py upload \
+            --bucket "$PAWLOCAL_TF_PLAN_BUCKET" \
+            --key "$TF_PLAN_OBJECT_KEY" \
+            --file infra/terraform/tfplan \
+            --environment recovery \
+            --state-key pawlocal/terraform.tfstate \
+            --commit "$GITHUB_SHA" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --sha256 "$PLAN_SHA256"
+
+  recovery-apply:
+    name: Block recovery apply pending scoped IAM review
+    needs: recovery-plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Explain recovery apply blocker
+        shell: bash
+        run: |
+          {
+            echo '## Recovery apply is blocked'
+            echo
+            echo 'The recovery destroy plan is available for review, but apply is disabled until the independent IAM policy review passes and the legacy live-resource inventory is reconciled with the exact destroy actions.'
+            echo 'The review must account for DSQL deletion protection, S3 object and version cleanup, OIDC ownership, and narrowly scoped permissions. No AWS apply was attempted.'
+            echo 'After those items are resolved, update this workflow in a reviewed change to enable the separately protected exact-plan apply and local IAM bootstrap handoff.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'Recovery apply is intentionally blocked pending scoped IAM review and exact legacy resource inventory.' >&2
+          exit 1

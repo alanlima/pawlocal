@@ -4,16 +4,14 @@ data "aws_route53_zone" "root" {
 }
 
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 locals {
-  environments = var.environment_sizes
-  dsql_runtime_environments = {
-    development = var.environment_sizes.development
-  }
-  frontend_environments = {
-    development = var.environment_sizes.development
-  }
-  github_owner = split("/", var.github_repository)[0]
-  github_repo  = split("/", var.github_repository)[1]
+  environments              = var.environment_sizes
+  dsql_runtime_environments = { for environment, config in local.environments : environment => config if environment == "development" }
+  frontend_environments     = local.environments
+  frontend_bucket_arns      = concat([for bucket in values(aws_s3_bucket.frontend) : bucket.arn], var.additional_frontend_bucket_arns)
+  github_owner              = split("/", var.github_repository)[0]
+  github_repo               = split("/", var.github_repository)[1]
 
   common_tags = {
     costcenter = "personal"
@@ -142,6 +140,7 @@ resource "aws_iam_role" "dsql_runtime" {
   name               = "pawlocal-${each.key}-dsql-runtime"
   assume_role_policy = data.aws_iam_policy_document.dsql_runtime_trust[each.key].json
   description        = "Refreshable Aurora DSQL connection role for PawLocal ${each.key} Lightsail API."
+  tags               = merge(local.common_tags, { environment = each.key, purpose = "dsql-runtime" })
 }
 
 data "aws_iam_policy_document" "dsql_runtime_trust" {
@@ -497,6 +496,7 @@ resource "aws_iam_role" "github_deploy" {
   for_each           = local.frontend_environments
   name               = "pawlocal-${each.key}-github-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
+  tags               = merge(local.common_tags, { environment = each.key, purpose = "frontend-publish" })
 }
 
 data "aws_iam_policy_document" "github_deploy" {
@@ -532,6 +532,7 @@ resource "aws_iam_role" "github_terraform_deploy" {
   name               = "pawlocal-${each.key}-terraform-deploy"
   assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
   description        = "Terraform state-backed release deployment for the PawLocal ${each.key} Lightsail container service."
+  tags               = merge(local.common_tags, { environment = each.key, purpose = "container-release" })
 }
 
 data "aws_iam_policy_document" "github_terraform_deploy" {
@@ -628,14 +629,14 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
     sid       = "ListPawLocalFrontendBucketsForTerraformRefresh"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+    resources = local.frontend_bucket_arns
   }
 
   statement {
     sid       = "ReadPawLocalFrontendBucketAccelerationForTerraformRefresh"
     effect    = "Allow"
     actions   = ["s3:GetAccelerateConfiguration"]
-    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+    resources = local.frontend_bucket_arns
   }
 
   dynamic "statement" {
@@ -645,7 +646,7 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
       sid       = "ReadPawLocalFrontendBucketReplicationForTerraformRefresh"
       effect    = "Allow"
       actions   = ["s3:GetReplicationConfiguration"]
-      resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+      resources = local.frontend_bucket_arns
     }
   }
 
@@ -656,8 +657,8 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
       "s3:GetObject", "s3:PutObject", "s3:DeleteObject"
     ]
     resources = [
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate",
-      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"
+      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/${each.key}/terraform.tfstate",
+      "arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/${each.key}/terraform.tfstate.tflock"
     ]
   }
 
@@ -669,7 +670,7 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["pawlocal/terraform.tfstate", "pawlocal/terraform.tfstate.tflock"]
+      values   = ["pawlocal/${each.key}/terraform.tfstate", "pawlocal/${each.key}/terraform.tfstate.tflock"]
     }
   }
 

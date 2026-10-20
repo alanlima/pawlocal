@@ -1,0 +1,390 @@
+name: Terraform production promotion
+run-name: PawLocal production promotion from development run ${{ inputs.development_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      development_run_id:
+        description: Successful development run ID, after local bootstrap pins dev OAC and switches creation to production
+        required: true
+        type: string
+      backend_image_digest:
+        description: Immutable API image digest used by that development run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pawlocal-infrastructure
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.10.5
+
+jobs:
+  validate-development:
+    name: Verify successful development deployment
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      development_sha: ${{ steps.verify.outputs.development_sha }}
+    steps:
+      - name: Verify run identity, success, branch, and digest
+        id: verify
+        uses: actions/github-script@v7
+        env:
+          DEVELOPMENT_RUN_ID: ${{ inputs.development_run_id }}
+          BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        with:
+          script: |
+            const runId = process.env.DEVELOPMENT_RUN_ID;
+            const digest = process.env.BACKEND_IMAGE_DIGEST;
+            if (!/^\d+$/.test(runId)) throw new Error('Development run ID must be numeric.');
+            if (!/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(digest)) throw new Error('Image digest is invalid.');
+            const { data: workflow } = await github.rest.actions.getWorkflow({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'terraform-infrastructure-deploy.yml'
+            });
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(runId)
+            });
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(runId),
+              per_page: 100
+            });
+            const expectedTitle = `PawLocal development deployment ${digest}`;
+            if (run.workflow_id !== workflow.id || run.path?.split('@')[0] !== '.github/workflows/terraform-infrastructure-deploy.yml') throw new Error('Run is not from the PawLocal development deployment workflow.');
+            if (run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.status !== 'completed' || run.conclusion !== 'success') throw new Error('Development run must have completed successfully from main.');
+            if (run.display_title !== expectedTitle) throw new Error('Development run image digest does not match the requested production image digest.');
+            if (!/^[0-9a-f]{40}$/.test(run.head_sha)) throw new Error('Development run commit is invalid.');
+            const verifiedDevelopmentStep = jobs.jobs.some(job => job.steps?.some(step => step.name === 'Verify development API and database-backed place query' && step.conclusion === 'success'));
+            if (!verifiedDevelopmentStep) throw new Error('Development run did not complete the database-backed API verification step.');
+            core.setOutput('development_sha', run.head_sha);
+            await core.summary.addHeading('Development promotion evidence').addText(`Verified successful main run ${runId} at ${run.head_sha} for the requested immutable image digest.`).write();
+
+  validate-ref:
+    name: Restrict production promotion to main
+    needs: validate-development
+    outputs:
+      development_sha: ${{ needs.validate-development.outputs.development_sha }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main branch and valid image digest
+        shell: bash
+        env:
+          BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Production promotion may only be dispatched from main.' >&2; exit 1; }
+          [[ "$BACKEND_IMAGE_DIGEST" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]] || { echo 'Immutable backend image digest is invalid.' >&2; exit 1; }
+  production-plan:
+    name: Plan production infrastructure
+    needs: validate-ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      plan_sha256: ${{ steps.digest.outputs.plan_sha256 }}
+      development_sha: ${{ needs.validate-ref.outputs.development_sha }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_PRODUCTION_TERRAFORM_PLAN_ROLE_ARN }}
+      PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
+      PAWLOCAL_OAC_ARN: ${{ vars.PAWLOCAL_PRODUCTION_OAC_ARN }}
+      PAWLOCAL_DEVELOPMENT_OAC_ARN: ${{ vars.PAWLOCAL_DEVELOPMENT_OAC_ARN }}
+      TF_PLAN_OBJECT_KEY: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_root_domain: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_cloudfront_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
+      TF_VAR_github_repository: ${{ github.repository }}
+      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+      TF_VAR_github_repository_id: ${{ github.repository_id }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_backend_image_digest: ${{ inputs.backend_image_digest }}
+    steps:
+      - name: Check out the dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate-ref.outputs.development_sha }}
+          persist-credentials: false
+
+      - name: Verify checkout and required configuration
+        shell: bash
+        env:
+          BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ needs.validate-ref.outputs.development_sha }}"
+          test -n "$AWS_REGION"
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-plan$ ]]
+          test -n "$PAWLOCAL_TF_STATE_BUCKET"
+          test -n "$PAWLOCAL_TF_PLAN_BUCKET"
+          test -n "$TF_VAR_root_domain"
+          test -n "$TF_VAR_cloudfront_certificate_arn"
+          [[ "$BACKEND_IMAGE_DIGEST" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure production plan role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-prod-tf-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify local bootstrap OAC handoff
+        env:
+          PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+          PAWLOCAL_DEVELOPMENT_OAC_ARN: ${{ vars.PAWLOCAL_DEVELOPMENT_OAC_ARN }}
+          PAWLOCAL_PRODUCTION_OAC_ARN: ${{ vars.PAWLOCAL_PRODUCTION_OAC_ARN }}
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/verify-terraform-bootstrap-oac-handoff.py \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
+            --development-oac-arn "$PAWLOCAL_DEVELOPMENT_OAC_ARN" \
+            --production-oac-arn "$PAWLOCAL_PRODUCTION_OAC_ARN" \
+            --region "$AWS_REGION"
+
+      - name: Initialize production state and create saved plan
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/production/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true'
+          existing_oac_arn="$(terraform output -raw oac_arn 2>/dev/null || true)"
+          if [[ -n "$existing_oac_arn" ]]; then
+            [[ -n "$PAWLOCAL_OAC_ARN" && "$PAWLOCAL_OAC_ARN" == "$existing_oac_arn" ]] || {
+              echo 'Production OAC policy ARN is missing or does not match Terraform state; apply the reviewed bootstrap policy and set PAWLOCAL_OAC_ARN before another deployment run.' >&2
+              exit 1
+            }
+          fi
+          if ! terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-plan-output.txt" 2>&1; then
+            echo 'Terraform plan failed; raw Terraform output was withheld from this public workflow log.' >&2
+            exit 1
+          fi
+
+      - name: Publish sanitized production plan for review
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo '## Production Terraform plan review'
+            echo
+            echo "Development commit: `${{ needs.validate-ref.outputs.development_sha }}`"
+            echo "State: `pawlocal/production/terraform.tfstate`"
+            echo 'Changed resource addresses, actions, and attribute paths are shown; values are omitted.'
+            if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-show-error.txt" | python ../../../../ops/terraform-plan-review.py --environment production; then
+              echo 'Terraform plan review could not be safely rendered; raw output was withheld.' >&2
+              exit 1
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Calculate saved-plan digest
+        id: digest
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
+          echo "plan_sha256=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Saved plan SHA-256: `${digest}`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exact production plan to the private Terraform plan prefix
+        env:
+          PLAN_SHA256: ${{ steps.digest.outputs.plan_sha256 }}
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/terraform-plan-object.py upload \
+            --bucket "$PAWLOCAL_TF_PLAN_BUCKET" \
+            --key "$TF_PLAN_OBJECT_KEY" \
+            --file infra/terraform/environments/production/tfplan \
+            --environment production \
+            --state-key pawlocal/production/terraform.tfstate \
+            --commit "${{ needs.validate-ref.outputs.development_sha }}" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --sha256 "$PLAN_SHA256"
+
+  production-apply:
+    name: Apply reviewed production plan
+    needs: production-plan
+    runs-on: ubuntu-latest
+    # Configure this GitHub Environment with required reviewers, main-only
+    # deployment branches, and the matching production apply role ARN.
+    environment: production-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+      PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
+      PAWLOCAL_OAC_ARN: ${{ vars.PAWLOCAL_PRODUCTION_OAC_ARN }}
+      TF_PLAN_OBJECT_KEY: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.production-plan.outputs.development_sha }}
+          persist-credentials: false
+
+      - name: Verify checkout and artifact digest
+        shell: bash
+        env:
+          EXPECTED_PLAN_SHA256: ${{ needs.production-plan.outputs.plan_sha256 }}
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ needs.production-plan.outputs.development_sha }}"
+          test -n "$EXPECTED_PLAN_SHA256"
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-apply$ ]]
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure production apply role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-prod-tf-apply-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Download and verify exact production plan from private S3
+        env:
+          EXPECTED_PLAN_SHA256: ${{ needs.production-plan.outputs.plan_sha256 }}
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/terraform-plan-object.py download \
+            --bucket "$PAWLOCAL_TF_PLAN_BUCKET" \
+            --key "$TF_PLAN_OBJECT_KEY" \
+            --file infra/terraform/environments/production/tfplan \
+            --environment production \
+            --state-key pawlocal/production/terraform.tfstate \
+            --commit "${{ needs.production-plan.outputs.development_sha }}" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --sha256 "$EXPECTED_PLAN_SHA256"
+
+      - name: Initialize production state
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/production/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true'
+          existing_oac_arn="$(terraform output -raw oac_arn 2>/dev/null || true)"
+          if [[ -n "$existing_oac_arn" ]]; then
+            [[ -n "$PAWLOCAL_OAC_ARN" && "$PAWLOCAL_OAC_ARN" == "$existing_oac_arn" ]] || {
+              echo 'Production OAC policy ARN is missing or does not match Terraform state; apply the reviewed bootstrap policy before continuing.' >&2
+              exit 1
+            }
+          fi
+
+      - name: Apply the exact reviewed production plan
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          if ! terraform apply -input=false -lock-timeout=5m -auto-approve tfplan > "$RUNNER_TEMP/terraform-apply-output.txt" 2>&1; then
+            echo 'Production Terraform apply failed; raw provider output was withheld from this public workflow log.' >&2
+            exit 1
+          fi
+          echo 'Production Terraform apply completed.'
+
+      - name: Publish OAC identifier for bootstrap policy refresh
+        working-directory: infra/terraform/environments/production
+        shell: bash
+        run: |
+          oac_arn="$(terraform output -raw oac_arn)"
+          echo "Production OAC ARN for the separate bootstrap policy: `${oac_arn}`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify production API and database-backed place query
+        working-directory: infra/terraform/environments/production
+        env:
+          EXPECTED_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/production-targets.json"
+          api_health_url="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["production"]["api_health_url"])' "$RUNNER_TEMP/production-targets.json")"
+          api_base_url="${api_health_url%/health}"
+          expected_digest="${EXPECTED_IMAGE_DIGEST##*@}"
+          health_file="$RUNNER_TEMP/production-health.json"
+          places_file="$RUNNER_TEMP/production-places.json"
+
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error --max-time 15 "$api_health_url" --output "$health_file"; then
+              break
+            fi
+            if [[ "$attempt" == 24 ]]; then
+              echo 'Production API health endpoint did not become available.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          python - "$health_file" "$expected_digest" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          if payload.get("status") != "ok" or payload.get("environment") != "production":
+              raise SystemExit("Health response did not identify a healthy production API")
+          if payload.get("image_digest") != sys.argv[2]:
+              raise SystemExit("Production API is not running the selected immutable image digest")
+          PY
+
+          places_url="${api_base_url}/api/v1/places?page_size=1"
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error --max-time 15 "$places_url" --output "$places_file"; then
+              break
+            fi
+            if [[ "$attempt" == 24 ]]; then
+              echo 'Production database-backed places query did not succeed.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          python - "$places_file" <<'PY'
+          import json, sys
+          payload = json.load(open(sys.argv[1]))
+          if not isinstance(payload.get("items"), list) or not isinstance(payload.get("total"), int):
+              raise SystemExit("Places API response did not match the database-backed page contract")
+          PY
+
+          {
+            echo 'Production API health and database-backed place query both passed.'
+            echo "API image digest: \`${expected_digest}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record production apply result
+        shell: bash
+        env:
+          BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        run: |
+          echo 'Production apply succeeded for the reviewed saved plan.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Development commit: `${{ needs.production-plan.outputs.development_sha }}`" >> "$GITHUB_STEP_SUMMARY"

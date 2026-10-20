@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { printf '%s\n' "$1" >&2; exit 2; }
 need() { [[ -n "${!1:-}" ]] || die "Required deployment setting is missing: $1"; }
@@ -44,15 +45,13 @@ publish_frontend() {
   else
     die "Environment must be development or production"
   fi
-  (
-    local app_dir
-    app_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/pawlocal-frontend.XXXXXX")"
-    trap 'rm -rf -- "$app_dir"' EXIT
-    tar -xzf "$archive" -C "$app_dir"
-    aws s3 sync "$app_dir" "s3://${bucket}/" --delete --no-progress
-    aws s3 cp "$archive" "s3://${bucket}/releases/${commit}/${digest#sha256:}.tar.gz" --no-progress
-    aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' >/dev/null
-  )
+  python3 -m pip install --disable-pip-version-check boto3==1.35.99
+  python3 "$script_dir/../publish-frontend-artifact.py" \
+    --archive "$archive" \
+    --bucket "$bucket" \
+    --distribution-id "$distribution" \
+    --commit "$commit" \
+    --digest "$digest"
   printf 'Published %s frontend artifact %s\n' "$environment" "$digest"
 }
 

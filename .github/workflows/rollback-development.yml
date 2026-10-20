@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-lightsail-deploy
+  group: pawlocal-infrastructure
   cancel-in-progress: false
 
 jobs:

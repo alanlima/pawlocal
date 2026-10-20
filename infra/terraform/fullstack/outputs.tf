@@ -13,6 +13,8 @@ output "environment_targets" {
     api_backend_image          = local.backend_images[name]
     frontend_bucket            = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].bucket : null
     distribution_id            = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].id : null
+    oac_id                     = contains(keys(local.frontend_environments), name) ? aws_cloudfront_origin_access_control.frontend[name].id : null
+    oac_arn                    = contains(keys(local.frontend_environments), name) ? "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:origin-access-control/${aws_cloudfront_origin_access_control.frontend[name].id}" : null
     dsql_cluster_arn           = aws_dsql_cluster.app[name].arn
     dsql_endpoint              = "${aws_dsql_cluster.app[name].identifier}.dsql.${var.aws_region}.on.aws"
     dsql_database_role         = config.database_role
