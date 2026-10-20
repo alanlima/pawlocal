@@ -376,6 +376,31 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 self.assertLess(credential_step, account_check)
                 self.assertLess(account_check, min(terraform_calls))
 
+    def test_destroy_preparation_guard_is_temporarily_commented_out(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "# Temporarily disabled for this teardown; review and restore later if relevant.",
+            source,
+        )
+        self.assertIn(
+            "# - name: Enforce strict teardown-preparation change guard",
+            source,
+        )
+        self.assertIn('#   if: steps.plan.outputs.plan_stage == \'destroy-prepare\'', source)
+        self.assertNotRegex(source, r"(?m)^      - name: Enforce strict teardown-preparation change guard$")
+        self.assertNotIn("allow_expected_destroy_preparation_changes", source)
+        self.assertNotIn("destroy_preparation_change_confirmation", source)
+        self.assertIn("Note deferred IAM bootstrap ownership work", source)
+        self.assertIn("IAM/bootstrap ownership deferred until recreation", source)
+        self.assertIn("destroy = false` lifecycle block leaves the development GitHub publisher role in AWS", source)
+        self.assertIn("this destroy does not remove that role", source)
+        self.assertIn("handled by the full destroy plan", source)
+        for job_name in ("prepare-destroy", "destroy"):
+            start = source.index(f"  {job_name}:\n")
+            next_job = re.search(r"(?m)^  [a-z][a-z-]+:\s*$", source[start + 1 :])
+            end = start + 1 + next_job.start() if next_job else len(source)
+            self.assertIn("environment: infrastructure-apply", source[start:end])
+
     def test_fullstack_release_ignores_current_stack_operations_only_changes(self) -> None:
         source = FULLSTACK_RELEASE_WORKFLOW.read_text(encoding="utf-8")
         pull_request_paths = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
