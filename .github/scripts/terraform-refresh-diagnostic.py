@@ -57,8 +57,65 @@ def _contains_wildcard_resource(value: Any) -> bool:
     return False
 
 
+def _as_sequence(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
+
+
+def _service_names(statements: list[dict[str, Any]]) -> list[str]:
+    services = set()
+    for statement in statements:
+        for action in _as_sequence(statement.get("Action", [])):
+            if isinstance(action, str) and ":" in action:
+                service = action.split(":", 1)[0]
+                if re.fullmatch(r"[a-z0-9-]{1,32}", service):
+                    services.add(service)
+    return sorted(services)
+
+
+def _action_classes(statements: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    classes: dict[str, dict[str, int]] = {}
+    for statement in statements:
+        effect = statement.get("Effect")
+        if effect not in {"Allow", "Deny"}:
+            continue
+        counts = classes.setdefault(effect.lower(), {})
+        for action in _as_sequence(statement.get("Action", [])):
+            if not isinstance(action, str) or ":" not in action:
+                category = "other"
+            else:
+                verb = action.split(":", 1)[1].split("*", 1)[0]
+                if action.endswith(":*") or action == "*":
+                    category = "wildcard"
+                elif re.match(r"^(Get|Describe|List|Head|Read|Lookup|Search|Check|View)", verb, re.IGNORECASE):
+                    category = "read"
+                elif re.match(r"^(Delete|Remove|Revoke|Purge|Destroy)", verb, re.IGNORECASE):
+                    category = "delete"
+                elif re.match(r"^(Put|Create|Update|Modify|Tag|Untag|Set|Associate|Attach|Detach|Import|Upload|Restore|Enable|Disable|Start|Stop)", verb, re.IGNORECASE):
+                    category = "write"
+                else:
+                    category = "other"
+            counts[category] = counts.get(category, 0) + 1
+    return classes
+
+
+def _resource_categories(statements: list[dict[str, Any]]) -> dict[str, int]:
+    categories = {"wildcard": 0, "s3": 0, "iam": 0, "cloudfront": 0, "dsql": 0, "route53": 0, "lightsail": 0, "other_arn": 0, "other": 0}
+    for statement in statements:
+        for resource in _as_sequence(statement.get("Resource", [])):
+            if not isinstance(resource, str):
+                categories["other"] += 1
+            elif resource == "*":
+                categories["wildcard"] += 1
+            elif resource.startswith("arn:"):
+                category = next((name for name in ("s3", "iam", "cloudfront", "dsql", "route53", "lightsail") if f":{name}:" in resource), "other_arn")
+                categories[category] += 1
+            else:
+                categories["other"] += 1
+    return {name: count for name, count in categories.items() if count}
+
+
 def policy_summary(value: Any) -> str:
-    """Summarize policy shape and fingerprint without printing policy contents."""
+    """Summarize policy structure and fingerprint without printing policy values."""
     if value is None:
         return "absent"
     try:
@@ -77,11 +134,58 @@ def policy_summary(value: Any) -> str:
         wildcard_resources = sum(_contains_wildcard_resource(item.get("Resource")) for item in statements)
         principal_count = sum("Principal" in item for item in statements)
         condition_count = sum(isinstance(item.get("Condition"), dict) for item in statements)
+        actions_count = sum(len(_as_sequence(item.get("Action", []))) for item in statements)
+        resources_count = sum(len(_as_sequence(item.get("Resource", []))) for item in statements)
+        principal_types = sorted({
+            key
+            for item in statements
+            for key in (item.get("Principal", {}) if isinstance(item.get("Principal"), dict) else {})
+            if key in {"AWS", "Service", "Federated", "CanonicalUser"}
+        })
+        condition_operators = sorted({
+            operator
+            for item in statements
+            for operator in (item.get("Condition", {}) if isinstance(item.get("Condition"), dict) else {})
+            if isinstance(operator, str) and re.fullmatch(r"[A-Za-z0-9]+", operator)
+        })
         return (
             f"sha256={digest}; statements={len(statements)}; allow={allow_count}; deny={deny_count}; "
+            f"actions={actions_count}; action_services={','.join(_service_names(statements)) or 'none'}; "
+            f"action_effect_classes={json.dumps(_action_classes(statements), sort_keys=True)}; "
+            f"resources={resources_count}; resource_categories={json.dumps(_resource_categories(statements), sort_keys=True)}; "
             f"wildcard_resource_statements={wildcard_resources}; principals={principal_count}; "
-            f"conditioned_statements={condition_count}"
+            f"principal_types={','.join(principal_types) or 'none'}; conditioned_statements={condition_count}; "
+            f"condition_operators={','.join(condition_operators) or 'none'}"
         )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return "unavailable"
+
+
+def encryption_summary(value: Any) -> str:
+    """Show only approved enum fields and a fingerprint, never arbitrary values."""
+    if value is None:
+        return "absent"
+    try:
+        details = json.loads(value) if isinstance(value, str) else value
+        if not isinstance(details, dict):
+            return "unavailable"
+        canonical = json.dumps(details, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        output = [f"sha256={digest}"]
+        safe_enums = {
+            "encryption_status": {"ENABLED", "DISABLED"},
+            "encryption_type": {"AWS_OWNED_KMS_KEY", "CUSTOMER_MANAGED_KMS_KEY"},
+        }
+        for key in ("encryption_status", "encryption_type"):
+            candidate = details.get(key)
+            if candidate is None:
+                output.append(f"{key}=absent")
+            elif isinstance(candidate, str) and candidate.upper() in safe_enums[key]:
+                output.append(f"{key}={candidate.upper()}")
+            else:
+                output.append(f"{key}=present")
+        output.append(f"fields={','.join(sorted(key for key in details if key in {'encryption_status', 'encryption_type'})) or 'none'}")
+        return "; ".join(output)
     except (TypeError, ValueError, json.JSONDecodeError):
         return "unavailable"
 
@@ -107,6 +211,10 @@ def summarize_plan(plan: dict[str, Any], label: str) -> list[tuple[str, str, lis
             old_policy = before.get("policy") if isinstance(before, dict) else None
             new_policy = after.get("policy") if isinstance(after, dict) else None
             policy_detail = f"before[{policy_summary(old_policy)}]; after[{policy_summary(new_policy)}]"
+        elif "$.encryption_details" in paths:
+            old_details = before.get("encryption_details") if isinstance(before, dict) else None
+            new_details = after.get("encryption_details") if isinstance(after, dict) else None
+            policy_detail = f"before[{encryption_summary(old_details)}]; after[{encryption_summary(new_details)}]"
         output.append((safe_resource_label(item.get("address")), safe_actions(actions), paths, policy_detail))
     return output
 
@@ -117,7 +225,7 @@ def print_section(title: str, rows: list[tuple[str, str, list[str], str | None]]
         print("No managed resource changes.")
         print()
         return
-    print("| Resource label | Actions | Changed attribute paths | Sanitized policy summary |")
+    print("| Resource label | Actions | Changed attribute paths | Sanitized before/after summary |")
     print("|---|---|---|---|")
     for label, actions, paths, policy in rows:
         path_text = ", ".join(paths) if paths else "<none>"
