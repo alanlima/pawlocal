@@ -147,6 +147,7 @@ Implementation must happen in the following order.
 - Implement CI/CD.
 - Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Production must not deploy automatically on merges to `main`.
 - Keep any historical mock-backed static frontend release evidence distinct from the full-stack release model. Issue #135 rebuilds the approved Issue #75 architecture from clean application states: one standalone IAM bootstrap state and separate development and production application states. Do not migrate or preserve the former application state, and do not point a workflow at unconfigured targets or credentials.
+- Before merging any Issue #135 Terraform, deployment-workflow, or deployment-helper implementation, disable or make fail-closed the legacy automatic development-deploy path and verify that a `main` merge cannot invoke the former combined-state deployment. Keep that path disabled until the new environment roots, targets, credentials, and release path are configured and independently reviewed.
 - Use `pawlocal-dev.<domain>` for the development site and `pawlocal.<domain>` for production. No domain, DNS, certificate, target, or secret is authorized by this naming convention alone.
 - Evaluate AWS hosting alternatives and running costs.
 - Obtain human approval before provisioning billable resources.
