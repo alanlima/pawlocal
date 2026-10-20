@@ -14,6 +14,13 @@ from typing import Any
 SAFE_ACTIONS = {"create", "read", "update", "delete", "forget", "import", "no-op"}
 SAFE_LABEL = re.compile(r"[A-Za-z0-9_.\[\]*-]+")
 SAFE_ATTRIBUTE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SAFE_PATH_CHILDREN = {
+    "$.policy": {"Statement", "Version"},
+    "$.policy.Statement[*]": {
+        "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", "Principal", "NotPrincipal", "Condition",
+    },
+    "$.encryption_details": {"encryption_status", "encryption_type", "kms_key_arn"},
+}
 
 
 def read_plan(path: str) -> dict[str, Any]:
@@ -226,6 +233,42 @@ def _has_attribute_flags(change: dict[str, Any], attribute: str) -> bool:
     return False
 
 
+def _flag_paths(value: Any, path: str) -> list[str]:
+    """Return safe Terraform attribute paths set in unknown/sensitive metadata."""
+    if value is True:
+        return [path]
+    if isinstance(value, dict):
+        paths = []
+        for key, nested in sorted(value.items(), key=lambda item: str(item[0])):
+            # Only fixed schema/policy field names may be printed. Dynamic map
+            # keys can resemble account IDs or resource identifiers, so collapse
+            # every other key to a stable wildcard.
+            if isinstance(key, str) and key in SAFE_PATH_CHILDREN.get(path, set()):
+                child_path = f"{path}.{key}"
+            else:
+                child_path = f"{path}[*]"
+            paths.extend(_flag_paths(nested, child_path))
+        return paths
+    if isinstance(value, list):
+        paths = []
+        for nested in value:
+            paths.extend(_flag_paths(nested, f"{path}[*]"))
+        return paths
+    return []
+
+
+def attribute_flag_summary(change: dict[str, Any], attribute: str) -> str:
+    """Render only safe paths from Terraform's unknown/sensitive masks."""
+    summaries = []
+    for metadata_name in ("before_unknown", "after_unknown", "before_sensitive", "after_sensitive"):
+        metadata = change.get(metadata_name)
+        value = metadata.get(attribute) if isinstance(metadata, dict) else None
+        paths = sorted(set(_flag_paths(value, f"$.{attribute}")))
+        if paths:
+            summaries.append(f"{metadata_name}={','.join(paths)}")
+    return "; ".join(summaries) if summaries else "none"
+
+
 def attribute_summary(change: dict[str, Any], attribute: str, side: str, summarize: Any) -> str:
     values = change.get(side)
     values = values if isinstance(values, dict) else {}
@@ -262,12 +305,14 @@ def summarize_plan(plan: dict[str, Any], label: str) -> list[tuple[str, str, lis
         if "$.policy" in paths or _has_attribute_flags(change, "policy"):
             policy_detail = (
                 f"before[{attribute_summary(change, 'policy', 'before', policy_summary)}]; "
-                f"after[{attribute_summary(change, 'policy', 'after', policy_summary)}]"
+                f"after[{attribute_summary(change, 'policy', 'after', policy_summary)}]; "
+                f"flag_paths[{attribute_flag_summary(change, 'policy')}]"
             )
         elif "$.encryption_details" in paths or _has_attribute_flags(change, "encryption_details"):
             policy_detail = (
                 f"before[{attribute_summary(change, 'encryption_details', 'before', encryption_summary)}]; "
-                f"after[{attribute_summary(change, 'encryption_details', 'after', encryption_summary)}]"
+                f"after[{attribute_summary(change, 'encryption_details', 'after', encryption_summary)}]; "
+                f"flag_paths[{attribute_flag_summary(change, 'encryption_details')}]"
             )
         output.append((safe_resource_label(item.get("address")), safe_actions(actions), paths, policy_detail))
     return output
