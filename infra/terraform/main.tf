@@ -188,15 +188,12 @@ resource "aws_route53_record" "site_aaaa" {
   }
 }
 
-resource "aws_iam_openid_connect_provider" "github" {
-  count          = var.manage_github_oidc_provider ? 1 : 0
-  url            = "https://token.actions.githubusercontent.com"
-  client_id_list = ["sts.amazonaws.com"]
-}
+removed {
+  from = aws_iam_openid_connect_provider.github[0]
 
-moved {
-  from = aws_iam_openid_connect_provider.github
-  to   = aws_iam_openid_connect_provider.github[0]
+  lifecycle {
+    destroy = false
+  }
 }
 
 data "aws_iam_openid_connect_provider" "github" {

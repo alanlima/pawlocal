@@ -17,3 +17,8 @@ output "plan_transfer_bucket_name" {
   description = "Private Terraform plan transfer bucket; plan and apply roles have environment-prefix-only access."
   value       = aws_s3_bucket.plan_transfer.bucket
 }
+
+output "legacy_terraform_role_arns" {
+  description = "GitHub OIDC plan/apply role ARNs for the legacy combined-state operations workflow."
+  value       = { for key, role in aws_iam_role.legacy_terraform : key => role.arn }
+}
