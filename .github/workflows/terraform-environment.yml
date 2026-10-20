@@ -40,6 +40,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: read
   deployments: read
 
@@ -69,7 +70,30 @@ jobs:
             const commit = process.env.RELEASE_COMMIT
             const image = process.env.BACKEND_IMAGE
             if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('Production requires a full development-verified commit SHA')
-            if (image && !/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(image)) throw new Error('Invalid immutable backend image')
+            if (!/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(image)) throw new Error('Production requires a valid immutable backend image')
+
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              ...context.repo, basehead: `${commit}...main`,
+            })
+            if (!['ahead', 'identical'].includes(comparison.data.status)) {
+              throw new Error('Selected development release commit is not in main history')
+            }
+
+            const expectedWorkflow = await github.rest.actions.getWorkflow({
+              ...context.repo, workflow_id: 'fullstack-release.yml',
+            })
+            const workflowRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: expectedWorkflow.data.id, branch: 'main',
+              event: 'push', status: 'success', head_sha: commit, per_page: 100,
+            })
+            const successfulRunIds = new Set(workflowRuns
+              .filter(run => run.head_sha === commit && run.head_branch === 'main' &&
+                run.event === 'push' && run.conclusion === 'success')
+              .map(run => `${run.id}:${run.run_attempt}`))
+            if (successfulRunIds.size === 0) {
+              throw new Error('No successful main-branch full-stack release workflow run exists for the selected commit')
+            }
+
             const deployments = await github.paginate(github.rest.repos.listDeployments, {
               ...context.repo, environment: 'development', ref: commit, per_page: 100,
             })
@@ -79,10 +103,32 @@ jobs:
               })
               const latest = statuses.data.reduce((value, item) =>
                 !value || Date.parse(item.created_at) > Date.parse(value.created_at) ? item : value, null)
-              const payload = deployment.payload || {}
-              if (latest?.state === 'success' && (!image || payload.backend_image === image)) return
+              let payload = deployment.payload || {}
+              if (typeof payload === 'string') {
+                try { payload = JSON.parse(payload) } catch { continue }
+              }
+              const workflowRun = `${payload.workflow_run_id}:${payload.workflow_run_attempt}`
+              const evidenceMatches = payload.record_schema_version === 1 &&
+                payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                payload.evidence_validated === true && successfulRunIds.has(workflowRun) &&
+                payload.release_commit === commit &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.release_manifest_digest || '') &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.verification_evidence_digest || '') &&
+                payload.backend_image === image &&
+                payload.backend_image_digest === image.split('@', 2)[1] &&
+                payload.running_image_digest === payload.backend_image_digest &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.frontend_artifact_digest || '') &&
+                payload.database_provider === 'aurora_dsql' &&
+                payload.migration_runner === 'dsql_baseline' &&
+                payload.migration_id === 'dsql_0001_initial' &&
+                payload.telemetry_enabled === false &&
+                payload.public_endpoint_health?.frontend === true &&
+                payload.public_endpoint_health?.api === true &&
+                payload.database_query_smoke?.route === '/api/v1/places' &&
+                payload.database_query_smoke?.result === 'valid_place_page'
+              if (latest?.state === 'success' && evidenceMatches) return
             }
-            throw new Error('No successful matching development deployment exists')
+            throw new Error('No successful development deployment has matching validated full-stack release evidence')
 
   plan:
     name: Plan ${{ inputs.environment }}

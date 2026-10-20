@@ -9,7 +9,7 @@ locals {
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
-# two named policies and may attach them only to their matching roles.
+# three named policies and may attach them only to their matching roles.
 data "aws_iam_policy_document" "environment_apply_boundary" {
   for_each = local.environments
 
@@ -206,17 +206,132 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     }
   }
 
-  statement {
-    sid       = "CreateEnvironmentCloudFrontResources"
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateFunction", "cloudfront:CreateOriginAccessControl"]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = (
+      each.key == "development"
+      ? var.development_distribution_arn == "" && var.development_oac_arn == ""
+      : var.production_distribution_arn == "" && var.production_oac_arn == ""
+    ) ? [true] : []
+    content {
+      sid       = "CreateTaggedEnvironmentCloudFrontDistribution"
+      effect    = "Allow"
+      actions   = ["cloudfront:CreateDistribution"]
+      resources = ["*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/project"
+        values   = ["pawlocal"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/environment"
+        values   = [each.key]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/managedby"
+        values   = ["terraform"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/component"
+        values   = ["fullstack-mvp"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/workload"
+        values   = ["application"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/costcenter"
+        values   = ["personal"]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "aws:TagKeys"
+        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = (
+      each.key == "development"
+      ? var.development_distribution_arn == "" && var.development_oac_arn == ""
+      : var.production_distribution_arn == "" && var.production_oac_arn == ""
+    ) ? [true] : []
+    content {
+      sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"
+      effect    = "Allow"
+      actions   = ["cloudfront:TagResource"]
+      resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
+      condition {
+        test     = "Null"
+        variable = "aws:ResourceTag/project"
+        values   = ["true"]
+      }
+      condition {
+        test     = "Null"
+        variable = "aws:ResourceTag/environment"
+        values   = ["true"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/project"
+        values   = ["pawlocal"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/environment"
+        values   = [each.key]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/managedby"
+        values   = ["terraform"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/component"
+        values   = ["fullstack-mvp"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/workload"
+        values   = ["application"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/costcenter"
+        values   = ["personal"]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "aws:TagKeys"
+        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = (
+      each.key == "development"
+      ? var.development_distribution_arn == "" && var.development_oac_arn == ""
+      : var.production_distribution_arn == "" && var.production_oac_arn == ""
+    ) ? [true] : []
+    content {
+      sid       = "CreateEnvironmentCloudFrontOAC"
+      effect    = "Allow"
+      actions   = ["cloudfront:CreateOriginAccessControl"]
+      resources = ["*"]
+    }
   }
 
   statement {
     sid       = "ManageExactEnvironmentCloudFrontFunction"
     effect    = "Allow"
-    actions   = ["cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
+    actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"]
   }
 

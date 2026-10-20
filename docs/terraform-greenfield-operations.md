@@ -71,6 +71,7 @@ Get-FileHash infra/terraform/iam-bootstrap/iam-bootstrap.tfplan -Algorithm SHA25
 The independent reviewer must confirm:
 
 - the existing populated bootstrap resources remain under their current addresses unless the change intentionally replaces a prior inline application permission with the new boundary/baseline model;
+- exactly the four former bootstrap app-specific frontend/runtime managed policies are planned for deletion through their declarative `removed` blocks, leaving the environment states as their sole replacements/owners;
 - the only imports are the existing GitHub OIDC provider, the verified development publisher role, and the already-existing fixed DSQL service-linked role selected by the explicit flags;
 - no application resource is imported;
 - the development publisher role is updated in place, not replaced or deleted;
@@ -119,11 +120,11 @@ Dispatch `Terraform environment plan and apply` from `main`. A normal foundation
 7. pauses at the matching protected apply Environment; and
 8. verifies the metadata and SHA-256 before applying exactly that downloaded plan.
 
-Development must be created, reviewed, and live-verified before production. Production workflow eligibility requires a successful development deployment for the same full commit SHA and immutable backend image.
+Development must be created, reviewed, and live-verified before production. Before any production Terraform plan, the workflow uses the GitHub API to require that the selected commit is in `main`, that the expected main-branch `fullstack-release.yml` run for that exact commit completed successfully, and that its successful development deployment carries validated schema-versioned health, database-query, migration, telemetry, frontend-digest, and backend-digest evidence from the same run/attempt.
 
 ### Generated-identifier and runtime handoff
 
-CloudFront distribution and OAC updates are deliberately denied until their exact ARNs are known. The first create-only environment plan may create them but cannot update/delete an account-wide wildcard target. After its approved apply, copy the non-secret exact output ARNs into the matching protected Environment variables and update the bootstrap inputs with the same ARNs through a new independently reviewed bootstrap plan. Future changes are then restricted to those exact resources.
+CloudFront distribution and OAC updates are deliberately denied until their exact ARNs are known. The first create-only environment plan may create them but cannot update/delete an account-wide wildcard target. CloudFront distribution creation uses the provider's `CreateDistributionWithTags` path, so the temporary create stage includes the dependent `TagResource` action only for an untagged distribution, requires the complete matching request-tag set, and grants no `UntagResource`. After its approved apply, copy the non-secret exact output ARNs into the matching protected Environment variables and update the bootstrap inputs with the same ARNs through a new independently reviewed bootstrap plan. Supplying both ARNs removes distribution/OAC create and wildcard tag authorization from both the environment policy and its bootstrap boundary; future changes are restricted to those exact resources.
 
 The API deployment and API DNS record remain absent while `PAWLOCAL_RUNTIME_ROLE_ARN` is empty. After the foundation apply, pass the exact Lightsail `principal_arn` output into the matching bootstrap runtime-role input and apply a separately reviewed bootstrap plan. Set the resulting runtime role ARN in the environment variables, then run a new environment plan with the immutable backend image. This breaks the identity dependency without manual AWS or state mutation.
 

@@ -94,6 +94,7 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: publish
     permissions:
+      actions: read
       contents: read
       deployments: read
       id-token: write
@@ -206,17 +207,47 @@ jobs:
           RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/development-verification.json
         run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+      - name: Validate development verification evidence
+        run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider aurora_dsql --migration-runner dsql_baseline --migration-id dsql_0001_initial
       - name: Record successful verified development deployment
         uses: actions/github-script@v7
         env:
           BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
           ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |
+            const crypto = require('crypto')
+            const fs = require('fs')
+            const manifestBytes = fs.readFileSync('release/release-manifest.json')
+            const evidenceBytes = fs.readFileSync('release/development-verification.json')
+            const manifest = JSON.parse(manifestBytes.toString('utf8'))
+            const evidence = JSON.parse(evidenceBytes.toString('utf8'))
+            const sha256 = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`
             const deployment = await github.rest.repos.createDeployment({
               ...context.repo, ref: context.sha, environment: 'development',
               production_environment: false, auto_merge: false, required_contexts: [],
-              payload: {workflow_run_id: context.runId, backend_image: process.env.BACKEND_IMAGE, telemetry_enabled: false},
+              payload: {
+                record_schema_version: 1,
+                manifest_schema_version: manifest.schema_version,
+                evidence_schema_version: evidence.schema_version,
+                evidence_validated: true,
+                workflow_run_id: context.runId,
+                workflow_run_attempt: Number(process.env.RUN_ATTEMPT),
+                release_commit: manifest.commit,
+                release_manifest_digest: sha256(manifestBytes),
+                verification_evidence_digest: sha256(evidenceBytes),
+                backend_image: process.env.BACKEND_IMAGE,
+                backend_image_digest: evidence.backend_image_digest,
+                running_image_digest: evidence.running_image_digest,
+                frontend_artifact_digest: evidence.frontend_artifact_digest,
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                telemetry_enabled: evidence.telemetry_enabled,
+                public_endpoint_health: evidence.public_endpoint_health,
+                database_query_smoke: evidence.database_query_smoke,
+              },
             })
             await github.rest.repos.createDeploymentStatus({
               ...context.repo, deployment_id: deployment.data.id, state: 'success',

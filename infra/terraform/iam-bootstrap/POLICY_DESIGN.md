@@ -17,7 +17,7 @@ The bootstrap-owned boundary is the effective maximum. It does not allow role cr
 | S3 | Create only a bucket with the matching `pawlocal-<environment>-` prefix; later management requires matching project/environment tags. |
 | Aurora DSQL | Create requires matching request tags; update/delete/policy actions require matching resource tags. Runtime connection policy is an environment-owned exact-cluster policy attached only to the bootstrap runtime role. |
 | Lightsail | Create requires matching request tags. Update/deployment/delete requires matching resource tags. `TagResource` is limited to the exact environment service/certificate names, requires the two authorization request tags, and is allowed only while both resource tags are absent. `UntagResource` is never granted. |
-| CloudFront | Create is permitted for the greenfield foundation. Function management uses the exact environment name. Distribution and OAC update/delete permissions are absent until the generated exact ARNs are returned to bootstrap and independently reviewed. No distribution retag permission exists. |
+| CloudFront | First-stage distribution creation requires the complete matching tag set and the provider's dependent `TagResource` authorization; that authorization is limited to untagged distributions and exists only while both generated ARNs are empty. OAC creation follows the same temporary stage. Function management uses the exact environment name. After both ARNs are returned to bootstrap, all create/wildcard-tag authorization disappears and update/delete is limited to the exact resources. `UntagResource` is never granted. |
 | Cognito | Create requires matching request tags; follow-on management requires matching resource tags. |
 | Route 53 | Changes are limited to the configured zone, the environment frontend/API/validation names, and A/AAAA/CNAME types. |
 
@@ -26,6 +26,8 @@ The normal workflow plan guard rejects deletes and replacements except the provi
 ## Publisher and runtime identities
 
 Bootstrap declaratively imports only the read-only-inventory-verified development publisher role when `import_existing_development_deploy_role=true`. The production publisher is created normally. Both trust only their matching release GitHub Environment and use their matching bootstrap-owned environment boundary. Environment roots create the exact frontend publication policy and attachment after their frontend resources exist.
+
+Four former bootstrap app-specific frontend/runtime managed-policy addresses are explicit `removed` blocks with `destroy = true`; the reviewed bootstrap plan must delete those policies rather than preserve duplicate ownership. Bootstrap retains only identity, trust, baseline, boundary, and shared plan-transfer ownership. Environment roots are the sole owners of application, frontend-publish, and runtime policies and matching attachments.
 
 Development and production runtime roles are created only after bootstrap receives the exact Lightsail `principal_arn` from the matching foundation output. Each boundary contains only that environment's exact DSQL cluster ARN handed back through reviewed bootstrap inputs. The environment root creates the exact DSQL connection policy and attachment. This staged handoff avoids wildcard cross-environment runtime access and manual state operations.
 

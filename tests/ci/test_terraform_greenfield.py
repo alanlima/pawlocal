@@ -61,6 +61,58 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('identity_app_role_boundary["production"].arn', roles)
         self.assertIn('to   = aws_iam_policy.identity_app_role_boundary["development"]', permissions)
 
+    def test_bootstrap_removes_duplicate_app_policies_and_environment_roots_are_sole_owners(self) -> None:
+        bootstrap_permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(
+            encoding="utf-8"
+        )
+        bootstrap_roles = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(
+            encoding="utf-8"
+        )
+        environment = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
+            encoding="utf-8"
+        )
+        for name in (
+            "identity_development_frontend",
+            "identity_production_frontend",
+            "identity_development_runtime",
+            "identity_production_runtime",
+        ):
+            with self.subTest(name=name):
+                self.assertNotIn(f'resource "aws_iam_policy" "{name}"', bootstrap_permissions)
+                self.assertIn(f"from = aws_iam_policy.{name}", bootstrap_permissions)
+        self.assertEqual(bootstrap_permissions.count("destroy = true"), 4)
+        self.assertNotIn('output "identity_managed_policy_arns"', bootstrap_roles)
+        self.assertIn('output "identity_app_boundary_arns"', bootstrap_roles)
+        self.assertIn('resource "aws_iam_policy" "application"', environment)
+        self.assertIn('resource "aws_iam_policy" "frontend_publish"', environment)
+        self.assertIn('resource "aws_iam_policy" "runtime"', environment)
+
+    def test_cloudfront_tagged_create_permission_is_temporary_and_handed_off(self) -> None:
+        module_permissions = (ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf").read_text(
+            encoding="utf-8"
+        )
+        boundary = (ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf").read_text(
+            encoding="utf-8"
+        )
+        distribution = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
+            encoding="utf-8"
+        )
+        for source in (module_permissions, boundary):
+            self.assertIn('"cloudfront:TagResource"', source)
+            self.assertIn('variable = "aws:RequestTag/environment"', source)
+            self.assertIn('variable = "aws:TagKeys"', source)
+            self.assertIn('sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"', source)
+            self.assertIn('sid       = "ManageExactEnvironmentCloudFrontFunction"', source)
+            self.assertIn('"cloudfront:CreateFunction"', source)
+            self.assertNotIn("cloudfront:UntagResource", source)
+        self.assertIn(
+            'var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == ""',
+            module_permissions,
+        )
+        self.assertIn('var.development_distribution_arn == "" && var.development_oac_arn == ""', boundary)
+        self.assertIn('var.production_distribution_arn == "" && var.production_oac_arn == ""', boundary)
+        self.assertIn("tags                = local.common_tags", distribution)
+
     def test_lightsail_authorization_tags_are_one_time_and_cannot_be_removed(self) -> None:
         for path in (
             ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf",

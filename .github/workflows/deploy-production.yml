@@ -23,6 +23,7 @@ jobs:
   terraform-production:
     name: Apply exact production release plan
     permissions:
+      actions: read
       contents: read
       deployments: read
       id-token: write
@@ -61,12 +62,11 @@ jobs:
         with:
           ref: ${{ inputs.release_commit }}
           persist-credentials: false
-      - name: Require selected commit in main history
+      - name: Validate selected release checkout
         shell: bash
         run: |
           [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
-          git fetch --no-tags --depth=1 origin main
-          git merge-base --is-ancestor "$RELEASE_COMMIT" origin/main
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           [[ "$BACKEND_IMAGE" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
       - name: Configure narrow production publisher credentials
         uses: aws-actions/configure-aws-credentials@v5

@@ -289,14 +289,10 @@ data "aws_iam_policy_document" "identity_terraform_role_permissions" {
   }
 
   statement {
-    sid     = "ReadOnlyBootstrapManagedIdentityPolicies"
+    sid     = "ReadOnlyBootstrapManagedIdentityBoundaries"
     effect  = "Allow"
     actions = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]
     resources = [
-      aws_iam_policy.identity_development_frontend.arn,
-      aws_iam_policy.identity_production_frontend.arn,
-      aws_iam_policy.identity_development_runtime.arn,
-      aws_iam_policy.identity_production_runtime.arn,
       aws_iam_policy.identity_app_role_boundary["development"].arn,
       aws_iam_policy.identity_app_role_boundary["production"].arn
     ]
@@ -317,15 +313,11 @@ output "identity_terraform_role_arns" {
   value       = { for key, role in aws_iam_role.identity_terraform : key => role.arn }
 }
 
-output "identity_managed_policy_arns" {
-  description = "Bootstrap-owned fixed app policies and required IAM permissions boundary for identity-stage roles."
+output "identity_app_boundary_arns" {
+  description = "Bootstrap-owned permissions boundaries for the fixed publisher and runtime identity roles."
   value = {
-    development_frontend = aws_iam_policy.identity_development_frontend.arn
-    production_frontend  = aws_iam_policy.identity_production_frontend.arn
-    development_runtime  = aws_iam_policy.identity_development_runtime.arn
-    production_runtime   = aws_iam_policy.identity_production_runtime.arn
-    development_boundary = aws_iam_policy.identity_app_role_boundary["development"].arn
-    production_boundary  = aws_iam_policy.identity_app_role_boundary["production"].arn
+    development = aws_iam_policy.identity_app_role_boundary["development"].arn
+    production  = aws_iam_policy.identity_app_role_boundary["production"].arn
   }
 }
 

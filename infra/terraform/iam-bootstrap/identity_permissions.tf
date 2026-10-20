@@ -1,6 +1,6 @@
 # The identity state is applied after the environment foundation exposes its
-# immutable resource ARNs. Until then, each managed policy grants only access
-# to a deliberately nonexistent sentinel ARN.
+# immutable resource ARNs. Until then, each boundary grants only access to a
+# deliberately nonexistent sentinel ARN.
 locals {
   identity_pending_bucket_arn       = "arn:aws:s3:::__pawlocal_identity_scope_pending__"
   identity_pending_distribution_arn = "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/PENDING"
@@ -48,66 +48,6 @@ output "dsql_service_linked_role_arn" {
   value       = aws_iam_service_linked_role.dsql.arn
 }
 
-data "aws_iam_policy_document" "identity_development_frontend" {
-  statement {
-    sid       = "ListDevelopmentFrontendBucket"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = [local.identity_development_bucket_arn]
-  }
-  statement {
-    sid       = "PublishDevelopmentFrontendObjects"
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${local.identity_development_bucket_arn}/*"]
-  }
-  statement {
-    sid       = "InvalidateDevelopmentDistribution"
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateInvalidation"]
-    resources = [local.identity_development_distribution_arn]
-  }
-}
-
-data "aws_iam_policy_document" "identity_production_frontend" {
-  statement {
-    sid       = "ListProductionFrontendBucket"
-    effect    = "Allow"
-    actions   = ["s3:ListBucket"]
-    resources = [local.identity_production_bucket_arn]
-  }
-  statement {
-    sid       = "PublishProductionFrontendObjects"
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${local.identity_production_bucket_arn}/*"]
-  }
-  statement {
-    sid       = "InvalidateProductionDistribution"
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateInvalidation"]
-    resources = [local.identity_production_distribution_arn]
-  }
-}
-
-data "aws_iam_policy_document" "identity_development_runtime" {
-  statement {
-    sid       = "ConnectOnlyToDevelopmentDSQL"
-    effect    = "Allow"
-    actions   = ["dsql:DbConnect"]
-    resources = [local.identity_development_cluster_arn]
-  }
-}
-
-data "aws_iam_policy_document" "identity_production_runtime" {
-  statement {
-    sid       = "ConnectOnlyToProductionDSQL"
-    effect    = "Allow"
-    actions   = ["dsql:DbConnect"]
-    resources = [local.identity_production_cluster_arn]
-  }
-}
-
 data "aws_iam_policy_document" "identity_app_role_boundary" {
   for_each = local.identity_environment_resources
 
@@ -137,28 +77,36 @@ data "aws_iam_policy_document" "identity_app_role_boundary" {
   }
 }
 
-resource "aws_iam_policy" "identity_development_frontend" {
-  name        = "pawlocal-identity-development-frontend-publish"
-  description = "Fixed least-privilege frontend publishing policy for PawLocal development."
-  policy      = data.aws_iam_policy_document.identity_development_frontend.json
+removed {
+  from = aws_iam_policy.identity_development_frontend
+
+  lifecycle {
+    destroy = true
+  }
 }
 
-resource "aws_iam_policy" "identity_production_frontend" {
-  name        = "pawlocal-identity-production-frontend-publish"
-  description = "Fixed least-privilege frontend publishing policy for PawLocal production."
-  policy      = data.aws_iam_policy_document.identity_production_frontend.json
+removed {
+  from = aws_iam_policy.identity_production_frontend
+
+  lifecycle {
+    destroy = true
+  }
 }
 
-resource "aws_iam_policy" "identity_development_runtime" {
-  name        = "pawlocal-identity-development-dsql-connect"
-  description = "Fixed least-privilege Aurora DSQL connection policy for PawLocal development runtime."
-  policy      = data.aws_iam_policy_document.identity_development_runtime.json
+removed {
+  from = aws_iam_policy.identity_development_runtime
+
+  lifecycle {
+    destroy = true
+  }
 }
 
-resource "aws_iam_policy" "identity_production_runtime" {
-  name        = "pawlocal-identity-production-dsql-connect"
-  description = "Fixed least-privilege Aurora DSQL connection policy for PawLocal production runtime."
-  policy      = data.aws_iam_policy_document.identity_production_runtime.json
+removed {
+  from = aws_iam_policy.identity_production_runtime
+
+  lifecycle {
+    destroy = true
+  }
 }
 
 resource "aws_iam_policy" "identity_app_role_boundary" {
