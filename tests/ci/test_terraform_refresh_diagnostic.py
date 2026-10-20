@@ -196,7 +196,7 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
                         "before": {"policy": None},
                         "after": {"policy": None},
                         "after_unknown": {"policy": {"Statement": [{"Resource": True}]}},
-                        "before_sensitive": {"policy": {"Statement": [{"Condition": {"StringEquals": True}}]}},
+                        "before_sensitive": {"policy": {"Statement": [{"Condition": {"123456789012": {"privateKeyId": True}}}]}},
                     },
                 },
                 {
@@ -217,7 +217,7 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
                         "actions": ["update"],
                         "before": {"policy": None},
                         "after": {"policy": None},
-                        "after_sensitive": {"policy": {"Statement": [{"Principal": {"Service": True}}]}},
+                        "after_sensitive": {"policy": {"Statement": [{"Principal": {"privatePrincipal123456789012": True}}]}},
                     },
                 },
             ]
@@ -228,12 +228,15 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertIn("after[unknown/computed]", result.stdout)
         self.assertIn("module.fullstack.aws_dsql_cluster.app[*]", result.stdout)
         self.assertIn("before[sensitive]; after[unknown/computed]", result.stdout)
-        self.assertIn("before_sensitive=$.policy.Statement[*].Condition.StringEquals", result.stdout)
+        self.assertIn("before_sensitive=$.policy.Statement[*].Condition[*][*]", result.stdout)
         self.assertIn("after_unknown=$.policy.Statement[*].Resource", result.stdout)
         self.assertIn("after_unknown=$.encryption_details.kms_key_arn", result.stdout)
         self.assertIn("after_sensitive=$.encryption_details.encryption_type", result.stdout)
         self.assertIn("module.fullstack.aws_s3_bucket_policy.frontend[*]", result.stdout)
-        self.assertIn("after_sensitive=$.policy.Statement[*].Principal.Service", result.stdout)
+        self.assertIn("after_sensitive=$.policy.Statement[*].Principal[*]", result.stdout)
+        self.assertNotIn("123456789012", result.stdout)
+        self.assertNotIn("privateKeyId", result.stdout)
+        self.assertNotIn("privatePrincipal", result.stdout)
         self.assertNotIn("private-policy-body-marker", result.stdout)
         self.assertNotIn("private-id", result.stdout)
 

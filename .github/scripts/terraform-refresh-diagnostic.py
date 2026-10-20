@@ -14,6 +14,13 @@ from typing import Any
 SAFE_ACTIONS = {"create", "read", "update", "delete", "forget", "import", "no-op"}
 SAFE_LABEL = re.compile(r"[A-Za-z0-9_.\[\]*-]+")
 SAFE_ATTRIBUTE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+SAFE_PATH_CHILDREN = {
+    "$.policy": {"Statement", "Version"},
+    "$.policy.Statement[*]": {
+        "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", "Principal", "NotPrincipal", "Condition",
+    },
+    "$.encryption_details": {"encryption_status", "encryption_type", "kms_key_arn"},
+}
 
 
 def read_plan(path: str) -> dict[str, Any]:
@@ -233,10 +240,14 @@ def _flag_paths(value: Any, path: str) -> list[str]:
     if isinstance(value, dict):
         paths = []
         for key, nested in sorted(value.items(), key=lambda item: str(item[0])):
-            # Terraform metadata keys are schema attribute names. Reject arbitrary
-            # map keys so identifiers or values cannot be echoed into a summary.
-            safe_key = key if isinstance(key, str) and SAFE_ATTRIBUTE.fullmatch(key) else "<other>"
-            paths.extend(_flag_paths(nested, f"{path}.{safe_key}"))
+            # Only fixed schema/policy field names may be printed. Dynamic map
+            # keys can resemble account IDs or resource identifiers, so collapse
+            # every other key to a stable wildcard.
+            if isinstance(key, str) and key in SAFE_PATH_CHILDREN.get(path, set()):
+                child_path = f"{path}.{key}"
+            else:
+                child_path = f"{path}[*]"
+            paths.extend(_flag_paths(nested, child_path))
         return paths
     if isinstance(value, list):
         paths = []
