@@ -250,20 +250,15 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertIn("data.aws_iam_openid_connect_provider.github.arn", source)
         self.assertNotIn('variable "manage_github_oidc_provider"', variables)
         self.assertIn("import the provider", source)
-        self.assertIn("After the bootstrap has imported the publisher roles", policy_design)
+        self.assertIn("shared GitHub OIDC provider", policy_design)
+        self.assertIn("Bootstrap declaratively imports only", policy_design)
 
-    def test_workflow_runs_refresh_only_before_the_destroy_preparation_plan(self) -> None:
+    def test_retired_workflow_cannot_run_destroy_preparation(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
-        refresh_step = source.index("name: Create read-only refresh snapshot for destroy preparation")
-        refresh_plan = source.index("terraform plan -refresh-only", refresh_step)
-        normal_plan = source.index("terraform plan -input=false", refresh_plan)
-        diagnostic = source.index("terraform-refresh-diagnostic.py", normal_plan)
-        strict_guard = source.index("--destroy-prepare-guard", diagnostic)
-        self.assertLess(refresh_step, refresh_plan)
-        self.assertLess(refresh_plan, normal_plan)
-        self.assertLess(normal_plan, diagnostic)
-        self.assertLess(diagnostic, strict_guard)
-        self.assertIn("if: inputs.operation == 'destroy'", source[refresh_step:refresh_plan])
+        self.assertIn("permanently disabled", source)
+        self.assertNotIn("terraform plan -refresh-only", source)
+        self.assertNotIn("--destroy-prepare-guard", source)
+        self.assertNotIn("inputs.operation == 'destroy'", source)
 
 
 if __name__ == "__main__":

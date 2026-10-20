@@ -11,6 +11,19 @@ locals {
   identity_development_distribution_arn = var.development_distribution_arn != "" ? var.development_distribution_arn : local.identity_pending_distribution_arn
   identity_production_distribution_arn  = var.production_distribution_arn != "" ? var.production_distribution_arn : local.identity_pending_distribution_arn
   identity_development_cluster_arn      = var.development_dsql_cluster_arn != "" ? var.development_dsql_cluster_arn : local.identity_pending_cluster_arn
+  identity_production_cluster_arn       = var.production_dsql_cluster_arn != "" ? var.production_dsql_cluster_arn : local.identity_pending_cluster_arn
+  identity_environment_resources = {
+    development = {
+      bucket_arn       = local.identity_development_bucket_arn
+      distribution_arn = local.identity_development_distribution_arn
+      cluster_arn      = local.identity_development_cluster_arn
+    }
+    production = {
+      bucket_arn       = local.identity_production_bucket_arn
+      distribution_arn = local.identity_production_distribution_arn
+      cluster_arn      = local.identity_production_cluster_arn
+    }
+  }
 }
 
 resource "aws_iam_service_linked_role" "dsql" {
@@ -86,30 +99,41 @@ data "aws_iam_policy_document" "identity_development_runtime" {
   }
 }
 
+data "aws_iam_policy_document" "identity_production_runtime" {
+  statement {
+    sid       = "ConnectOnlyToProductionDSQL"
+    effect    = "Allow"
+    actions   = ["dsql:DbConnect"]
+    resources = [local.identity_production_cluster_arn]
+  }
+}
+
 data "aws_iam_policy_document" "identity_app_role_boundary" {
+  for_each = local.identity_environment_resources
+
   statement {
     sid       = "AllowApprovedFrontendPublishActions"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
-    resources = [local.identity_development_bucket_arn, local.identity_production_bucket_arn]
+    resources = [each.value.bucket_arn]
   }
   statement {
     sid       = "AllowApprovedFrontendObjectActions"
     effect    = "Allow"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${local.identity_development_bucket_arn}/*", "${local.identity_production_bucket_arn}/*"]
+    resources = ["${each.value.bucket_arn}/*"]
   }
   statement {
     sid       = "AllowApprovedFrontendInvalidations"
     effect    = "Allow"
     actions   = ["cloudfront:CreateInvalidation"]
-    resources = [local.identity_development_distribution_arn, local.identity_production_distribution_arn]
+    resources = [each.value.distribution_arn]
   }
   statement {
-    sid       = "AllowDevelopmentRuntimeDatabaseConnection"
+    sid       = "AllowApprovedRuntimeDatabaseConnection"
     effect    = "Allow"
     actions   = ["dsql:DbConnect"]
-    resources = [local.identity_development_cluster_arn]
+    resources = [each.value.cluster_arn]
   }
 }
 
@@ -131,8 +155,21 @@ resource "aws_iam_policy" "identity_development_runtime" {
   policy      = data.aws_iam_policy_document.identity_development_runtime.json
 }
 
+resource "aws_iam_policy" "identity_production_runtime" {
+  name        = "pawlocal-identity-production-dsql-connect"
+  description = "Fixed least-privilege Aurora DSQL connection policy for PawLocal production runtime."
+  policy      = data.aws_iam_policy_document.identity_production_runtime.json
+}
+
 resource "aws_iam_policy" "identity_app_role_boundary" {
-  name        = "pawlocal-app-role-boundary"
-  description = "Permissions ceiling for the three fixed PawLocal app identity roles."
-  policy      = data.aws_iam_policy_document.identity_app_role_boundary.json
+  for_each = local.identity_environment_resources
+
+  name        = each.key == "development" ? "pawlocal-app-role-boundary" : "pawlocal-${each.key}-app-role-boundary"
+  description = "Permissions ceiling for fixed PawLocal ${each.key} publisher and runtime identity roles."
+  policy      = data.aws_iam_policy_document.identity_app_role_boundary[each.key].json
+}
+
+moved {
+  from = aws_iam_policy.identity_app_role_boundary
+  to   = aws_iam_policy.identity_app_role_boundary["development"]
 }

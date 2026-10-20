@@ -196,33 +196,21 @@ class WorkflowPathTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(matches("workflow-validation.yml", path))
 
-    def test_historical_production_promotion_uses_current_deployment_tooling(self) -> None:
+    def test_production_promotion_uses_matching_environment_state(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text(encoding="utf-8")
-        release_checkout = workflow.index("name: Check out selected release source")
-        tooling_checkout = workflow.index("name: Check out current deployment tooling")
-        self.assertLess(release_checkout, tooling_checkout)
-        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
-        self.assertIn("path: deployment-tools", workflow)
+        self.assertIn("uses: ./.github/workflows/terraform-environment.yml", workflow)
+        self.assertIn("environment: production", workflow)
+        self.assertIn("release_only: true", workflow)
         self.assertIn("ref: ${{ inputs.release_commit }}", workflow)
-        self.assertIn(
-            "bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production",
-            workflow,
-        )
-        adapter = Path("ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"', adapter)
-        self.assertIn('root="$script_dir/../infra/terraform"', adapter)
-        self.assertIn('python3 "$script_dir/validate-lightsail-container-plan.py"', adapter)
-        self.assertNotIn('python3 ops/validate-lightsail-container-plan.py', adapter)
+        self.assertNotIn("pawlocal/terraform.tfstate", workflow)
 
     def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
-        workflow = (WORKFLOWS / "deploy-production.yml").read_text()
-        self.assertIn("statuses.data.reduce((latest, status)", workflow)
-        self.assertIn("latestStatus.state !== 'success'", workflow)
-        self.assertNotIn("statuses.data.find(status => status.state === 'success')", workflow)
-        self.assertIn("deployment.payload?.migration_chains?.[provider]", workflow)
-        self.assertIn("successPayload.migration_runner === selectedChain.runner", workflow)
-        self.assertIn("successPayload.migration_id === selectedChain.migration_id", workflow)
-        self.assertIn("successPayload.backend_image_digest === deployment.payload.backend_image_digest", workflow)
+        workflow = (WORKFLOWS / "terraform-environment.yml").read_text()
+        self.assertIn("statuses.data.reduce((value, item)", workflow)
+        self.assertIn("latest?.state === 'success'", workflow)
+        self.assertIn("payload.backend_image === image", workflow)
+        self.assertIn("environment: 'development'", workflow)
+        self.assertIn("No successful matching development deployment exists", workflow)
 
 
 if __name__ == "__main__":

@@ -132,19 +132,21 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             VALIDATOR.validate(self.plan(address, ["delete"], self.image), "production", self.image, self.account_id)
 
     def test_release_workflows_do_not_use_ssh_or_manual_ingress(self) -> None:
-        for filename in ("fullstack-release.yml", "deploy-production.yml", "rollback-development.yml"):
+        for filename in ("fullstack-release.yml", "deploy-production.yml"):
             workflow = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
-            self.assertIn("terraform-lightsail-container-deploy.sh", workflow)
+            self.assertIn("./.github/workflows/terraform-environment.yml", workflow)
+            self.assertIn("release_only: true", workflow)
             self.assertNotIn("terraform-lightsail-ingress.sh", workflow)
             self.assertNotIn("PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY", workflow)
             self.assertNotIn("PAWLOCAL_DSQL_ACCESS_KEY_ID", workflow)
 
     def test_container_release_records_running_image_digest(self) -> None:
-        deploy = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
+        deploy = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
         adapter = (ROOT / "ops/deployment-adapters/lightsail-dsql.sh").read_text(encoding="utf-8")
-        self.assertIn("get-container-services", deploy)
-        self.assertIn("currentDeployment", deploy)
-        self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8"))
+        module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(encoding="utf-8")
+        self.assertIn("release_only", deploy)
+        self.assertIn("terraform-plan-metadata.py verify", deploy)
+        self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", module)
         self.assertIn("running_image_digest", adapter)
 
     def test_deploy_adapter_cleans_frontend_temp_dir_after_publication(self) -> None:
@@ -332,15 +334,10 @@ class TerraformLightsailContainerTests(unittest.TestCase):
 
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
-        restore_step = workflow.split("      - name: Restore the selected frontend artifact\n", 1)[1].split("      - name:", 1)[0]
-        verify_step = workflow.split("      - name: Verify restored development release\n", 1)[1].split("      - name:", 1)[0]
-        adapter_variable = "PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}"
-        self.assertIn(adapter_variable, restore_step)
-        self.assertIn(adapter_variable, verify_step)
-        self.assertIn("No successful main-branch full-stack release", workflow)
-        self.assertIn("no successful verified development deployment", workflow)
-        self.assertIn("terraform-lightsail-container-deploy.sh development", workflow)
-        self.assertIn("validate-release-metadata.py", workflow)
+        self.assertIn("Legacy development rollback (disabled)", workflow)
+        self.assertIn("Issue #44", workflow)
+        self.assertNotIn("terraform apply", workflow)
+        self.assertNotIn("run-deployment-adapter.sh", workflow)
 
     def test_nullable_dsql_retention_validation_is_null_safe(self) -> None:
         for filename in ("infra/terraform/variables.tf", "infra/terraform/fullstack/variables.tf"):

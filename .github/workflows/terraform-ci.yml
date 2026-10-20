@@ -4,7 +4,11 @@ on:
   pull_request:
     paths:
       - "infra/terraform/**"
+      - ".github/scripts/terraform-environment-plan.py"
+      - ".github/scripts/terraform-plan-metadata.py"
       - ".github/workflows/terraform-ci.yml"
+      - ".github/workflows/terraform-environment.yml"
+      - "tests/ci/test_terraform_greenfield.py"
       - '!**/*.md'
       - '!**/*.mdx'
   push:
@@ -12,7 +16,11 @@ on:
       - main
     paths:
       - "infra/terraform/**"
+      - ".github/scripts/terraform-environment-plan.py"
+      - ".github/scripts/terraform-plan-metadata.py"
       - ".github/workflows/terraform-ci.yml"
+      - ".github/workflows/terraform-environment.yml"
+      - "tests/ci/test_terraform_greenfield.py"
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_call:
@@ -26,11 +34,19 @@ concurrency:
 
 jobs:
   terraform:
-    name: Terraform format and validation
+    name: Terraform validation (${{ matrix.root }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root:
+          - iam-bootstrap
+          - environments/development
+          - environments/production
+          - modules/pawlocal-environment
     defaults:
       run:
-        working-directory: infra/terraform
+        working-directory: infra/terraform/${{ matrix.root }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -42,7 +58,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Check Terraform formatting
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive .
 
       - name: Initialize providers without configuring the backend
         run: terraform init -backend=false -input=false

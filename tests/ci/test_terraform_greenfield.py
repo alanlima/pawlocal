@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+PLAN_GUARD = ROOT / ".github/scripts/terraform-environment-plan.py"
+METADATA = ROOT / ".github/scripts/terraform-plan-metadata.py"
+
+
+def load_module(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class GreenfieldTerraformTests(unittest.TestCase):
+    def test_roots_and_backend_keys_are_explicit_and_distinct(self) -> None:
+        for environment in ("development", "production"):
+            root = ROOT / f"infra/terraform/environments/{environment}"
+            self.assertTrue((root / "versions.tf").is_file())
+            self.assertIn('backend "s3" {}', (root / "versions.tf").read_text(encoding="utf-8"))
+        workflow = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
+        self.assertIn("TF_ROOT: infra/terraform/environments/${{ inputs.environment }}", workflow)
+        self.assertIn("TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate", workflow)
+        self.assertNotIn("pawlocal/terraform.tfstate", workflow)
+
+    def test_environment_module_does_not_manage_role_identity_or_trust(self) -> None:
+        source = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (ROOT / "infra/terraform/modules/pawlocal-environment").glob("*.tf")
+        )
+        self.assertNotIn('resource "aws_iam_role"', source)
+        self.assertNotIn('resource "aws_iam_openid_connect_provider"', source)
+        self.assertNotIn("assume_role_policy", source)
+        self.assertIn('resource "aws_iam_policy" "application"', source)
+        self.assertIn('resource "aws_iam_role_policy_attachment" "application"', source)
+
+    def test_bootstrap_declaratively_imports_only_verified_development_role(self) -> None:
+        source = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(encoding="utf-8")
+        self.assertIn("import_existing_development_deploy_role", source)
+        import_block = source.split("import {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("development_frontend", import_block)
+        self.assertNotIn("production_frontend =", import_block)
+
+    def test_bootstrap_app_role_boundaries_are_environment_specific(self) -> None:
+        permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(encoding="utf-8")
+        roles = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(encoding="utf-8")
+        self.assertIn("for_each = local.identity_environment_resources", permissions)
+        self.assertIn("resources = [each.value.cluster_arn]", permissions)
+        self.assertIn('identity_app_role_boundary["development"].arn', roles)
+        self.assertIn('identity_app_role_boundary["production"].arn', roles)
+        self.assertIn('to   = aws_iam_policy.identity_app_role_boundary["development"]', permissions)
+
+    def test_lightsail_authorization_tags_are_one_time_and_cannot_be_removed(self) -> None:
+        for path in (
+            ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf",
+            ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf",
+        ):
+            source = path.read_text(encoding="utf-8")
+            self.assertIn('"lightsail:TagResource"', source)
+            self.assertIn('variable = "aws:ResourceTag/project"', source)
+            self.assertIn('variable = "aws:ResourceTag/environment"', source)
+            self.assertIn('values   = ["true"]', source)
+            self.assertNotIn("lightsail:UntagResource", source)
+
+    def test_plan_and_apply_use_different_matching_roles_and_exact_plan(self) -> None:
+        source = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
+        bootstrap = (ROOT / "infra/terraform/iam-bootstrap/main.tf").read_text(encoding="utf-8")
+        self.assertIn("pawlocal-${{ inputs.environment }}-terraform-plan", source)
+        self.assertIn("pawlocal-${{ inputs.environment }}-terraform-apply", source)
+        self.assertIn('subject_environment = "${env}-plan"', bootstrap)
+        self.assertIn('environment:${each.value.subject_environment}', bootstrap)
+        self.assertIn("terraform-plan-metadata.py verify", source)
+        self.assertIn('terraform -chdir="$TF_ROOT" apply', source)
+        self.assertNotIn("-auto-approve", source)
+        self.assertIn("environment: ${{ inputs.environment }}-apply", source)
+        self.assertIn("pawlocal-${each.value.environment}-github-deploy", bootstrap)
+        self.assertIn("pawlocal-${each.value.environment}-dsql-runtime", bootstrap)
+        self.assertIn("ReadExactMatchingEnvironmentPoliciesForRefresh", bootstrap)
+        self.assertIn('"cloudfront:GetOriginAccessControl"', bootstrap)
+        self.assertNotIn("pawlocal-production-terraform-deploy", bootstrap)
+
+    def test_release_workflows_call_matching_environment_root_workflow(self) -> None:
+        development = (ROOT / ".github/workflows/fullstack-release.yml").read_text(encoding="utf-8")
+        production = (ROOT / ".github/workflows/deploy-production.yml").read_text(encoding="utf-8")
+        self.assertIn("uses: ./.github/workflows/terraform-environment.yml", development)
+        self.assertIn("environment: development", development)
+        self.assertIn("release_only: true", development)
+        self.assertIn("uses: ./.github/workflows/terraform-environment.yml", production)
+        self.assertIn("environment: production", production)
+        self.assertIn("release_only: true", production)
+
+    def test_plan_guard_rejects_roles_imports_deletes_and_non_release_changes(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan")
+        with self.assertRaises(SystemExit):
+            module.validate(
+                {"resource_changes": [{"type": "aws_iam_role", "change": {"actions": ["create"]}}]},
+                "development",
+                False,
+            )
+        with self.assertRaises(SystemExit):
+            module.validate(
+                {"resource_changes": [{"type": "aws_s3_bucket", "change": {"actions": ["delete"]}}]},
+                "development",
+                False,
+            )
+        with self.assertRaises(SystemExit):
+            module.validate(
+                {"resource_changes": [{"type": "aws_s3_bucket", "importing": {}, "change": {"actions": ["create"]}}]},
+                "development",
+                False,
+            )
+        with self.assertRaises(SystemExit):
+            module.validate(
+                {"resource_changes": [{"type": "aws_s3_bucket", "change": {"actions": ["update"]}}]},
+                "development",
+                True,
+            )
+
+    def test_sanitized_plan_summary_omits_addresses_and_values(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_summary")
+        plan = {
+            "resource_changes": [{
+                "address": "module.pawlocal.aws_s3_bucket.frontend",
+                "type": "aws_s3_bucket",
+                "change": {"actions": ["create"], "after": {"bucket": "private-value"}},
+            }]
+        }
+        summary = module.render(module.validate(plan, "development", False), "development")
+        self.assertIn("aws_s3_bucket", summary)
+        self.assertNotIn("module.pawlocal", summary)
+        self.assertNotIn("private-value", summary)
+
+    def test_plan_guard_ignores_provider_data_reads(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_data")
+        rows = module.validate(
+            {"resource_changes": [{"mode": "data", "type": "aws_caller_identity", "change": {"actions": ["read"]}}]},
+            "development",
+            False,
+        )
+        self.assertEqual(rows, [])
+
+    def test_plan_guard_accepts_only_the_expected_immutable_deployment_replacement(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_replacement")
+        plan = {
+            "resource_changes": [{
+                "type": "aws_lightsail_container_service_deployment_version",
+                "change": {"actions": ["delete", "create"]},
+            }],
+            "variables": {"environment": {"value": "development"}},
+        }
+        self.assertEqual(
+            module.validate(plan, "development", True),
+            [("aws_lightsail_container_service_deployment_version", "replace")],
+        )
+        plan["resource_changes"][0]["type"] = "aws_lightsail_container_service"
+        with self.assertRaises(SystemExit):
+            module.validate(plan, "development", False)
+
+    def test_plan_metadata_is_bound_to_run_and_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = Path(directory) / "tfplan"
+            metadata = Path(directory) / "metadata.json"
+            plan.write_bytes(b"opaque plan")
+            args = [
+                "--environment", "development", "--state-key", "pawlocal/development/terraform.tfstate",
+                "--account-id", "1" * 12, "--backend-bucket", "private-state", "--backend-region", "test-region-1",
+                "--commit", "a" * 40, "--repository-id", "1", "--run-id", "2", "--run-attempt", "1",
+            ]
+            created = subprocess.run(
+                [sys.executable, str(METADATA), "create", str(plan), str(metadata), *args],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertEqual(created, hashlib.sha256(plan.read_bytes()).hexdigest())
+            subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *args],
+                check=True, capture_output=True, text=True,
+            )
+            mismatched_target = list(args)
+            mismatched_target[mismatched_target.index("private-state")] = "other-state"
+            result = subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *mismatched_target],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            plan.write_bytes(b"changed")
+            result = subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *args],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

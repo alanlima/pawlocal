@@ -53,6 +53,20 @@ resource "aws_iam_role_policy_attachment" "frontend_publish" {
   policy_arn = aws_iam_policy.frontend_publish.arn
 }
 
+resource "aws_iam_policy" "runtime" {
+  count       = var.runtime_role_arn == "" ? 0 : 1
+  name        = "pawlocal-${var.environment}-runtime"
+  description = "Environment-owned DSQL connection permission for PawLocal ${var.environment}."
+  policy      = data.aws_iam_policy_document.runtime[0].json
+  tags        = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "runtime" {
+  count      = var.runtime_role_arn == "" ? 0 : 1
+  role       = "pawlocal-${var.environment}-dsql-runtime"
+  policy_arn = aws_iam_policy.runtime[0].arn
+}
+
 resource "aws_s3_bucket" "frontend" {
   bucket        = "pawlocal-${var.environment}-${random_id.bucket_suffix.hex}"
   force_destroy = false

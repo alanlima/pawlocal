@@ -2,7 +2,8 @@ locals {
   environment_application_policy_arns = {
     for environment in keys(local.environments) : environment => [
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application",
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish"
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish",
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
     ]
   }
 }
@@ -30,6 +31,28 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
+    sid     = "ReadStateAndPlanBucketMetadata"
+    effect  = "Allow"
+    actions = ["s3:GetBucketLocation"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:s3:::${var.terraform_state_bucket_name}",
+      local.plan_transfer_bucket_arn
+    ]
+  }
+
+  statement {
+    sid       = "ListOnlyMatchingStatePrefix"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::${var.terraform_state_bucket_name}"]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = [each.value.state_key, "${each.value.state_key}.tflock"]
+    }
+  }
+
+  statement {
     sid       = "ReadProviderState"
     effect    = "Allow"
     actions   = concat(local.readonly_discovery_actions, local.regional_read_actions)
@@ -39,7 +62,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     sid       = "ManageOnlyMatchingEnvironmentPolicies"
     effect    = "Allow"
-    actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:SetDefaultPolicyVersion"]
+    actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyTags", "iam:ListPolicyVersions", "iam:SetDefaultPolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
     resources = local.environment_application_policy_arns[each.key]
   }
 
@@ -68,9 +91,28 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
+    sid       = "AttachOnlyMatchingRuntimePolicyToRuntimeRole"
+    effect    = "Allow"
+    actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-dsql-runtime"]
+    condition {
+      test     = "ArnEquals"
+      variable = "iam:PolicyARN"
+      values   = [local.environment_application_policy_arns[each.key][2]]
+    }
+  }
+
+  statement {
     sid       = "CreateOnlyMatchingFrontendBucket"
     effect    = "Allow"
     actions   = ["s3:CreateBucket"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
+  }
+
+  statement {
+    sid       = "TagOnlyMatchingFrontendBucketName"
+    effect    = "Allow"
+    actions   = ["s3:PutBucketTagging"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
   }
 
@@ -79,7 +121,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     effect = "Allow"
     actions = [
       "s3:DeleteBucket", "s3:Get*", "s3:ListBucket", "s3:PutBucketOwnershipControls",
-      "s3:PutBucketPolicy", "s3:PutBucketTagging", "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
+      "s3:PutBucketPolicy", "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
     condition {

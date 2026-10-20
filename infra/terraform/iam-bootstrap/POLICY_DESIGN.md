@@ -1,75 +1,43 @@
 # Terraform role policy design
 
-This root creates role trust, role policies, the private saved-plan transfer bucket, and the fixed application identity policies. It does not make AWS calls in this document; the role grants are proposals until independently reviewed and applied through the approved Terraform path.
+This root owns the shared GitHub OIDC provider, GitHub role identity/trust, baseline permissions, permissions boundaries, runtime identities, and the private saved-plan transfer bucket. Development and production roots own application resources and only their matching managed policies and attachments. Configuration is not evidence of an apply.
 
-## Environment plan and apply roles
+## Environment plan roles
 
-Development and production have separate plan/apply roles and separate state keys. Plan roles receive read-only application discovery and can upload a saved plan only beneath `plans/development/` or `plans/production/`. Apply roles can read only the matching saved-plan prefix and state key. Their AWS service grants are limited to the actions below. Destructive recovery permissions are out of scope for this release and are not included in this root.
+Each plan role trusts only its exact `<environment>-plan` GitHub Environment subject; those Environments are restricted to `main`. It can read the matching state, manage only that state's lock object, perform provider refresh reads, and upload only to `plans/<environment>/`. It has no application-service mutation actions and no IAM write actions.
 
-| Service | Allowed environment apply actions | Resource and condition boundary |
-|---|---|---|
-| S3 frontend bucket | `CreateBucket`, `PutBucketTagging`, ownership/public access/encryption controls, bucket policy | Bucket names must begin `pawlocal-development-` or `pawlocal-production-`; controls and policy writes require existing `project=pawlocal` and matching `environment` tags. S3 bucket tagging is scoped by that name prefix because the S3 tagging API does not provide a reliable request-tag condition for bucket tags. Object deployment permissions belong to the separate fixed frontend publisher roles. |
-| Aurora DSQL | `CreateCluster`, `UpdateCluster`, `PutClusterPolicy`, `TagResource` | Create uses the DSQL cluster ARN pattern and requires `project=pawlocal`, the matching environment, and approved tag keys. Updates require matching existing project/environment tags. Cluster deletion is not granted. |
-| Lightsail | `CreateContainerService`, `CreateCertificate`, dependent `TagResource`, `UpdateContainerService`, `CreateContainerServiceDeployment` | Create APIs require `Resource="*"` in the AWS authorization model; requests require project/environment tags and the approved tag-key set. The dependent tag action is limited to the exact environment service and certificate ARNs and matching request tags. Updates and deployments are limited to the exact environment service ARN and existing tags. Create-time name limits are unavailable in IAM, so these create grants can create other same-tagged Lightsail services/certificates and carry cost risk. |
-| CloudFront | `CreateDistribution`, `CreateFunction`, `TagResource`, `UpdateDistribution`, `UpdateFunction`, `PublishFunction` | Create APIs require `Resource="*"`; creation is gated by project/environment request tags and the fixed approved tag-key set. Function tagging is scoped to its exact environment-specific name. Distribution tagging is scoped to this AWS account's `distribution/*` ARN family and requires `project=pawlocal`, the current apply role's environment value, and the approved tag-key set. `UpdateDistribution` is also allowed on this account's `distribution/*` ARN family when the existing resource has `project=pawlocal` and the apply role's environment value. This leaves a cross-environment configuration risk described below, which the owner explicitly accepts for the MVP. OAC permissions stay on the separate staged exact-ARN flow. |
-| Cognito | `CreateUserPool`, `UpdateUserPool`, create/update pool client and domain, `TagResource` | Pool creation requires project/environment request tags. Follow-on actions require matching project/environment resource tags on a user-pool ARN. Delete operations are not granted. |
-| Route 53 | `ChangeResourceRecordSets` | Exact configured hosted-zone ARN. Change actions are limited to CREATE/UPSERT, record names to the environment API/frontend hostnames and one validation-label wildcard beneath the API hostname, and record types to A/AAAA/CNAME. DELETE is not granted. |
+## Environment apply roles
 
-Terraform resource replacement may require delete permissions, which are deliberately not part of these app deployment grants. The saved plan must be inspected for create/update/delete/replace actions, and an unapproved replacement must not be applied.
+Each apply role trusts only its protected `<environment>-apply` GitHub Environment. Bootstrap grants state/plan access and narrowly scoped IAM policy administration so the environment root can create/update its fixed-name application, frontend-publish, and runtime policies. Attachment actions are restricted twice: to the exact matching role ARN and to the exact matching policy ARN through `iam:PolicyARN`.
 
-### CloudFront distribution tagging tradeoff accepted for MVP
+The bootstrap-owned boundary is the effective maximum. It does not allow role creation/deletion, trust changes, permissions-boundary changes, `PassRole`, OIDC changes, another environment's state, policies, attachments, DNS names, or named resources.
 
-Terraform AWS provider 6.69.1 calls `CreateDistributionWithTags` even when its tag list is empty, and AWS requires `cloudfront:TagResource` for that request. The distribution ARN is generated during creation, so the apply policy scopes tagging to `arn:aws:cloudfront::<account>:distribution/*` and requires the expected PawLocal project and environment request tags plus the approved tag-key set.
+| Service | Maximum environment authority |
+|---|---|
+| S3 | Create only a bucket with the matching `pawlocal-<environment>-` prefix; later management requires matching project/environment tags. |
+| Aurora DSQL | Create requires matching request tags; update/delete/policy actions require matching resource tags. Runtime connection policy is an environment-owned exact-cluster policy attached only to the bootstrap runtime role. |
+| Lightsail | Create requires matching request tags. Update/deployment/delete requires matching resource tags. `TagResource` is limited to the exact environment service/certificate names, requires the two authorization request tags, and is allowed only while both resource tags are absent. `UntagResource` is never granted. |
+| CloudFront | Create is permitted for the greenfield foundation. Function management uses the exact environment name. Distribution and OAC update/delete permissions are absent until the generated exact ARNs are returned to bootstrap and independently reviewed. No distribution retag permission exists. |
+| Cognito | Create requires matching request tags; follow-on management requires matching resource tags. |
+| Route 53 | Changes are limited to the configured zone, the environment frontend/API/validation names, and A/AAAA/CNAME types. |
 
-These conditions do not prove that an existing distribution belongs to the role's environment. A development apply can retag a production distribution with `environment=development`, then use its account-wide, tag-conditioned `UpdateDistribution` grant to change the production distribution's full CloudFront configuration. The production apply role can do the equivalent to development. The owner explicitly accepts this cross-environment tagging and configuration risk as the lower-effort MVP tradeoff. OAC permissions continue to use the one-environment-at-a-time exact-ARN handoff.
+The normal workflow plan guard rejects deletes and replacements except the provider's expected immutable Lightsail deployment-version replacement. A future destructive infrastructure change requires separate scope and authorization; the boundary alone is not authorization to apply it.
 
+## Publisher and runtime identities
 
-## Identity state and app runtime identities
+Bootstrap declaratively imports only the read-only-inventory-verified development publisher role when `import_existing_development_deploy_role=true`. The production publisher is created normally. Both trust only their matching release GitHub Environment and use their matching bootstrap-owned environment boundary. Environment roots create the exact frontend publication policy and attachment after their frontend resources exist.
 
-The identity state key is `pawlocal/identity/terraform.tfstate`. Its plan role can read the exact development and production state objects for foundation outputs and can write only its own lock; its apply role can write only the identity state and lock. Both use an identity-specific saved-plan prefix.
+Development and production runtime roles are created only after bootstrap receives the exact Lightsail `principal_arn` from the matching foundation output. Each boundary contains only that environment's exact DSQL cluster ARN handed back through reviewed bootstrap inputs. The environment root creates the exact DSQL connection policy and attachment. This staged handoff avoids wildcard cross-environment runtime access and manual state operations.
 
-Development-plan and production-plan roles can inspect inline and attached policy metadata only on their corresponding exact Terraform apply role ARN, for the pre-approval promotion verifier. The verifier must inspect the `pawlocal-<environment>-terraform-application-services` inline policy where the CloudFront `TagResource` and `UpdateDistribution` statements live, and fail closed if unexpected managed policies are attached. IAM role-detail actions are excluded from wildcard discovery permissions; only `iam:ListRoles` remains there. Production Terraform refresh has a separate exact-role read statement for its application roles. Environment plan/apply roles receive S3 bucket refresh reads (including `ListBucket` for `HeadBucket` and `GetBucketAcl`) only on bucket ARNs with their matching `pawlocal-<environment>-` prefix. CloudFront `DescribeFunction` is limited to the fixed SPA function ARN for that role's environment. Identity-plan can read the identity state but only identity-apply can write it; both retain access only to the identity lock and identity saved-plan transfer prefix.
+## Saved plan handling
 
-After the staged publisher-role handoff, the IAM bootstrap state owns the application roles and their trust documents: development and production frontend publisher roles trust only their exact GitHub Environment OIDC subject, and the development DSQL runtime role trusts the exact Lightsail principal plus the `development-seed` OIDC subject. The runtime role is created only after its exact Lightsail `principal_arn` is supplied from the foundation output. All three roles receive the bootstrap-owned `pawlocal-app-role-boundary` at creation.
+Plan roles upload opaque plans and metadata only beneath their environment prefix. Apply roles can only read that prefix. Metadata binds the plan SHA-256 to repository ID, commit, run, attempt, environment, state key, and a one-way account/backend/region fingerprint. GitHub summaries contain only resource type/action/count. Raw provider logs, raw plan JSON, plan binaries, Terraform state, credentials, secret values, account identifiers, and resource identifiers are not public evidence.
 
-The identity apply role cannot create roles, change trust documents, set or remove permissions boundaries, pass roles, or delete roles. It can attach/detach only the matching bootstrap-owned managed policy to each exact role. This keeps GitHub trust and role ownership in the separately controlled bootstrap state while the identity state owns only policy attachments.
+## Mandatory gates
 
-The bootstrap-owned fixed policies grant only:
-
-- Development/prod publisher: S3 list on its exact frontend bucket; get/put/delete objects under that bucket; CloudFront invalidations on its exact distribution.
-- Development runtime: `dsql:DbConnect` on its exact DSQL cluster.
-- Permissions boundary: the union of those exact allowed actions/resources, acting only as a ceiling.
-
-After environment foundation outputs exist, pass the exact bucket, distribution, and development DSQL cluster ARNs into the bootstrap state. Empty values use nonexistent sentinel ARNs and provide no useful access. Apply and review that bootstrap policy update before the identity state attaches the policies.
-
-## Explicit prerequisites and gaps
-
-- Aurora DSQL automatically creates the service-linked role `AWSServiceRoleForAuroraDsql` when a cluster is first created. The bootstrap state manages it with `aws_iam_service_linked_role`; it is excluded from app-role policies. If it already exists, set `import_existing_dsql_service_linked_role=true` for the reviewed bootstrap plan. A conditional Terraform `import` block targets the fixed service-linked-role ARN; leave the variable false when the role does not exist. Review the import plan before applying.
-- The Lightsail create grants use `Resource="*"` with request tags because those create APIs do not support a resource ARN or a create-time name condition. The fixed MVP budget and protected apply approval remain required; a tighter IAM boundary is not available for that create call.
-- The existing fullstack module still defines app IAM roles in PR #113's current code. Environment applies cannot succeed until the identity root consumes bootstrap role and policy outputs and manages only policy attachments.
-- Destructive recovery and legacy-stack teardown are out of scope for this release. This root creates no recovery plan/apply roles and grants no application-resource deletion or DSQL deletion-protection update permissions.
-- GitHub's immutable OIDC subject customization and GitHub Environment protections must be verified before publishing role ARNs.
-
-## AWS references
-
-- [Amazon CloudFront service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_cloudfront.html)
-- [CloudFront CreateDistributionWithTags required permissions](https://docs.aws.amazon.com/cloudfront/latest/APIReference/API_CreateDistributionWithTags.html)
-- [Terraform AWS provider 6.69.1 distribution create implementation](https://github.com/hashicorp/terraform-provider-aws/blob/v6.69.1/internal/service/cloudfront/distribution.go#L1013-L1046)
-- [Amazon Lightsail service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_lightsail.html)
-- [Aurora DSQL service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazondsql.html)
-- [Aurora DSQL service-linked role](https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-service-linked-roles.html)
-- [Amazon Cognito User Pools service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoncognitouserpools.html)
-- [Amazon S3 service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_s3.html)
-- [Route 53 service authorization](https://docs.aws.amazon.com/service-authorization/latest/reference/list_route53.html)
-
-## Legacy combined-state GitHub Actions roles
-
-The `legacy_terraform_role_arns` output contains a dedicated plan role for `infrastructure-plan` and a dedicated apply role for `infrastructure-apply`. Both trust the exact immutable repository and Environment subject. The plan role can read the legacy key `pawlocal/terraform.tfstate`, manage only its `.tflock`, read provider resources, and upload plan bytes plus metadata to the bootstrap transfer bucket under `plans/legacy/`. The apply role can write that state key, manage its lock, and read plans from that exact prefix. Terraform apply and destroy jobs both use this apply role behind the protected GitHub Environment.
-
-The bootstrap stages the frontend publisher roles to avoid an ownership collision. While `import_existing_frontend_publish_roles=false`, the role resources and import blocks are both absent from the planned configuration; the first bootstrap apply can create the legacy plan/apply roles and transfer bucket. Configure the resulting role ARNs and bucket name in GitHub, then use the protected app workflow to detach the existing publisher roles with `destroy = false`. A second bootstrap plan with `import_existing_frontend_publish_roles=true` imports those existing roles. The app root continues to own each inline publish policy; only role trust and permissions-boundary management transfer to the bootstrap. Supply exact bucket and distribution ARNs to keep each boundary aligned with its current inline policy. The account-specific plan transfer bucket ARN is derived from the caller account and AWS partition, so all plan-transfer IAM policy documents are known before the bucket resource is created.
-
-The apply role receives only actions used by the current combined Terraform root, not `AdministratorAccess`. It can manage PawLocal-named S3 buckets/objects, the exact DSQL cluster class selected by region and environment/purpose tags, tagged PawLocal Cognito pools, PawLocal IAM role names, Route 53 records in the configured zone and approved DNS names, and the named PawLocal Lightsail services/certificates. It has no permissions for backups, recovery, restore, telemetry, CloudTrail audit resources, or arbitrary IAM managed policies.
-
-Two documented MVP exceptions remain account-wide because the current Terraform resources cannot be safely selected by resource name/tag in IAM: CloudFront distribution IDs and OAC IDs are generated, and the distributions currently have no tags; Lightsail container-service creation also requires `Resource: "*"` and the service resource currently sends no tags. The role therefore can create CloudFront distributions/functions/OACs and update/delete any CloudFront distribution or OAC in the account; its Lightsail create grants can create services/certificates. The plan role also has read-only `Resource: "*"` discovery permissions required by provider refresh. Review these exact policy statements and the AWS authorization conditions before the local bootstrap apply. The role is restricted by OIDC to `infrastructure-apply`, whose branch rules and required reviewer provide the operational gate; this does not reduce the IAM resource scope.
-
-The app root continues to own the existing GitHub OIDC provider through the publisher-role handoff. After the bootstrap has imported the publisher roles, make a separate reviewed app-root change that detaches the provider with `removed { destroy = false }` and reads it through a data source. Apply that exact plan through the protected GitHub workflow, then adopt the provider through the conditional Terraform `import` block in a separately reviewed bootstrap plan. This keeps GitHub Actions trust available through full-stack destroy. Do not perform manual state edits or import commands.
+- Bootstrap changes run locally only after independent review of a fresh exact saved plan and only under the owner's explicit bootstrap authorization.
+- Application plans/applies run only through protected GitHub Environments.
+- Development verification precedes production eligibility.
+- Billable application provisioning still needs explicit cost approval.
+- DSQL runtime identity and credential refresh require live development verification before production.
+- An unrelated account-level personal workload is out of scope and must not appear in plan changes or evidence.

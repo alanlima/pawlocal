@@ -122,6 +122,16 @@ variable "development_dsql_cluster_arn" {
   }
 }
 
+variable "production_dsql_cluster_arn" {
+  description = "Exact production Aurora DSQL cluster ARN from the reviewed production foundation output; empty before that output exists."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.production_dsql_cluster_arn == "" || can(regex("^arn:[^:]+:dsql:[^:]+:[0-9]{12}:cluster/[A-Za-z0-9-]+$", var.production_dsql_cluster_arn))
+    error_message = "production_dsql_cluster_arn must be empty or an exact Aurora DSQL cluster ARN."
+  }
+}
+
 variable "development_lightsail_principal_arn" {
   description = "Exact principal_arn output from the development Lightsail container service. Leave empty until the foundation exists; bootstrap then creates the runtime role with exact Lightsail and development-seed trust."
   type        = string
@@ -129,6 +139,16 @@ variable "development_lightsail_principal_arn" {
   validation {
     condition     = var.development_lightsail_principal_arn == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", var.development_lightsail_principal_arn))
     error_message = "development_lightsail_principal_arn must be empty or an IAM role ARN returned as the exact Lightsail principal_arn."
+  }
+}
+
+variable "production_lightsail_principal_arn" {
+  description = "Exact principal_arn output from the production Lightsail container service. Leave empty until the production foundation exists."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.production_lightsail_principal_arn == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/.+$", var.production_lightsail_principal_arn))
+    error_message = "production_lightsail_principal_arn must be empty or an IAM role ARN returned as the exact Lightsail principal_arn."
   }
 }
 
@@ -142,16 +162,6 @@ variable "import_existing_development_deploy_role" {
   description = "Set true only for the reviewed bootstrap plan that declaratively imports the verified existing pawlocal-development-github-deploy role. Production is created normally; no application resource is imported."
   type        = bool
   default     = false
-}
-
-variable "oac_create_environment" {
-  description = "Select at most one environment for initial or replacement OAC creation. That environment's apply role temporarily receives CreateOriginAccessControl on Resource=* and OAC read access; use empty after its exact ARN handoff."
-  type        = string
-  default     = ""
-  validation {
-    condition     = contains(["", "development", "production"], var.oac_create_environment)
-    error_message = "oac_create_environment must be empty, development, or production."
-  }
 }
 
 variable "import_existing_github_oidc_provider" {

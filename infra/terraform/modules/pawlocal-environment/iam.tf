@@ -7,11 +7,18 @@ data "aws_iam_policy_document" "application" {
   }
 
   statement {
+    sid       = "TagOnlyMatchingFrontendBucketName"
+    effect    = "Allow"
+    actions   = ["s3:PutBucketTagging"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
+  }
+
+  statement {
     sid    = "ManageOnlyTaggedMatchingFrontendBucket"
     effect = "Allow"
     actions = [
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
-      "s3:PutBucketTagging", "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
+      "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
     condition {
@@ -185,5 +192,16 @@ data "aws_iam_policy_document" "frontend_publish" {
     effect    = "Allow"
     actions   = ["cloudfront:CreateInvalidation"]
     resources = [aws_cloudfront_distribution.frontend.arn]
+  }
+}
+
+data "aws_iam_policy_document" "runtime" {
+  count = var.runtime_role_arn == "" ? 0 : 1
+
+  statement {
+    sid       = "ConnectOnlyToEnvironmentDSQL"
+    effect    = "Allow"
+    actions   = ["dsql:DbConnect"]
+    resources = [aws_dsql_cluster.application.arn]
   }
 }
