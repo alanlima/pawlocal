@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,13 @@ SHARED_STATE_WRITERS = (
     ROOT / ".github/workflows/rollback-development.yml",
     WORKFLOW,
 )
+AWS_ENABLED_JOBS = {
+    "plan": "infrastructure-plan",
+    "apply": "infrastructure-apply",
+    "prepare-destroy": "infrastructure-apply",
+    "destroy-plan": "infrastructure-plan",
+    "destroy": "infrastructure-apply",
+}
 EXPECTED_ACCOUNT = "123456789012"
 
 
@@ -109,6 +117,28 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
             with self.subTest(workflow=workflow_path.name):
                 source = workflow_path.read_text(encoding="utf-8")
                 self.assertIn("group: pawlocal-lightsail-deploy", source)
+
+    def test_each_aws_job_checks_live_account_before_terraform(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        for job_name, environment in AWS_ENABLED_JOBS.items():
+            with self.subTest(job=job_name):
+                start = source.index(f"  {job_name}:\n")
+                next_job = re.search(r"(?m)^  [a-z][a-z-]+:\s*$", source[start + 1 :])
+                end = start + 1 + next_job.start() if next_job else len(source)
+                job = source[start:end]
+                self.assertIn(f"environment: {environment}", job)
+                credential_step = job.index("uses: aws-actions/configure-aws-credentials@v4")
+                self.assertIn("aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}", job)
+                self.assertIn("aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}", job)
+                account_check = job.index("steps.aws-credentials.outputs.aws-account-id")
+                terraform_calls = [
+                    position
+                    for command in ("terraform init", "terraform plan", "terraform apply")
+                    if (position := job.find(command)) >= 0
+                ]
+                self.assertTrue(terraform_calls, "expected an AWS-backed Terraform command")
+                self.assertLess(credential_step, account_check)
+                self.assertLess(account_check, min(terraform_calls))
 
 
 if __name__ == "__main__":

@@ -59,8 +59,6 @@ jobs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
       plan_stage: ${{ steps.metadata.outputs.plan_stage }}
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -89,8 +87,6 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -n "$AWS_ACCESS_KEY_ID"
-          test -n "$AWS_SECRET_ACCESS_KEY"
           test -n "$AWS_REGION"
           [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
           test -n "$PAWLOCAL_TF_STATE_BUCKET"
@@ -107,6 +103,26 @@ jobs:
               if set(json.loads(os.environ[name])) != {"development", "production"}:
                   raise SystemExit(f"{name} must contain development and production")
           PY
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -253,8 +269,6 @@ jobs:
     permissions:
       contents: read
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -284,6 +298,26 @@ jobs:
         with:
           name: pawlocal-terraform-apply-apply-${{ github.run_id }}-${{ github.run_attempt }}
           path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
 
       - name: Verify plan metadata and digest
         shell: bash
@@ -335,8 +369,6 @@ jobs:
     permissions:
       contents: read
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -366,6 +398,26 @@ jobs:
         with:
           name: pawlocal-terraform-destroy-destroy-prepare-${{ github.run_id }}-${{ github.run_attempt }}
           path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
 
       - name: Verify plan metadata and digest
         shell: bash
@@ -416,8 +468,6 @@ jobs:
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -441,6 +491,26 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -522,8 +592,6 @@ jobs:
     permissions:
       contents: read
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -553,6 +621,26 @@ jobs:
         with:
           name: pawlocal-terraform-destroy-${{ github.run_id }}-${{ github.run_attempt }}
           path: plan
+
+      - name: Configure AWS credentials and verify the live account
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Require the configured AWS account
+        shell: bash
+        env:
+          ACTUAL_AWS_ACCOUNT_ID: ${{ steps.aws-credentials.outputs.aws-account-id }}
+          EXPECTED_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          [[ "$ACTUAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ && "$ACTUAL_AWS_ACCOUNT_ID" == "$EXPECTED_AWS_ACCOUNT_ID" ]] || {
+            echo 'AWS credentials do not resolve to the configured account.' >&2
+            exit 1
+          }
 
       - name: Verify exact destroy plan metadata and digest
         shell: bash
