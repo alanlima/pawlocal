@@ -235,6 +235,14 @@ jobs:
             --production-oac-arn "$PAWLOCAL_PRODUCTION_OAC_ARN" \
             --region "$AWS_REGION"
 
+      - name: Verify bootstrap CloudFront distribution tag grant
+        env:
+          PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+        run: |
+          python ops/verify-terraform-bootstrap-cloudfront-tag-grant.py \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
+            --region "$AWS_REGION"
+
       - name: Initialize production state and create saved plan
         working-directory: infra/terraform/environments/production
         shell: bash

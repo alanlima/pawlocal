@@ -13,10 +13,14 @@ DEV_ROLE = "pawlocal-development-terraform-apply"
 PROD_ROLE = "pawlocal-production-terraform-apply"
 DEV_POLICY = f"{DEV_ROLE}-permissions"
 PROD_POLICY = f"{PROD_ROLE}-permissions"
+DEV_SERVICE_POLICY = "pawlocal-development-terraform-application-services"
+PROD_SERVICE_POLICY = "pawlocal-production-terraform-application-services"
 READ_ACTIONS = {"cloudfront:GetOriginAccessControl", "cloudfront:GetOriginAccessControlConfig"}
 MUTATE_ACTIONS = {"cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl"}
 CREATE_ACTION = "cloudfront:CreateOriginAccessControl"
 LIST_ACTION = "cloudfront:ListOriginAccessControls"
+TAG_ACTION = "cloudfront:TagResource"
+OAC_ACTIONS = READ_ACTIONS | MUTATE_ACTIONS | {CREATE_ACTION, LIST_ACTION}
 
 
 def parse_document(document: Any) -> dict[str, Any]:
@@ -80,17 +84,27 @@ def list_all_role_policies(iam: Any, operation: str, role_name: str, result_key:
 
 
 def fetch_exact_inline_policy(iam: Any, role_name: str, expected_policy_name: str) -> Any:
+    service_policy_name = {
+        DEV_ROLE: DEV_SERVICE_POLICY,
+        PROD_ROLE: PROD_SERVICE_POLICY,
+    }.get(role_name)
+    if service_policy_name is None:
+        raise ValueError("OAC verifier received an unsupported apply role")
+    expected_names = {expected_policy_name, service_policy_name}
     inline = list_all_role_policies(iam, "list_role_policies", role_name, "PolicyNames")
     names = {item for item in inline if isinstance(item, str)}
-    if len(names) != len(inline) or names != {expected_policy_name}:
+    if len(names) != len(inline) or names != expected_names or len(inline) != len(expected_names):
         raise ValueError("Apply role has missing or additional inline policies")
     attached = list_all_role_policies(iam, "list_attached_role_policies", role_name, "AttachedPolicies")
     if attached:
         raise ValueError("Apply role has an attached managed policy that is not approved for the OAC handoff")
-    response = iam.get_role_policy(RoleName=role_name, PolicyName=expected_policy_name)
-    if "PolicyDocument" not in response:
-        raise ValueError("IAM inline policy document could not be read")
-    return response["PolicyDocument"]
+    statements: list[Any] = []
+    for policy_name in sorted(expected_names):
+        response = iam.get_role_policy(RoleName=role_name, PolicyName=policy_name)
+        if "PolicyDocument" not in response:
+            raise ValueError("IAM inline policy document could not be read")
+        statements.extend(parse_document(response["PolicyDocument"])["Statement"])
+    return {"Statement": statements}
 
 
 def verify_handoff(dev_policy_document: Any, prod_policy_document: Any, dev_arn: str, prod_arn: str = "", account_id: str = "") -> str:
@@ -98,8 +112,13 @@ def verify_handoff(dev_policy_document: Any, prod_policy_document: Any, dev_arn:
         raise ValueError("Development OAC ARN is missing or malformed")
     if account_id and f"cloudfront::{account_id}:" not in dev_arn:
         raise ValueError("Development OAC ARN belongs to a different AWS account")
-    dev = allowed_cloudfront(parse_document(dev_policy_document))
-    prod = allowed_cloudfront(parse_document(prod_policy_document))
+    dev_all = allowed_cloudfront(parse_document(dev_policy_document))
+    prod_all = allowed_cloudfront(parse_document(prod_policy_document))
+    # This handoff check owns only OAC permissions. Other exact CloudFront
+    # actions are validated by their own policy checks; wildcard actions are
+    # rejected by allowed_cloudfront before this filter.
+    dev = [(action, resource) for action, resource in dev_all if action in OAC_ACTIONS]
+    prod = [(action, resource) for action, resource in prod_all if action in OAC_ACTIONS]
 
     if any(action not in READ_ACTIONS | MUTATE_ACTIONS for action, _ in dev):
         raise ValueError("Development apply policy has an unexpected CloudFront permission")
