@@ -25,12 +25,14 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     image = "ghcr.io/alanlima/pawlocal-api@sha256:" + "a" * 64
     account_id = "097922957316"
 
-    def test_dsql_cluster_policy_uses_environment_runtime_principal_and_db_user_condition(self) -> None:
+    def test_development_dsql_connection_uses_identity_policy_not_cluster_grant(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
         cluster_policy = terraform.split('resource "aws_dsql_cluster_policy" "api_connect" {', 1)[1].split('\n}', 1)[0]
         runtime_policy = terraform.split('resource "aws_iam_role_policy" "dsql_runtime" {', 1)[1].split('\n}', 1)[0]
 
         self.assertIn('Action    = "dsql:DbConnectAdmin"', cluster_policy)
+        self.assertIn('each.key == "production" ?', cluster_policy)
+        self.assertNotIn('Sid       = "AllowDevelopmentDsqlRuntimeRole"', cluster_policy)
         self.assertIn('Principal = { AWS = local.dsql_app_principal_arns[each.key] }', cluster_policy)
         self.assertIn('Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }', cluster_policy)
         app_principals = terraform.split("dsql_app_principal_arns = {", 1)[1].split("\n  }", 1)[0]
@@ -42,6 +44,15 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         )
         self.assertIn('Action   = "dsql:DbConnect"', runtime_policy)
         self.assertIn('Resource = aws_dsql_cluster.app[each.key].arn', runtime_policy)
+
+    def test_production_dsql_cluster_connection_grant_remains_explicit(self) -> None:
+        terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
+        cluster_policy = terraform.split('resource "aws_dsql_cluster_policy" "api_connect" {', 1)[1].split('\n}', 1)[0]
+
+        self.assertIn('each.key == "production" ? [', cluster_policy)
+        self.assertIn('Sid       = "AllowLightsailServiceIdentity"', cluster_policy)
+        self.assertIn('Action    = "dsql:DbConnect"', cluster_policy)
+        self.assertIn(': []', cluster_policy)
 
     def test_seed_workflow_oidc_trust_is_limited_to_development_environment(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
