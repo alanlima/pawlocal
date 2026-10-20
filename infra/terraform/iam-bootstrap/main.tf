@@ -256,16 +256,22 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   statement {
-    sid       = "ReadOnlyProviderDiscovery"
-    effect    = "Allow"
-    actions   = local.readonly_discovery_actions
+    sid    = "ReadOnlyProviderDiscovery"
+    effect = "Allow"
+    actions = each.key == "production-plan" ? [
+      for action in local.readonly_discovery_actions : action
+      if !startswith(action, "iam:") || action == "iam:ListRoles"
+    ] : local.readonly_discovery_actions
     resources = ["*"]
   }
 
   statement {
-    sid       = "ReadApplicationResources"
-    effect    = "Allow"
-    actions   = local.regional_read_actions
+    sid    = "ReadApplicationResources"
+    effect = "Allow"
+    actions = each.key == "production-plan" ? [
+      for action in local.regional_read_actions : action
+      if !startswith(action, "iam:")
+    ] : local.regional_read_actions
     resources = ["*"]
   }
 
@@ -279,12 +285,35 @@ data "aws_iam_policy_document" "role_permissions" {
   dynamic "statement" {
     for_each = each.key == "production-plan" ? [true] : []
     content {
-      sid     = "ReadEnvironmentApplyRoleInlinePoliciesForPromotionCheck"
-      effect  = "Allow"
-      actions = ["iam:GetRolePolicy"]
+      sid    = "ReadExactApplyRolesForPromotionCheck"
+      effect = "Allow"
+      actions = [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies"
+      ]
       resources = [
         "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-terraform-apply",
         "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-apply"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.key == "production-plan" ? [true] : []
+    content {
+      sid    = "ReadExactProductionApplicationRolesForTerraformRefresh"
+      effect = "Allow"
+      actions = [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies"
+      ]
+      resources = [
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-github-deploy",
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-deploy"
       ]
     }
   }
