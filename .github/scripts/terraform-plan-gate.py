@@ -41,14 +41,20 @@ def find_account(module):
     return None
 
 
+stage = os.environ.get("PLAN_STAGE", mode)
+# The teardown-preparation plan is an apply-mode plan, but its account guard
+# must use the existing state just like the subsequent destroy plan. Terraform
+# may omit unchanged data sources such as aws_caller_identity from planned_values
+# for this stage. The workflow separately verifies the live OIDC account.
+uses_prior_state = mode == "destroy" or stage == "destroy-prepare"
 account_values = (
     plan.get("prior_state", {}).get("values", {}).get("root_module", {})
-    if mode == "destroy"
+    if uses_prior_state
     else plan.get("planned_values", {}).get("root_module", {})
 )
 actual_account = find_account(account_values)
 if actual_account != expected_account:
-    source = "prior Terraform state" if mode == "destroy" else "planned values"
+    source = "prior Terraform state" if uses_prior_state else "planned values"
     raise SystemExit(f"Terraform {source} has a different or missing AWS account than configured")
 
 
