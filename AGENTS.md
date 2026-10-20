@@ -304,6 +304,8 @@ Terraform configuration and the approved Terraform states are the only mechanism
 
 Do not manually edit, move, or remove state bindings. Issue #135 permits only a reviewed Terraform import of the exact existing GitHub deployment IAM identity and related resources that read-only inspection confirms belong in the new bootstrap state. The import must be represented by reviewed Terraform configuration, appear in the saved plan, and show no duplicate ownership or unintended replacement/deletion. Do not import application resources or use imports for any other issue without a new approved decision.
 
+Read-only inventory is a blocking gate for Issue #135. If it finds surviving application resources or legacy state bindings, stop the affected greenfield environment and record the exact resources, ownership, cost exposure, and name collisions. Cleanup requires an explicitly owner-approved, independently reviewed, Terraform-only cleanup plan in a separately scoped change. Do not import survivors into the new bootstrap, development, or production states. If cleanup would require adopting an orphaned application resource into a temporary cleanup state, amend Issue #135 and the decision record before planning it. Do not proceed with the affected environment until cleanup verification shows that its new state can start without duplicate ownership or collision.
+
 PawLocal must remain inexpensive to operate at low traffic.
 
 Before deploying AWS infrastructure:
