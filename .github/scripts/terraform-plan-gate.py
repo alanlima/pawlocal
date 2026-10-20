@@ -28,14 +28,48 @@ def destroy_preparation_guard(plan):
     }
     unexpected = []
 
-    def top_level_changed_paths(before, after):
+    def all_unknown(value):
+        if value is True:
+            return True
+        if isinstance(value, dict) and value:
+            return all(all_unknown(child) for child in value.values())
+        if isinstance(value, list) and value:
+            return all(all_unknown(child) for child in value)
+        return False
+
+    def without_unknown_values(value, unknown):
+        if unknown is True:
+            return None
+        if isinstance(value, dict) and isinstance(unknown, dict):
+            return {
+                key: without_unknown_values(child, unknown.get(key))
+                for key, child in value.items()
+                if unknown.get(key) is not True
+            }
+        if isinstance(value, list) and isinstance(unknown, list):
+            return [
+                without_unknown_values(child, unknown[index] if index < len(unknown) else None)
+                for index, child in enumerate(value)
+            ]
+        return value
+
+    def contains_flag(value):
+        if value is True:
+            return True
+        if isinstance(value, dict):
+            return any(contains_flag(child) for child in value.values())
+        if isinstance(value, list):
+            return any(contains_flag(child) for child in value)
+        return False
+
+    def top_level_changed_paths(before, after, ignored_keys):
         if not isinstance(before, dict):
             before = {}
         if not isinstance(after, dict):
             after = {}
         paths = []
         for key in sorted(set(before) | set(after), key=str):
-            if key == "force_destroy" or before.get(key) == after.get(key):
+            if key in ignored_keys or before.get(key) == after.get(key):
                 continue
             # Terraform schema attribute names are safe to show. Avoid arbitrary
             # map keys, values, and nested paths, which could contain identifiers.
@@ -55,20 +89,59 @@ def destroy_preparation_guard(plan):
         after = change.get("after") or {}
         old = dict(before) if isinstance(before, dict) else before
         new = dict(after) if isinstance(after, dict) else after
-        if isinstance(old, dict):
-            old.pop("force_destroy", None)
-        if isinstance(new, dict):
-            new.pop("force_destroy", None)
         address = item.get("address", "")
+        after_unknown = change.get("after_unknown", {})
+        computed_encryption_update = (
+            address in allowed
+            and address.startswith("module.fullstack.aws_dsql_cluster.app[")
+            and actions == ["update"]
+            and isinstance(after, dict)
+            and after.get("force_destroy") is True
+            and isinstance(after_unknown, dict)
+            and after_unknown.get("encryption_details") is not None
+        )
+        unknown_metadata = dict(after_unknown) if isinstance(after_unknown, dict) else after_unknown
+        if computed_encryption_update:
+            unknown_metadata.pop("encryption_details", None)
+        metadata_is_known = not contains_flag(unknown_metadata) and not contains_flag(
+            change.get("after_sensitive", {})
+        )
+        ignored_keys = {"force_destroy"}
+        if computed_encryption_update:
+            # encryption_details is a provider-exported attribute. It can become
+            # unknown as a consequence of updating force_destroy, but cannot be
+            # configured independently of the cluster's kms_encryption_key. Drop
+            # only unknown subpaths; a mixed known/unknown value remains compared.
+            encryption_unknown = after_unknown["encryption_details"]
+            if all_unknown(encryption_unknown):
+                ignored_keys.add("encryption_details")
+            else:
+                before = dict(before) if isinstance(before, dict) else before
+                after = dict(after) if isinstance(after, dict) else after
+                before["encryption_details"] = without_unknown_values(
+                    before.get("encryption_details"), encryption_unknown
+                )
+                after["encryption_details"] = without_unknown_values(
+                    after.get("encryption_details"), encryption_unknown
+                )
+                old = dict(before)
+                new = dict(after)
+        if isinstance(old, dict):
+            for key in ignored_keys:
+                old.pop(key, None)
+        if isinstance(new, dict):
+            for key in ignored_keys:
+                new.pop(key, None)
         allowed_update = (
             address in allowed
             and actions == ["update"]
             and old == new
             and isinstance(after, dict)
             and after.get("force_destroy") is True
+            and metadata_is_known
         )
         if not allowed_update:
-            paths = top_level_changed_paths(before, after)
+            paths = top_level_changed_paths(before, after, ignored_keys)
             resource_label = address if known_address(address) else "<unlisted resource>"
             safe_actions = [
                 action if action in {"create", "read", "update", "delete", "forget", "import", "no-op"} else "<other>"
