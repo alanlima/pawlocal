@@ -546,7 +546,6 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
       "cognito-idp:Describe*", "cognito-idp:List*",
       "dsql:Get*", "dsql:List*",
       "events:Describe*", "events:List*",
-      "iam:Get*", "iam:List*",
       "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments",
       "lightsail:GetCertificates", "lightsail:GetDomains", "lightsail:GetInstances",
       "lightsail:GetStaticIps", "lightsail:GetContainerServicePowers",
@@ -557,6 +556,43 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
       "tag:GetResources"
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid    = "ReadPawLocalIdentityForPlan"
+    effect = "Allow"
+    actions = [
+      "iam:GetRole", "iam:GetRolePolicy", "iam:GetPolicy", "iam:GetPolicyVersion",
+      "iam:GetOpenIDConnectProvider"
+    ]
+    resources = concat(
+      ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-*"],
+      ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-*"],
+      [local.oidc_provider_arn]
+    )
+  }
+
+  statement {
+    sid       = "ListRolesForPlan"
+    effect    = "Allow"
+    actions   = ["iam:ListRoles"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ListPawLocalRolePoliciesForPlan"
+    effect = "Allow"
+    actions = [
+      "iam:ListRolePolicies", "iam:ListAttachedRolePolicies"
+    ]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-*"]
+  }
+
+  statement {
+    sid       = "ListPawLocalPolicyVersionsForPlan"
+    effect    = "Allow"
+    actions   = ["iam:ListPolicyVersions"]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-*"]
   }
 
   statement {
@@ -657,6 +693,152 @@ resource "aws_iam_role_policy" "github_terraform_deploy" {
   name     = "pawlocal-${each.key}-terraform-container-release"
   role     = aws_iam_role.github_terraform_deploy[each.key].id
   policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
+}
+
+# Planning uses a separate GitHub Environment subject and a read/state-lock
+# role. It cannot create, update, or delete application infrastructure.
+data "aws_iam_policy_document" "github_terraform_plan_trust" {
+  for_each = local.environments
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.key}-plan"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_terraform_plan" {
+  for_each           = local.environments
+  name               = "pawlocal-${each.key}-terraform-plan"
+  assume_role_policy = data.aws_iam_policy_document.github_terraform_plan_trust[each.key].json
+  description        = "Read-only Terraform plan role for PawLocal ${each.key}; may access only the shared state and planning reads."
+}
+
+data "aws_iam_policy_document" "github_terraform_plan" {
+  for_each = local.environments
+
+  statement {
+    sid    = "ReadApplicationInfrastructureForPlan"
+    effect = "Allow"
+    actions = [
+      "acm:Describe*", "acm:List*",
+      "cloudfront:Get*", "cloudfront:List*",
+      "cognito-idp:Describe*", "cognito-idp:List*",
+      "dsql:Get*", "dsql:List*",
+      "events:Describe*", "events:List*",
+      "iam:Get*", "iam:List*",
+      "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments",
+      "lightsail:GetCertificates", "lightsail:GetDomains", "lightsail:GetInstances",
+      "lightsail:GetStaticIps", "lightsail:GetContainerServicePowers",
+      "lightsail:GetContainerServiceBundles",
+      "route53:Get*", "route53:List*",
+      "sns:Get*", "sns:List*",
+      "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:ListTags",
+      "tag:GetResources"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid     = "DescribePawLocalSpaFunctionsForPlan"
+    effect  = "Allow"
+    actions = ["cloudfront:DescribeFunction"]
+    resources = concat(
+      [for function in values(aws_cloudfront_function.spa) : function.arn],
+      ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-production-spa-routing"]
+    )
+  }
+
+  statement {
+    sid       = "ReadPawLocalUserPoolMfaForPlan"
+    effect    = "Allow"
+    actions   = ["cognito-idp:GetUserPoolMfaConfig"]
+    resources = [for user_pool in values(aws_cognito_user_pool.app) : user_pool.arn]
+  }
+
+  statement {
+    sid       = "ReadPawLocalBucketConfigurationForPlan"
+    effect    = "Allow"
+    actions   = ["s3:GetBucket*", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration", "s3:GetBucketPolicy", "s3:GetBucketOwnershipControls", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetBucketLocation"]
+    resources = ["arn:aws:s3:::pawlocal-*"]
+  }
+
+  statement {
+    sid       = "ListPawLocalFrontendBucketsForPlan"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+  }
+
+  statement {
+    sid       = "ReadPawLocalFrontendBucketAccelerationForPlan"
+    effect    = "Allow"
+    actions   = ["s3:GetAccelerateConfiguration"]
+    resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+  }
+
+  dynamic "statement" {
+    for_each = each.key == "development" ? [true] : []
+    content {
+      sid       = "ReadPawLocalFrontendBucketReplicationForPlan"
+      effect    = "Allow"
+      actions   = ["s3:GetReplicationConfiguration"]
+      resources = concat([aws_s3_bucket.frontend["development"].arn], var.additional_frontend_bucket_arns)
+    }
+  }
+
+  statement {
+    sid       = "ReadSharedTerraformStateForPlan"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate"]
+  }
+
+  statement {
+    sid       = "LockSharedTerraformStateForPlan"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/pawlocal/terraform.tfstate.tflock"]
+  }
+
+  statement {
+    sid       = "ListSharedTerraformStatePrefixForPlan"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["pawlocal/terraform.tfstate", "pawlocal/terraform.tfstate.tflock"]
+    }
+  }
+
+  statement {
+    sid       = "ReadSharedTerraformStateBucketLocationForPlan"
+    effect    = "Allow"
+    actions   = ["s3:GetBucketLocation"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_terraform_plan" {
+  for_each = local.environments
+  name     = "pawlocal-${each.key}-terraform-plan"
+  role     = aws_iam_role.github_terraform_plan[each.key].id
+  policy   = data.aws_iam_policy_document.github_terraform_plan[each.key].json
 }
 
 # Keep the database-role mapping inputs visible in Terraform plans without
