@@ -212,14 +212,31 @@ data "aws_iam_policy_document" "environment_service_apply" {
     }
   }
 
+  dynamic "statement" {
+    for_each = each.key == "development" && var.development_distribution_arn != "" ? [var.development_distribution_arn] : each.key == "production" && var.production_distribution_arn != "" ? [var.production_distribution_arn] : []
+    content {
+      sid       = "UpdateExactEnvironmentCloudFrontDistribution"
+      effect    = "Allow"
+      actions   = ["cloudfront:UpdateDistribution"]
+      resources = [statement.value]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/project"
+        values   = ["pawlocal"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/environment"
+        values   = [each.key]
+      }
+    }
+  }
+
   statement {
-    sid    = "UpdateOnlyTaggedEnvironmentCloudFrontResources"
-    effect = "Allow"
-    actions = [
-      "cloudfront:UpdateDistribution", "cloudfront:UpdateFunction", "cloudfront:PublishFunction"
-    ]
+    sid     = "UpdateOnlyNamedEnvironmentCloudFrontFunction"
+    effect  = "Allow"
+    actions = ["cloudfront:UpdateFunction", "cloudfront:PublishFunction"]
     resources = [
-      "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*",
       "arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"
     ]
     condition {

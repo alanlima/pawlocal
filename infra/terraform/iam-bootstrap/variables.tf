@@ -93,7 +93,7 @@ variable "production_frontend_bucket_arn" {
 }
 
 variable "development_distribution_arn" {
-  description = "Exact development CloudFront distribution ARN from the reviewed development foundation output; empty before that output exists."
+  description = "Exact development CloudFront distribution ARN from the reviewed development Actions output. Empty disables cloudfront:UpdateDistribution for development until the bootstrap state is updated with the ARN."
   type        = string
   default     = ""
   validation {
@@ -103,7 +103,7 @@ variable "development_distribution_arn" {
 }
 
 variable "production_distribution_arn" {
-  description = "Exact production CloudFront distribution ARN from the reviewed production foundation output; empty before that output exists."
+  description = "Exact production CloudFront distribution ARN from the reviewed production Actions output. Empty disables cloudfront:UpdateDistribution for production until the bootstrap state is updated with the ARN."
   type        = string
   default     = ""
   validation {
