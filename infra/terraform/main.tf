@@ -188,20 +188,13 @@ resource "aws_route53_record" "site_aaaa" {
   }
 }
 
-removed {
-  from = aws_iam_openid_connect_provider.github
-
-  lifecycle {
-    destroy = false
-  }
-}
-
-data "aws_iam_openid_connect_provider" "github" {
-  url = "https://token.actions.githubusercontent.com"
+resource "aws_iam_openid_connect_provider" "github" {
+  url            = "https://token.actions.githubusercontent.com"
+  client_id_list = ["sts.amazonaws.com"]
 }
 
 locals {
-  github_oidc_provider_arn = data.aws_iam_openid_connect_provider.github.arn
+  github_oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
 }
 
 data "aws_iam_policy_document" "github_deploy_assume_role" {
