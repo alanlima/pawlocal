@@ -250,23 +250,27 @@ resource "aws_dsql_cluster_policy" "api_connect" {
   identifier = aws_dsql_cluster.app[each.key].identifier
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "DelegateToAccountIdentities"
-        Effect    = "Allow"
-        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
-        Action    = "dsql:DbConnectAdmin"
-        Resource  = aws_dsql_cluster.app[each.key].arn
-      },
-      {
-        Sid       = each.key == "development" ? "AllowDevelopmentDsqlRuntimeRole" : "AllowLightsailServiceIdentity"
-        Effect    = "Allow"
-        Principal = { AWS = local.dsql_app_principal_arns[each.key] }
-        Action    = "dsql:DbConnect"
-        Resource  = aws_dsql_cluster.app[each.key].arn
-        Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
-      }
-    ]
+    Statement = concat(
+      [
+        {
+          Sid       = "DelegateToAccountIdentities"
+          Effect    = "Allow"
+          Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+          Action    = "dsql:DbConnectAdmin"
+          Resource  = aws_dsql_cluster.app[each.key].arn
+        }
+      ],
+      each.key == "production" ? [
+        {
+          Sid       = "AllowLightsailServiceIdentity"
+          Effect    = "Allow"
+          Principal = { AWS = local.dsql_app_principal_arns[each.key] }
+          Action    = "dsql:DbConnect"
+          Resource  = aws_dsql_cluster.app[each.key].arn
+          Condition = { StringEquals = { "dsql:DbUser" = each.value.database_role } }
+        }
+      ] : []
+    )
   })
 }
 
