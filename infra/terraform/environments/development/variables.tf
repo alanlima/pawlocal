@@ -31,8 +31,21 @@ variable "terraform_state_bucket_name" {
 variable "backend_image_digest" {
   description = "Immutable public GHCR image reference used by the development API."
   type        = string
+  default     = null
+  nullable    = true
   validation {
-    condition     = can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", var.backend_image_digest))
+    condition     = var.backend_image_digest == null || trimspace(var.backend_image_digest) == "" ? true : can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", var.backend_image_digest))
     error_message = "The backend image must be pinned to a public GHCR sha256 digest."
+  }
+}
+
+variable "dsql_runtime_role_arn" {
+  description = "Development DSQL runtime role ARN from the separate identity state; null during foundation."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.dsql_runtime_role_arn == null || trimspace(var.dsql_runtime_role_arn) == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/pawlocal-development-dsql-runtime$", var.dsql_runtime_role_arn))
+    error_message = "The DSQL runtime role must be the separate PawLocal development identity role."
   }
 }

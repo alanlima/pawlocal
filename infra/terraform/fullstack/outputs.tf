@@ -12,14 +12,14 @@ output "environment_targets" {
     aws_account_id             = data.aws_caller_identity.current.account_id
     api_backend_image          = local.backend_images[name]
     frontend_bucket            = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].bucket : null
+    frontend_bucket_arn        = contains(keys(local.frontend_environments), name) ? aws_s3_bucket.frontend[name].arn : null
     distribution_id            = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].id : null
+    frontend_distribution_arn  = contains(keys(local.frontend_environments), name) ? aws_cloudfront_distribution.app[name].arn : null
     oac_id                     = contains(keys(local.frontend_environments), name) ? aws_cloudfront_origin_access_control.frontend[name].id : null
     oac_arn                    = contains(keys(local.frontend_environments), name) ? "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:origin-access-control/${aws_cloudfront_origin_access_control.frontend[name].id}" : null
     dsql_cluster_arn           = aws_dsql_cluster.app[name].arn
     dsql_endpoint              = "${aws_dsql_cluster.app[name].identifier}.dsql.${var.aws_region}.on.aws"
     dsql_database_role         = config.database_role
-    deploy_role_arn            = contains(keys(local.frontend_environments), name) ? aws_iam_role.github_deploy[name].arn : null
-    terraform_deploy_role_arn  = aws_iam_role.github_terraform_deploy[name].arn
     cognito_user_pool_id       = aws_cognito_user_pool.app[name].id
     cognito_client_id          = aws_cognito_user_pool_client.app[name].id
     cognito_domain             = "https://${aws_cognito_user_pool_domain.app[name].domain}.auth.${var.aws_region}.amazoncognito.com"

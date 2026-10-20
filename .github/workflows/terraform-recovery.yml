@@ -2,9 +2,15 @@ name: Terraform legacy state recovery
 
 on:
   workflow_dispatch:
+    inputs:
+      dsql_protection_run_id:
+        description: Successful protected DSQL deletion-protection stage run ID.
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: pawlocal-infrastructure
@@ -25,6 +31,36 @@ jobs:
             echo 'Terraform recovery may only be dispatched from main.' >&2
             exit 1
           fi
+
+      - name: Require successful protected DSQL-protection stage
+        uses: actions/github-script@v7
+        env:
+          DSQL_PROTECTION_RUN_ID: ${{ inputs.dsql_protection_run_id }}
+        with:
+          script: |
+            const runId = process.env.DSQL_PROTECTION_RUN_ID;
+            if (!/^\d+$/.test(runId)) throw new Error('DSQL protection run ID must be numeric.');
+            const { data: workflow } = await github.rest.actions.getWorkflow({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'terraform-recovery-dsql-protection.yml'
+            });
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(runId)
+            });
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(runId),
+              per_page: 100
+            });
+            if (run.workflow_id !== workflow.id || run.path?.split('@')[0] !== '.github/workflows/terraform-recovery-dsql-protection.yml') throw new Error('Run is not from the exact DSQL-protection workflow.');
+            if (run.event !== 'workflow_dispatch' || run.head_branch !== 'main' || run.status !== 'completed' || run.conclusion !== 'success' || run.head_sha !== context.sha) throw new Error('DSQL protection must have completed successfully on main at this source commit.');
+            const applied = jobs.jobs.some(job => job.steps?.some(step => step.name === 'Apply exact reviewed DSQL protection plan' && step.conclusion === 'success'));
+            if (!applied) throw new Error('DSQL-protection workflow did not apply its exact reviewed saved plan.');
+            await core.summary.addText(`Verified protected DSQL-protection workflow run ${runId} before the legacy destroy plan.`).write();
 
   recovery-plan:
     name: Plan destruction of the legacy shared state
@@ -49,6 +85,8 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_recovery_force_destroy_frontend_buckets: "true"
+      TF_VAR_recovery_disable_dsql_deletion_protection: "true"
     steps:
       - name: Check out the dispatched commit
         uses: actions/checkout@v4
@@ -81,6 +119,12 @@ jobs:
           role-session-name: pawlocal-legacy-recovery-plan-${{ github.run_id }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      - name: Reject external roles that trust the legacy GitHub OIDC provider
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/terraform-recovery-oidc-preflight.py
+
       - name: Initialize the legacy shared state and create a destroy plan
         working-directory: infra/terraform
         shell: bash
@@ -104,8 +148,8 @@ jobs:
             echo '## Legacy shared-state Terraform recovery'
             echo
             echo "Commit: `${GITHUB_SHA}`"
-            echo 'This is a proposed destroy plan for the old shared dev/prod application resources. Recovery apply is currently blocked pending independent IAM policy review and exact resource inventory.'
-            echo 'The external Terraform backend bucket is explicitly rejected if it appears in the destroy plan.'
+            echo 'This is a proposed destroy plan for the old shared dev/prod application resources. Recovery apply remains blocked pending independent IAM policy review, DSQL protection staging, and review of this exact inventory.'
+            echo 'Terraform recovery mode enables force-destroy only for the tracked PawLocal frontend buckets; the sanitizer verifies each bucket name against the source naming scheme and rejects the backend bucket.'
             if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-recovery-show-error.txt" | python ../../ops/terraform-recovery-plan-review.py --state-bucket-name "$PAWLOCAL_TF_STATE_BUCKET"; then
               echo 'Recovery plan review could not be safely rendered; raw output was withheld.' >&2
               exit 1
@@ -139,9 +183,10 @@ jobs:
             --sha256 "$PLAN_SHA256"
 
   recovery-apply:
-    name: Block recovery apply pending scoped IAM review
+    name: Protected recovery apply (disabled pending independent review)
     needs: recovery-plan
     runs-on: ubuntu-latest
+    environment: terraform-recovery-apply
     permissions:
       contents: read
     steps:
@@ -151,9 +196,8 @@ jobs:
           {
             echo '## Recovery apply is blocked'
             echo
-            echo 'The recovery destroy plan is available for review, but apply is disabled until the independent IAM policy review passes and the legacy live-resource inventory is reconciled with the exact destroy actions.'
-            echo 'The review must account for DSQL deletion protection, S3 object and version cleanup, OIDC ownership, and narrowly scoped permissions. No AWS apply was attempted.'
-            echo 'After those items are resolved, update this workflow in a reviewed change to enable the separately protected exact-plan apply and local IAM bootstrap handoff.'
+            echo 'The recovery destroy plan is available for review. Apply remains disabled until the independent IAM policy review passes, the protected DSQL-disable stage has completed, OIDC preflight and exact address inventory are independently reviewed, and a real Actions destroy plan is approved.'
+            echo 'This job is attached to the protected terraform-recovery-apply Environment so the intended review boundary is explicit. No AWS apply or credentials were used in this blocker job.'
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'Recovery apply is intentionally blocked pending scoped IAM review and exact legacy resource inventory.' >&2
+          echo 'Recovery apply is intentionally blocked pending independent review and the DSQL protection stage.' >&2
           exit 1

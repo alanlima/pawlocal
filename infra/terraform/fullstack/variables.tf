@@ -19,38 +19,14 @@ variable "cloudfront_certificate_arn" {
   }
 }
 
-variable "github_repository" {
-  description = "GitHub repository in owner/name format."
-  type        = string
-  validation {
-    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
-    error_message = "Use owner/repository format."
-  }
+variable "recovery_force_destroy_frontend_buckets" {
+  description = "Recovery-only switch for deleting the exact frontend buckets owned by the old shared state."
+  type        = bool
+  default     = false
 }
 
-variable "github_owner_id" {
-  description = "Immutable numeric GitHub owner ID for OIDC trust."
-  type        = string
-}
-
-variable "github_repository_id" {
-  description = "Immutable numeric GitHub repository ID for OIDC trust."
-  type        = string
-}
-
-variable "terraform_state_bucket_name" {
-  description = "Existing S3 bucket that stores the shared PawLocal Terraform root state."
-  type        = string
-}
-
-variable "additional_frontend_bucket_arns" {
-  description = "Additional exact frontend bucket ARNs owned by the root state and read by the Terraform release role during full-state refresh."
-  type        = list(string)
-  default     = []
-}
-
-variable "manage_github_oidc_provider" {
-  description = "Create the account-level GitHub OIDC provider only if none exists."
+variable "recovery_disable_dsql_deletion_protection" {
+  description = "Recovery-only switch to turn off cluster deletion protection in a separately approved Terraform stage."
   type        = bool
   default     = false
 }
@@ -68,6 +44,17 @@ variable "backend_image_digests" {
   validation {
     condition     = alltrue([for environment in keys(var.backend_image_digests) : contains(["development", "production"], environment)])
     error_message = "Backend image keys may only be development and production."
+  }
+}
+
+variable "dsql_runtime_role_arn" {
+  description = "Development runtime identity role ARN created by the separate identity Terraform state; null during environment foundation."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.dsql_runtime_role_arn == null || trimspace(var.dsql_runtime_role_arn) == "" || can(regex("^arn:[^:]+:iam::[0-9]{12}:role/pawlocal-development-dsql-runtime$", var.dsql_runtime_role_arn))
+    error_message = "The DSQL runtime role must be the separate PawLocal development identity role."
   }
 }
 

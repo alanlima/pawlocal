@@ -1,0 +1,188 @@
+name: Terraform identity stage
+run-name: PawLocal ${{ inputs.target_environment }} identity stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: Identity resources to add after that environment's foundation is deployed.
+        required: true
+        type: choice
+        options:
+          - development
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-infrastructure
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.10.5
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+  PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
+  TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+
+jobs:
+  validate-ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main and supported target
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Identity stage may only run from main.' >&2; exit 1; }
+          [[ "$TARGET_ENVIRONMENT" == development || "$TARGET_ENVIRONMENT" == production ]]
+
+  identity-plan:
+    name: Plan environment identity roles
+    needs: validate-ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      plan_sha256: ${{ steps.digest.outputs.plan_sha256 }}
+    env:
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_IDENTITY_PLAN_ROLE_ARN: ${{ vars.PAWLOCAL_IDENTITY_TERRAFORM_PLAN_ROLE_ARN }}
+      TF_PLAN_OBJECT_KEY: plans/identity/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_target_environment: ${{ inputs.target_environment }}
+    steps:
+      - name: Check out the dispatched commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate fixed role and bootstrap outputs
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_IDENTITY_PLAN_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-identity-terraform-plan$ ]]
+          test -n "$PAWLOCAL_TF_STATE_BUCKET"
+          test -n "$PAWLOCAL_TF_PLAN_BUCKET"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure identity plan role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_IDENTITY_PLAN_ROLE_ARN }}
+          role-session-name: pawlocal-identity-plan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialize identity state and create saved plan
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/identity/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/identity-init.log" 2>&1
+          if ! terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/identity-plan-output.txt" 2>&1; then
+            echo 'Identity Terraform plan failed; raw provider output was withheld.' >&2
+            exit 1
+          fi
+
+      - name: Publish exact sanitized identity plan
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: |
+          set -o pipefail
+          {
+            echo "## ${TARGET_ENVIRONMENT} identity Terraform review"
+            echo
+            echo "Commit: `${GITHUB_SHA}`"
+            echo "State: `pawlocal/identity/terraform.tfstate`"
+            terraform show -json tfplan 2>"$RUNNER_TEMP/identity-show-error.txt" | python ../../../ops/terraform-identity-plan-review.py \
+              --environment "$TARGET_ENVIRONMENT" \
+              --development-frontend-policy-arn "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:policy/pawlocal-identity-development-frontend-publish" \
+              --production-frontend-policy-arn "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:policy/pawlocal-identity-production-frontend-publish" \
+              --development-dsql-policy-arn "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:policy/pawlocal-identity-development-dsql-connect"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Calculate saved-plan digest
+        id: digest
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: |
+          digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
+          echo "plan_sha256=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Store exact saved identity plan privately
+        env:
+          PLAN_SHA256: ${{ steps.digest.outputs.plan_sha256 }}
+        run: |
+          python ops/terraform-plan-object.py upload \
+            --bucket "$PAWLOCAL_TF_PLAN_BUCKET" --key "$TF_PLAN_OBJECT_KEY" \
+            --file infra/terraform/identity/tfplan --environment identity \
+            --state-key pawlocal/identity/terraform.tfstate --commit "$GITHUB_SHA" \
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" --sha256 "$PLAN_SHA256"
+
+  identity-apply:
+    name: Protected exact-plan identity apply
+    needs: identity-plan
+    runs-on: ubuntu-latest
+    environment: identity-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+      TF_PLAN_OBJECT_KEY: plans/identity/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
+    steps:
+      - name: Check out planned commit and validate role
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require the identity apply role
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-identity-terraform-apply$ ]]
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Configure protected identity apply role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-identity-apply-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Download and verify the exact saved identity plan
+        env:
+          EXPECTED_PLAN_SHA256: ${{ needs.identity-plan.outputs.plan_sha256 }}
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/terraform-plan-object.py download \
+            --bucket "$PAWLOCAL_TF_PLAN_BUCKET" --key "$TF_PLAN_OBJECT_KEY" \
+            --file infra/terraform/identity/tfplan --environment identity \
+            --state-key pawlocal/identity/terraform.tfstate --commit "$GITHUB_SHA" \
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" --sha256 "$EXPECTED_PLAN_SHA256"
+      - name: Initialize identity state
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: terraform init -input=false -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config='key=pawlocal/identity/terraform.tfstate' -backend-config="region=${AWS_REGION}" -backend-config='use_lockfile=true'
+      - name: Apply the exact reviewed identity plan
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: terraform apply -input=false -lock-timeout=5m -auto-approve tfplan

@@ -28,7 +28,7 @@ resource "random_id" "site_bucket_suffix" {
 
 resource "aws_s3_bucket" "site" {
   bucket        = "${local.name_prefix}-${random_id.site_bucket_suffix.hex}"
-  force_destroy = false
+  force_destroy = var.recovery_force_destroy_frontend_buckets
 }
 
 resource "aws_s3_bucket_ownership_controls" "site" {
@@ -275,25 +275,28 @@ resource "aws_iam_role_policy" "github_deploy" {
 }
 
 module "fullstack" {
-  source = "./fullstack"
+  # Destroy-only legacy graph. New environment states use ./fullstack and the
+  # dedicated identity root owns application IAM resources.
+  source = "./legacy-fullstack"
 
   providers = {
     aws = aws.fullstack
   }
 
-  aws_region                      = var.aws_region
-  root_domain                     = var.domain_name
-  cloudfront_certificate_arn      = var.certificate_arn
-  github_repository               = var.github_repository
-  github_owner_id                 = var.github_owner_id
-  github_repository_id            = var.github_repository_id
-  terraform_state_bucket_name     = var.terraform_state_bucket_name
-  additional_frontend_bucket_arns = [aws_s3_bucket.site.arn]
-  # The existing root state owns the account-level provider; the child module reads it.
-  manage_github_oidc_provider    = false
-  backend_image_digests          = var.backend_image_digests
-  enable_dsql_auth_event_capture = var.enable_dsql_auth_event_capture
-  dsql_auth_audit_bucket_name    = var.dsql_auth_audit_bucket_name
-  dsql_auth_retention_days       = var.dsql_auth_retention_days
-  dsql_auth_alert_email          = var.dsql_auth_alert_email
+  aws_region                                = var.aws_region
+  root_domain                               = var.domain_name
+  cloudfront_certificate_arn                = var.certificate_arn
+  github_repository                         = var.github_repository
+  github_owner_id                           = var.github_owner_id
+  github_repository_id                      = var.github_repository_id
+  terraform_state_bucket_name               = var.terraform_state_bucket_name
+  additional_frontend_bucket_arns           = [aws_s3_bucket.site.arn]
+  manage_github_oidc_provider               = false
+  recovery_force_destroy_frontend_buckets   = var.recovery_force_destroy_frontend_buckets
+  recovery_disable_dsql_deletion_protection = var.recovery_disable_dsql_deletion_protection
+  backend_image_digests                     = var.backend_image_digests
+  enable_dsql_auth_event_capture            = var.enable_dsql_auth_event_capture
+  dsql_auth_audit_bucket_name               = var.dsql_auth_audit_bucket_name
+  dsql_auth_retention_days                  = var.dsql_auth_retention_days
+  dsql_auth_alert_email                     = var.dsql_auth_alert_email
 }

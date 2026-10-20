@@ -6,7 +6,8 @@ on:
     inputs:
       backend_image_digest:
         description: Immutable public GHCR API image reference, pinned to a sha256 digest.
-        required: true
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -50,6 +51,8 @@ jobs:
       PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_DEVELOPMENT_TERRAFORM_PLAN_ROLE_ARN }}
       PAWLOCAL_TF_PLAN_BUCKET: ${{ vars.PAWLOCAL_TF_PLAN_BUCKET }}
       PAWLOCAL_OAC_ARN: ${{ vars.PAWLOCAL_DEVELOPMENT_OAC_ARN }}
+      PAWLOCAL_IDENTITY_PLAN_ROLE_ARN: ${{ vars.PAWLOCAL_IDENTITY_TERRAFORM_PLAN_ROLE_ARN }}
+      BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
       TF_PLAN_OBJECT_KEY: plans/development/${{ github.run_id }}/${{ github.run_attempt }}/tfplan
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_root_domain: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
@@ -79,13 +82,42 @@ jobs:
           test -n "$PAWLOCAL_TF_PLAN_BUCKET"
           test -n "$TF_VAR_root_domain"
           test -n "$TF_VAR_cloudfront_certificate_arn"
-          [[ "$BACKEND_IMAGE_DIGEST" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+          [[ -z "$BACKEND_IMAGE_DIGEST" || "$BACKEND_IMAGE_DIGEST" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+
+      - name: Configure identity plan role to read the applied DSQL runtime identity
+        if: env.BACKEND_IMAGE_DIGEST != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_IDENTITY_PLAN_ROLE_ARN }}
+          role-session-name: pawlocal-dev-runtime-identity-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Require the applied development DSQL runtime identity
+        if: env.BACKEND_IMAGE_DIGEST != ''
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/identity/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/identity-output-init.log" 2>&1
+          terraform output -json role_arns > "$RUNNER_TEMP/identity-role-arns.json"
+          python - "$RUNNER_TEMP/identity-role-arns.json" "$PAWLOCAL_AWS_ACCOUNT_ID" <<'PY' >> "$GITHUB_ENV"
+          import json, sys
+          roles = json.load(open(sys.argv[1]))
+          arn = roles.get("development_dsql_runtime")
+          expected = f"arn:aws:iam::{sys.argv[2]}:role/pawlocal-development-dsql-runtime"
+          if arn != expected:
+              raise SystemExit("The applied identity state does not contain the exact development DSQL runtime role")
+          print(f"TF_VAR_dsql_runtime_role_arn={arn}")
+          PY
 
       - name: Configure development plan role
         uses: aws-actions/configure-aws-credentials@v4
@@ -258,6 +290,7 @@ jobs:
           echo "Development OAC ARN for the separate bootstrap policy: `${oac_arn}`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify development API and database-backed place query
+        if: inputs.backend_image_digest != ''
         working-directory: infra/terraform/environments/development
         env:
           EXPECTED_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
@@ -315,6 +348,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record development apply result
+        if: inputs.backend_image_digest != ''
         shell: bash
         env:
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
@@ -323,3 +357,12 @@ jobs:
           echo "Development workflow run ID: `${GITHUB_RUN_ID}`" >> "$GITHUB_STEP_SUMMARY"
           echo "Immutable API image: `${BACKEND_IMAGE_DIGEST}`" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: `${GITHUB_SHA}`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record development foundation handoff
+        if: inputs.backend_image_digest == ''
+        shell: bash
+        run: |
+          {
+            echo 'Development foundation applied from the sanitized exact plan.'
+            echo 'Next pin the development OAC and complete the local bootstrap update, then run the identity workflow for development. Dispatch this workflow again with an immutable backend image digest after identity-apply succeeds.'
+          } >> "$GITHUB_STEP_SUMMARY"

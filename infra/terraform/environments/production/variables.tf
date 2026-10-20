@@ -31,8 +31,17 @@ variable "terraform_state_bucket_name" {
 variable "backend_image_digest" {
   description = "Immutable public GHCR image reference used by the production API."
   type        = string
+  default     = null
+  nullable    = true
   validation {
-    condition     = can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", var.backend_image_digest))
+    condition     = var.backend_image_digest == null || trimspace(var.backend_image_digest) == "" ? true : can(regex("^ghcr\\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$", var.backend_image_digest))
     error_message = "The backend image must be pinned to a public GHCR sha256 digest."
   }
+}
+
+variable "dsql_runtime_role_arn" {
+  description = "Unused for production; reserved so both environment roots share one identity handoff contract."
+  type        = string
+  default     = null
+  nullable    = true
 }

@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
 def _common(parser: argparse.ArgumentParser, *, with_file: bool, with_metadata: bool) -> None:
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--key", required=True)
-    parser.add_argument("--environment", choices=("development", "production", "recovery"), required=True)
+    parser.add_argument("--environment", choices=("development", "production", "recovery", "identity"), required=True)
     parser.add_argument("--state-key", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--repository-id", required=True)
@@ -62,6 +62,7 @@ def expected_metadata(args: argparse.Namespace) -> dict[str, str]:
         "development": "pawlocal/development/terraform.tfstate",
         "production": "pawlocal/production/terraform.tfstate",
         "recovery": "pawlocal/terraform.tfstate",
+        "identity": "pawlocal/identity/terraform.tfstate",
     }[args.environment]
     if args.state_key != expected_state_key:
         raise ValueError("Terraform state key does not match the selected environment")

@@ -25,16 +25,11 @@ provider "aws" {
 module "fullstack" {
   source = "../../fullstack"
 
-  aws_region                      = var.aws_region
-  root_domain                     = var.root_domain
-  cloudfront_certificate_arn      = var.cloudfront_certificate_arn
-  github_repository               = var.github_repository
-  github_owner_id                 = var.github_owner_id
-  github_repository_id            = var.github_repository_id
-  terraform_state_bucket_name     = var.terraform_state_bucket_name
-  additional_frontend_bucket_arns = []
-  manage_github_oidc_provider     = false
-  backend_image_digests           = { (local.environment) = var.backend_image_digest }
-  environment_sizes               = { (local.environment) = local.environment_size }
-  enable_dsql_auth_event_capture  = false
+  aws_region                     = var.aws_region
+  root_domain                    = var.root_domain
+  cloudfront_certificate_arn     = var.cloudfront_certificate_arn
+  backend_image_digests          = trimspace(coalesce(var.backend_image_digest, "")) == "" ? {} : { (local.environment) = var.backend_image_digest }
+  environment_sizes              = { (local.environment) = local.environment_size }
+  enable_dsql_auth_event_capture = false
+  dsql_runtime_role_arn          = var.dsql_runtime_role_arn
 }

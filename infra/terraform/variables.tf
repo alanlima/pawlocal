@@ -82,6 +82,18 @@ variable "manage_github_oidc_provider" {
   default     = true
 }
 
+variable "recovery_force_destroy_frontend_buckets" {
+  description = "Recovery-only switch that lets Terraform empty and remove the exact PawLocal frontend buckets in the legacy shared state. Keep false for all normal plans."
+  type        = bool
+  default     = false
+}
+
+variable "recovery_disable_dsql_deletion_protection" {
+  description = "Recovery-only stage that disables deletion protection on the legacy PawLocal DSQL clusters before the separately reviewed destroy plan. Keep false for all normal plans."
+  type        = bool
+  default     = false
+}
+
 variable "backend_image_digests" {
   description = "Environment-keyed immutable public GHCR image references. Development and production must use the same digest when promoting a release."
   type        = map(string)

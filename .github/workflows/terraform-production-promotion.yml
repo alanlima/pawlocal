@@ -1,5 +1,5 @@
 name: Terraform production promotion
-run-name: PawLocal production promotion from development run ${{ inputs.development_run_id }}
+run-name: PawLocal production ${{ inputs.target_stage }} from development run ${{ inputs.development_run_id }}
 
 on:
   workflow_dispatch:
@@ -11,6 +11,18 @@ on:
       backend_image_digest:
         description: Immutable API image digest used by that development run
         required: true
+        type: string
+      target_stage:
+        description: Run production foundation first, then API deployment after production identity is applied.
+        required: true
+        type: choice
+        options:
+          - foundation
+          - api
+      production_foundation_run_id:
+        description: Successful production foundation run ID, required for the api stage.
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -40,10 +52,14 @@ jobs:
         env:
           DEVELOPMENT_RUN_ID: ${{ inputs.development_run_id }}
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+          TARGET_STAGE: ${{ inputs.target_stage }}
+          PRODUCTION_FOUNDATION_RUN_ID: ${{ inputs.production_foundation_run_id }}
         with:
           script: |
             const runId = process.env.DEVELOPMENT_RUN_ID;
             const digest = process.env.BACKEND_IMAGE_DIGEST;
+            const targetStage = process.env.TARGET_STAGE;
+            const foundationRunId = process.env.PRODUCTION_FOUNDATION_RUN_ID;
             if (!/^\d+$/.test(runId)) throw new Error('Development run ID must be numeric.');
             if (!/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(digest)) throw new Error('Image digest is invalid.');
             const { data: workflow } = await github.rest.actions.getWorkflow({
@@ -69,8 +85,35 @@ jobs:
             if (!/^[0-9a-f]{40}$/.test(run.head_sha)) throw new Error('Development run commit is invalid.');
             const verifiedDevelopmentStep = jobs.jobs.some(job => job.steps?.some(step => step.name === 'Verify development API and database-backed place query' && step.conclusion === 'success'));
             if (!verifiedDevelopmentStep) throw new Error('Development run did not complete the database-backed API verification step.');
+            if (targetStage === 'api') {
+              if (!/^\d+$/.test(foundationRunId)) throw new Error('API stage requires the successful production foundation run ID.');
+              const { data: productionWorkflow } = await github.rest.actions.getWorkflow({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'terraform-production-promotion.yml'
+              });
+              const { data: foundationRun } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: Number(foundationRunId)
+              });
+              const { data: foundationJobs } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: Number(foundationRunId),
+                per_page: 100
+              });
+              const expectedFoundationTitle = `PawLocal production foundation from development run ${runId}`;
+              if (foundationRun.workflow_id !== productionWorkflow.id || foundationRun.path?.split('@')[0] !== '.github/workflows/terraform-production-promotion.yml') throw new Error('Run is not from the PawLocal production Terraform workflow.');
+              if (foundationRun.event !== 'workflow_dispatch' || foundationRun.head_branch !== 'main' || foundationRun.status !== 'completed' || foundationRun.conclusion !== 'success') throw new Error('Production foundation run must have completed successfully from main.');
+              if (foundationRun.display_title !== expectedFoundationTitle || foundationRun.head_sha !== run.head_sha) throw new Error('Production foundation must use the same source commit and development run.');
+              const appliedFoundation = foundationJobs.jobs.some(job => job.steps?.some(step => step.name === 'Apply the exact reviewed production plan' && step.conclusion === 'success'));
+              if (!appliedFoundation) throw new Error('Production foundation run did not complete its exact-plan apply.');
+            } else if (targetStage !== 'foundation' || foundationRunId) {
+              throw new Error('Foundation stage must not supply a production foundation run ID.');
+            }
             core.setOutput('development_sha', run.head_sha);
-            await core.summary.addHeading('Development promotion evidence').addText(`Verified successful main run ${runId} at ${run.head_sha} for the requested immutable image digest.`).write();
+            await core.summary.addHeading('Development promotion evidence').addText(`Verified successful main run ${runId} at ${run.head_sha} for the requested immutable image digest and ${targetStage} stage.`).write();
 
   validate-ref:
     name: Restrict production promotion to main
@@ -83,8 +126,10 @@ jobs:
         shell: bash
         env:
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+          DEVELOPMENT_SHA: ${{ needs.validate-development.outputs.development_sha }}
         run: |
           [[ "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Production promotion may only be dispatched from main.' >&2; exit 1; }
+          [[ "$GITHUB_SHA" == "$DEVELOPMENT_SHA" ]] || { echo 'Dispatch a successful development deployment from the current main commit before production.' >&2; exit 1; }
           [[ "$BACKEND_IMAGE_DIGEST" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]] || { echo 'Immutable backend image digest is invalid.' >&2; exit 1; }
   production-plan:
     name: Plan production infrastructure
@@ -112,7 +157,8 @@ jobs:
       TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      TF_VAR_backend_image_digest: ${{ inputs.backend_image_digest }}
+      TF_VAR_backend_image_digest: ${{ inputs.target_stage == 'api' && inputs.backend_image_digest || '' }}
+      PAWLOCAL_IDENTITY_PLAN_ROLE_ARN: ${{ vars.PAWLOCAL_IDENTITY_TERRAFORM_PLAN_ROLE_ARN }}
     steps:
       - name: Check out the dispatched commit
         uses: actions/checkout@v4
@@ -140,6 +186,34 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+
+      - name: Configure identity plan role to verify production identity stage
+        if: inputs.target_stage == 'api'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_IDENTITY_PLAN_ROLE_ARN }}
+          role-session-name: pawlocal-prod-identity-check-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Require the applied production frontend identity
+        if: inputs.target_stage == 'api'
+        working-directory: infra/terraform/identity
+        shell: bash
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config='key=pawlocal/identity/terraform.tfstate' \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/identity-output-init.log" 2>&1
+          terraform output -json role_arns > "$RUNNER_TEMP/identity-role-arns.json"
+          python - "$RUNNER_TEMP/identity-role-arns.json" "$PAWLOCAL_AWS_ACCOUNT_ID" <<'PY'
+          import json, sys
+          roles = json.load(open(sys.argv[1]))
+          arn = roles.get("production_frontend_deploy")
+          expected = f"arn:aws:iam::{sys.argv[2]}:role/pawlocal-production-github-deploy"
+          if arn != expected:
+              raise SystemExit("The applied identity state does not contain the exact production frontend deployment role")
+          PY
 
       - name: Configure production plan role
         uses: aws-actions/configure-aws-credentials@v4
@@ -190,6 +264,7 @@ jobs:
           {
             echo '## Production Terraform plan review'
             echo
+            echo "Stage: `${{ inputs.target_stage }}`"
             echo "Development commit: `${{ needs.validate-ref.outputs.development_sha }}`"
             echo "State: `pawlocal/production/terraform.tfstate`"
             echo 'Changed resource addresses, actions, and attribute paths are shown; values are omitted.'
@@ -325,6 +400,7 @@ jobs:
           echo "Production OAC ARN for the separate bootstrap policy: `${oac_arn}`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify production API and database-backed place query
+        if: inputs.target_stage == 'api'
         working-directory: infra/terraform/environments/production
         env:
           EXPECTED_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
@@ -382,9 +458,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record production apply result
+        if: inputs.target_stage == 'api'
         shell: bash
         env:
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
         run: |
           echo 'Production apply succeeded for the reviewed saved plan.' >> "$GITHUB_STEP_SUMMARY"
           echo "Development commit: `${{ needs.production-plan.outputs.development_sha }}`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record production foundation handoff
+        if: inputs.target_stage == 'foundation'
+        shell: bash
+        run: |
+          {
+            echo 'Production foundation applied from the sanitized exact plan.'
+            echo 'Next run the separate identity workflow for production, then dispatch this workflow with target_stage=api and this run ID as production_foundation_run_id.'
+          } >> "$GITHUB_STEP_SUMMARY"
