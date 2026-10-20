@@ -10,4 +10,5 @@ jobs:
   disabled:
     runs-on: ubuntu-latest
     steps:
-      - run: echo 'The combined-state rollback path is retired. Recovery work remains deferred to Issue #44.'
+      - run: |
+          echo 'The combined-state rollback path is retired. Recovery work remains deferred to Issue #44.'
