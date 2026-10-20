@@ -93,7 +93,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           require_env() {
             local name="$1"
-            if [[ -z "${!name:-}" ]]; then
+            if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub Environment variable: ${name}" >&2
               exit 1
             fi
@@ -315,7 +315,7 @@ jobs:
         run: |
           require_env() {
             local name="$1"
-            if [[ -z "${!name:-}" ]]; then
+            if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub Environment variable: ${name}" >&2
               exit 1
             fi
@@ -451,7 +451,7 @@ jobs:
         run: |
           require_env() {
             local name="$1"
-            if [[ -z "${!name:-}" ]]; then
+            if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub Environment variable: ${name}" >&2
               exit 1
             fi
@@ -588,7 +588,7 @@ jobs:
         run: |
           require_env() {
             local name="$1"
-            if [[ -z "${!name:-}" ]]; then
+            if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub Environment variable: ${name}" >&2
               exit 1
             fi
@@ -740,7 +740,7 @@ jobs:
         run: |
           require_env() {
             local name="$1"
-            if [[ -z "${!name:-}" ]]; then
+            if [[ -z "${!name}" ]]; then
               echo "Missing required GitHub Environment variable: ${name}" >&2
               exit 1
             fi

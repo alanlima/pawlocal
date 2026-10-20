@@ -138,6 +138,7 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 self.assertIn(f"TERRAFORM_ROLE_VARIABLE_NAME: {expected_role}", job)
                 self.assertIn("role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}", job)
                 self.assertIn('test -n "$PLAN_TRANSFER_BUCKET"', job)
+                self.assertIn('[[ -z "${!name}" ]]', job)
                 for required_variable in (
                     "AWS_REGION", "PAWLOCAL_AWS_ACCOUNT_ID", "PAWLOCAL_TF_STATE_BUCKET",
                     "PAWLOCAL_DOMAIN_NAME", "PAWLOCAL_CERTIFICATE_ARN",
