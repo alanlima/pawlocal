@@ -195,7 +195,8 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
                         "actions": ["update"],
                         "before": {"policy": None},
                         "after": {"policy": None},
-                        "after_unknown": {"policy": True},
+                        "after_unknown": {"policy": {"Statement": [{"Resource": True}]}},
+                        "before_sensitive": {"policy": {"Statement": [{"Condition": {"StringEquals": True}}]}},
                     },
                 },
                 {
@@ -206,6 +207,17 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
                         "before": {"encryption_details": None},
                         "after": {"encryption_details": None},
                         "after_unknown": {"encryption_details": {"kms_key_arn": True}},
+                        "after_sensitive": {"encryption_details": {"encryption_type": True}},
+                    },
+                },
+                {
+                    "address": 'module.fullstack.aws_s3_bucket_policy.frontend["development"]',
+                    "mode": "managed",
+                    "change": {
+                        "actions": ["update"],
+                        "before": {"policy": None},
+                        "after": {"policy": None},
+                        "after_sensitive": {"policy": {"Statement": [{"Principal": {"Service": True}}]}},
                     },
                 },
             ]
@@ -215,8 +227,15 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertIn("aws_iam_role_policy.example", result.stdout)
         self.assertIn("after[unknown/computed]", result.stdout)
         self.assertIn("module.fullstack.aws_dsql_cluster.app[*]", result.stdout)
-        self.assertIn("before[absent]; after[unknown/computed]", result.stdout)
-        self.assertNotIn("kms_key_arn", result.stdout)
+        self.assertIn("before[sensitive]; after[unknown/computed]", result.stdout)
+        self.assertIn("before_sensitive=$.policy.Statement[*].Condition.StringEquals", result.stdout)
+        self.assertIn("after_unknown=$.policy.Statement[*].Resource", result.stdout)
+        self.assertIn("after_unknown=$.encryption_details.kms_key_arn", result.stdout)
+        self.assertIn("after_sensitive=$.encryption_details.encryption_type", result.stdout)
+        self.assertIn("module.fullstack.aws_s3_bucket_policy.frontend[*]", result.stdout)
+        self.assertIn("after_sensitive=$.policy.Statement[*].Principal.Service", result.stdout)
+        self.assertNotIn("private-policy-body-marker", result.stdout)
+        self.assertNotIn("private-id", result.stdout)
 
     def test_oidc_provider_stays_app_root_owned_until_later_transfer(self) -> None:
         source = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
