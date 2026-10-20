@@ -249,7 +249,7 @@ jobs:
           PLAN_STAGE: ${{ steps.plan.outputs.plan_stage }}
         run: |
           test -n "$PLAN_TRANSFER_BUCKET"
-          python -m pip install --disable-pip-version-check --no-warn-script-location boto3
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r ../../.github/scripts/requirements-terraform-plan-transfer.txt
           python ../../.github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${PLAN_STAGE}" tfplan plan-metadata.json
 
   apply:
@@ -307,7 +307,7 @@ jobs:
         shell: bash
         run: |
           test -n "$PLAN_TRANSFER_BUCKET"
-          python -m pip install --disable-pip-version-check --no-warn-script-location boto3
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${{ needs.plan.outputs.plan_stage }}" plan plan-metadata.json
 
       - name: Verify plan metadata and digest
@@ -413,7 +413,7 @@ jobs:
         shell: bash
         run: |
           test -n "$PLAN_TRANSFER_BUCKET"
-          python -m pip install --disable-pip-version-check --no-warn-script-location boto3
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/${{ needs.plan.outputs.plan_stage }}" plan plan-metadata.json
 
       - name: Verify plan metadata and digest
@@ -584,7 +584,7 @@ jobs:
         shell: bash
         run: |
           test -n "$PLAN_TRANSFER_BUCKET"
-          python -m pip install --disable-pip-version-check --no-warn-script-location boto3
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r ../../.github/scripts/requirements-terraform-plan-transfer.txt
           python ../../.github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/destroy" tfplan destroy-plan-metadata.json
 
   destroy:
@@ -642,7 +642,7 @@ jobs:
         shell: bash
         run: |
           test -n "$PLAN_TRANSFER_BUCKET"
-          python -m pip install --disable-pip-version-check --no-warn-script-location boto3
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "plans/legacy/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}/destroy" plan destroy-plan-metadata.json
 
       - name: Verify exact destroy plan metadata and digest

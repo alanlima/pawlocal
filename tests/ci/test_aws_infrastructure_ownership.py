@@ -80,6 +80,7 @@ EXECUTION_FILES = [
     *composite_action_files(Path(ROOT / ".github/actions")),
     *local_action_script_files(Path(ROOT / ".github/actions")),
     *javascript_action_files(Path(ROOT / ".github/actions")),
+    ROOT / ".github/scripts/terraform-plan-transfer.py",
 ]
 ALLOWED_AWS_COMMANDS = {
     ("lightsail", "get-container-services"),
@@ -834,12 +835,34 @@ def python_aws_cli_commands(source: str) -> list[tuple[str, str]]:
 
 
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
+    def assert_plan_transfer_helper_is_s3_object_only(self, source: str) -> None:
+        tree = ast.parse(source)
+        s3_client_calls = []
+        client_method_calls = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "boto3":
+                self.assertEqual(node.func.attr, "client")
+                self.assertTrue(node.args)
+                self.assertIsInstance(node.args[0], ast.Constant)
+                self.assertEqual(node.args[0].value, "s3")
+                s3_client_calls.append(node)
+            if isinstance(node.func.value, ast.Name) and node.func.value.id == "client":
+                client_method_calls.append(node.func.attr)
+
+        self.assertEqual(len(s3_client_calls), 2)
+        self.assertEqual(set(client_method_calls), {"upload_file", "download_file"})
+
     def test_executable_automation_does_not_mutate_infrastructure_outside_terraform(self) -> None:
         for path in EXECUTION_FILES:
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
-                self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
+                if path == ROOT / ".github/scripts/terraform-plan-transfer.py":
+                    self.assert_plan_transfer_helper_is_s3_object_only(source)
+                else:
+                    self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
                 js_commands = javascript_process_launch_commands(source) if path.suffix in {".js", ".cjs", ".mjs"} else []
                 scanned_commands = python_aws_cli_commands(source) if path.suffix == ".py" else [*aws_cli_commands(source), *python_aws_cli_commands(source)]
                 for command in js_commands:
