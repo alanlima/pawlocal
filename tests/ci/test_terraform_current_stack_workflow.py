@@ -388,7 +388,7 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         self.assertIn("The teardown-preparation exception is available only for destroy.", source)
         self.assertIn("The teardown-preparation exception requires its exact typed confirmation.", source)
 
-    def test_exception_skips_only_preparation_guard_and_defers_full_destroy(self) -> None:
+    def test_exception_skips_only_preparation_guard_and_documents_deferred_iam(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
             "python ../../.github/scripts/terraform-plan-gate.py \"$RUNNER_TEMP/terraform-plan.json\" >> \"$GITHUB_STEP_SUMMARY\"",
@@ -399,15 +399,13 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            "if: inputs.operation == 'destroy' && inputs.allow_expected_destroy_preparation_changes != true",
+            "if: inputs.operation == 'destroy'",
             source,
         )
-        self.assertIn("Stop for publisher-role IAM bootstrap handoff", source)
-        self.assertIn("import_existing_frontend_publish_roles=true", source)
-        self.assertIn("pawlocal-development-github-deploy", source)
-        self.assertIn("pawlocal-production-github-deploy", source)
-        self.assertIn("pawlocal-development-dsql-runtime", source)
-        self.assertIn("do not include it in this handoff", source)
+        self.assertIn("Note deferred IAM bootstrap ownership work", source)
+        self.assertIn("IAM/bootstrap ownership deferred until recreation", source)
+        self.assertIn("Existing `destroy = false` lifecycle blocks", source)
+        self.assertIn("handled by the full destroy plan", source)
         for job_name in ("prepare-destroy", "destroy"):
             start = source.index(f"  {job_name}:\n")
             next_job = re.search(r"(?m)^  [a-z][a-z-]+:\s*$", source[start + 1 :])

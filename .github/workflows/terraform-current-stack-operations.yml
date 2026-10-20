@@ -583,19 +583,18 @@ jobs:
         shell: bash
         run: terraform apply -input=false -lock-timeout=5m -auto-approve ../../plan/tfplan
 
-      - name: Stop for publisher-role IAM bootstrap handoff
-        if: inputs.allow_expected_destroy_preparation_changes == true
+      - name: Note deferred IAM bootstrap ownership work
         shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
-          ### Next required step before full destroy
+          ### IAM/bootstrap ownership deferred until recreation
 
-          This run applied only the approved teardown-preparation plan. Full destroy was intentionally skipped. Complete the staged Terraform handoff for the GitHub OIDC frontend publisher roles `pawlocal-development-github-deploy` and `pawlocal-production-github-deploy`: import them into the isolated IAM-bootstrap state with `import_existing_frontend_publish_roles=true` and the exact four frontend bucket/distribution ARN inputs, then review and apply that saved bootstrap plan through its approved procedure. Keep the development application runtime role `pawlocal-development-dsql-runtime` managed by the fullstack app module; do not include it in this handoff or set `development_lightsail_principal_arn` for this stage. Then dispatch this workflow again with the teardown-preparation exception disabled; the new run will create a fresh destroy plan and retain the `infrastructure-apply` approval gate.
+          Existing `destroy = false` lifecycle blocks continue to protect any GitHub publisher role released from the app state. IAM/bootstrap ownership work is deferred until recreation. The development application runtime role remains managed by the fullstack app module and is handled by the full destroy plan.
           EOF
 
   destroy-plan:
     name: Plan destruction of the combined stack
-    if: inputs.operation == 'destroy' && inputs.allow_expected_destroy_preparation_changes != true
+    if: inputs.operation == 'destroy'
     needs: prepare-destroy
     runs-on: ubuntu-latest
     environment: infrastructure-plan
