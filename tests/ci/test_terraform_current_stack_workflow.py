@@ -134,15 +134,26 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                     if environment == "infrastructure-plan"
                     else "PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN"
                 )
-                self.assertIn(f"role-to-assume: ${{{{ vars.{expected_role} }}}}", job)
+                self.assertIn(f"TERRAFORM_ROLE_ARN: ${{{{ vars.{expected_role} }}}}", job)
+                self.assertIn(f"TERRAFORM_ROLE_VARIABLE_NAME: {expected_role}", job)
+                self.assertIn("role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}", job)
+                self.assertIn('test -n "$PLAN_TRANSFER_BUCKET"', job)
+                self.assertIn('[[ -z "${!name}" ]]', job)
+                for required_variable in (
+                    "AWS_REGION", "PAWLOCAL_AWS_ACCOUNT_ID", "PAWLOCAL_TF_STATE_BUCKET",
+                    "PAWLOCAL_DOMAIN_NAME", "PAWLOCAL_CERTIFICATE_ARN",
+                ):
+                    self.assertIn(required_variable, job)
                 self.assertIn("allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}", job)
                 account_check = job.index("steps.aws-credentials.outputs.aws-account-id")
+                role_validation = job.index("${TERRAFORM_ROLE_VARIABLE_NAME} must belong")
                 terraform_calls = [
                     position
                     for command in ("terraform init", "terraform plan", "terraform apply")
                     if (position := job.find(command)) >= 0
                 ]
                 self.assertTrue(terraform_calls, "expected an AWS-backed Terraform command")
+                self.assertLess(role_validation, credential_step)
                 self.assertLess(credential_step, account_check)
                 self.assertLess(account_check, min(terraform_calls))
 
