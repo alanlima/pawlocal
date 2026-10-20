@@ -217,6 +217,15 @@ def _contains_true(value: Any) -> bool:
     return False
 
 
+def _has_attribute_flags(change: dict[str, Any], attribute: str) -> bool:
+    for metadata_name in ("before_unknown", "after_unknown", "before_sensitive", "after_sensitive"):
+        metadata = change.get(metadata_name)
+        value = metadata.get(attribute) if isinstance(metadata, dict) else None
+        if _contains_true(value):
+            return True
+    return False
+
+
 def attribute_summary(change: dict[str, Any], attribute: str, side: str, summarize: Any) -> str:
     values = change.get(side)
     values = values if isinstance(values, dict) else {}
@@ -250,12 +259,12 @@ def summarize_plan(plan: dict[str, Any], label: str) -> list[tuple[str, str, lis
         after = change.get("after")
         paths = changed_top_level_paths(before, after)
         policy_detail = None
-        if "$.policy" in paths:
+        if "$.policy" in paths or _has_attribute_flags(change, "policy"):
             policy_detail = (
                 f"before[{attribute_summary(change, 'policy', 'before', policy_summary)}]; "
                 f"after[{attribute_summary(change, 'policy', 'after', policy_summary)}]"
             )
-        elif "$.encryption_details" in paths:
+        elif "$.encryption_details" in paths or _has_attribute_flags(change, "encryption_details"):
             policy_detail = (
                 f"before[{attribute_summary(change, 'encryption_details', 'before', encryption_summary)}]; "
                 f"after[{attribute_summary(change, 'encryption_details', 'after', encryption_summary)}]"

@@ -185,6 +185,39 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertNotIn("private-bucket", first)
 
+    def test_unknown_metadata_triggers_policy_and_nested_encryption_summaries(self) -> None:
+        plan_with_unknowns = {
+            "resource_changes": [
+                {
+                    "address": "aws_iam_role_policy.example",
+                    "mode": "managed",
+                    "change": {
+                        "actions": ["update"],
+                        "before": {"policy": None},
+                        "after": {"policy": None},
+                        "after_unknown": {"policy": True},
+                    },
+                },
+                {
+                    "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                    "mode": "managed",
+                    "change": {
+                        "actions": ["update"],
+                        "before": {"encryption_details": None},
+                        "after": {"encryption_details": None},
+                        "after_unknown": {"encryption_details": {"kms_key_arn": True}},
+                    },
+                },
+            ]
+        }
+        result = self.run_diagnostic({"resource_changes": []}, plan_with_unknowns)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("aws_iam_role_policy.example", result.stdout)
+        self.assertIn("after[unknown/computed]", result.stdout)
+        self.assertIn("module.fullstack.aws_dsql_cluster.app[*]", result.stdout)
+        self.assertIn("before[absent]; after[unknown/computed]", result.stdout)
+        self.assertNotIn("kms_key_arn", result.stdout)
+
     def test_oidc_provider_stays_app_root_owned_until_later_transfer(self) -> None:
         source = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
         variables = (ROOT / "infra/terraform/variables.tf").read_text(encoding="utf-8")
