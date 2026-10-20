@@ -28,6 +28,8 @@ These conditions do not prove that an existing distribution belongs to the role'
 
 The identity state key is `pawlocal/identity/terraform.tfstate`. Its plan role can read the exact development and production state objects for foundation outputs and can write only its own lock; its apply role can write only the identity state and lock. Both use an identity-specific saved-plan prefix.
 
+Development-plan and production-plan roles can inspect inline and attached policy metadata only on the exact development and production Terraform apply role ARNs, for the pre-approval promotion verifier. IAM role-detail actions are excluded from wildcard discovery permissions; only `iam:ListRoles` remains there. Production Terraform refresh has a separate exact-role read statement for its application roles.
+
 The IAM bootstrap state owns the three application roles and their trust documents: development and production frontend publisher roles trust only their exact GitHub Environment OIDC subject, and the development DSQL runtime role trusts the exact Lightsail principal plus the `development-seed` OIDC subject. The runtime role is created only after its exact Lightsail `principal_arn` is supplied from the foundation output. All three roles receive the bootstrap-owned `pawlocal-app-role-boundary` at creation.
 
 The identity apply role cannot create roles, change trust documents, set or remove permissions boundaries, pass roles, or delete roles. It can attach/detach only the matching bootstrap-owned managed policy to each exact role. This keeps GitHub trust and role ownership in the separately controlled bootstrap state while the identity state owns only policy attachments.

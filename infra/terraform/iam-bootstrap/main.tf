@@ -258,7 +258,7 @@ data "aws_iam_policy_document" "role_permissions" {
   statement {
     sid    = "ReadOnlyProviderDiscovery"
     effect = "Allow"
-    actions = each.key == "production-plan" ? [
+    actions = each.value.purpose == "plan" ? [
       for action in local.readonly_discovery_actions : action
       if !startswith(action, "iam:") || action == "iam:ListRoles"
     ] : local.readonly_discovery_actions
@@ -268,7 +268,7 @@ data "aws_iam_policy_document" "role_permissions" {
   statement {
     sid    = "ReadApplicationResources"
     effect = "Allow"
-    actions = each.key == "production-plan" ? [
+    actions = each.value.purpose == "plan" ? [
       for action in local.regional_read_actions : action
       if !startswith(action, "iam:")
     ] : local.regional_read_actions
@@ -283,7 +283,7 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
-    for_each = each.key == "production-plan" ? [true] : []
+    for_each = each.value.purpose == "plan" ? [true] : []
     content {
       sid    = "ReadExactApplyRolesForPromotionCheck"
       effect = "Allow"
