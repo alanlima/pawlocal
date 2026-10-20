@@ -1,8 +1,10 @@
-# Current-stack Terraform Actions
+# Historical current-stack Terraform Actions (non-actionable)
 
-This temporary workflow operates the existing combined Terraform root at `infra/terraform/` and its current state key, `pawlocal/terraform.tfstate`. It has no development-to-production promotion path. Use it only from `main`. It shares the `pawlocal-lightsail-deploy` GitHub Actions concurrency group with the full-stack development release, production promotion, and development rollback jobs, so none can invalidate a saved plan during an approval wait.
+> **Do not dispatch this workflow or follow the commands below for Issue #135.** This file preserves the former combined-state procedure as audit evidence only. Run 39480644777 applied part of its destroy plan and then failed; [PR #134](https://github.com/alanlima/pawlocal/pull/134) remains open, and the resulting AWS/state inventory has not yet been independently verified. Issue #135 requires clean bootstrap, development, and production states and will provide new operator instructions only after implementation.
 
-## GitHub Environment configuration
+Historically, this temporary workflow operated the former combined Terraform root at `infra/terraform/` and its state key, `pawlocal/terraform.tfstate`. The details below describe that retired design; they do not establish current live resources or authorize another apply or destroy.
+
+## Historical GitHub Environment configuration
 
 Create/configure these two GitHub Environments and restrict both to the `main` branch:
 
@@ -30,7 +32,7 @@ Do not configure SSH public-key/CIDR maps or a manually supplied backend image d
 
 Each AWS-enabled job requests `id-token: write` and uses `aws-actions/configure-aws-credentials@v5` to assume its Environment role through GitHub OIDC. The action's `allowed-account-ids` input checks the live account against `PAWLOCAL_AWS_ACCOUNT_ID`; a following step also compares the action's `aws-account-id` output before Terraform runs. Credentials are short-lived and remain in the runner environment. Do not print them or copy them into files or artifacts.
 
-## Dispatch and approval sequence
+## Historical dispatch and approval sequence
 
 1. Open **Actions → Terraform current stack operations → Run workflow** and select `main`.
 2. For `apply`, choose `apply` and enter `APPLY PAWLOCAL`. Review the sanitized plan summary, then approve the `infrastructure-apply` job to apply the exact saved plan from the private S3 transfer bucket.
@@ -45,4 +47,4 @@ Before any Terraform command, the assumed-role account is checked by `configure-
 
 Plans are bound to the run, attempt, commit, operation, account, and state key, and applied with Terraform backend locking. The workflow invokes no AWS CLI and makes no infrastructure change outside Terraform.
 
-The destroy operation permanently deletes the current app infrastructure and objects in its app-owned frontend buckets. Run it only when the reviewed destroy plan shows the intended current stack.
+The historical destroy operation was destructive and its last run completed only partially. Do not dispatch it again as part of Issue #135; use read-only inspection to establish the actual remaining AWS resources and state bindings.

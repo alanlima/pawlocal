@@ -1,8 +1,10 @@
-# Full-stack deployment adapter contract
+# Historical full-stack deployment adapter contract (non-actionable)
 
-The adapter publishes environment-specific frontend artifacts to the private S3 bucket and CloudFront distribution returned by the selected environment's `environment_targets` Terraform output from the existing shared root state. The workflow must not supply or override these resource identifiers through GitHub variables. It performs public endpoint smoke checks and writes release evidence. It does not deploy backend containers; Terraform owns that deployment through `aws_lightsail_container_service_deployment_version` in the existing shared root state.
+> **Do not implement or invoke this contract for Issue #135.** It depends on the superseded combined-state `environment_targets` output and deployment-version address. Retain it only as evidence of the former release path. Issue #135 must define and review a replacement contract after the new development and production state outputs exist; do not infer its paths, outputs, variables, or commands from this file.
 
-## Commands
+Historically, the adapter published environment-specific frontend artifacts to the private S3 bucket and CloudFront distribution returned by the selected environment's `environment_targets` Terraform output from the former shared root state. The remaining details record that retired behavior and are not current requirements.
+
+## Historical commands
 
 ```text
 <adapter> deploy --environment development|production --manifest <path> --frontend-archive <path>

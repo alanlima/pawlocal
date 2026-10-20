@@ -146,7 +146,8 @@ Implementation must happen in the following order.
 - Validate complete Docker Compose startup.
 - Implement CI/CD.
 - Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Production must not deploy automatically on merges to `main`.
-- Keep the existing mock-backed static frontend release distinct from the full-stack release model. Full-stack CI/CD follows the accepted Issue #75 architecture and remains gated on a reviewed Terraform migration plan, live DSQL compatibility, and explicit cost/provisioning approval; do not point a workflow at unconfigured targets or credentials.
+- Keep any historical mock-backed static frontend release evidence distinct from the full-stack release model. Issue #135 rebuilds the approved Issue #75 architecture from clean application states: one standalone IAM bootstrap state and separate development and production application states. Do not migrate or preserve the former application state, and do not point a workflow at unconfigured targets or credentials.
+- Before merging any Issue #135 Terraform, deployment-workflow, or deployment-helper implementation, disable or make fail-closed the legacy automatic development-deploy path and verify that a `main` merge cannot invoke the former combined-state deployment. Keep that path disabled until the new environment roots, targets, credentials, and release path are configured and independently reviewed.
 - Use `pawlocal-dev.<domain>` for the development site and `pawlocal.<domain>` for production. No domain, DNS, certificate, target, or secret is authorized by this naming convention alone.
 - Evaluate AWS hosting alternatives and running costs.
 - Obtain human approval before provisioning billable resources.
@@ -299,7 +300,11 @@ Do not give incident agents unrestricted production permissions.
 
 ## 10. Cost management
 
-Terraform configuration and the existing shared Terraform state are the only mechanism for creating, changing, replacing, or deleting AWS infrastructure. AWS console, CLI, SDK, shell, and bootstrap scripts must not mutate infrastructure or Terraform state. CI may publish immutable application artifacts; any AWS-side application deployment must be owned by a Terraform resource in the shared state. Runtime secrets must not be stored in Terraform state. Never manually edit, import, or remove state bindings.
+Terraform configuration and the approved Terraform states are the only mechanism for creating, changing, replacing, or deleting AWS infrastructure. Under Issue #135, those ownership boundaries are the standalone IAM bootstrap state and separate development and production application states. AWS console, CLI, SDK, shell, and bootstrap scripts must not mutate infrastructure or Terraform state. CI may publish immutable application artifacts; any AWS-side application deployment must be owned by a Terraform resource in the matching environment state. Runtime secrets must not be stored in Terraform state.
+
+Do not manually edit, move, or remove state bindings. Issue #135 permits only a reviewed Terraform import of the exact existing GitHub deployment IAM identity and related resources that read-only inspection confirms belong in the new bootstrap state. The import must be represented by reviewed Terraform configuration, appear in the saved plan, and show no duplicate ownership or unintended replacement/deletion. Do not import application resources or use imports for any other issue without a new approved decision.
+
+Read-only inventory is a blocking gate for Issue #135. If it finds surviving application resources or legacy state bindings, stop the affected greenfield environment and record the exact resources, ownership, cost exposure, and name collisions. Cleanup requires an explicitly owner-approved, independently reviewed, Terraform-only cleanup plan in a separately scoped change. Do not import survivors into the new bootstrap, development, or production states. If cleanup would require adopting an orphaned application resource into a temporary cleanup state, amend Issue #135 and the decision record before planning it. Do not proceed with the affected environment until cleanup verification shows that its new state can start without duplicate ownership or collision.
 
 PawLocal must remain inexpensive to operate at low traffic.
 
