@@ -22,10 +22,7 @@ def load_helper(name: str):
 
 plan_review = load_helper("terraform-plan-review")
 plan_object = load_helper("terraform-plan-object")
-recovery_review = load_helper("terraform-recovery-plan-review")
-recovery_oidc = load_helper("terraform-recovery-oidc-preflight")
 identity_review = load_helper("terraform-identity-plan-review")
-protection_review = load_helper("terraform-recovery-protection-review")
 bootstrap_oac = load_helper("verify-terraform-bootstrap-oac-handoff")
 bootstrap_cf_tag = load_helper("verify-terraform-bootstrap-cloudfront-tag-grant")
 
@@ -415,19 +412,6 @@ class TerraformPlanObjectTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "digest"):
             plan_object.expected_metadata(args)
 
-    def test_recovery_metadata_uses_legacy_shared_state_key(self):
-        args = Namespace(
-            environment="recovery",
-            state_key="pawlocal/terraform.tfstate",
-            commit="a" * 40,
-            repository_id="123456",
-            run_id="445566",
-            run_attempt="1",
-            sha256="b" * 64,
-        )
-        self.assertEqual(plan_object.expected_metadata(args)["state_key"], "pawlocal/terraform.tfstate")
-
-
 class TerraformWorkflowContractTests(unittest.TestCase):
     def test_development_workflow_approves_exact_plan_and_verifies_database(self):
         text = (ROOT / ".github/workflows/terraform-infrastructure-deploy.yml").read_text()
@@ -476,37 +460,6 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         self.assertIn("terraform-plan-review.py", production)
         self.assertIn("plans/production/${{ github.run_id }}/${{ github.run_attempt }}/tfplan", production)
         self.assertIn("verify-terraform-bootstrap-oac-handoff.py", production)
-
-    def test_recovery_is_fail_closed_until_scoped_policy_review(self):
-        text = (ROOT / ".github/workflows/terraform-recovery.yml").read_text()
-        protection = (ROOT / ".github/workflows/terraform-recovery-dsql-protection.yml").read_text()
-        self.assertIn("terraform plan -destroy", text)
-        self.assertNotIn("environment: terraform-recovery-plan", text)
-        self.assertIn("pawlocal/terraform.tfstate", text)
-        self.assertIn("terraform-recovery-plan-review.py", text)
-        self.assertIn("terraform-plan-object.py upload", text)
-        self.assertIn("Recovery apply is intentionally blocked", text)
-        self.assertNotIn("terraform apply", text)
-        apply_job = text.split("  recovery-apply:", 1)[1]
-        self.assertNotIn("configure-aws-credentials", apply_job)
-        self.assertNotIn("terraform-plan-object.py download", apply_job)
-        self.assertNotIn("manage_github_oidc_provider=true", text)
-        self.assertIn("pawlocal-infrastructure", text)
-        self.assertNotIn("upload-artifact", text)
-        self.assertIn("dsql_protection_run_id:", text)
-        self.assertIn("terraform-recovery-dsql-protection.yml", text)
-        self.assertIn("TF_VAR_recovery_disable_dsql_deletion_protection: \"true\"", text)
-        self.assertLess(protection.index("Publish exact sanitized DSQL changes"), protection.index("  recovery-protection-apply:"))
-        protected_apply = protection.split("  recovery-protection-apply:", 1)[1]
-        self.assertIn("if: github.event_name == 'push'", protected_apply)
-        self.assertIn("workflow_dispatch:", protection)
-        self.assertIn("configure-aws-credentials", protected_apply)
-        self.assertIn("terraform apply", protected_apply)
-        self.assertIn("pending scoped policy review", protected_apply)
-        self.assertIn("environment: terraform-recovery-apply", protection)
-        self.assertIn("terraform-plan-object.py download", protection)
-        self.assertIn("Apply exact reviewed DSQL protection plan", protection)
-        self.assertIn("terraform-recovery-protection-review.py", protection)
 
     def test_production_handoff_and_policy_check_order_before_approval(self):
         text = (ROOT / ".github/workflows/terraform-production-promotion.yml").read_text()
@@ -597,8 +550,6 @@ class TerraformWorkflowContractTests(unittest.TestCase):
     def test_active_terraform_delivery_helpers_do_not_invoke_aws_cli(self):
         files = (
             ".github/workflows/terraform-infrastructure-deploy.yml",
-            ".github/workflows/terraform-recovery.yml",
-            ".github/workflows/terraform-recovery-dsql-protection.yml",
             ".github/workflows/terraform-identity-deploy.yml",
             ".github/workflows/fullstack-release.yml",
             ".github/workflows/deploy-production.yml",
@@ -612,111 +563,6 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         for name in files:
             with self.subTest(file=name):
                 self.assertIsNone(aws_cli.search((ROOT / name).read_text()))
-
-
-class TerraformRecoveryReviewTests(unittest.TestCase):
-    def complete_plan(self):
-        changes = []
-        for address in sorted(recovery_review.REQUIRED_MANAGED):
-            resource_type = recovery_review._resource_type_from_address(address)
-            before = {}
-            if resource_type == "aws_s3_bucket":
-                if address == "aws_s3_bucket.site":
-                    before["bucket"] = "pawlocal-frontend-1234abcd"
-                else:
-                    env = "development" if "development" in address else "production"
-                    before["bucket"] = f"pawlocal-{env}-123abc"
-            if resource_type == "aws_iam_openid_connect_provider":
-                before["url"] = "https://token.actions.githubusercontent.com"
-            if resource_type == "aws_dsql_cluster":
-                before["deletion_protection_enabled"] = False
-            changes.append({
-                "address": address,
-                "mode": "managed",
-                "type": resource_type,
-                "change": {"actions": ["delete"], "before": before},
-            })
-        return {"format_version": "1.2", "applyable": True, "complete": True, "errored": False,
-                "resource_changes": changes}
-
-    def test_complete_plan_shows_exact_resource_addresses_without_values(self):
-        rendered = recovery_review.render(self.complete_plan(), "terraform-state-bucket")
-        self.assertIn("module.fullstack.aws_cloudfront_distribution.app[\"production\"]", rendered)
-        self.assertIn("aws_iam_openid_connect_provider.github[0]", rendered)
-        self.assertNotIn("attribute values", rendered)
-        self.assertNotIn("pawlocal-frontend-1234abcd", rendered)
-        self.assertIn("Only source-declared PawLocal", rendered)
-
-    def test_non_mutating_known_data_read_is_allowed(self):
-        plan = self.complete_plan()
-        plan["resource_changes"].append({
-            "address": "data.aws_caller_identity.current", "mode": "data", "type": "aws_caller_identity",
-            "change": {"actions": ["read"]},
-        })
-        self.assertIn("Non-mutating data reads: 1", recovery_review.render(plan, "terraform-state-bucket"))
-
-    def test_missing_oidc_or_production_frontend_fails_closed(self):
-        for address in (
-            "aws_iam_openid_connect_provider.github[0]",
-            'module.fullstack.aws_cloudfront_distribution.app["production"]',
-        ):
-            plan = self.complete_plan()
-            plan["resource_changes"] = [c for c in plan["resource_changes"] if c["address"] != address]
-            with self.subTest(address=address), self.assertRaisesRegex(ValueError, "missing|production frontend"):
-                recovery_review.render(plan, "terraform-state-bucket")
-
-    def test_audit_unknown_duplicate_or_non_delete_resources_fail_closed(self):
-        for address, resource_type, actions in (
-            ('module.fullstack.aws_cloudtrail.dsql_auth[0]', 'aws_cloudtrail', ["delete"]),
-            ('aws_s3_bucket.unrelated', 'aws_s3_bucket', ["delete"]),
-            ('aws_s3_bucket.site', 'aws_s3_bucket', ["update"]),
-            ('aws_s3_bucket.site', 'aws_s3_bucket', ["delete", "create"]),
-        ):
-            plan = self.complete_plan()
-            plan["resource_changes"].append({
-                "address": address, "mode": "managed", "type": resource_type,
-                "change": {"actions": actions, "before": {"bucket": "other-bucket"}},
-            })
-            with self.subTest(address=address, actions=actions), self.assertRaises(ValueError):
-                recovery_review.render(plan, "terraform-state-bucket")
-
-    def test_backend_and_unverifiable_frontend_bucket_are_rejected(self):
-        for bucket in ("terraform-state-bucket", "pawlocal-prod-unknown"):
-            plan = self.complete_plan()
-            change = next(c for c in plan["resource_changes"] if c["address"] == "aws_s3_bucket.site")
-            change["change"]["before"]["bucket"] = bucket
-            with self.subTest(bucket=bucket), self.assertRaises(ValueError):
-                recovery_review.render(plan, "terraform-state-bucket")
-
-
-class RecoveryOidcPreflightTests(unittest.TestCase):
-    ARN = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
-
-    class FakeIam:
-        def __init__(self, roles):
-            self.roles = roles
-
-        def list_open_id_connect_providers(self, **kwargs):
-            return {"OpenIDConnectProviderList": [{"Arn": RecoveryOidcPreflightTests.ARN}]}
-
-        def get_open_id_connect_provider(self, OpenIDConnectProviderArn):
-            return {"Url": "token.actions.githubusercontent.com"}
-
-        def list_roles(self, **kwargs):
-            return {"Roles": self.roles}
-
-    def test_known_pawlocal_trust_is_allowed(self):
-        role = {"RoleName": "pawlocal-frontend-github-deploy", "AssumeRolePolicyDocument": {
-            "Statement": [{"Principal": {"Federated": self.ARN}}],
-        }}
-        self.assertEqual(recovery_oidc.verify(self.FakeIam([role]))[1], [role["RoleName"]])
-
-    def test_unrelated_oidc_trust_fails_closed(self):
-        role = {"RoleName": "other-project-github-deploy", "AssumeRolePolicyDocument": {
-            "Statement": [{"Principal": {"Federated": self.ARN}}],
-        }}
-        with self.assertRaisesRegex(ValueError, "outside the PawLocal allowlist"):
-            recovery_oidc.verify(self.FakeIam([role]))
 
 
 class TerraformIdentityPlanReviewTests(unittest.TestCase):
@@ -771,24 +617,6 @@ class TerraformIdentityPlanReviewTests(unittest.TestCase):
         plan["resource_changes"][0]["change"]["actions"] = ["delete"]
         with self.assertRaisesRegex(ValueError, "updates and detachments are blocked"):
             identity_review.render(plan, "development", self.policy_arns())
-
-
-class TerraformRecoveryProtectionReviewTests(unittest.TestCase):
-    def plan(self):
-        changes = []
-        for address in sorted(protection_review.EXPECTED):
-            changes.append({"address": address, "type": "aws_dsql_cluster", "mode": "managed",
-                            "change": {"actions": ["update"], "before": {"deletion_protection_enabled": True},
-                                       "after": {"deletion_protection_enabled": False}}})
-        return {"format_version": "1.2", "applyable": True, "complete": True, "errored": False,
-                "resource_changes": changes}
-
-    def test_only_exact_dsql_protection_changes_are_accepted(self):
-        self.assertIn("development", protection_review.render(self.plan()))
-        plan = self.plan()
-        plan["resource_changes"][0]["change"]["after"]["deletion_protection_enabled"] = True
-        with self.assertRaisesRegex(ValueError, "enabled to disabled"):
-            protection_review.render(plan)
 
 
 if __name__ == "__main__":

@@ -55,18 +55,6 @@ variable "manage_github_oidc_provider" {
   default     = false
 }
 
-variable "recovery_force_destroy_frontend_buckets" {
-  description = "Recovery-only switch to empty and remove legacy PawLocal frontend buckets. Keep false for normal deployments."
-  type        = bool
-  default     = false
-}
-
-variable "recovery_disable_dsql_deletion_protection" {
-  description = "Recovery-only Terraform stage to disable deletion protection before the destroy plan."
-  type        = bool
-  default     = false
-}
-
 variable "backend_image_digests" {
   description = "Environment-keyed immutable public GHCR image references for the Lightsail API deployment."
   type        = map(string)

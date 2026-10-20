@@ -19,18 +19,6 @@ variable "cloudfront_certificate_arn" {
   }
 }
 
-variable "recovery_force_destroy_frontend_buckets" {
-  description = "Recovery-only switch for deleting the exact frontend buckets owned by the old shared state."
-  type        = bool
-  default     = false
-}
-
-variable "recovery_disable_dsql_deletion_protection" {
-  description = "Recovery-only switch to turn off cluster deletion protection in a separately approved Terraform stage."
-  type        = bool
-  default     = false
-}
-
 variable "backend_image_digests" {
   description = "Environment-keyed immutable public GHCR image references for the Lightsail API deployment."
   type        = map(string)

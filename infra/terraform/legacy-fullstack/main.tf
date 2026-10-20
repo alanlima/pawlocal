@@ -48,7 +48,7 @@ resource "random_id" "bucket_suffix" {
 resource "aws_s3_bucket" "frontend" {
   for_each      = local.frontend_environments
   bucket        = "pawlocal-${each.key}-${random_id.bucket_suffix[each.key].hex}"
-  force_destroy = var.recovery_force_destroy_frontend_buckets
+  force_destroy = false
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
@@ -87,7 +87,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 
 resource "aws_dsql_cluster" "app" {
   for_each                    = local.environments
-  deletion_protection_enabled = !var.recovery_disable_dsql_deletion_protection
+  deletion_protection_enabled = true
   kms_encryption_key          = "AWS_OWNED_KMS_KEY"
   tags = {
     Name        = "pawlocal-${each.key}"
