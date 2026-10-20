@@ -128,8 +128,7 @@ locals {
     "dsql:GetCluster", "dsql:GetClusterPolicy", "dsql:GetVpcEndpointServiceName", "dsql:ListTagsForResource",
     "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
     "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments", "lightsail:GetCertificates", "lightsail:GetOperations",
-    "route53:GetHostedZone", "route53:ListResourceRecordSets",
-    "s3:GetBucketLocation", "s3:GetBucketPolicy", "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration", "s3:GetBucketOwnershipControls", "s3:GetBucketPublicAccessBlock", "s3:GetAccelerateConfiguration", "s3:GetReplicationConfiguration"
+    "route53:GetHostedZone", "route53:ListResourceRecordSets"
   ]
   app_resource_tags = {
     "aws:ResourceTag/project" = "pawlocal"
@@ -264,6 +263,20 @@ data "aws_iam_policy_document" "role_permissions" {
       if !startswith(action, "iam:")
     ] : local.regional_read_actions
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadMatchingEnvironmentFrontendBucketForRefresh"
+    effect    = "Allow"
+    actions   = ["s3:GetAccelerateConfiguration", "s3:GetBucketAcl", "s3:GetBucketLocation", "s3:GetBucketOwnershipControls", "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration", "s3:ListBucket"]
+    resources = ["arn:aws:s3:::pawlocal-${each.value.environment}-*"]
+  }
+
+  statement {
+    sid       = "DescribeExactEnvironmentCloudFrontFunctionForRefresh"
+    effect    = "Allow"
+    actions   = ["cloudfront:DescribeFunction"]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.value.environment}-spa-routing"]
   }
 
   statement {

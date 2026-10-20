@@ -180,11 +180,14 @@ data "aws_iam_policy_document" "identity_terraform_role_permissions" {
     ]
   }
 
-  statement {
-    sid       = "WriteOnlyIdentityStateObject"
-    effect    = "Allow"
-    actions   = ["s3:GetObject", "s3:PutObject"]
-    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/${local.identity_state_key}"]
+  dynamic "statement" {
+    for_each = each.value.purpose == "apply" ? [true] : []
+    content {
+      sid       = "WriteOnlyIdentityStateObject"
+      effect    = "Allow"
+      actions   = ["s3:GetObject", "s3:PutObject"]
+      resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}/${local.identity_state_key}"]
+    }
   }
 
   statement {
