@@ -53,6 +53,15 @@ def destroy_preparation_guard(plan):
             ]
         return value
 
+    def contains_flag(value):
+        if value is True:
+            return True
+        if isinstance(value, dict):
+            return any(contains_flag(child) for child in value.values())
+        if isinstance(value, list):
+            return any(contains_flag(child) for child in value)
+        return False
+
     def top_level_changed_paths(before, after, ignored_keys):
         if not isinstance(before, dict):
             before = {}
@@ -91,6 +100,12 @@ def destroy_preparation_guard(plan):
             and isinstance(after_unknown, dict)
             and after_unknown.get("encryption_details") is not None
         )
+        unknown_metadata = dict(after_unknown) if isinstance(after_unknown, dict) else after_unknown
+        if computed_encryption_update:
+            unknown_metadata.pop("encryption_details", None)
+        metadata_is_known = not contains_flag(unknown_metadata) and not contains_flag(
+            change.get("after_sensitive", {})
+        )
         ignored_keys = {"force_destroy"}
         if computed_encryption_update:
             # encryption_details is a provider-exported attribute. It can become
@@ -123,6 +138,7 @@ def destroy_preparation_guard(plan):
             and old == new
             and isinstance(after, dict)
             and after.get("force_destroy") is True
+            and metadata_is_known
         )
         if not allowed_update:
             paths = top_level_changed_paths(before, after, ignored_keys)

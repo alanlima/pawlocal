@@ -263,6 +263,49 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("$.encryption_details", result.stderr)
 
+    def test_destroy_preparation_rejects_unknown_dsql_kms_key_even_when_null(self) -> None:
+        result = self.run_destroy_prepare_guard([
+            {
+                "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                "mode": "managed",
+                "change": {
+                    "actions": ["update"],
+                    "before": {
+                        "force_destroy": False,
+                        "kms_encryption_key": None,
+                        "encryption_details": None,
+                    },
+                    "after": {
+                        "force_destroy": True,
+                        "kms_encryption_key": None,
+                        "encryption_details": None,
+                    },
+                    "after_unknown": {
+                        "kms_encryption_key": True,
+                        "encryption_details": [{"encryption_status": True}],
+                    },
+                },
+            },
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Teardown preparation plan includes changes beyond force_destroy settings", result.stderr)
+
+    def test_destroy_preparation_rejects_sensitive_dsql_configuration_metadata(self) -> None:
+        result = self.run_destroy_prepare_guard([
+            {
+                "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                "mode": "managed",
+                "change": {
+                    "actions": ["update"],
+                    "before": {"force_destroy": False, "kms_encryption_key": None},
+                    "after": {"force_destroy": True, "kms_encryption_key": None},
+                    "after_unknown": {},
+                    "after_sensitive": {"kms_encryption_key": True},
+                },
+            },
+        ])
+        self.assertNotEqual(result.returncode, 0)
+
     def test_destroy_preparation_still_rejects_policy_changes_and_role_forget(self) -> None:
         policy_addresses = [
             "aws_iam_role_policy.github_deploy",
