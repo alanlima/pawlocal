@@ -16,7 +16,7 @@ output "environment_targets" {
     dsql_cluster_arn           = aws_dsql_cluster.app[name].arn
     dsql_endpoint              = "${aws_dsql_cluster.app[name].identifier}.dsql.${var.aws_region}.on.aws"
     dsql_database_role         = config.database_role
-    deploy_role_arn            = contains(keys(local.frontend_environments), name) ? aws_iam_role.github_deploy[name].arn : null
+    deploy_role_arn            = contains(keys(local.frontend_environments), name) ? data.aws_iam_role.github_deploy[name].arn : null
     terraform_deploy_role_arn  = aws_iam_role.github_terraform_deploy[name].arn
     cognito_user_pool_id       = aws_cognito_user_pool.app[name].id
     cognito_client_id          = aws_cognito_user_pool_client.app[name].id

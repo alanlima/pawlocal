@@ -138,6 +138,12 @@ variable "import_existing_dsql_service_linked_role" {
   default     = false
 }
 
+variable "import_existing_frontend_publish_roles" {
+  description = "Set true only after the combined application root has detached both existing frontend publisher roles with reviewed removed blocks using destroy=false; the bootstrap state will then import and manage the role trust and permissions boundary."
+  type        = bool
+  default     = false
+}
+
 variable "oac_create_environment" {
   description = "Select at most one environment for initial or replacement OAC creation. That environment's apply role temporarily receives CreateOriginAccessControl on Resource=* and OAC read access; use empty after its exact ARN handoff."
   type        = string

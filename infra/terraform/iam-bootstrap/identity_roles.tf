@@ -76,6 +76,12 @@ resource "aws_iam_role" "identity_app" {
   }
 }
 
+import {
+  for_each = var.import_existing_frontend_publish_roles ? local.identity_app_role_specs : {}
+  to       = aws_iam_role.identity_app[each.key]
+  id       = each.value.name
+}
+
 data "aws_iam_policy_document" "development_runtime_trust" {
   count = var.development_lightsail_principal_arn == "" ? 0 : 1
 
@@ -226,7 +232,7 @@ data "aws_iam_policy_document" "identity_terraform_role_permissions" {
       sid       = "UploadIdentityPlan"
       effect    = "Allow"
       actions   = ["s3:PutObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/identity/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/identity/*"]
     }
   }
 
@@ -236,7 +242,7 @@ data "aws_iam_policy_document" "identity_terraform_role_permissions" {
       sid       = "ReadIdentityPlan"
       effect    = "Allow"
       actions   = ["s3:GetObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/identity/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/identity/*"]
     }
   }
 
