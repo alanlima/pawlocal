@@ -15,11 +15,16 @@ locals {
   legacy_main_subject  = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:infrastructure-plan"
   legacy_apply_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:infrastructure-apply"
 
+  # Shared by plan and apply roles because both refresh the complete combined
+  # root. Includes the AWS provider's aws_s3_bucket read calls and full-stack
+  # data/resource refresh calls; keep this read-only list separate from apply
+  # mutations below.
   legacy_read_actions = distinct(concat(
     local.readonly_discovery_actions,
     local.regional_read_actions,
     [
       "acm:ListTagsForCertificate",
+      "cloudfront:GetOriginAccessControl",
       "cloudfront:ListOriginAccessControls",
       "cognito-idp:DescribeUserPool",
       "cognito-idp:DescribeUserPoolClient",
@@ -33,17 +38,24 @@ locals {
       "lightsail:GetContainerServices",
       "lightsail:GetCertificates",
       "route53:GetHostedZone",
+      "route53:ListHostedZones",
       "route53:ListResourceRecordSets",
       "s3:GetAccelerateConfiguration",
       "s3:GetBucketAcl",
+      "s3:GetBucketCORS",
       "s3:GetBucketLocation",
+      "s3:GetBucketLogging",
+      "s3:GetBucketObjectLockConfiguration",
       "s3:GetBucketOwnershipControls",
       "s3:GetBucketPolicy",
       "s3:GetBucketPublicAccessBlock",
+      "s3:GetBucketRequestPayment",
       "s3:GetBucketTagging",
       "s3:GetBucketVersioning",
+      "s3:GetBucketWebsite",
       "s3:GetEncryptionConfiguration",
       "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration",
       "s3:ListBucket",
       "s3:ListBucketVersions"
     ]
