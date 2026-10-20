@@ -1,0 +1,321 @@
+name: Terraform environment plan and apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: PawLocal environment to plan and apply.
+        required: true
+        type: choice
+        options: [development, production]
+      backend_image:
+        description: Optional immutable ghcr.io/alanlima/pawlocal-api digest reference.
+        required: false
+        type: string
+      release_commit:
+        description: Development-verified main commit; required for production.
+        required: false
+        type: string
+      release_only:
+        description: Reject any change except the environment container deployment version.
+        required: true
+        default: false
+        type: boolean
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      backend_image:
+        required: false
+        default: ""
+        type: string
+      release_commit:
+        required: false
+        default: ""
+        type: string
+      release_only:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+  deployments: read
+
+concurrency:
+  group: pawlocal-terraform-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.14.3
+  TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
+  TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
+  PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
+
+jobs:
+  production-eligibility:
+    name: Require a verified development release
+    if: inputs.environment == 'production'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate the selected development deployment
+        uses: actions/github-script@v7
+        env:
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          BACKEND_IMAGE: ${{ inputs.backend_image }}
+        with:
+          script: |
+            const commit = process.env.RELEASE_COMMIT
+            const image = process.env.BACKEND_IMAGE
+            if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('Production requires a full development-verified commit SHA')
+            if (!/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(image)) throw new Error('Production requires a valid immutable backend image')
+
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              ...context.repo, basehead: `${commit}...main`,
+            })
+            if (!['ahead', 'identical'].includes(comparison.data.status)) {
+              throw new Error('Selected development release commit is not in main history')
+            }
+
+            const expectedWorkflow = await github.rest.actions.getWorkflow({
+              ...context.repo, workflow_id: 'fullstack-release.yml',
+            })
+            const workflowRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: expectedWorkflow.data.id, branch: 'main',
+              event: 'push', status: 'success', head_sha: commit, per_page: 100,
+            })
+            const successfulRunIds = new Set(workflowRuns
+              .filter(run => run.head_sha === commit && run.head_branch === 'main' &&
+                run.event === 'push' && run.conclusion === 'success')
+              .map(run => `${run.id}:${run.run_attempt}`))
+            if (successfulRunIds.size === 0) {
+              throw new Error('No successful main-branch full-stack release workflow run exists for the selected commit')
+            }
+
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              ...context.repo, environment: 'development', ref: commit, per_page: 100,
+            })
+            for (const deployment of deployments) {
+              const statuses = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deployment.id, per_page: 100,
+              })
+              const latest = statuses.data.reduce((value, item) =>
+                !value || Date.parse(item.created_at) > Date.parse(value.created_at) ? item : value, null)
+              let payload = deployment.payload || {}
+              if (typeof payload === 'string') {
+                try { payload = JSON.parse(payload) } catch { continue }
+              }
+              const workflowRun = `${payload.workflow_run_id}:${payload.workflow_run_attempt}`
+              const evidenceMatches = payload.record_schema_version === 1 &&
+                payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                payload.evidence_validated === true && successfulRunIds.has(workflowRun) &&
+                payload.release_commit === commit &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.release_manifest_digest || '') &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.verification_evidence_digest || '') &&
+                payload.backend_image === image &&
+                payload.backend_image_digest === image.split('@', 2)[1] &&
+                payload.running_image_digest === payload.backend_image_digest &&
+                /^sha256:[0-9a-f]{64}$/.test(payload.frontend_artifact_digest || '') &&
+                payload.database_provider === 'aurora_dsql' &&
+                payload.migration_runner === 'dsql_baseline' &&
+                payload.migration_id === 'dsql_0001_initial' &&
+                payload.telemetry_enabled === false &&
+                payload.public_endpoint_health?.frontend === true &&
+                payload.public_endpoint_health?.api === true &&
+                payload.database_query_smoke?.route === '/api/v1/places' &&
+                payload.database_query_smoke?.result === 'valid_place_page'
+              if (latest?.state === 'success' && evidenceMatches) return
+            }
+            throw new Error('No successful development deployment has matching validated full-stack release evidence')
+
+  plan:
+    name: Plan ${{ inputs.environment }}
+    if: always() && (inputs.environment == 'development' || needs.production-eligibility.result == 'success')
+    needs: production-eligibility
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}-plan
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_root_domain: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      TF_VAR_route53_zone_id: ${{ vars.PAWLOCAL_ROUTE53_ZONE_ID }}
+      TF_VAR_cloudfront_certificate_arn: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
+      TF_VAR_runtime_role_arn: ${{ vars.PAWLOCAL_RUNTIME_ROLE_ARN }}
+      TF_VAR_cloudfront_distribution_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
+      TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
+      TF_VAR_backend_image: ${{ inputs.backend_image }}
+    steps:
+      - name: Check out the exact requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate selection and required configuration
+        shell: bash
+        run: |
+          [[ '${{ inputs.environment }}' =~ ^(development|production)$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
+            [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
+          done
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-plan" ]]
+          if [[ -n "$TF_VAR_backend_image" ]]; then
+            [[ "$TF_VAR_backend_image" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+          fi
+
+      - name: Configure read-only plan credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
+          allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize the matching clean state
+        shell: bash
+        run: |
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='encrypt=true' \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
+              exit 1
+            }
+
+      - name: Create saved plan
+        shell: bash
+        run: |
+          terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
+            > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
+              echo 'Terraform planning failed; raw provider output was withheld.' >&2
+              python .github/scripts/terraform-plan-diagnostic.py "$RUNNER_TEMP/terraform-plan.log" >&2
+              exit 1
+            }
+          terraform -chdir="$TF_ROOT" show -json tfplan > "$RUNNER_TEMP/terraform-plan.json" \
+            2> "$RUNNER_TEMP/terraform-show.log" || {
+              echo 'Saved plan could not be safely rendered; raw output was withheld.' >&2
+              exit 1
+            }
+
+      - name: Enforce ownership and publish sanitized summary
+        shell: bash
+        run: |
+          release_flag=()
+          if [[ '${{ inputs.release_only }}' == 'true' ]]; then release_flag+=(--release-only); fi
+          python .github/scripts/terraform-environment-plan.py "$RUNNER_TEMP/terraform-plan.json" \
+            --environment '${{ inputs.environment }}' "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bind exact plan metadata
+        id: metadata
+        shell: bash
+        run: |
+          digest="$(python .github/scripts/terraform-plan-metadata.py create "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json" \
+            --environment '${{ inputs.environment }}' --state-key "$TF_STATE_KEY" --commit "$GITHUB_SHA" \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
+          echo "plan_sha256=$digest" >> "$GITHUB_OUTPUT"
+          echo "Exact saved-plan digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload opaque plan to the private transfer bucket
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
+          python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json"
+
+  apply:
+    name: Apply reviewed exact ${{ inputs.environment }} plan
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}-apply
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+    steps:
+      - name: Check out the exact planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate the matching apply identity
+        shell: bash
+        run: |
+          [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-apply" ]]
+          test -n "$PLAN_TRANSFER_BUCKET"
+
+      - name: Configure bounded apply credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
+          allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Download the exact saved plan
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$RUNNER_TEMP/saved-plan" plan-metadata.json
+
+      - name: Verify exact saved plan metadata and digest
+        shell: bash
+        env:
+          EXPECTED_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          actual="$(python .github/scripts/terraform-plan-metadata.py verify "$RUNNER_TEMP/saved-plan/tfplan" "$RUNNER_TEMP/saved-plan/plan-metadata.json" \
+            --environment '${{ inputs.environment }}' --state-key "$TF_STATE_KEY" --commit "$GITHUB_SHA" \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
+          test "$actual" = "$EXPECTED_SHA256"
+
+      - name: Set up Terraform and initialize matching state
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Initialize matching state and apply only the reviewed plan
+        shell: bash
+        run: |
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config='encrypt=true' \
+            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
+              exit 1
+            }
+          terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m -no-color "$RUNNER_TEMP/saved-plan/tfplan" \
+            > "$RUNNER_TEMP/terraform-apply.log" 2>&1 || {
+              echo 'Terraform apply failed; raw provider output was withheld.' >&2
+              exit 1
+            }
+          echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"

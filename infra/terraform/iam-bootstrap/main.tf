@@ -90,10 +90,9 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 locals {
-  github_owner            = split("/", var.github_repository)[0]
-  github_repo             = split("/", var.github_repository)[1]
-  github_main_ref_subject = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:ref:refs/heads/main"
-  oidc_arn                = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+  oidc_arn     = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   environments = {
     development = {
       state_key    = "pawlocal/development/terraform.tfstate"
@@ -125,7 +124,7 @@ locals {
   ]
   regional_read_actions = [
     "acm:DescribeCertificate",
-    "cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:GetFunction", "cloudfront:ListTagsForResource",
+    "cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:GetFunction", "cloudfront:GetOriginAccessControl", "cloudfront:ListTagsForResource",
     "cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient", "cognito-idp:DescribeUserPoolDomain", "cognito-idp:GetUserPoolMfaConfig", "cognito-idp:ListTagsForResource",
     "dsql:GetCluster", "dsql:GetClusterPolicy", "dsql:GetVpcEndpointServiceName", "dsql:ListTagsForResource",
     "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
@@ -159,9 +158,7 @@ data "aws_iam_policy_document" "role_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [each.value.purpose == "plan" ? local.github_main_ref_subject :
-        "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.value.subject_environment}"
-      ]
+      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.value.subject_environment}"]
     }
   }
 }
@@ -172,6 +169,7 @@ resource "aws_iam_role" "github_terraform" {
   name                 = each.value.role_name
   assume_role_policy   = data.aws_iam_policy_document.role_trust[each.key].json
   description          = "PawLocal Terraform ${each.value.purpose} role for ${each.value.environment}."
+  permissions_boundary = each.value.purpose == "apply" ? aws_iam_policy.environment_apply_boundary[each.value.environment].arn : null
   max_session_duration = 3600
   tags = {
     project     = "pawlocal"
@@ -270,7 +268,7 @@ data "aws_iam_policy_document" "role_permissions" {
   statement {
     sid       = "ReadMatchingEnvironmentFrontendBucketForRefresh"
     effect    = "Allow"
-    actions   = ["s3:GetAccelerateConfiguration", "s3:GetBucketAcl", "s3:GetBucketLocation", "s3:GetBucketOwnershipControls", "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration", "s3:ListBucket"]
+    actions   = ["s3:GetAccelerateConfiguration", "s3:GetBucketAcl", "s3:GetBucketCORS", "s3:GetBucketLocation", "s3:GetBucketLogging", "s3:GetBucketObjectLockConfiguration", "s3:GetBucketOwnershipControls", "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketRequestPayment", "s3:GetBucketTagging", "s3:GetBucketVersioning", "s3:GetBucketWebsite", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration", "s3:ListBucket"]
     resources = ["arn:aws:s3:::pawlocal-${each.value.environment}-*"]
   }
 
@@ -291,7 +289,7 @@ data "aws_iam_policy_document" "role_permissions" {
   dynamic "statement" {
     for_each = contains(["development-plan", "production-plan"], each.key) ? [true] : []
     content {
-      sid    = "ReadMatchingExactApplyRoleForPromotionCheck"
+      sid    = "ReadExactMatchingEnvironmentRolesForRefresh"
       effect = "Allow"
       actions = [
         "iam:GetRole",
@@ -300,61 +298,77 @@ data "aws_iam_policy_document" "role_permissions" {
         "iam:ListAttachedRolePolicies"
       ]
       resources = [
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-terraform-apply"
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-terraform-apply",
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-github-deploy",
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-dsql-runtime"
       ]
     }
   }
 
   dynamic "statement" {
-    for_each = each.key == "production-plan" ? [true] : []
+    for_each = contains(["development-plan", "production-plan"], each.key) ? [true] : []
     content {
-      sid    = "ReadExactProductionApplicationRolesForTerraformRefresh"
-      effect = "Allow"
-      actions = [
-        "iam:GetRole",
-        "iam:GetRolePolicy",
-        "iam:ListRolePolicies",
-        "iam:ListAttachedRolePolicies"
-      ]
-      resources = [
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-github-deploy",
-        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-deploy"
-      ]
+      sid       = "ReadExactMatchingEnvironmentPoliciesForRefresh"
+      effect    = "Allow"
+      actions   = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyTags", "iam:ListPolicyVersions"]
+      resources = local.environment_application_policy_arns[each.value.environment]
     }
   }
 
   dynamic "statement" {
-    for_each = each.value.environment == "development" && (var.development_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "development")) ? [true] : each.value.environment == "production" && (var.production_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "production")) ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "ReadOnlyAssignedEnvironmentOAC"
+      sid       = "ManageOnlyMatchingEnvironmentPolicies"
       effect    = "Allow"
-      actions   = ["cloudfront:GetOriginAccessControl", "cloudfront:GetOriginAccessControlConfig"]
-      resources = [each.value.environment == "development" ? (each.value.purpose == "apply" && var.oac_create_environment == "development" ? "*" : var.development_oac_arn) : (each.value.purpose == "apply" && var.oac_create_environment == "production" ? "*" : var.production_oac_arn)]
+      actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyTags", "iam:ListPolicyVersions", "iam:SetDefaultPolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
+      resources = local.environment_application_policy_arns[each.value.environment]
     }
   }
 
   dynamic "statement" {
-    for_each = each.value.purpose == "apply" && each.value.environment == var.oac_create_environment ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "CreateCloudFrontOriginAccessControl"
+      sid       = "AttachOnlyMatchingApplicationPolicyToApplyRole"
       effect    = "Allow"
-      actions   = ["cloudfront:CreateOriginAccessControl"]
-      resources = ["*"]
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-terraform-apply"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = [local.environment_application_policy_arns[each.value.environment][0]]
+      }
     }
   }
 
   dynamic "statement" {
-    for_each = each.value.purpose == "apply" && each.value.environment == "development" && var.development_oac_arn != "" ? [true] : each.value.purpose == "apply" && each.value.environment == "production" && var.production_oac_arn != "" ? [true] : []
+    for_each = each.value.purpose == "apply" ? [true] : []
     content {
-      sid       = "UpdateOrDeleteAssignedEnvironmentOAC"
+      sid       = "AttachOnlyMatchingPublishPolicyToPublishRole"
       effect    = "Allow"
-      actions   = ["cloudfront:UpdateOriginAccessControl", "cloudfront:DeleteOriginAccessControl"]
-      resources = [each.value.environment == "development" ? var.development_oac_arn : var.production_oac_arn]
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-github-deploy"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = [local.environment_application_policy_arns[each.value.environment][1]]
+      }
     }
   }
 
-  # Other application mutations remain absent until their
-  # per-action resource and condition scopes are independently verified.
+  dynamic "statement" {
+    for_each = each.value.purpose == "apply" ? [true] : []
+    content {
+      sid       = "AttachOnlyMatchingRuntimePolicyToRuntimeRole"
+      effect    = "Allow"
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.value.environment}-dsql-runtime"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = [local.environment_application_policy_arns[each.value.environment][2]]
+      }
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "github_terraform" {

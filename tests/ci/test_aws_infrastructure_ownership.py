@@ -1444,20 +1444,21 @@ cp.execFile("terraform", args);
         self.assertFalse(contains_forbidden_terraform_state_change('terraform -chdir="$root" plan -input=false'))
 
     def test_frontend_destinations_come_from_the_authoritative_terraform_outputs(self) -> None:
-        deploy_script = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('terraform -chdir="$root" output -json environment_targets', deploy_script)
-        self.assertIn("PAWLOCAL_FRONTEND_BUCKET={bucket}", deploy_script)
-        self.assertIn("PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID={distribution}", deploy_script)
+        outputs = (ROOT / "infra/terraform/modules/pawlocal-environment/outputs.tf").read_text(encoding="utf-8")
+        runbook = (ROOT / "docs/terraform-greenfield-operations.md").read_text(encoding="utf-8")
+        self.assertIn("frontend_bucket", outputs)
+        self.assertIn("cloudfront_distribution_id", outputs)
+        self.assertIn("set `PAWLOCAL_FRONTEND_BUCKET`", runbook)
+        self.assertIn("from the matching `environment_targets` output", runbook)
 
         for workflow in (
             "fullstack-release.yml",
             "deploy-production.yml",
-            "rollback-development.yml",
         ):
             source = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
-            self.assertNotIn("vars.PAWLOCAL_FRONTEND_BUCKET", source)
-            self.assertNotIn("vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID", source)
-            terraform_step = source.index("terraform-lightsail-container-deploy.sh")
+            self.assertIn("vars.PAWLOCAL_FRONTEND_BUCKET", source)
+            self.assertIn("vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID", source)
+            terraform_step = source.index("./.github/workflows/terraform-environment.yml")
             publish_step = source.index("run-deployment-adapter.sh deploy")
             self.assertLess(terraform_step, publish_step)
 

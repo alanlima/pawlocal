@@ -1,10 +1,14 @@
-name: Deploy Production
+name: Promote verified release to production
 
 on:
   workflow_dispatch:
     inputs:
       release_commit:
-        description: Main-branch commit successfully deployed and verified in development
+        description: Full main-branch commit SHA already verified in development.
+        required: true
+        type: string
+      backend_image:
+        description: Exact development-verified immutable backend image reference.
         required: true
         type: string
 
@@ -12,193 +16,70 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-production-deploy
+  group: pawlocal-production-release
   cancel-in-progress: false
 
 jobs:
-  validate-release:
-    name: Validate development-verified release
-    if: github.ref == 'refs/heads/main' && vars.PAWLOCAL_DEPLOY_MODE == 'github-actions'
-    runs-on: ubuntu-latest
+  terraform-production:
+    name: Apply exact production release plan
     permissions:
       actions: read
       contents: read
       deployments: read
-    outputs:
-      release_run_id: ${{ steps.validate.outputs.release_run_id }}
-      manifest_digest: ${{ steps.validate.outputs.manifest_digest }}
-      database_provider: ${{ steps.validate.outputs.database_provider }}
-      migration_runner: ${{ steps.validate.outputs.migration_runner }}
-      migration_id: ${{ steps.validate.outputs.migration_id }}
-    steps:
-      - name: Check out main history
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      id-token: write
+    uses: ./.github/workflows/terraform-environment.yml
+    with:
+      environment: production
+      backend_image: ${{ inputs.backend_image }}
+      release_commit: ${{ inputs.release_commit }}
+      release_only: true
+    secrets: inherit
 
-      - name: Validate selected commit, CI run and development deployment
-        id: validate
-        uses: actions/github-script@v7
-        env:
-          RELEASE_COMMIT: ${{ inputs.release_commit }}
-        with:
-          script: |
-            const commit = process.env.RELEASE_COMMIT.toLowerCase()
-            if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('Enter a complete 40-character commit SHA')
-            const { execFileSync } = require('child_process')
-            execFileSync('git', ['fetch', '--no-tags', 'origin', 'main'], { stdio: 'inherit' })
-            try {
-              execFileSync('git', ['merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' })
-            } catch {
-              throw new Error('Selected commit is not in main history')
-            }
-
-            const workflow = await github.rest.actions.getWorkflow({ ...context.repo, workflow_id: 'fullstack-release.yml' })
-            let run
-            for (let page = 1; page <= 20 && !run; page++) {
-              const runs = await github.rest.actions.listWorkflowRuns({
-                ...context.repo,
-                workflow_id: workflow.data.id,
-                branch: 'main',
-                status: 'success',
-                per_page: 100,
-                page,
-              })
-              if (runs.data.workflow_runs.length === 0) break
-              run = runs.data.workflow_runs.find(item => item.head_sha === commit && item.event === 'push' && item.head_branch === 'main')
-            }
-            if (!run) throw new Error('No successful full-stack release workflow exists for this commit')
-
-            const deployments = await github.rest.repos.listDeployments({
-              ...context.repo,
-              ref: commit,
-              environment: 'development',
-              per_page: 100,
-            })
-            let verified
-            let verifiedSelection
-            for (const deployment of deployments.data) {
-              if (Number(deployment.payload?.workflow_run_id) !== run.id) continue
-              const statuses = await github.rest.repos.listDeploymentStatuses({
-                ...context.repo,
-                deployment_id: deployment.id,
-                per_page: 100,
-              })
-              const latestStatus = statuses.data.reduce((latest, status) =>
-                !latest || Date.parse(status.created_at) > Date.parse(latest.created_at) ? status : latest, null)
-              if (!latestStatus || latestStatus.state !== 'success') continue
-              let successPayload
-              try {
-                successPayload = typeof latestStatus.payload === 'string'
-                  ? JSON.parse(latestStatus.payload)
-                  : (latestStatus.payload || {})
-              } catch {
-                continue
-              }
-              const provider = successPayload.database_provider
-              const selectedChain = deployment.payload?.migration_chains?.[provider]
-              if (successPayload.telemetry_enabled === false &&
-                  ['postgresql', 'aurora_dsql'].includes(provider) &&
-                  selectedChain && successPayload.migration_runner === selectedChain.runner &&
-                  successPayload.migration_id === selectedChain.migration_id &&
-                  /^sha256:[0-9a-f]{64}$/.test(successPayload.backend_image_digest || '') &&
-                  /^sha256:[0-9a-f]{64}$/.test(deployment.payload?.backend_image_digest || '') &&
-                  successPayload.backend_image_digest === deployment.payload.backend_image_digest &&
-                  /^sha256:[0-9a-f]{64}$/.test(deployment.payload?.release_manifest_digest || '')) {
-                verified = deployment
-                verifiedSelection = successPayload
-                break
-              }
-            }
-            if (!verified) throw new Error('No successful development deployment record matches this release run and backend digest')
-            core.setOutput('release_run_id', run.id)
-            core.setOutput('manifest_digest', verified.payload.release_manifest_digest)
-            core.setOutput('database_provider', verifiedSelection.database_provider)
-            core.setOutput('migration_runner', verifiedSelection.migration_runner)
-            core.setOutput('migration_id', verifiedSelection.migration_id)
-            core.info(`Validated ${commit}, workflow run ${run.id}, development deployment ${verified.id}`)
-
-  deploy-production:
-    name: Promote verified release to production
-    needs: validate-release
+  verify-production:
+    name: Publish frontend and verify production
+    needs: terraform-production
     runs-on: ubuntu-latest
     environment: production
-    concurrency:
-      group: pawlocal-lightsail-deploy
-      cancel-in-progress: false
-    env:
-      PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
-      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
-      PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-      PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
-      PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
-      PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
-      PAWLOCAL_TELEMETRY_ENABLED: "false"
-      AWS_REGION: ${{ vars.AWS_REGION }}
-      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
-      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
-      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
-      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
-      TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
-      TF_VAR_github_repository_id: ${{ github.repository_id }}
     permissions:
-      actions: read
       contents: read
       deployments: write
       id-token: write
-      packages: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
+      PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
+      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
+      PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
+      PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
+      PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
+      PAWLOCAL_TELEMETRY_ENABLED: "false"
+      BACKEND_IMAGE: ${{ inputs.backend_image }}
+      RELEASE_COMMIT: ${{ inputs.release_commit }}
     steps:
-      - name: Check out selected release source
+      - name: Check out selected verified source
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.release_commit }}
-
-      - name: Check out current deployment tooling
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: deployment-tools
-
-      - name: Download development-verified release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: pawlocal-release-manifest
-          path: release/
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ needs.validate-release.outputs.release_run_id }}
-
-      - name: Verify release artifact identity
-        env:
-          RELEASE_COMMIT: ${{ inputs.release_commit }}
-          EXPECTED_MANIFEST_DIGEST: ${{ needs.validate-release.outputs.manifest_digest }}
+          persist-credentials: false
+      - name: Validate selected release checkout
+        shell: bash
         run: |
-          actual_digest="sha256:$(sha256sum release/release-manifest.json | cut -d ' ' -f 1)"
-          test "$actual_digest" = "$EXPECTED_MANIFEST_DIGEST"
-          python ops/validate-release-metadata.py --manifest release/release-manifest.json
-          jq -e --arg commit "$RELEASE_COMMIT" '.commit == $commit' release/release-manifest.json > /dev/null
-          test "$PAWLOCAL_DATABASE_PROVIDER" = "$PAWLOCAL_EXPECTED_DATABASE_PROVIDER"
-
-      - name: Require the environment-specific OIDC role
-        run: test -n "$PAWLOCAL_DEPLOY_ROLE_ARN" && test -n "$PAWLOCAL_TERRAFORM_ROLE_ARN"
-
-      - name: Configure AWS credentials with GitHub OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          [[ "$BACKEND_IMAGE" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+      - name: Configure narrow production publisher credentials
+        uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalProd-${{ github.run_id }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          role-to-assume: ${{ env.PAWLOCAL_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: "true"
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
-      - name: Build production frontend from the verified commit
+      - name: Build production frontend
         working-directory: frontend
         env:
           VITE_RELEASE_ENV: production
@@ -211,181 +92,74 @@ jobs:
           VITE_COGNITO_LOGOUT_URI: ${{ vars.VITE_COGNITO_LOGOUT_URI }}
           VITE_COGNITO_SCOPES: ${{ vars.VITE_COGNITO_SCOPES }}
           VITE_APP_COMMIT: ${{ inputs.release_commit }}
+        run: npm ci && npm run build
+      - name: Create production release manifest and frontend archive
+        shell: bash
         run: |
-          test -n "$VITE_API_BASE_URL"
-          npm ci
-          npm run build
+          mkdir -p release
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf release/frontend-production.tar.gz -C frontend/dist .
+          python -m pip install --quiet 'alembic>=1.13,<2'
+          python - <<'PY'
+          import ast, hashlib, json, os
+          from pathlib import Path
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
 
-      - name: Package production frontend and verify backend digest
-        id: release
-        run: |
-          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-            -czf release/frontend-production.tar.gz -C frontend/dist .
-          frontend_digest="sha256:$(sha256sum release/frontend-production.tar.gz | cut -d ' ' -f 1)"
-          backend_image="$(jq -r .backend_image release/release-manifest.json)"
-          echo "$backend_image" | grep -Eq '@sha256:[0-9a-f]{64}$'
-          echo "frontend_digest=$frontend_digest" >> "$GITHUB_OUTPUT"
-          jq --arg frontend_digest "$frontend_digest" \
-            '. + {frontend:{environment:"production",artifact_digest:$frontend_digest,source_development_artifact_digest:.frontend.artifact_digest}}' \
-            release/release-manifest.json > release/production-release-manifest.json
-          production_manifest_digest="sha256:$(sha256sum release/production-release-manifest.json | cut -d ' ' -f 1)"
-          echo "production_manifest_digest=$production_manifest_digest" >> "$GITHUB_OUTPUT"
-
-      - name: Create production deployment record
-        id: deployment
-        uses: actions/github-script@v7
-        env:
-          SOURCE_MANIFEST_DIGEST: ${{ needs.validate-release.outputs.manifest_digest }}
-          PRODUCTION_MANIFEST_DIGEST: ${{ steps.release.outputs.production_manifest_digest }}
-          FRONTEND_DIGEST: ${{ steps.release.outputs.frontend_digest }}
-          SOURCE_RUN_ID: ${{ needs.validate-release.outputs.release_run_id }}
-        with:
-          script: |
-            const fs = require('fs')
-            const value = JSON.parse(fs.readFileSync('release/production-release-manifest.json', 'utf8'))
-            const deployment = await github.rest.repos.createDeployment({
-              ...context.repo,
-              ref: value.commit,
-              environment: 'production',
-              production_environment: true,
-              auto_merge: false,
-              required_contexts: [],
-              payload: {
-                workflow_run_id: context.runId,
-                source_release_run_id: Number(process.env.SOURCE_RUN_ID),
-                backend_image: value.backend_image,
-                backend_image_digest: value.backend_image_digest,
-                development_frontend_digest: value.frontend.source_development_artifact_digest,
-                production_frontend_digest: process.env.FRONTEND_DIGEST,
-                source_release_manifest_digest: process.env.SOURCE_MANIFEST_DIGEST,
-                production_release_manifest_digest: process.env.PRODUCTION_MANIFEST_DIGEST,
-                migration_chains: value.migration_chains,
-                telemetry_enabled: false,
+          heads = ScriptDirectory.from_config(Config('backend/alembic.ini')).get_heads()
+          if len(heads) != 1:
+              raise SystemExit('Expected exactly one PostgreSQL migration head')
+          tree = ast.parse(Path('backend/pawlocal/dsql_migrations.py').read_text(encoding='utf-8'))
+          dsql_revision = next(
+              ast.literal_eval(statement.value)
+              for statement in tree.body
+              if isinstance(statement, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == 'BASELINE_REVISION' for target in statement.targets)
+          )
+          archive = Path('release/frontend-production.tar.gz')
+          image = os.environ['BACKEND_IMAGE']
+          value = {
+              'schema_version': 2,
+              'commit': os.environ['RELEASE_COMMIT'],
+              'backend_image': image,
+              'backend_image_digest': image.split('@', 1)[1],
+              'migration_chains': {
+                  'postgresql': {'runner': 'alembic', 'migration_id': heads[0]},
+                  'aurora_dsql': {'runner': 'dsql_baseline', 'migration_id': dsql_revision},
               },
-            })
-            core.setOutput('deployment_id', deployment.data.id)
-            await github.rest.repos.createDeploymentStatus({
-              ...context.repo,
-              deployment_id: deployment.data.id,
-              state: 'in_progress',
-              environment: 'production',
-              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'Production promotion started',
-            })
-
-      - name: Set up Terraform for container deployment
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.10.5
-
-      - name: Assume the Terraform deployment role
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalProdTerraform-${{ github.run_id }}
-
-      - name: Deploy the container image through shared Terraform state
+              'telemetry_enabled': False,
+              'frontend': {
+                  'environment': 'production',
+                  'artifact_digest': 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest(),
+              },
+          }
+          Path('release/release-manifest.json').write_text(json.dumps(value, separators=(',', ':')), encoding='utf-8')
+          PY
+          python ops/validate-release-metadata.py --manifest release/release-manifest.json
+      - name: Publish exact production artifacts
         env:
-          RELEASE_MANIFEST: release/production-release-manifest.json
-        run: bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production "$RELEASE_MANIFEST"
-
-      - name: Restore the environment frontend publishing role
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: PawLocalProduction-Deploy-${{ github.run_id }}
-      - name: Deploy exact backend digest and production frontend through the environment adapter
-        env:
-          RELEASE_MANIFEST: release/production-release-manifest.json
+          RELEASE_MANIFEST: release/release-manifest.json
           FRONTEND_ARCHIVE: release/frontend-production.tar.gz
-          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
-          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-          PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
-          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
-          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
         run: bash ops/run-deployment-adapter.sh deploy --environment production --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
-
-      - name: Verify production release through the environment adapter
+      - name: Verify production release
         env:
-          RELEASE_MANIFEST: release/production-release-manifest.json
+          RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/production-verification.json
-          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
-          PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-          PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
-          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
-          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
         run: bash ops/run-deployment-adapter.sh verify --environment production --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
-
-      - name: Validate production deployment evidence and selected migration chain
-        env:
-          PAWLOCAL_EXPECTED_DATABASE_PROVIDER: ${{ needs.validate-release.outputs.database_provider }}
-          PAWLOCAL_EXPECTED_MIGRATION_RUNNER: ${{ needs.validate-release.outputs.migration_runner }}
-          PAWLOCAL_EXPECTED_MIGRATION_ID: ${{ needs.validate-release.outputs.migration_id }}
-        run: |
-          python ops/validate-release-metadata.py \
-            --manifest release/production-release-manifest.json \
-            --evidence release/production-verification.json \
-            --environment production \
-            --database-provider "$PAWLOCAL_EXPECTED_DATABASE_PROVIDER" \
-            --migration-runner "$PAWLOCAL_EXPECTED_MIGRATION_RUNNER" \
-            --migration-id "$PAWLOCAL_EXPECTED_MIGRATION_ID"
-
-      - name: Upload production deployment evidence
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pawlocal-production-deployment
-          path: |
-            release/release-manifest.json
-            release/production-release-manifest.json
-            release/frontend-production.tar.gz
-            release/production-verification.json
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Mark production deployment successful
-        if: success()
+      - name: Record successful production deployment
         uses: actions/github-script@v7
         env:
-          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
-          PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          BACKEND_IMAGE: ${{ inputs.backend_image }}
         with:
           script: |
-            const fs = require('fs')
-            const evidence = JSON.parse(fs.readFileSync('release/production-verification.json', 'utf8'))
-            await github.rest.repos.createDeploymentStatus({
-              ...context.repo,
-              deployment_id: Number(process.env.DEPLOYMENT_ID),
-              state: 'success',
-              environment: 'production',
-              log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'Production health, release verification, and evidence upload passed',
-              environment_url: process.env.PAWLOCAL_PUBLIC_BASE_URL,
-              payload: JSON.stringify({
-                database_provider: evidence.database_provider,
-                migration_runner: evidence.migration_runner,
-                migration_id: evidence.migration_id,
-                backend_image_digest: evidence.backend_image_digest,
-                telemetry_enabled: evidence.telemetry_enabled,
-              }),
+            const deployment = await github.rest.repos.createDeployment({
+              ...context.repo, ref: process.env.RELEASE_COMMIT, environment: 'production',
+              production_environment: true, auto_merge: false, required_contexts: [],
+              payload: {workflow_run_id: context.runId, backend_image: process.env.BACKEND_IMAGE, telemetry_enabled: false},
             })
-
-      - name: Mark production deployment failed
-        if: ${{ (failure() || cancelled()) && steps.deployment.outputs.deployment_id != '' }}
-        uses: actions/github-script@v7
-        env:
-          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
-        with:
-          script: |
             await github.rest.repos.createDeploymentStatus({
-              ...context.repo,
-              deployment_id: Number(process.env.DEPLOYMENT_ID),
-              state: 'failure',
-              environment: 'production',
+              ...context.repo, deployment_id: deployment.data.id, state: 'success',
+              environment: 'production', environment_url: process.env.ENVIRONMENT_URL,
               log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              description: 'Production deployment, verification, or evidence finalization failed',
+              description: 'Production release and public verification passed',
             })

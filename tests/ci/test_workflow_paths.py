@@ -196,33 +196,75 @@ class WorkflowPathTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(matches("workflow-validation.yml", path))
 
-    def test_historical_production_promotion_uses_current_deployment_tooling(self) -> None:
+    def test_production_promotion_uses_matching_environment_state(self) -> None:
         workflow = (WORKFLOWS / "deploy-production.yml").read_text(encoding="utf-8")
-        release_checkout = workflow.index("name: Check out selected release source")
-        tooling_checkout = workflow.index("name: Check out current deployment tooling")
-        self.assertLess(release_checkout, tooling_checkout)
-        self.assertIn("ref: ${{ github.workflow_sha }}", workflow)
-        self.assertIn("path: deployment-tools", workflow)
+        self.assertIn("uses: ./.github/workflows/terraform-environment.yml", workflow)
+        self.assertIn("environment: production", workflow)
+        self.assertIn("release_only: true", workflow)
         self.assertIn("ref: ${{ inputs.release_commit }}", workflow)
-        self.assertIn(
-            "bash deployment-tools/ops/terraform-lightsail-container-deploy.sh production",
-            workflow,
-        )
-        adapter = Path("ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"', adapter)
-        self.assertIn('root="$script_dir/../infra/terraform"', adapter)
-        self.assertIn('python3 "$script_dir/validate-lightsail-container-plan.py"', adapter)
-        self.assertNotIn('python3 ops/validate-lightsail-container-plan.py', adapter)
+        self.assertNotIn("pawlocal/terraform.tfstate", workflow)
 
-    def test_production_promotion_requires_latest_success_with_matching_release_payload(self) -> None:
-        workflow = (WORKFLOWS / "deploy-production.yml").read_text()
-        self.assertIn("statuses.data.reduce((latest, status)", workflow)
-        self.assertIn("latestStatus.state !== 'success'", workflow)
-        self.assertNotIn("statuses.data.find(status => status.state === 'success')", workflow)
-        self.assertIn("deployment.payload?.migration_chains?.[provider]", workflow)
-        self.assertIn("successPayload.migration_runner === selectedChain.runner", workflow)
-        self.assertIn("successPayload.migration_id === selectedChain.migration_id", workflow)
-        self.assertIn("successPayload.backend_image_digest === deployment.payload.backend_image_digest", workflow)
+    def test_production_ancestry_gate_precedes_any_terraform_plan(self) -> None:
+        workflow = (WORKFLOWS / "terraform-environment.yml").read_text()
+        eligibility = workflow.index("  production-eligibility:")
+        ancestry_gate = workflow.index("compareCommitsWithBasehead")
+        plan = workflow.index("  plan:")
+        self.assertLess(eligibility, ancestry_gate)
+        self.assertLess(ancestry_gate, plan)
+        self.assertIn("needs: production-eligibility", workflow[plan:])
+        self.assertIn("basehead: `${commit}...main`", workflow)
+
+        promotion = (WORKFLOWS / "deploy-production.yml").read_text()
+        self.assertNotIn("git fetch --no-tags --depth=1", promotion)
+        self.assertNotIn("git merge-base --is-ancestor", promotion)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"', promotion)
+
+    def test_production_promotion_requires_expected_successful_workflow_and_validated_evidence(self) -> None:
+        workflow = (WORKFLOWS / "terraform-environment.yml").read_text()
+        self.assertIn("workflow_id: 'fullstack-release.yml'", workflow)
+        self.assertIn("github.rest.actions.listWorkflowRuns", workflow)
+        self.assertIn("run.head_branch === 'main'", workflow)
+        self.assertIn("run.event === 'push'", workflow)
+        self.assertIn("run.conclusion === 'success'", workflow)
+        self.assertIn("statuses.data.reduce((value, item)", workflow)
+        self.assertIn("latest?.state === 'success'", workflow)
+        self.assertIn("payload.backend_image === image", workflow)
+        self.assertIn("payload.evidence_validated === true", workflow)
+        self.assertIn("payload.manifest_schema_version === 2", workflow)
+        self.assertIn("payload.evidence_schema_version === 1", workflow)
+        self.assertIn("payload.release_commit === commit", workflow)
+        self.assertIn("payload.release_manifest_digest", workflow)
+        self.assertIn("payload.verification_evidence_digest", workflow)
+        self.assertIn("payload.running_image_digest === payload.backend_image_digest", workflow)
+        self.assertIn("successfulRunIds.has(workflowRun)", workflow)
+        self.assertIn("payload.database_provider === 'aurora_dsql'", workflow)
+        self.assertIn("payload.public_endpoint_health?.api === true", workflow)
+        self.assertIn("payload.database_query_smoke?.result === 'valid_place_page'", workflow)
+        self.assertIn("environment: 'development'", workflow)
+        self.assertIn("matching validated full-stack release evidence", workflow)
+
+    def test_development_evidence_is_validated_before_it_is_recorded(self) -> None:
+        workflow = (WORKFLOWS / "fullstack-release.yml").read_text()
+        validation = workflow.index("- name: Validate development verification evidence")
+        record = workflow.index("- name: Record successful verified development deployment")
+        self.assertLess(validation, record)
+        self.assertIn("--evidence release/development-verification.json", workflow[validation:record])
+        for field in (
+            "record_schema_version",
+            "manifest_schema_version",
+            "evidence_schema_version",
+            "evidence_validated",
+            "workflow_run_attempt",
+            "release_manifest_digest",
+            "verification_evidence_digest",
+            "backend_image_digest",
+            "running_image_digest",
+            "frontend_artifact_digest",
+            "public_endpoint_health",
+            "database_query_smoke",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, workflow[record:])
 
 
 if __name__ == "__main__":

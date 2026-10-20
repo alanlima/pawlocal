@@ -1,6 +1,6 @@
 # Historical AWS deployment and full-stack release record (non-actionable)
 
-> **Do not use this file as the Issue #135 deployment runbook.** It records the former combined-state implementation and dated runtime observations. The later legacy teardown was partial, so these statements do not establish current AWS resources, state ownership, or service availability. Issue #135 will define new bootstrap, development, and production roots and operator commands after implementation and review.
+> **Do not use this file as the Issue #135 deployment runbook.** It records the former combined-state implementation and dated runtime observations, not current AWS resources, state ownership, or service availability. Use the [Issue #135 operator guide](terraform-greenfield-operations.md) for the clean bootstrap, development, and production roots and current approval gates.
 
 At the time of this record, the tracked `infra/terraform/` directory was the sole Terraform root and used the `pawlocal/terraform.tfstate` S3 backend. The former `fullstack/` module had no backend of its own. This ownership model is superseded by DEC-008 and must not be reused for Issue #135.
 

@@ -1,6 +1,6 @@
 # Historical current-stack Terraform Actions (non-actionable)
 
-> **Do not dispatch this workflow or follow the commands below for Issue #135.** This file preserves the former combined-state procedure as audit evidence only. Run 39480644777 applied part of its destroy plan and then failed; [PR #134](https://github.com/alanlima/pawlocal/pull/134) remains open, and the resulting AWS/state inventory has not yet been independently verified. Issue #135 requires clean bootstrap, development, and production states and will provide new operator instructions only after implementation.
+> **Do not dispatch this workflow or follow the commands below for Issue #135.** This file preserves the former combined-state procedure as audit evidence only. Corrected read-only inventory verified the former application state is empty and no PawLocal application resources survive. The workflow is now inert; use the [Issue #135 operator guide](terraform-greenfield-operations.md) for the clean roots and current gates.
 
 Historically, this temporary workflow operated the former combined Terraform root at `infra/terraform/` and its state key, `pawlocal/terraform.tfstate`. The details below describe that retired design; they do not establish current live resources or authorize another apply or destroy.
 

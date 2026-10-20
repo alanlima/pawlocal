@@ -4,7 +4,7 @@ locals {
     identity-plan = {
       role_name = "pawlocal-identity-terraform-plan"
       purpose   = "plan"
-      subject   = local.github_main_ref_subject
+      subject   = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:identity-plan"
     }
     identity-apply = {
       role_name = "pawlocal-identity-terraform-apply"
@@ -15,12 +15,14 @@ locals {
   identity_role_resource_arns = [
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-github-deploy",
     "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-github-deploy",
-    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-dsql-runtime"
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-dsql-runtime",
+    "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-dsql-runtime"
   ]
   identity_app_role_arns = {
     development_frontend = try(aws_iam_role.identity_app["development_frontend"].arn, null)
     production_frontend  = try(aws_iam_role.identity_app["production_frontend"].arn, null)
     development_runtime  = var.development_lightsail_principal_arn == "" ? null : aws_iam_role.development_runtime[0].arn
+    production_runtime   = var.production_lightsail_principal_arn == "" ? null : aws_iam_role.production_runtime[0].arn
   }
   identity_app_role_specs = {
     development_frontend = {
@@ -34,7 +36,7 @@ locals {
       subject     = "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:production"
     }
   }
-  managed_identity_app_role_specs = var.import_existing_frontend_publish_roles ? local.identity_app_role_specs : {}
+  managed_identity_app_role_specs = local.identity_app_role_specs
 }
 
 data "aws_iam_policy_document" "identity_app_role_trust" {
@@ -67,7 +69,7 @@ resource "aws_iam_role" "identity_app" {
   name                 = each.value.name
   description          = each.value.description
   assume_role_policy   = data.aws_iam_policy_document.identity_app_role_trust[each.key].json
-  permissions_boundary = aws_iam_policy.identity_app_role_boundary.arn
+  permissions_boundary = aws_iam_policy.identity_app_role_boundary[each.key == "development_frontend" ? "development" : "production"].arn
   max_session_duration = 3600
   tags = {
     project     = "pawlocal"
@@ -78,9 +80,11 @@ resource "aws_iam_role" "identity_app" {
 }
 
 import {
-  for_each = local.managed_identity_app_role_specs
-  to       = aws_iam_role.identity_app[each.key]
-  id       = each.value.name
+  for_each = var.import_existing_development_deploy_role ? {
+    development_frontend = local.identity_app_role_specs.development_frontend.name
+  } : {}
+  to = aws_iam_role.identity_app[each.key]
+  id = each.value
 }
 
 data "aws_iam_policy_document" "development_runtime_trust" {
@@ -123,11 +127,41 @@ resource "aws_iam_role" "development_runtime" {
   name                 = "pawlocal-development-dsql-runtime"
   description          = "PawLocal development API DSQL runtime; trust is bootstrap-owned."
   assume_role_policy   = data.aws_iam_policy_document.development_runtime_trust[0].json
-  permissions_boundary = aws_iam_policy.identity_app_role_boundary.arn
+  permissions_boundary = aws_iam_policy.identity_app_role_boundary["development"].arn
   max_session_duration = 3600
   tags = {
     project     = "pawlocal"
     environment = "development"
+    managedby   = "terraform"
+    purpose     = "dsql-runtime"
+  }
+}
+
+data "aws_iam_policy_document" "production_runtime_trust" {
+  count = var.production_lightsail_principal_arn == "" ? 0 : 1
+
+  statement {
+    sid     = "AllowExactProductionLightsailPrincipal"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "AWS"
+      identifiers = [var.production_lightsail_principal_arn]
+    }
+  }
+}
+
+resource "aws_iam_role" "production_runtime" {
+  count = var.production_lightsail_principal_arn == "" ? 0 : 1
+
+  name                 = "pawlocal-production-dsql-runtime"
+  description          = "PawLocal production API DSQL runtime; trust is bootstrap-owned."
+  assume_role_policy   = data.aws_iam_policy_document.production_runtime_trust[0].json
+  permissions_boundary = aws_iam_policy.identity_app_role_boundary["production"].arn
+  max_session_duration = 3600
+  tags = {
+    project     = "pawlocal"
+    environment = "production"
     managedby   = "terraform"
     purpose     = "dsql-runtime"
   }
@@ -255,61 +289,15 @@ data "aws_iam_policy_document" "identity_terraform_role_permissions" {
   }
 
   statement {
-    sid     = "ReadOnlyBootstrapManagedIdentityPolicies"
+    sid     = "ReadOnlyBootstrapManagedIdentityBoundaries"
     effect  = "Allow"
     actions = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]
     resources = [
-      aws_iam_policy.identity_development_frontend.arn,
-      aws_iam_policy.identity_production_frontend.arn,
-      aws_iam_policy.identity_development_runtime.arn,
-      aws_iam_policy.identity_app_role_boundary.arn
+      aws_iam_policy.identity_app_role_boundary["development"].arn,
+      aws_iam_policy.identity_app_role_boundary["production"].arn
     ]
   }
 
-  dynamic "statement" {
-    for_each = each.value.purpose == "apply" ? [true] : []
-    content {
-      sid       = "AttachDevelopmentPublisherPolicyOnlyToDevelopmentRole"
-      effect    = "Allow"
-      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
-      resources = [local.identity_role_resource_arns[0]]
-      condition {
-        test     = "ArnEquals"
-        variable = "iam:PolicyARN"
-        values   = [aws_iam_policy.identity_development_frontend.arn]
-      }
-    }
-  }
-
-  dynamic "statement" {
-    for_each = each.value.purpose == "apply" ? [true] : []
-    content {
-      sid       = "AttachProductionPublisherPolicyOnlyToProductionRole"
-      effect    = "Allow"
-      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
-      resources = [local.identity_role_resource_arns[1]]
-      condition {
-        test     = "ArnEquals"
-        variable = "iam:PolicyARN"
-        values   = [aws_iam_policy.identity_production_frontend.arn]
-      }
-    }
-  }
-
-  dynamic "statement" {
-    for_each = each.value.purpose == "apply" ? [true] : []
-    content {
-      sid       = "AttachDevelopmentRuntimePolicyOnlyToRuntimeRole"
-      effect    = "Allow"
-      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
-      resources = [local.identity_role_resource_arns[2]]
-      condition {
-        test     = "ArnEquals"
-        variable = "iam:PolicyARN"
-        values   = [aws_iam_policy.identity_development_runtime.arn]
-      }
-    }
-  }
 }
 
 resource "aws_iam_role_policy" "identity_terraform" {
@@ -325,17 +313,15 @@ output "identity_terraform_role_arns" {
   value       = { for key, role in aws_iam_role.identity_terraform : key => role.arn }
 }
 
-output "identity_managed_policy_arns" {
-  description = "Bootstrap-owned fixed app policies and required IAM permissions boundary for identity-stage roles."
+output "identity_app_boundary_arns" {
+  description = "Bootstrap-owned permissions boundaries for the fixed publisher and runtime identity roles."
   value = {
-    development_frontend = aws_iam_policy.identity_development_frontend.arn
-    production_frontend  = aws_iam_policy.identity_production_frontend.arn
-    development_runtime  = aws_iam_policy.identity_development_runtime.arn
-    boundary             = aws_iam_policy.identity_app_role_boundary.arn
+    development = aws_iam_policy.identity_app_role_boundary["development"].arn
+    production  = aws_iam_policy.identity_app_role_boundary["production"].arn
   }
 }
 
 output "identity_app_role_arns" {
-  description = "Bootstrap-owned application role ARNs; frontend publisher ARNs are null until the second bootstrap stage imports them."
+  description = "Bootstrap-owned publisher and conditional runtime role ARNs. Runtime values remain null until exact Lightsail principals are supplied."
   value       = local.identity_app_role_arns
 }

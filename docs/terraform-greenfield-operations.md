@@ -1,0 +1,140 @@
+# Issue #135 Terraform operations
+
+## Status and safety boundary
+
+The configuration, workflows, and validation described here do not prove that bootstrap or application infrastructure was applied. The latest read-only inventory found an empty former application state, no PawLocal application resources, a populated bootstrap state that remains authoritative, and one verified development publisher role eligible for adoption. An unrelated account-level personal workload was verified out of scope and must never be imported, changed, or used as PawLocal evidence.
+
+Only Terraform may change AWS infrastructure or Terraform state. Do not use manual `terraform import`, `terraform state` commands, AWS CLI/SDK mutation, or the AWS console. Local Terraform execution is authorized only for the bootstrap root, after independent review of the exact saved plan. Development and production plans/applies run only through the matching protected GitHub Environments. Billable application resources still require fresh owner cost/provisioning approval.
+
+## Roots and ownership
+
+| Root | Backend key | Owns |
+|---|---|---|
+| `infra/terraform/iam-bootstrap` | `pawlocal/iam-bootstrap/terraform.tfstate` | Shared GitHub OIDC provider, plan/apply and publisher role objects/trust, baseline permissions, permissions boundaries, runtime identity, private saved-plan transfer bucket |
+| `infra/terraform/environments/development` | `pawlocal/development/terraform.tfstate` | Development S3/CloudFront frontend, Route 53 records, Lightsail API, Aurora DSQL, Cognito, environment policies, and matching attachments |
+| `infra/terraform/environments/production` | `pawlocal/production/terraform.tfstate` | The same resource types for production only, plus production policies and matching attachments |
+
+The two application roots use `infra/terraform/modules/pawlocal-environment`. The module does not create IAM roles, OIDC providers, trust policies, or permissions boundaries. The former `infra/terraform` and `infra/terraform/fullstack` roots and `pawlocal/terraform.tfstate` key are historical only. The legacy operation and rollback workflows are inert.
+
+Previously bootstrap-owned legacy combined-state and identity-stage roles are retained at their existing state addresses to avoid an unrelated identity deletion. Their policies are fail-closed to read-only state/session inspection and contain no application mutation or policy-attachment authority. They are not used by the greenfield workflows.
+
+Plan roles can read AWS resources, read their own state, acquire only their own lock, and upload only their environment plan prefix. Their exact GitHub Environment OIDC subjects are `development-plan` and `production-plan`; both Environments must allow deployments only from `main`. Apply roles can read their approved plan, update only their state, create/update their fixed-name environment policies, and attach them only to the matching bootstrap roles. A bootstrap-owned boundary caps the effective application actions. It excludes role creation, trust changes, boundary changes, cross-environment attachments, and authorization-tag removal.
+
+## Validate locally without AWS access
+
+```powershell
+terraform fmt -check -recursive infra/terraform
+
+$roots = @(
+  "infra/terraform/iam-bootstrap",
+  "infra/terraform/environments/development",
+  "infra/terraform/environments/production"
+)
+foreach ($root in $roots) {
+  terraform -chdir=$root init -backend=false -input=false
+  terraform -chdir=$root validate -no-color
+}
+
+python -m unittest tests.ci.test_terraform_greenfield -v
+```
+
+These checks parse configuration only. They are not a state-backed plan, apply, deployment, DSQL compatibility result, or public health check.
+
+## Prepare and review the bootstrap plan
+
+Keep all values in the operator credential provider and process environment. Do not write a populated tfvars file to the repository. The bootstrap state already exists; use its existing backend key and normal refresh.
+
+```powershell
+$env:TF_VAR_terraform_state_bucket_name = "<existing state bucket>"
+$env:TF_VAR_github_repository = "alanlima/pawlocal"
+$env:TF_VAR_github_owner_id = "<immutable owner ID>"
+$env:TF_VAR_github_repository_id = "<immutable repository ID>"
+$env:TF_VAR_route53_zone_id = "<existing hosted zone ID>"
+$env:TF_VAR_domain_name = "<base hosted zone name>"
+$env:TF_VAR_manage_github_oidc_provider = "true"
+$env:TF_VAR_import_existing_github_oidc_provider = "true"
+$env:TF_VAR_import_existing_development_deploy_role = "true"
+$env:TF_VAR_import_existing_dsql_service_linked_role = "true"
+
+terraform -chdir=infra/terraform/iam-bootstrap init -input=false -reconfigure `
+  -backend-config="bucket=$env:TF_VAR_terraform_state_bucket_name" `
+  -backend-config="key=pawlocal/iam-bootstrap/terraform.tfstate" `
+  -backend-config="region=ap-southeast-2" `
+  -backend-config="encrypt=true" `
+  -backend-config="use_lockfile=true"
+
+terraform -chdir=infra/terraform/iam-bootstrap plan -input=false -lock-timeout=5m -out=iam-bootstrap.tfplan
+terraform -chdir=infra/terraform/iam-bootstrap show -no-color iam-bootstrap.tfplan
+Get-FileHash infra/terraform/iam-bootstrap/iam-bootstrap.tfplan -Algorithm SHA256
+```
+
+The independent reviewer must confirm:
+
+- the existing populated bootstrap resources remain under their current addresses unless the change intentionally replaces a prior inline application permission with the new boundary/baseline model;
+- exactly three state-backed former bootstrap app-specific managed policies (development frontend, production frontend, and development runtime) are planned for deletion through their declarative `removed` blocks, leaving the environment states as their sole replacements/owners;
+- the defensive `identity_production_runtime` removed address is absent from the populated bootstrap state and therefore produces no fourth deletion or other planned change;
+- the only imports are the existing GitHub OIDC provider, the verified development publisher role, and the already-existing fixed DSQL service-linked role selected by the explicit flags;
+- no application resource is imported;
+- the development publisher role is updated in place, not replaced or deleted;
+- the production publisher role and environment boundaries are the expected creates;
+- no credential or secret value appears in the plan or review evidence; and
+- no unrelated account-level workload appears in the plan.
+
+Only after that exact plan and digest receive independent approval may the owner-authorized operator run:
+
+```powershell
+terraform -chdir=infra/terraform/iam-bootstrap apply -input=false iam-bootstrap.tfplan
+```
+
+Changing any input or source invalidates the review: discard the plan, create a fresh saved plan, and repeat review. Never commit or upload the raw plan to GitHub.
+
+## Protected GitHub Environment configuration
+
+Create or update values only after the bootstrap apply outputs are verified. Never store static AWS access keys. Both `development-plan` and `production-plan` need the same variable names, with environment-specific role values:
+
+- `AWS_REGION`
+- `PAWLOCAL_AWS_ACCOUNT_ID`
+- `PAWLOCAL_TF_STATE_BUCKET`
+- `PAWLOCAL_TERRAFORM_PLAN_BUCKET`
+- `PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN`
+- `PAWLOCAL_DOMAIN_NAME`
+- `PAWLOCAL_ROUTE53_ZONE_ID`
+- `PAWLOCAL_RUNTIME_ROLE_ARN` (empty for the first foundation stage)
+- `PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN` (empty for the first create-only stage)
+- `PAWLOCAL_CLOUDFRONT_OAC_ARN` (empty for the first create-only stage)
+- secret `PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN`
+
+The matching `development-apply` and `production-apply` Environments use the same names plus `PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN`. Restrict them to `main` and require reviewers. Release Environments `development` and `production` use `PAWLOCAL_DEPLOY_ROLE_ARN` for the narrow frontend publisher plus the existing public application configuration used by the deployment adapter. After the foundation apply, set `PAWLOCAL_FRONTEND_BUCKET` and `PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID` from the matching `environment_targets` output; never copy one environment's target into the other.
+
+Do not print Environment or secret values as evidence. Record only which required names are configured and whether protection rules are enabled.
+
+## Environment plan/apply stages
+
+Dispatch `Terraform environment plan and apply` from `main`. A normal foundation dispatch uses the target environment, an empty backend image, and `release_only=false`. The workflow:
+
+1. assumes the matching read-only plan role;
+2. initializes only `pawlocal/<environment>/terraform.tfstate`;
+3. writes the binary plan only in the runner workspace;
+4. renders a sanitized summary containing resource types, actions, and counts only;
+5. rejects application imports, IAM role/OIDC/inline-policy ownership, deletes, and replacements other than the expected immutable Lightsail deployment-version replacement;
+6. uploads the opaque saved plan plus bound metadata to the private one-day transfer prefix;
+7. pauses at the matching protected apply Environment; and
+8. verifies the metadata and SHA-256 before applying exactly that downloaded plan.
+
+Development must be created, reviewed, and live-verified before production. Before any production Terraform plan, the workflow uses the GitHub API to require that the selected commit is in `main`, that the expected main-branch `fullstack-release.yml` run for that exact commit completed successfully, and that its successful development deployment carries validated schema-versioned health, database-query, migration, telemetry, frontend-digest, and backend-digest evidence from the same run/attempt.
+
+### Generated-identifier and runtime handoff
+
+CloudFront distribution and OAC updates are deliberately denied until their exact ARNs are known. The first create-only environment plan may create them but cannot update/delete an account-wide wildcard target. CloudFront distribution creation uses the provider's `CreateDistributionWithTags` path, so the temporary create stage includes the dependent `TagResource` action only for an untagged distribution, requires the complete matching request-tag set, and grants no `UntagResource`. After its approved apply, copy the non-secret exact output ARNs into the matching protected Environment variables and update the bootstrap inputs with the same ARNs through a new independently reviewed bootstrap plan. Supplying both ARNs removes distribution/OAC create and wildcard tag authorization from both the environment policy and its bootstrap boundary; future changes are restricted to those exact resources.
+
+The API deployment and API DNS record remain absent while `PAWLOCAL_RUNTIME_ROLE_ARN` is empty. After the foundation apply, pass the exact Lightsail `principal_arn` output into the matching bootstrap runtime-role input and apply a separately reviewed bootstrap plan. Set the resulting runtime role ARN in the environment variables, then run a new environment plan with the immutable backend image. This breaks the identity dependency without manual AWS or state mutation.
+
+Lightsail update and deployment actions require `project=pawlocal` and the matching `environment` resource tag. The role has no `lightsail:UntagResource`. `lightsail:TagResource` is limited to the exact environment service/certificate names, required request tags, and only when both authorization tags are absent, so the role cannot retag the other environment or change the authorization tags after creation.
+
+## Release and verification
+
+`Full-stack release to development` publishes an immutable backend image from `main`, calls the environment workflow with `environment=development` and `release_only=true`, publishes the frontend with the narrow publisher role, runs the deployment adapter's public health/database smoke verification, and records a successful GitHub development deployment only after verification.
+
+`Promote verified release to production` is manual. Supply the full verified commit SHA and exact immutable image reference recorded by development. The environment workflow rejects production before it finds the matching successful development deployment. It plans/applies only the production root, after production approval, then builds the selected commit's production frontend and runs the same public verification.
+
+Passing CI or Terraform apply is not deployment completion. Before closing Issue #135, evidence must separately show the exact saved plans, approvals, successful development verification, production promotion of the same digest, live public health and database-query smoke, and current runtime state. DSQL identity/credential refresh remains a mandatory live gate. Telemetry, backup, HA, restore, rollback, and recovery are not part of Issue #135.
