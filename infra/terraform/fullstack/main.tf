@@ -494,10 +494,17 @@ data "aws_iam_policy_document" "github_deploy_trust" {
   }
 }
 
-resource "aws_iam_role" "github_deploy" {
-  for_each           = local.frontend_environments
-  name               = "pawlocal-${each.key}-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
+removed {
+  from = aws_iam_role.github_deploy
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+data "aws_iam_role" "github_deploy" {
+  for_each = local.frontend_environments
+  name     = "pawlocal-${each.key}-github-deploy"
 }
 
 data "aws_iam_policy_document" "github_deploy" {
@@ -521,7 +528,7 @@ data "aws_iam_policy_document" "github_deploy" {
 
 resource "aws_iam_role_policy" "github_deploy" {
   for_each = local.frontend_environments
-  role     = aws_iam_role.github_deploy[each.key].id
+  role     = data.aws_iam_role.github_deploy[each.key].name
   policy   = data.aws_iam_policy_document.github_deploy[each.key].json
 }
 

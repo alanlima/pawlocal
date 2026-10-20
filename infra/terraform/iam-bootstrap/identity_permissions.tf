@@ -16,6 +16,10 @@ locals {
 resource "aws_iam_service_linked_role" "dsql" {
   aws_service_name = "dsql.amazonaws.com"
   description      = "Service-linked role used by Aurora DSQL to create and manage its AWS resources."
+
+  lifecycle {
+    ignore_changes = [description]
+  }
 }
 
 import {

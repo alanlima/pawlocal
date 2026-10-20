@@ -15,7 +15,7 @@ output "aws_account_id" {
 
 output "plan_transfer_bucket_name" {
   description = "Private Terraform plan transfer bucket; plan and apply roles have environment-prefix-only access."
-  value       = aws_s3_bucket.plan_transfer.bucket
+  value       = local.plan_transfer_bucket_name
 }
 
 output "legacy_terraform_role_arns" {

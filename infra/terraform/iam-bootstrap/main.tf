@@ -1,16 +1,18 @@
 data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
 
 data "aws_iam_openid_connect_provider" "github" {
   count = var.manage_github_oidc_provider ? 0 : 1
   url   = "https://token.actions.githubusercontent.com"
 }
 
-resource "random_id" "plan_transfer_suffix" {
-  byte_length = 4
+locals {
+  plan_transfer_bucket_name = "pawlocal-terraform-plans-${data.aws_caller_identity.current.account_id}"
+  plan_transfer_bucket_arn  = "arn:${data.aws_partition.current.partition}:s3:::${local.plan_transfer_bucket_name}"
 }
 
 resource "aws_s3_bucket" "plan_transfer" {
-  bucket        = "pawlocal-terraform-plans-${data.aws_caller_identity.current.account_id}-${random_id.plan_transfer_suffix.hex}"
+  bucket        = local.plan_transfer_bucket_name
   force_destroy = false
   tags = {
     project   = "pawlocal"
@@ -39,7 +41,7 @@ data "aws_iam_policy_document" "plan_transfer_tls_only" {
     sid       = "DenyInsecureTransport"
     effect    = "Deny"
     actions   = ["s3:*"]
-    resources = [aws_s3_bucket.plan_transfer.arn, "${aws_s3_bucket.plan_transfer.arn}/*"]
+    resources = [local.plan_transfer_bucket_arn, "${local.plan_transfer_bucket_arn}/*"]
     principals {
       type        = "*"
       identifiers = ["*"]
@@ -231,7 +233,7 @@ data "aws_iam_policy_document" "role_permissions" {
       sid       = "UploadOnlyOwnEnvironmentPlan"
       effect    = "Allow"
       actions   = ["s3:PutObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/${each.value.environment}/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/${each.value.environment}/*"]
     }
   }
 
@@ -241,7 +243,7 @@ data "aws_iam_policy_document" "role_permissions" {
       sid       = "ReadOnlyOwnEnvironmentPlan"
       effect    = "Allow"
       actions   = ["s3:GetObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/${each.value.environment}/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/${each.value.environment}/*"]
     }
   }
 

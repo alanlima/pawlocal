@@ -156,7 +156,7 @@ data "aws_iam_policy_document" "legacy_role_permissions" {
       sid       = "UploadExactRunPlanToPrivateTransferBucket"
       effect    = "Allow"
       actions   = ["s3:PutObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/legacy/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/legacy/*"]
     }
   }
 
@@ -166,7 +166,7 @@ data "aws_iam_policy_document" "legacy_role_permissions" {
       sid       = "ReadExactRunPlanFromPrivateTransferBucket"
       effect    = "Allow"
       actions   = ["s3:GetObject"]
-      resources = ["${aws_s3_bucket.plan_transfer.arn}/plans/legacy/*"]
+      resources = ["${local.plan_transfer_bucket_arn}/plans/legacy/*"]
     }
   }
 
