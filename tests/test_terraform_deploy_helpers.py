@@ -32,6 +32,22 @@ class BootstrapOacHandoffTests(unittest.TestCase):
     def policy(self, statements):
         return {"Version": "2012-10-17", "Statement": statements}
 
+    class FakeIam:
+        def __init__(self, inline_pages=None, attached_pages=None):
+            self.inline_pages = inline_pages or [{"PolicyNames": [bootstrap_oac.DEV_POLICY], "IsTruncated": False}]
+            self.attached_pages = attached_pages or [{"AttachedPolicies": [], "IsTruncated": False}]
+            self.gets = []
+
+        def list_role_policies(self, RoleName, Marker=None):
+            return self.inline_pages[0 if Marker is None else 1]
+
+        def list_attached_role_policies(self, RoleName, Marker=None):
+            return self.attached_pages[0 if Marker is None else 1]
+
+        def get_role_policy(self, RoleName, PolicyName):
+            self.gets.append((RoleName, PolicyName))
+            return {"PolicyDocument": {"Statement": []}}
+
     def test_initial_production_create_window_requires_exact_dev_pin(self):
         dev = self.policy([{
             "Effect": "Allow",
@@ -64,6 +80,64 @@ class BootstrapOacHandoffTests(unittest.TestCase):
             }])
             with self.subTest(action=action), self.assertRaises(ValueError):
                 bootstrap_oac.verify_handoff(dev, prod, self.dev_arn)
+
+    def test_wildcard_action_and_notaction_allow_statements_are_rejected(self):
+        for statement in (
+            {"Effect": "Allow", "Action": "*", "Resource": "*"},
+            {"Effect": "Allow", "Action": "cloudfront:*", "Resource": "*"},
+            {"Effect": "Allow", "NotAction": "iam:*", "Resource": "*"},
+            {"Effect": "Allow", "Action": "cloudfront:GetOriginAccessControl", "NotResource": "arn:aws:cloudfront::*:origin-access-control/*"},
+        ):
+            with self.subTest(statement=statement), self.assertRaises(ValueError):
+                bootstrap_oac.allowed_cloudfront(self.policy([statement]))
+
+    def test_extra_inline_policy_fails_closed(self):
+        iam = self.FakeIam(inline_pages=[{
+            "PolicyNames": [bootstrap_oac.DEV_POLICY, "unexpected-extra"], "IsTruncated": False,
+        }])
+        with self.assertRaisesRegex(ValueError, "additional inline policies"):
+            bootstrap_oac.fetch_exact_inline_policy(iam, bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY)
+        self.assertEqual(iam.gets, [])
+
+    def test_attached_managed_policy_fails_closed(self):
+        iam = self.FakeIam(attached_pages=[{
+            "AttachedPolicies": [{"PolicyName": "unexpected", "PolicyArn": "arn:aws:iam::123456789012:policy/unexpected"}],
+            "IsTruncated": False,
+        }])
+        with self.assertRaisesRegex(ValueError, "managed policy"):
+            bootstrap_oac.fetch_exact_inline_policy(iam, bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY)
+        self.assertEqual(iam.gets, [])
+
+    def test_extra_policy_on_later_page_fails_closed(self):
+        inline = self.FakeIam(inline_pages=[
+            {"PolicyNames": [bootstrap_oac.DEV_POLICY], "IsTruncated": True, "Marker": "next-inline"},
+            {"PolicyNames": ["late-extra"], "IsTruncated": False},
+        ])
+        with self.assertRaisesRegex(ValueError, "additional inline policies"):
+            bootstrap_oac.fetch_exact_inline_policy(inline, bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY)
+        managed = self.FakeIam(attached_pages=[
+            {"AttachedPolicies": [], "IsTruncated": True, "Marker": "next-managed"},
+            {"AttachedPolicies": [{"PolicyName": "late-extra", "PolicyArn": "arn:aws:iam::123456789012:policy/late-extra"}], "IsTruncated": False},
+        ])
+        with self.assertRaisesRegex(ValueError, "managed policy"):
+            bootstrap_oac.fetch_exact_inline_policy(managed, bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY)
+
+    def test_inline_and_attached_policy_enumeration_is_paginated(self):
+        iam = self.FakeIam(
+            inline_pages=[
+                {"PolicyNames": [bootstrap_oac.DEV_POLICY], "IsTruncated": True, "Marker": "next-inline"},
+                {"PolicyNames": [], "IsTruncated": False},
+            ],
+            attached_pages=[
+                {"AttachedPolicies": [], "IsTruncated": True, "Marker": "next-managed"},
+                {"AttachedPolicies": [], "IsTruncated": False},
+            ],
+        )
+        self.assertEqual(
+            bootstrap_oac.fetch_exact_inline_policy(iam, bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY),
+            {"Statement": []},
+        )
+        self.assertEqual(iam.gets, [(bootstrap_oac.DEV_ROLE, bootstrap_oac.DEV_POLICY)])
 
     def test_pinned_production_policy_requires_exact_arn(self):
         dev = self.policy([{
@@ -263,6 +337,8 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         plan = text.index("Initialize production state and create saved plan")
         self.assertLess(handoff, plan)
         self.assertIn("--development-oac-arn \"$PAWLOCAL_DEVELOPMENT_OAC_ARN\"", text)
+        self.assertIn("list_role_policies", (ROOT / "ops/verify-terraform-bootstrap-oac-handoff.py").read_text())
+        self.assertIn("list_attached_role_policies", (ROOT / "ops/verify-terraform-bootstrap-oac-handoff.py").read_text())
         self.assertNotRegex(text, r'\[\[\s*"\$\{\{\s*inputs\.backend_image_digest')
         self.assertNotIn("-target ", text)
 
