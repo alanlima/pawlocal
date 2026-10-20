@@ -224,7 +224,7 @@ jobs:
               target.write(f"plan_sha256={digest}\n")
               target.write(f"plan_stage={stage}\n")
           PY
-          printf 'Exact plan SHA-256: `%s`\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Exact plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
           # This repository is public. Encrypt the binary plan so the artifact
           # contains no readable Terraform state/configuration values. The AWS
           # secret key stays in the Environment secret store and is never written
@@ -497,7 +497,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as target:
               target.write(f"plan_sha256={sys.argv[1]}\n")
           PY
-          printf 'Exact destroy plan SHA-256: `%s`\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Exact destroy plan SHA-256: %s\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
           openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
             -pass env:AWS_SECRET_ACCESS_KEY -in tfplan -out tfplan.enc
 
