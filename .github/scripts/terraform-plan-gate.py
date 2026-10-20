@@ -69,23 +69,20 @@ def destroy_preparation_guard(plan):
         )
         if not allowed_update:
             paths = top_level_changed_paths(before, after)
+            resource_label = address if known_address(address) else "<unlisted resource>"
             safe_actions = [
                 action if action in {"create", "read", "update", "delete", "forget", "import", "no-op"} else "<other>"
                 for action in actions
                 if isinstance(action, str)
             ]
-            unexpected.append((safe_actions, paths))
+            unexpected.append((resource_label, safe_actions, paths))
 
     if unexpected:
         print("Teardown preparation plan includes changes beyond force_destroy settings:", file=sys.stderr)
-        for index, (actions, paths) in enumerate(unexpected, start=1):
-            print(f"- change {index}: actions={','.join(actions) or '<none>'}; changed attribute paths={', '.join(paths) or '<none>'}", file=sys.stderr)
+        for index, (resource_label, actions, paths) in enumerate(unexpected, start=1):
+            print(f"- change {index}: resource={resource_label}; actions={','.join(actions) or '<none>'}; changed attribute paths={', '.join(paths) or '<none>'}", file=sys.stderr)
         raise SystemExit(1)
 
-
-if len(sys.argv) > 2 and sys.argv[2] == "--destroy-prepare-guard":
-    destroy_preparation_guard(plan)
-    raise SystemExit(0)
 
 if plan.get("applyable") is not True:
     raise SystemExit("Terraform plan is not marked applyable")
@@ -193,6 +190,11 @@ def known_address(address):
         if re.fullmatch(re.escape(name) + suffix, resource_address):
             return True
     return False
+
+
+if len(sys.argv) > 2 and sys.argv[2] == "--destroy-prepare-guard":
+    destroy_preparation_guard(plan)
+    raise SystemExit(0)
 
 
 changes = []
