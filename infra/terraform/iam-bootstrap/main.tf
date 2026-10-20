@@ -277,6 +277,19 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
+    for_each = each.key == "production-plan" ? [true] : []
+    content {
+      sid     = "ReadEnvironmentApplyRoleInlinePoliciesForPromotionCheck"
+      effect  = "Allow"
+      actions = ["iam:GetRolePolicy"]
+      resources = [
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-terraform-apply",
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-apply"
+      ]
+    }
+  }
+
+  dynamic "statement" {
     for_each = each.value.environment == "development" && (var.development_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "development")) ? [true] : each.value.environment == "production" && (var.production_oac_arn != "" || (each.value.purpose == "apply" && var.oac_create_environment == "production")) ? [true] : []
     content {
       sid       = "ReadOnlyAssignedEnvironmentOAC"
