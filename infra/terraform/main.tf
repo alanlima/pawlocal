@@ -189,7 +189,7 @@ resource "aws_route53_record" "site_aaaa" {
 }
 
 removed {
-  from = aws_iam_openid_connect_provider.github[0]
+  from = aws_iam_openid_connect_provider.github
 
   lifecycle {
     destroy = false
@@ -197,12 +197,11 @@ removed {
 }
 
 data "aws_iam_openid_connect_provider" "github" {
-  count = var.manage_github_oidc_provider ? 0 : 1
-  url   = "https://token.actions.githubusercontent.com"
+  url = "https://token.actions.githubusercontent.com"
 }
 
 locals {
-  github_oidc_provider_arn = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  github_oidc_provider_arn = data.aws_iam_openid_connect_provider.github.arn
 }
 
 data "aws_iam_policy_document" "github_deploy_assume_role" {

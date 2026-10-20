@@ -76,12 +76,6 @@ variable "terraform_state_bucket_name" {
   }
 }
 
-variable "manage_github_oidc_provider" {
-  description = "Keep Terraform ownership of the GitHub OIDC provider already managed by the existing root state."
-  type        = bool
-  default     = true
-}
-
 variable "force_destroy_on_teardown" {
   description = "Allow an explicitly approved Terraform teardown to empty app-owned S3 buckets and remove Aurora DSQL clusters with deletion protection enabled. Leave false for normal operation."
   type        = bool

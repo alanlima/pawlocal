@@ -74,7 +74,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "false"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: ${{ inputs.operation == 'destroy' && 'true' || 'false' }}
     steps:
@@ -96,9 +95,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -274,7 +274,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "false"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "false"
     steps:
@@ -286,9 +285,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -380,7 +380,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "false"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -392,9 +391,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -487,7 +487,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "false"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -499,9 +498,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
@@ -609,7 +609,6 @@ jobs:
       TF_VAR_github_repository_id: ${{ github.repository_id }}
       TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       TF_VAR_dsql_bootstrap_python: /usr/bin/python3
-      TF_VAR_manage_github_oidc_provider: "false"
       TF_VAR_enable_dsql_auth_event_capture: "false"
       TF_VAR_force_destroy_on_teardown: "true"
     steps:
@@ -621,9 +620,10 @@ jobs:
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
 
