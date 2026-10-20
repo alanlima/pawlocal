@@ -246,7 +246,7 @@ jobs:
   apply:
     name: Apply reviewed exact ${{ inputs.environment }} plan
     needs: plan
-    if: always() && needs.plan.result == 'success'
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}-apply
     permissions:

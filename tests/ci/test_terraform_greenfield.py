@@ -197,7 +197,8 @@ class GreenfieldTerraformTests(unittest.TestCase):
         apply_header = source.split("\n  apply:\n", 1)[1].split("\n    steps:\n", 1)[0]
 
         self.assertIn("needs: plan", apply_header)
-        self.assertIn("if: always() && needs.plan.result == 'success'", apply_header)
+        self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' }}", apply_header)
+        self.assertNotIn("always()", apply_header)
         self.assertNotIn("production-eligibility", apply_header)
 
     def test_release_workflows_call_matching_environment_root_workflow(self) -> None:
