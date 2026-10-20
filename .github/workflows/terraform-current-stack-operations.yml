@@ -166,6 +166,27 @@ jobs:
           }
           python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
 
+      - name: Create read-only refresh snapshot for destroy preparation
+        if: inputs.operation == 'destroy'
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          if terraform plan -refresh-only -input=false -lock-timeout=5m -no-color \
+            -out="$RUNNER_TEMP/terraform-refresh-only.tfplan" \
+            > "$RUNNER_TEMP/terraform-refresh-only.log" 2>&1; then
+            :
+          else
+            echo 'Terraform refresh-only planning failed. Sanitized diagnostic summary:' >&2
+            python ../../.github/scripts/terraform-plan-diagnostic.py "$RUNNER_TEMP/terraform-refresh-only.log" >&2
+            exit 1
+          fi
+          terraform show -json "$RUNNER_TEMP/terraform-refresh-only.tfplan" \
+            > "$RUNNER_TEMP/terraform-refresh-only.json" \
+            2> "$RUNNER_TEMP/terraform-refresh-only-show.log" || {
+              echo 'Terraform refresh-only plan could not be safely rendered; raw output was withheld.' >&2
+              exit 1
+            }
+
       - name: Create the requested plan
         id: plan
         working-directory: infra/terraform
@@ -200,6 +221,11 @@ jobs:
             echo 'Terraform plan could not be safely rendered; raw output was withheld.' >&2
             exit 1
           }
+          if [[ "$PLAN_STAGE" == destroy-prepare ]]; then
+            python ../../.github/scripts/terraform-refresh-diagnostic.py \
+              "$RUNNER_TEMP/terraform-refresh-only.json" \
+              "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
+          fi
           python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$PLAN_STAGE" == destroy-prepare ]]; then
             python ../../.github/scripts/terraform-plan-gate.py "$RUNNER_TEMP/terraform-plan.json" --destroy-prepare-guard

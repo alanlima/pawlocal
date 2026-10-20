@@ -19,6 +19,7 @@ SHARED_STATE_WRITERS = (
     ROOT / ".github/workflows/rollback-development.yml",
     WORKFLOW,
 )
+FULLSTACK_RELEASE_WORKFLOW = ROOT / ".github/workflows/fullstack-release.yml"
 AWS_ENABLED_JOBS = {
     "plan": "infrastructure-plan",
     "apply": "infrastructure-apply",
@@ -156,6 +157,16 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 self.assertLess(role_validation, credential_step)
                 self.assertLess(credential_step, account_check)
                 self.assertLess(account_check, min(terraform_calls))
+
+    def test_fullstack_release_ignores_current_stack_operations_only_changes(self) -> None:
+        source = FULLSTACK_RELEASE_WORKFLOW.read_text(encoding="utf-8")
+        pull_request_paths = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+        push_paths = source.split("  push:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
+        operations_workflow = '"!.github/workflows/terraform-current-stack-operations.yml"'
+        self.assertIn(operations_workflow, pull_request_paths)
+        self.assertIn(operations_workflow, push_paths)
+        self.assertIn('"!.github/workflows/fullstack-release.yml"', push_paths)
+        self.assertNotIn('"!.github/workflows/fullstack-release.yml"', pull_request_paths)
 
 
 if __name__ == "__main__":
