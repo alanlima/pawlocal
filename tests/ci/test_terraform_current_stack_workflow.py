@@ -228,6 +228,41 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("$.encryption_details", result.stderr)
 
+    def test_destroy_preparation_rejects_known_sibling_with_unknown_dsql_encryption_field(self) -> None:
+        result = self.run_destroy_prepare_guard([
+            {
+                "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                "mode": "managed",
+                "change": {
+                    "actions": ["update"],
+                    "before": {
+                        "force_destroy": False,
+                        "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                        "encryption_details": [{
+                            "encryption_type": "AWS_OWNED_KMS_KEY",
+                            "encryption_status": "ENABLED",
+                        }],
+                    },
+                    "after": {
+                        "force_destroy": True,
+                        "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                        "encryption_details": [{
+                            "encryption_type": "CUSTOMER_MANAGED_KMS_KEY",
+                            "encryption_status": None,
+                        }],
+                    },
+                    "after_unknown": {
+                        "encryption_details": [{
+                            "encryption_type": False,
+                            "encryption_status": True,
+                        }],
+                    },
+                },
+            },
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("$.encryption_details", result.stderr)
+
     def test_destroy_preparation_still_rejects_policy_changes_and_role_forget(self) -> None:
         policy_addresses = [
             "aws_iam_role_policy.github_deploy",

@@ -28,14 +28,30 @@ def destroy_preparation_guard(plan):
     }
     unexpected = []
 
-    def contains_unknown(value):
+    def all_unknown(value):
         if value is True:
             return True
-        if isinstance(value, dict):
-            return any(contains_unknown(child) for child in value.values())
-        if isinstance(value, list):
-            return any(contains_unknown(child) for child in value)
+        if isinstance(value, dict) and value:
+            return all(all_unknown(child) for child in value.values())
+        if isinstance(value, list) and value:
+            return all(all_unknown(child) for child in value)
         return False
+
+    def without_unknown_values(value, unknown):
+        if unknown is True:
+            return None
+        if isinstance(value, dict) and isinstance(unknown, dict):
+            return {
+                key: without_unknown_values(child, unknown.get(key))
+                for key, child in value.items()
+                if unknown.get(key) is not True
+            }
+        if isinstance(value, list) and isinstance(unknown, list):
+            return [
+                without_unknown_values(child, unknown[index] if index < len(unknown) else None)
+                for index, child in enumerate(value)
+            ]
+        return value
 
     def top_level_changed_paths(before, after, ignored_keys):
         if not isinstance(before, dict):
@@ -66,21 +82,35 @@ def destroy_preparation_guard(plan):
         new = dict(after) if isinstance(after, dict) else after
         address = item.get("address", "")
         after_unknown = change.get("after_unknown", {})
-        ignore_computed_encryption = (
+        computed_encryption_update = (
             address in allowed
             and address.startswith("module.fullstack.aws_dsql_cluster.app[")
             and actions == ["update"]
             and isinstance(after, dict)
             and after.get("force_destroy") is True
             and isinstance(after_unknown, dict)
-            and contains_unknown(after_unknown.get("encryption_details"))
+            and after_unknown.get("encryption_details") is not None
         )
         ignored_keys = {"force_destroy"}
-        if ignore_computed_encryption:
+        if computed_encryption_update:
             # encryption_details is a provider-exported attribute. It can become
             # unknown as a consequence of updating force_destroy, but cannot be
-            # configured independently of the cluster's kms_encryption_key.
-            ignored_keys.add("encryption_details")
+            # configured independently of the cluster's kms_encryption_key. Drop
+            # only unknown subpaths; a mixed known/unknown value remains compared.
+            encryption_unknown = after_unknown["encryption_details"]
+            if all_unknown(encryption_unknown):
+                ignored_keys.add("encryption_details")
+            else:
+                before = dict(before) if isinstance(before, dict) else before
+                after = dict(after) if isinstance(after, dict) else after
+                before["encryption_details"] = without_unknown_values(
+                    before.get("encryption_details"), encryption_unknown
+                )
+                after["encryption_details"] = without_unknown_values(
+                    after.get("encryption_details"), encryption_unknown
+                )
+                old = dict(before)
+                new = dict(after)
         if isinstance(old, dict):
             for key in ignored_keys:
                 old.pop(key, None)
