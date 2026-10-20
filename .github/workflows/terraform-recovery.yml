@@ -147,7 +147,7 @@ jobs:
           {
             echo '## Legacy shared-state Terraform recovery'
             echo
-            echo "Commit: `${GITHUB_SHA}`"
+            printf 'Commit: \x60%s\x60\n' "$GITHUB_SHA"
             echo 'This is a proposed destroy plan for the old shared dev/prod application resources. Recovery apply remains blocked pending independent IAM policy review, DSQL protection staging, and review of this exact inventory.'
             echo 'Terraform recovery mode enables force-destroy only for the tracked PawLocal frontend buckets; the sanitizer verifies each bucket name against the source naming scheme and rejects the backend bucket.'
             if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-recovery-show-error.txt" | python ../../ops/terraform-recovery-plan-review.py --state-bucket-name "$PAWLOCAL_TF_STATE_BUCKET"; then

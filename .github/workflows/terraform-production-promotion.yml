@@ -235,14 +235,6 @@ jobs:
             --production-oac-arn "$PAWLOCAL_PRODUCTION_OAC_ARN" \
             --region "$AWS_REGION"
 
-      - name: Verify bootstrap CloudFront distribution tag grant
-        env:
-          PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
-        run: |
-          python ops/verify-terraform-bootstrap-cloudfront-tag-grant.py \
-            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
-            --region "$AWS_REGION"
-
       - name: Initialize production state and create saved plan
         working-directory: infra/terraform/environments/production
         shell: bash
@@ -266,15 +258,18 @@ jobs:
 
       - name: Publish sanitized production plan for review
         working-directory: infra/terraform/environments/production
+        env:
+          TARGET_STAGE: ${{ inputs.target_stage }}
+          DEVELOPMENT_SHA: ${{ needs.validate-ref.outputs.development_sha }}
         shell: bash
         run: |
           set -o pipefail
           {
             echo '## Production Terraform plan review'
             echo
-            echo "Stage: `${{ inputs.target_stage }}`"
-            echo "Development commit: `${{ needs.validate-ref.outputs.development_sha }}`"
-            echo "State: `pawlocal/production/terraform.tfstate`"
+            printf 'Stage: \x60%s\x60\n' "$TARGET_STAGE"
+            printf 'Development commit: \x60%s\x60\n' "$DEVELOPMENT_SHA"
+            printf 'State: \x60pawlocal/production/terraform.tfstate\x60\n'
             echo 'Changed resource addresses, actions, and attribute paths are shown; values are omitted.'
             if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-show-error.txt" | python ../../../../ops/terraform-plan-review.py --environment production; then
               echo 'Terraform plan review could not be safely rendered; raw output was withheld.' >&2
@@ -289,7 +284,7 @@ jobs:
         run: |
           digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
           echo "plan_sha256=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Saved plan SHA-256: `${digest}`" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Saved plan SHA-256: \x60%s\x60\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exact production plan to the private Terraform plan prefix
         env:
@@ -308,9 +303,50 @@ jobs:
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --sha256 "$PLAN_SHA256"
 
+  production-apply-policy-check:
+    name: Verify production apply permissions before approval
+    needs: production-plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_PRODUCTION_TERRAFORM_PLAN_ROLE_ARN }}
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.production-plan.outputs.development_sha }}
+          persist-credentials: false
+
+      - name: Validate the exact production plan role
+        shell: bash
+        run: |
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-plan$ ]]
+
+      - name: Configure production plan role for read-only policy inspection
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-prod-policy-check-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify production CloudFront apply policy
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/verify-terraform-bootstrap-cloudfront-tag-grant.py \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
+            --environment production \
+            --region "$AWS_REGION"
+          echo 'Checked the production apply role after sanitized plan publication and before the protected apply approval. The approved account-wide tag-conditioned policy carries the documented MVP cross-environment configuration risk.' >> "$GITHUB_STEP_SUMMARY"
+
   production-apply:
     name: Apply reviewed production plan
-    needs: production-plan
+    needs: [production-plan, production-apply-policy-check]
     runs-on: ubuntu-latest
     # Configure this GitHub Environment with required reviewers, main-only
     # deployment branches, and the matching production apply role ARN.
@@ -405,7 +441,7 @@ jobs:
         shell: bash
         run: |
           oac_arn="$(terraform output -raw oac_arn)"
-          echo "Production OAC ARN for the separate bootstrap policy: `${oac_arn}`" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Production OAC ARN for the separate bootstrap policy: \x60%s\x60\n' "$oac_arn" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify production API and database-backed place query
         if: inputs.target_stage == 'api'
@@ -462,17 +498,20 @@ jobs:
 
           {
             echo 'Production API health and database-backed place query both passed.'
-            echo "API image digest: \`${expected_digest}\`"
+            printf 'API image digest: \x60%s\x60\n' "$expected_digest"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record production apply result
         if: inputs.target_stage == 'api'
-        shell: bash
         env:
+          DEVELOPMENT_SHA: ${{ needs.production-plan.outputs.development_sha }}
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+        shell: bash
         run: |
-          echo 'Production apply succeeded for the reviewed saved plan.' >> "$GITHUB_STEP_SUMMARY"
-          echo "Development commit: `${{ needs.production-plan.outputs.development_sha }}`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'Production apply succeeded for the reviewed saved plan.'
+            printf 'Development commit: \x60%s\x60\n' "$DEVELOPMENT_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record production foundation handoff
         if: inputs.target_stage == 'foundation'

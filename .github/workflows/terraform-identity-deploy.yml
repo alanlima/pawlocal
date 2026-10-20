@@ -103,8 +103,8 @@ jobs:
           {
             echo "## ${TARGET_ENVIRONMENT} identity Terraform review"
             echo
-            echo "Commit: `${GITHUB_SHA}`"
-            echo "State: `pawlocal/identity/terraform.tfstate`"
+            printf 'Commit: \x60%s\x60\n' "$GITHUB_SHA"
+            printf 'State: \x60pawlocal/identity/terraform.tfstate\x60\n'
             terraform show -json tfplan 2>"$RUNNER_TEMP/identity-show-error.txt" | python ../../../ops/terraform-identity-plan-review.py \
               --environment "$TARGET_ENVIRONMENT" \
               --development-frontend-policy-arn "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:policy/pawlocal-identity-development-frontend-publish" \

@@ -184,6 +184,7 @@ class BootstrapCloudFrontTagGrantTests(unittest.TestCase):
     class FakeIam:
         def __init__(self, env_policy_overrides=None, extra_names=None, attached=None):
             self.documents = {}
+            self.requests = []
             self.extra_names = extra_names or {}
             self.attached = attached or {}
             for environment in bootstrap_cf_tag.ENVIRONMENTS:
@@ -192,25 +193,68 @@ class BootstrapCloudFrontTagGrantTests(unittest.TestCase):
                 names += self.extra_names.get(environment, [])
                 self.documents[(role, names[0])] = {"Statement": []}
                 self.documents[(role, names[1])] = {"Statement": [
-                    bootstrap_cf_tag._expected_statement(environment, BootstrapCloudFrontTagGrantTests.account_id)
+                    bootstrap_cf_tag._expected_statement(environment, BootstrapCloudFrontTagGrantTests.account_id),
+                    bootstrap_cf_tag._expected_update_statement(environment, BootstrapCloudFrontTagGrantTests.account_id),
                 ]}
                 for name, document in (env_policy_overrides or {}).get(environment, {}).items():
                     self.documents[(role, name)] = document
 
         def list_role_policies(self, RoleName, Marker=None):
+            self.requests.append(("list", RoleName))
             names = [name for role, name in self.documents if role == RoleName]
             names += self.extra_names.get(RoleName.removeprefix("pawlocal-").split("-terraform-apply")[0], [])
             return {"PolicyNames": names, "IsTruncated": False}
 
         def list_attached_role_policies(self, RoleName, Marker=None):
+            self.requests.append(("attached", RoleName))
             return {"AttachedPolicies": self.attached.get(RoleName, []), "IsTruncated": False}
 
         def get_role_policy(self, RoleName, PolicyName):
+            self.requests.append(("get", RoleName, PolicyName))
             return {"PolicyDocument": self.documents[(RoleName, PolicyName)]}
 
     def test_both_roles_require_exact_account_scoped_conditioned_grant(self):
         result = bootstrap_cf_tag.verify(self.FakeIam(), self.account_id)
-        self.assertIn("both environment apply roles", result)
+        self.assertIn("cross-environment retagging and configuration risk is accepted", result)
+
+    def test_environment_check_reads_only_matching_role_and_validates_both_grants(self):
+        iam = self.FakeIam()
+        self.assertIn("cross-environment", bootstrap_cf_tag.verify(iam, self.account_id, "development"))
+        self.assertEqual({request[1] for request in iam.requests}, {"pawlocal-development-terraform-apply"})
+
+    def test_update_distribution_scope_and_conditions_fail_closed(self):
+        for mutation in (
+            lambda statement: statement.update(Resource="*"),
+            lambda statement: statement.update(Resource="arn:aws:cloudfront::999999999999:distribution/*"),
+            lambda statement: statement["Condition"]["StringEquals"].update({"aws:ResourceTag/project": "other"}),
+            lambda statement: statement["Condition"]["StringEquals"].update({"aws:ResourceTag/environment": "production"}),
+            lambda statement: statement.update(Action=[bootstrap_cf_tag.UPDATE_ACTION, "cloudfront:TagResource"]),
+        ):
+            update = bootstrap_cf_tag._expected_update_statement("development", self.account_id)
+            mutation(update)
+            iam = self.FakeIam(env_policy_overrides={
+                "development": {"pawlocal-development-terraform-application-services": {"Statement": [
+                    bootstrap_cf_tag._expected_statement("development", self.account_id), update,
+                ]}}
+            })
+            with self.subTest(update=update), self.assertRaises(ValueError):
+                bootstrap_cf_tag.verify(iam, self.account_id, "development")
+
+    def test_update_distribution_in_wrong_policy_or_duplicated_is_rejected(self):
+        update = bootstrap_cf_tag._expected_update_statement("development", self.account_id)
+        for misplaced, duplicate in ((True, False), (False, True)):
+            service_statements = [bootstrap_cf_tag._expected_statement("development", self.account_id)]
+            if not misplaced:
+                service_statements.append(update)
+            permissions_statements = [update] if misplaced else ([{ "Sid": "Extra", **update }] if duplicate else [])
+            iam = self.FakeIam(env_policy_overrides={
+                "development": {
+                    "pawlocal-development-terraform-application-services": {"Statement": service_statements},
+                    "pawlocal-development-terraform-apply-permissions": {"Statement": permissions_statements},
+                }
+            })
+            with self.subTest(misplaced=misplaced, duplicate=duplicate), self.assertRaises(ValueError):
+                bootstrap_cf_tag.verify(iam, self.account_id, "development")
 
     def test_wrong_account_resource_or_tag_conditions_fail_closed(self):
         for mutation in (
@@ -406,9 +450,15 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         self.assertIn("required: false", text)
         self.assertIn("Require the applied development DSQL runtime identity", text)
         self.assertIn('if: inputs.backend_image_digest != \'\'', text)
-        verify_tag = text.index("Verify bootstrap CloudFront distribution tag grant")
-        dev_plan_command = text.index("Initialize development state and create saved plan")
-        self.assertLess(verify_tag, dev_plan_command)
+        dev_plan_review = text.index("Publish sanitized development plan for review")
+        policy_check = text.index("development-apply-policy-check:")
+        dev_apply_gate = text.index("development-apply:")
+        env_gate = text.index("environment: development-apply")
+        self.assertLess(dev_plan_review, policy_check)
+        self.assertLess(policy_check, dev_apply_gate)
+        self.assertLess(policy_check, env_gate)
+        self.assertIn("needs: [development-plan, development-apply-policy-check]", text)
+        self.assertIn("--environment development", text)
         self.assertIn("verify-terraform-bootstrap-cloudfront-tag-grant.py", text)
         self.assertIsNone(re.search(r"^\s*terraform\s+[^\n]*\s-target(?:\s|=)", text, re.MULTILINE))
 
@@ -448,7 +498,8 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         self.assertIn("TF_VAR_recovery_disable_dsql_deletion_protection: \"true\"", text)
         self.assertLess(protection.index("Publish exact sanitized DSQL changes"), protection.index("  recovery-protection-apply:"))
         protected_apply = protection.split("  recovery-protection-apply:", 1)[1]
-        self.assertIn("if: false", protected_apply)
+        self.assertIn("if: github.event_name == 'push'", protected_apply)
+        self.assertIn("workflow_dispatch:", protection)
         self.assertIn("configure-aws-credentials", protected_apply)
         self.assertIn("terraform apply", protected_apply)
         self.assertIn("pending scoped policy review", protected_apply)
@@ -457,13 +508,21 @@ class TerraformWorkflowContractTests(unittest.TestCase):
         self.assertIn("Apply exact reviewed DSQL protection plan", protection)
         self.assertIn("terraform-recovery-protection-review.py", protection)
 
-    def test_production_handoff_check_runs_before_plan_and_digest_is_not_shell_interpolated(self):
+    def test_production_handoff_and_policy_check_order_before_approval(self):
         text = (ROOT / ".github/workflows/terraform-production-promotion.yml").read_text()
         handoff = text.index("Verify local bootstrap OAC handoff")
-        tag_grant = text.index("Verify bootstrap CloudFront distribution tag grant")
         plan = text.index("Initialize production state and create saved plan")
+        review = text.index("Publish sanitized production plan for review")
+        policy_check = text.index("production-apply-policy-check:")
+        apply = text.index("production-apply:")
+        env_gate = text.index("environment: production-apply")
         self.assertLess(handoff, plan)
-        self.assertLess(tag_grant, plan)
+        self.assertLess(plan, review)
+        self.assertLess(review, policy_check)
+        self.assertLess(policy_check, apply)
+        self.assertLess(policy_check, env_gate)
+        self.assertIn("needs: [production-plan, production-apply-policy-check]", text)
+        self.assertIn("--environment production", text)
         self.assertIn("verify-terraform-bootstrap-cloudfront-tag-grant.py", text)
         self.assertIn("--development-oac-arn \"$PAWLOCAL_DEVELOPMENT_OAC_ARN\"", text)
         self.assertIn("list_role_policies", (ROOT / "ops/verify-terraform-bootstrap-oac-handoff.py").read_text())

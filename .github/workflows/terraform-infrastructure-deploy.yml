@@ -126,15 +126,6 @@ jobs:
           role-session-name: pawlocal-dev-tf-plan-${{ github.run_id }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Verify bootstrap CloudFront distribution tag grant
-        env:
-          PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
-        run: |
-          python -m pip install --disable-pip-version-check boto3==1.35.99
-          python ops/verify-terraform-bootstrap-cloudfront-tag-grant.py \
-            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
-            --region "$AWS_REGION"
-
       - name: Initialize development state and create saved plan
         working-directory: infra/terraform/environments/development
         shell: bash
@@ -164,8 +155,8 @@ jobs:
           {
             echo '## Development Terraform plan review'
             echo
-            echo "Commit: `${GITHUB_SHA}`"
-            echo "State: `pawlocal/development/terraform.tfstate`"
+            printf 'Commit: \x60%s\x60\n' "$GITHUB_SHA"
+            printf 'State: \x60pawlocal/development/terraform.tfstate\x60\n'
             echo 'Changed resource addresses, actions, and attribute paths are shown; values are omitted.'
             if ! terraform show -json tfplan 2>"$RUNNER_TEMP/terraform-show-error.txt" | python ../../../../ops/terraform-plan-review.py --environment development; then
               echo 'Terraform plan review could not be safely rendered; raw output was withheld.' >&2
@@ -180,7 +171,7 @@ jobs:
         run: |
           digest="$(sha256sum tfplan | cut -d ' ' -f 1)"
           echo "plan_sha256=${digest}" >> "$GITHUB_OUTPUT"
-          echo "Saved plan SHA-256: `${digest}`" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Saved plan SHA-256: \x60%s\x60\n' "$digest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload exact development plan to the private Terraform plan prefix
         env:
@@ -199,9 +190,50 @@ jobs:
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --sha256 "$PLAN_SHA256"
 
+  development-apply-policy-check:
+    name: Verify development apply permissions before approval
+    needs: development-plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_DEVELOPMENT_TERRAFORM_PLAN_ROLE_ARN }}
+    steps:
+      - name: Check out the planned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate the exact development plan role
+        shell: bash
+        run: |
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$PAWLOCAL_TERRAFORM_ROLE_ARN" =~ ^arn:[^:]+:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-development-terraform-plan$ ]]
+
+      - name: Configure development plan role for read-only policy inspection
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PAWLOCAL_TERRAFORM_ROLE_ARN }}
+          role-session-name: pawlocal-dev-policy-check-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify development CloudFront apply policy
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check boto3==1.35.99
+          python ops/verify-terraform-bootstrap-cloudfront-tag-grant.py \
+            --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
+            --environment development \
+            --region "$AWS_REGION"
+          echo 'Checked the development apply role after sanitized plan publication and before the protected apply approval. The approved account-wide tag-conditioned policy carries the documented MVP cross-environment configuration risk.' >> "$GITHUB_STEP_SUMMARY"
+
   development-apply:
     name: Apply reviewed development plan
-    needs: development-plan
+    needs: [development-plan, development-apply-policy-check]
     runs-on: ubuntu-latest
     # Configure this GitHub Environment with required reviewers, main-only
     # deployment branches, and the matching development apply role ARN.
@@ -296,7 +328,7 @@ jobs:
         shell: bash
         run: |
           oac_arn="$(terraform output -raw oac_arn)"
-          echo "Development OAC ARN for the separate bootstrap policy: `${oac_arn}`" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Development OAC ARN for the separate bootstrap policy: \x60%s\x60\n' "$oac_arn" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify development API and database-backed place query
         if: inputs.backend_image_digest != ''
@@ -353,7 +385,7 @@ jobs:
 
           {
             echo 'Development API health and database-backed place query both passed.'
-            echo "API image digest: \`${expected_digest}\`"
+            printf 'API image digest: \x60%s\x60\n' "$expected_digest"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record development apply result
@@ -362,10 +394,12 @@ jobs:
         env:
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
         run: |
-          echo 'Development apply succeeded for the reviewed saved plan.' >> "$GITHUB_STEP_SUMMARY"
-          echo "Development workflow run ID: `${GITHUB_RUN_ID}`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Immutable API image: `${BACKEND_IMAGE_DIGEST}`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Commit: `${GITHUB_SHA}`" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'Development apply succeeded for the reviewed saved plan.'
+            printf 'Development workflow run ID: \x60%s\x60\n' "$GITHUB_RUN_ID"
+            printf 'Immutable API image: \x60%s\x60\n' "$BACKEND_IMAGE_DIGEST"
+            printf 'Commit: \x60%s\x60\n' "$GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record development foundation handoff
         if: inputs.backend_image_digest == ''

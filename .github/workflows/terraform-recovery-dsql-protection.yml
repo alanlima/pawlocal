@@ -121,7 +121,9 @@ jobs:
     name: DSQL protection apply (blocked pending scoped policy review)
     needs: recovery-protection-plan
     # actionlint-disable if-cond
-    if: false
+    # This workflow is workflow_dispatch-only, so push can never schedule this
+    # apply job. Keep the blocked path non-constant so actionlint validates it.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: terraform-recovery-apply
     permissions:

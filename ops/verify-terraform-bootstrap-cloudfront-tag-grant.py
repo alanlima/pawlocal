@@ -11,6 +11,8 @@ from urllib.parse import unquote
 
 ENVIRONMENTS = ("development", "production")
 TAG_STATEMENT_SID = "TagAccountCloudFrontDistributionsForMVP"
+UPDATE_STATEMENT_SID = "UpdateTaggedAccountCloudFrontDistributionsForMVP"
+UPDATE_ACTION = "cloudfront:UpdateDistribution"
 TAG_KEYS = {"project", "environment", "managedby", "component", "workload", "costcenter"}
 
 
@@ -43,6 +45,21 @@ def _expected_statement(environment: str, account_id: str) -> dict[str, Any]:
                 "aws:RequestTag/environment": environment,
             },
             "ForAllValues:StringEquals": {"aws:TagKeys": sorted(TAG_KEYS)},
+        },
+    }
+
+
+def _expected_update_statement(environment: str, account_id: str) -> dict[str, Any]:
+    return {
+        "Sid": UPDATE_STATEMENT_SID,
+        "Effect": "Allow",
+        "Action": UPDATE_ACTION,
+        "Resource": f"arn:aws:cloudfront::{account_id}:distribution/*",
+        "Condition": {
+            "StringEquals": {
+                "aws:ResourceTag/project": "pawlocal",
+                "aws:ResourceTag/environment": environment,
+            }
         },
     }
 
@@ -133,25 +150,76 @@ def verify_role_tag_grant(documents: dict[str, dict[str, Any]], environment: str
         raise ValueError("Apply role is missing the single expected CloudFront distribution tag grant")
 
 
-def verify(iam: Any, account_id: str) -> str:
+def verify_role_update_grant(documents: dict[str, dict[str, Any]], environment: str, account_id: str) -> None:
+    expected_policy = f"pawlocal-{environment}-terraform-application-services"
+    expected = _expected_update_statement(environment, account_id)
+    matching_expected = 0
+    for policy_name, document in documents.items():
+        for statement in document["Statement"]:
+            if statement.get("Effect") != "Allow":
+                continue
+            if "NotAction" in statement or "NotResource" in statement:
+                raise ValueError("Apply role has a negated Allow statement whose CloudFront scope cannot be verified")
+            actions = _values(statement.get("Action", []))
+            if any(not isinstance(action, str) for action in actions):
+                raise ValueError("Apply role policy contains a non-string action")
+            if "*" in actions or any(action.casefold().startswith("cloudfront:") and "*" in action for action in actions):
+                raise ValueError("Apply role has a wildcard action that could grant broader CloudFront access")
+            if UPDATE_ACTION not in actions:
+                continue
+            if policy_name != expected_policy or not _matches_simple_expected(statement, expected):
+                raise ValueError("CloudFront UpdateDistribution grant does not match the approved account/tag scope")
+            matching_expected += 1
+    if matching_expected != 1:
+        raise ValueError("Apply role is missing the single approved account-wide CloudFront UpdateDistribution grant")
+
+
+def _matches_simple_expected(statement: dict[str, Any], expected: dict[str, Any]) -> bool:
+    if set(statement) != set(expected):
+        return False
+    if any(statement.get(key) != expected[key] for key in ("Sid", "Effect")):
+        return False
+    if _values(statement.get("Action")) != [expected["Action"]]:
+        return False
+    if _values(statement.get("Resource")) != [expected["Resource"]]:
+        return False
+    condition = statement.get("Condition")
+    expected_condition = expected.get("Condition")
+    if not isinstance(condition, dict) or not isinstance(expected_condition, dict) or set(condition) != set(expected_condition):
+        return False
+    for operator, expected_values in expected_condition.items():
+        actual_values = condition.get(operator)
+        if not isinstance(actual_values, dict) or set(actual_values) != set(expected_values):
+            return False
+        if any(_values(actual_values[key]) != [value] for key, value in expected_values.items()):
+            return False
+    return True
+
+
+def verify(iam: Any, account_id: str, environment: str = "") -> str:
     if not account_id.isdigit() or len(account_id) != 12:
         raise ValueError("AWS account ID must contain exactly 12 digits")
-    for environment in ENVIRONMENTS:
-        role_name = f"pawlocal-{environment}-terraform-apply"
+    if environment and environment not in ENVIRONMENTS:
+        raise ValueError("Environment must be development or production")
+    environments = (environment,) if environment else ENVIRONMENTS
+    for role_environment in environments:
+        role_name = f"pawlocal-{role_environment}-terraform-apply"
         documents = fetch_role_policy_documents(iam, role_name)
-        verify_role_tag_grant(documents, environment, account_id)
-    return "both environment apply roles have the exact account-scoped CloudFront TagResource grant"
+        verify_role_tag_grant(documents, role_environment, account_id)
+        verify_role_update_grant(documents, role_environment, account_id)
+    return "CloudFront TagResource and UpdateDistribution policies match the approved account/tag scope; cross-environment retagging and configuration risk is accepted for MVP"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--account-id", required=True)
     parser.add_argument("--region", required=True)
+    parser.add_argument("--environment", choices=ENVIRONMENTS, default="")
     args = parser.parse_args()
     try:
         import boto3
 
-        result = verify(boto3.client("iam", region_name=args.region), args.account_id)
+        result = verify(boto3.client("iam", region_name=args.region), args.account_id, args.environment)
         print(f"Bootstrap CloudFront tagging grant verified: {result}")
     except Exception as exc:  # Do not expose IAM policy contents or AWS response details in logs.
         print(f"Bootstrap CloudFront tagging grant verification failed: {type(exc).__name__}", file=sys.stderr)
