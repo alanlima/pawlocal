@@ -130,11 +130,13 @@ class GreenfieldTerraformTests(unittest.TestCase):
         for source in (module_permissions, boundary):
             self.assertIn('"cloudfront:TagResource"', source)
             self.assertIn('variable = "aws:RequestTag/environment"', source)
-            self.assertIn('variable = "aws:TagKeys"', source)
-            self.assertIn('sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"', source)
-            self.assertIn('sid       = "ManageExactEnvironmentCloudFrontFunction"', source)
             self.assertIn('"cloudfront:CreateFunction"', source)
             self.assertNotIn("cloudfront:UntagResource", source)
+        self.assertIn('sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"', module_permissions)
+        self.assertIn('sid       = "ManageExactEnvironmentCloudFrontFunction"', module_permissions)
+        self.assertIn('variable = "aws:TagKeys"', module_permissions)
+        for tag_name in ("managedby", "component", "workload", "costcenter"):
+            self.assertIn(f'variable = "aws:RequestTag/{tag_name}"', module_permissions)
         self.assertIn(
             'var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == ""',
             module_permissions,
@@ -142,6 +144,24 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('var.development_distribution_arn == "" && var.development_oac_arn == ""', boundary)
         self.assertIn('var.production_distribution_arn == "" && var.production_oac_arn == ""', boundary)
         self.assertIn("tags                = local.common_tags", distribution)
+
+    def test_environment_apply_boundaries_have_an_offline_size_and_isolation_gate(self) -> None:
+        boundary = (ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf").read_text(
+            encoding="utf-8"
+        )
+        test_file = (
+            ROOT
+            / "infra/terraform/iam-bootstrap/tests/environment_apply_boundary.tftest.hcl"
+        ).read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("environment_apply_boundary_max_bytes = 5500", boundary)
+        self.assertIn(".minified_json", boundary)
+        self.assertIn("length(policy.minified_json) < 6144", test_file)
+        self.assertIn("iam:UpdateAssumeRolePolicy", test_file)
+        self.assertIn("lightsail:UntagResource", test_file)
+        self.assertIn("cloudfront:UntagResource", test_file)
+        self.assertIn("terraform test -no-color", workflow)
 
     def test_lightsail_authorization_tags_are_one_time_and_cannot_be_removed(self) -> None:
         for path in (

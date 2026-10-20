@@ -12,6 +12,8 @@ Each apply role trusts only its protected `<environment>-apply` GitHub Environme
 
 The bootstrap-owned boundary is the effective maximum. It does not allow role creation/deletion, trust changes, permissions-boundary changes, `PassRole`, OIDC changes, another environment's state, policies, attachments, DNS names, or named resources.
 
+AWS limits a managed-policy document to 6,144 non-whitespace bytes. The repository enforces a stricter 5,500-byte budget against each rendered, minified environment apply boundary. Boundary statements omit non-authorizing SIDs and use read-only service patterns; the matching identity policy retains the provider's exact read actions. For the first CloudFront create, the boundary requires the matching project/environment authorization tags, while the environment-owned identity policy requires the approved tag-key set and every metadata tag value. Because effective permissions are the intersection, this compaction does not add mutation authority or weaken cross-environment isolation.
+
 | Service | Maximum environment authority |
 |---|---|
 | S3 | Create only a bucket with the matching `pawlocal-<environment>-` prefix; later management requires matching project/environment tags. |
@@ -30,6 +32,8 @@ Bootstrap declaratively imports only the read-only-inventory-verified developmen
 The three app-specific managed policies present in the populated bootstrap state (development frontend, production frontend, and development runtime) have explicit `removed` blocks with `destroy = true`; the reviewed bootstrap plan must delete exactly those three policies rather than preserve duplicate ownership. The additional `identity_production_runtime` removed address is defensive because that resource existed only on an unapplied change and must be a no-op against the populated state. Bootstrap retains only identity, trust, baseline, boundary, and shared plan-transfer ownership. Environment roots are the sole owners of application, frontend-publish, and runtime policies and matching attachments.
 
 The reviewed bootstrap plan must also delete exactly the two legacy `environment_service_apply` inline role policies. Those deletions intentionally remove the former inline application authority now replaced by bootstrap boundaries and environment-owned policies. The existing development app-role boundary keeps its state-compatible description so the policy updates in place; no other delete or replacement is allowed.
+
+The first bootstrap apply partially completed before the environment apply boundaries were created, and the remote state serial advanced. Its saved plan is stale and must never be retried. After the size-safe boundary change is merged, normal refresh should produce only two environment apply-boundary creates and eight dependent environment Terraform role/inline-policy updates. If it contains any import, delete, replacement, application resource, unrelated resource, or additional drift, stop for a new review instead of applying it.
 
 Development and production runtime roles are created only after bootstrap receives the exact Lightsail `principal_arn` from the matching foundation output. Each boundary contains only that environment's exact DSQL cluster ARN handed back through reviewed bootstrap inputs. The environment root creates the exact DSQL connection policy and attachment. This staged handoff avoids wildcard cross-environment runtime access and manual state operations.
 

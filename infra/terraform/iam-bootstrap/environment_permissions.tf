@@ -6,6 +6,19 @@ locals {
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
     ]
   }
+  # Boundaries cap mutation while the matching identity policy retains the
+  # provider's exact read list. Read-only wildcards keep the rendered boundary
+  # below IAM's managed-policy size limit without increasing effective writes.
+  environment_boundary_read_actions = [
+    "cloudfront:Get*", "cloudfront:List*",
+    "cognito-idp:Describe*", "cognito-idp:Get*", "cognito-idp:List*",
+    "dsql:Get*", "dsql:List*",
+    "iam:Get*", "iam:List*",
+    "lightsail:Get*",
+    "route53:Get*", "route53:List*",
+    "sts:GetCallerIdentity", "tag:GetResources"
+  ]
+  environment_apply_boundary_max_bytes = 5500
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
@@ -14,7 +27,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   for_each = local.environments
 
   statement {
-    sid     = "UseOnlyMatchingEnvironmentState"
     effect  = "Allow"
     actions = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = [
@@ -24,14 +36,12 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "UseOnlyMatchingPlanObjects"
     effect    = "Allow"
     actions   = ["s3:GetObject"]
     resources = ["${local.plan_transfer_bucket_arn}/plans/${each.key}/*"]
   }
 
   statement {
-    sid     = "ReadStateAndPlanBucketMetadata"
     effect  = "Allow"
     actions = ["s3:GetBucketLocation"]
     resources = [
@@ -41,7 +51,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "ListOnlyMatchingStatePrefix"
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::${var.terraform_state_bucket_name}"]
@@ -53,21 +62,18 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "ReadProviderState"
     effect    = "Allow"
-    actions   = concat(local.readonly_discovery_actions, local.regional_read_actions)
+    actions   = local.environment_boundary_read_actions
     resources = ["*"]
   }
 
   statement {
-    sid       = "ManageOnlyMatchingEnvironmentPolicies"
     effect    = "Allow"
-    actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyTags", "iam:ListPolicyVersions", "iam:SetDefaultPolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
+    actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
     resources = local.environment_application_policy_arns[each.key]
   }
 
   statement {
-    sid       = "AttachOnlyMatchingApplicationPolicyToApplyRole"
     effect    = "Allow"
     actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
     resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-terraform-apply"]
@@ -79,7 +85,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "AttachOnlyMatchingPublishPolicyToPublishRole"
     effect    = "Allow"
     actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
     resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-github-deploy"]
@@ -91,7 +96,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "AttachOnlyMatchingRuntimePolicyToRuntimeRole"
     effect    = "Allow"
     actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
     resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-dsql-runtime"]
@@ -103,21 +107,18 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "CreateOnlyMatchingFrontendBucket"
     effect    = "Allow"
     actions   = ["s3:CreateBucket"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
   }
 
   statement {
-    sid       = "TagOnlyMatchingFrontendBucketName"
     effect    = "Allow"
     actions   = ["s3:PutBucketTagging"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
   }
 
   statement {
-    sid    = "ManageOnlyTaggedMatchingFrontendBucket"
     effect = "Allow"
     actions = [
       "s3:DeleteBucket", "s3:Get*", "s3:ListBucket", "s3:PutBucketOwnershipControls",
@@ -137,7 +138,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "CreateOnlyTaggedEnvironmentResources"
     effect    = "Allow"
     actions   = ["dsql:CreateCluster", "lightsail:CreateCertificate", "lightsail:CreateContainerService", "cognito-idp:CreateUserPool"]
     resources = ["*"]
@@ -154,7 +154,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid    = "ManageOnlyTaggedEnvironmentResources"
     effect = "Allow"
     actions = [
       "dsql:DeleteCluster", "dsql:PutClusterPolicy", "dsql:UpdateCluster",
@@ -177,7 +176,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid     = "SetLightsailAuthorizationTagsOnlyOnce"
     effect  = "Allow"
     actions = ["lightsail:TagResource"]
     resources = [
@@ -213,7 +211,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       : var.production_distribution_arn == "" && var.production_oac_arn == ""
     ) ? [true] : []
     content {
-      sid       = "CreateTaggedEnvironmentCloudFrontDistribution"
       effect    = "Allow"
       actions   = ["cloudfront:CreateDistribution"]
       resources = ["*"]
@@ -227,31 +224,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
         variable = "aws:RequestTag/environment"
         values   = [each.key]
       }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/managedby"
-        values   = ["terraform"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/component"
-        values   = ["fullstack-mvp"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/workload"
-        values   = ["application"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/costcenter"
-        values   = ["personal"]
-      }
-      condition {
-        test     = "ForAllValues:StringEquals"
-        variable = "aws:TagKeys"
-        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
-      }
     }
   }
 
@@ -262,7 +234,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       : var.production_distribution_arn == "" && var.production_oac_arn == ""
     ) ? [true] : []
     content {
-      sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"
       effect    = "Allow"
       actions   = ["cloudfront:TagResource"]
       resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
@@ -286,31 +257,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
         variable = "aws:RequestTag/environment"
         values   = [each.key]
       }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/managedby"
-        values   = ["terraform"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/component"
-        values   = ["fullstack-mvp"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/workload"
-        values   = ["application"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/costcenter"
-        values   = ["personal"]
-      }
-      condition {
-        test     = "ForAllValues:StringEquals"
-        variable = "aws:TagKeys"
-        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
-      }
     }
   }
 
@@ -321,7 +267,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       : var.production_distribution_arn == "" && var.production_oac_arn == ""
     ) ? [true] : []
     content {
-      sid       = "CreateEnvironmentCloudFrontOAC"
       effect    = "Allow"
       actions   = ["cloudfront:CreateOriginAccessControl"]
       resources = ["*"]
@@ -329,7 +274,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "ManageExactEnvironmentCloudFrontFunction"
     effect    = "Allow"
     actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"]
@@ -338,7 +282,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   dynamic "statement" {
     for_each = each.key == "development" && var.development_distribution_arn != "" ? [var.development_distribution_arn] : each.key == "production" && var.production_distribution_arn != "" ? [var.production_distribution_arn] : []
     content {
-      sid       = "ManageOnlyExactHandoffDistribution"
       effect    = "Allow"
       actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]
       resources = [statement.value]
@@ -348,7 +291,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   dynamic "statement" {
     for_each = each.key == "development" && var.development_oac_arn != "" ? [var.development_oac_arn] : each.key == "production" && var.production_oac_arn != "" ? [var.production_oac_arn] : []
     content {
-      sid       = "ManageOnlyExactHandoffOAC"
       effect    = "Allow"
       actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]
       resources = [statement.value]
@@ -356,7 +298,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    sid       = "ChangeOnlyEnvironmentDNSNames"
     effect    = "Allow"
     actions   = ["route53:ChangeResourceRecordSets"]
     resources = ["arn:${data.aws_partition.current.partition}:route53:::hostedzone/${var.route53_zone_id}"]
@@ -384,5 +325,12 @@ resource "aws_iam_policy" "environment_apply_boundary" {
     environment = each.key
     managedby   = "terraform"
     purpose     = "permissions-boundary"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json) <= local.environment_apply_boundary_max_bytes
+      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 5500-byte repository budget (AWS maximum: 6144 bytes)."
+    }
   }
 }

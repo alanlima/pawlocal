@@ -65,3 +65,12 @@ jobs:
 
       - name: Validate Terraform configuration
         run: terraform validate -no-color
+
+      - name: Test bootstrap permissions boundaries
+        if: matrix.root == 'iam-bootstrap'
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_SESSION_TOKEN: test
+          AWS_EC2_METADATA_DISABLED: true
+        run: terraform test -no-color
