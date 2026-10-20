@@ -127,8 +127,6 @@ def policy_summary(value: Any) -> str:
             statements = [statements]
         if not isinstance(statements, list) or any(not isinstance(item, dict) for item in statements):
             return "unavailable"
-        canonical = json.dumps(policy, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         allow_count = sum(item.get("Effect") == "Allow" for item in statements)
         deny_count = sum(item.get("Effect") == "Deny" for item in statements)
         wildcard_resources = sum(_contains_wildcard_resource(item.get("Resource")) for item in statements)
@@ -148,8 +146,25 @@ def policy_summary(value: Any) -> str:
             for operator in (item.get("Condition", {}) if isinstance(item.get("Condition"), dict) else {})
             if isinstance(operator, str) and re.fullmatch(r"[A-Za-z0-9]+", operator)
         })
+        aggregate = {
+            "statements": len(statements),
+            "allow": allow_count,
+            "deny": deny_count,
+            "actions": actions_count,
+            "action_services": _service_names(statements),
+            "action_effect_classes": _action_classes(statements),
+            "resources": resources_count,
+            "resource_categories": _resource_categories(statements),
+            "wildcard_resource_statements": wildcard_resources,
+            "principals": principal_count,
+            "principal_types": principal_types,
+            "conditioned_statements": condition_count,
+            "condition_operators": condition_operators,
+        }
+        canonical = json.dumps(aggregate, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return (
-            f"sha256={digest}; statements={len(statements)}; allow={allow_count}; deny={deny_count}; "
+            f"aggregate_sha256={digest}; statements={len(statements)}; allow={allow_count}; deny={deny_count}; "
             f"actions={actions_count}; action_services={','.join(_service_names(statements)) or 'none'}; "
             f"action_effect_classes={json.dumps(_action_classes(statements), sort_keys=True)}; "
             f"resources={resources_count}; resource_categories={json.dumps(_resource_categories(statements), sort_keys=True)}; "
@@ -169,25 +184,53 @@ def encryption_summary(value: Any) -> str:
         details = json.loads(value) if isinstance(value, str) else value
         if not isinstance(details, dict):
             return "unavailable"
-        canonical = json.dumps(details, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        output = [f"sha256={digest}"]
         safe_enums = {
             "encryption_status": {"ENABLED", "DISABLED"},
             "encryption_type": {"AWS_OWNED_KMS_KEY", "CUSTOMER_MANAGED_KMS_KEY"},
         }
+        safe_values = {}
         for key in ("encryption_status", "encryption_type"):
             candidate = details.get(key)
             if candidate is None:
-                output.append(f"{key}=absent")
+                safe_values[key] = None
             elif isinstance(candidate, str) and candidate.upper() in safe_enums[key]:
-                output.append(f"{key}={candidate.upper()}")
+                safe_values[key] = candidate.upper()
             else:
-                output.append(f"{key}=present")
-        output.append(f"fields={','.join(sorted(key for key in details if key in {'encryption_status', 'encryption_type'})) or 'none'}")
+                safe_values[key] = "present"
+        canonical = json.dumps(safe_values, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        output = [f"aggregate_sha256={digest}"]
+        for key, value in safe_values.items():
+            output.append(f"{key}={value if value is not None else 'absent'}")
         return "; ".join(output)
     except (TypeError, ValueError, json.JSONDecodeError):
         return "unavailable"
+
+
+def _contains_true(value: Any) -> bool:
+    if value is True:
+        return True
+    if isinstance(value, dict):
+        return any(_contains_true(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_true(item) for item in value)
+    return False
+
+
+def attribute_summary(change: dict[str, Any], attribute: str, side: str, summarize: Any) -> str:
+    values = change.get(side)
+    values = values if isinstance(values, dict) else {}
+    metadata = change.get(f"{side}_sensitive")
+    sensitive = metadata.get(attribute) if isinstance(metadata, dict) else None
+    if _contains_true(sensitive):
+        return "sensitive"
+    metadata = change.get(f"{side}_unknown")
+    unknown = metadata.get(attribute) if isinstance(metadata, dict) else None
+    if _contains_true(unknown):
+        return "unknown/computed"
+    if attribute not in values or values[attribute] is None:
+        return "absent"
+    return f"present; {summarize(values[attribute])}"
 
 
 def summarize_plan(plan: dict[str, Any], label: str) -> list[tuple[str, str, list[str], str | None]]:
@@ -208,13 +251,15 @@ def summarize_plan(plan: dict[str, Any], label: str) -> list[tuple[str, str, lis
         paths = changed_top_level_paths(before, after)
         policy_detail = None
         if "$.policy" in paths:
-            old_policy = before.get("policy") if isinstance(before, dict) else None
-            new_policy = after.get("policy") if isinstance(after, dict) else None
-            policy_detail = f"before[{policy_summary(old_policy)}]; after[{policy_summary(new_policy)}]"
+            policy_detail = (
+                f"before[{attribute_summary(change, 'policy', 'before', policy_summary)}]; "
+                f"after[{attribute_summary(change, 'policy', 'after', policy_summary)}]"
+            )
         elif "$.encryption_details" in paths:
-            old_details = before.get("encryption_details") if isinstance(before, dict) else None
-            new_details = after.get("encryption_details") if isinstance(after, dict) else None
-            policy_detail = f"before[{encryption_summary(old_details)}]; after[{encryption_summary(new_details)}]"
+            policy_detail = (
+                f"before[{attribute_summary(change, 'encryption_details', 'before', encryption_summary)}]; "
+                f"after[{attribute_summary(change, 'encryption_details', 'after', encryption_summary)}]"
+            )
         output.append((safe_resource_label(item.get("address")), safe_actions(actions), paths, policy_detail))
     return output
 

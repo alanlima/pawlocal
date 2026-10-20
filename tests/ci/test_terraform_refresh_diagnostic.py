@@ -106,6 +106,84 @@ class TerraformRefreshDiagnosticTests(unittest.TestCase):
         self.assertIn("encryption_type=CUSTOMER_MANAGED_KMS_KEY", result.stdout)
         self.assertNotIn(sensitive_value, result.stdout)
         self.assertNotIn("kms_key_arn", result.stdout)
+        alternate = self.run_diagnostic(
+            refresh,
+            {
+                "resource_changes": [{
+                    "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                    "mode": "managed",
+                    "change": {
+                        "actions": ["update"],
+                        "before": {"encryption_details": {"encryption_status": "ENABLED", "encryption_type": "AWS_OWNED_KMS_KEY"}},
+                        "after": {"encryption_details": {"encryption_status": "ENABLED", "encryption_type": "CUSTOMER_MANAGED_KMS_KEY", "kms_key_arn": "different-private-key-id"}},
+                    },
+                }]
+            },
+        )
+        after_summary = next(line for line in result.stdout.splitlines() if "after[present;" in line)
+        alternate_summary = next(line for line in alternate.stdout.splitlines() if "after[present;" in line)
+        self.assertEqual(after_summary.split("after[", 1)[1].split("]", 1)[0], alternate_summary.split("after[", 1)[1].split("]", 1)[0])
+
+    def test_policy_summary_distinguishes_absent_unknown_sensitive_and_present(self) -> None:
+        secret_marker = "private-policy-body-marker"
+        cases = [
+            ("absent", {"policy": None}, {}, "after[absent]"),
+            (
+                "unknown",
+                {"policy": None},
+                {"after_unknown": {"policy": True}},
+                "after[unknown/computed]",
+            ),
+            (
+                "sensitive",
+                {"policy": secret_marker},
+                {"after_sensitive": {"policy": True}},
+                "after[sensitive]",
+            ),
+            (
+                "present",
+                {"policy": policy("private-bucket", "s3:GetObject")},
+                {},
+                "after[present; aggregate_sha256=",
+            ),
+        ]
+        for label, after, metadata, expected in cases:
+            with self.subTest(label=label):
+                change = {
+                    "actions": ["update"],
+                    "before": {"policy": policy("private-bucket", "s3:PutObject")},
+                    "after": after,
+                    **metadata,
+                }
+                result = self.run_diagnostic(
+                    {"resource_changes": []},
+                    {"resource_changes": [{
+                        "address": "aws_iam_role_policy.example",
+                        "mode": "managed",
+                        "change": change,
+                    }]},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+                self.assertNotIn(secret_marker, result.stdout)
+                self.assertNotIn("arn:aws:", result.stdout)
+                if label in {"unknown", "sensitive", "absent"}:
+                    after_summary = next(line for line in result.stdout.splitlines() if "after[" in line)
+                    self.assertNotIn("aggregate_sha256=", after_summary.split("after[", 1)[1])
+
+    def test_policy_fingerprint_uses_aggregate_shape_not_policy_identifiers(self) -> None:
+        def result_for(bucket: str) -> str:
+            result = self.run_diagnostic(
+                {"resource_changes": []},
+                plan("aws_iam_role_policy.example", policy("old-private-bucket", "s3:GetObject"), policy(bucket, "s3:GetObject")),
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return next(line for line in result.stdout.splitlines() if "after[present;" in line).split("after[", 1)[1].split("]", 1)[0]
+
+        first = result_for("private-bucket-one")
+        second = result_for("private-bucket-two")
+        self.assertEqual(first, second)
+        self.assertNotIn("private-bucket", first)
 
     def test_oidc_provider_stays_app_root_owned_until_later_transfer(self) -> None:
         source = (ROOT / "infra/terraform/main.tf").read_text(encoding="utf-8")
