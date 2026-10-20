@@ -180,8 +180,11 @@ jobs:
             # force_destroy behavior in state. It does not delete resources.
             plan_stage=destroy-prepare
           fi
-          if ! terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-plan.log" 2>&1; then
-            echo 'Terraform planning failed; raw provider output was withheld.' >&2
+          if terraform plan -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-plan.log" 2>&1; then
+            :
+          else
+            echo 'Terraform planning failed. Sanitized diagnostic summary:' >&2
+            python ../../.github/scripts/terraform-plan-diagnostic.py "$RUNNER_TEMP/terraform-plan.log" >&2
             exit 1
           fi
           echo "plan_stage=$plan_stage" >> "$GITHUB_OUTPUT"
@@ -653,8 +656,11 @@ jobs:
         working-directory: infra/terraform
         shell: bash
         run: |
-          if ! terraform plan -destroy -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-destroy-plan.log" 2>&1; then
-            echo 'Terraform destroy planning failed; raw provider output was withheld.' >&2
+          if terraform plan -destroy -input=false -lock-timeout=5m -no-color -out=tfplan > "$RUNNER_TEMP/terraform-destroy-plan.log" 2>&1; then
+            :
+          else
+            echo 'Terraform destroy planning failed. Sanitized diagnostic summary:' >&2
+            python ../../.github/scripts/terraform-plan-diagnostic.py "$RUNNER_TEMP/terraform-destroy-plan.log" >&2
             exit 1
           fi
 
