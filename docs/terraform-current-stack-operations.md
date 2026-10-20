@@ -6,10 +6,10 @@ This temporary workflow operates the existing combined Terraform root at `infra/
 
 Create/configure these two GitHub Environments and restrict both to the `main` branch:
 
-- `infrastructure-plan`: no required reviewer. It runs Terraform plans only and stores the AWS credentials needed to read the current state and inspect resources.
+- `infrastructure-plan`: no required reviewer. It runs Terraform plans and stores the short-lived AWS credentials needed to read the current state and inspect resources.
 - `infrastructure-apply`: require the repository owner as a reviewer. It gates every Terraform apply, including the teardown preparation apply and the final destroy.
 
-Set the following Environment variables in **both** environments:
+Set these non-secret Environment variables in **both** environments:
 
 - `AWS_REGION` — `ap-southeast-2` for the current stack.
 - `PAWLOCAL_AWS_ACCOUNT_ID` — expected 12-digit AWS account ID; the workflow rejects a plan for another account.
@@ -17,25 +17,29 @@ Set the following Environment variables in **both** environments:
 - `PAWLOCAL_DOMAIN_NAME` — current Route 53 zone name.
 - `PAWLOCAL_CERTIFICATE_ARN` — current CloudFront certificate ARN.
 
-Do not configure SSH public-key/CIDR maps or a backend image digest map for these workflows. The current Terraform root no longer declares the SSH inputs. After `terraform init`, each AWS-enabled job reads `terraform output -json environment_targets`, extracts the development and production `api_backend_image` values, validates that both are immutable PawLocal GHCR digests, and exports `TF_VAR_backend_image_digests` for the following Terraform command. This requires the existing state to contain the `environment_targets` output; if that output is absent or invalid, the workflow stops before planning or applying.
+Also configure these role and plan-transfer variables, only after the reviewed IAM bootstrap has been applied:
 
-Set these Environment secrets in **both** environments, using the same values:
+- `infrastructure-plan`: `PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN` and `PAWLOCAL_TERRAFORM_PLAN_BUCKET`.
+- `infrastructure-apply`: `PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN` and `PAWLOCAL_TERRAFORM_PLAN_BUCKET`.
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
+The plan-role ARN is used by `plan` and `destroy-plan`. The apply-role ARN is used by `apply`, `prepare-destroy`, and `destroy`. The private transfer bucket is used in both Environments for the exact plan file and metadata. Do not put role ARNs or bucket names in Secrets; they are non-secret Environment variables. Do not configure static AWS access-key secrets.
 
-Use an AWS principal authorized to read and update the existing Terraform state and to manage only the current PawLocal infrastructure. In every AWS-enabled job, `aws-actions/configure-aws-credentials@v4` receives the two GitHub Environment secrets and calls STS `GetCallerIdentity` through its AWS SDK. Version 4 does not expose the `allowed-account-ids` input, so a following step explicitly requires the action's live `aws-account-id` output to match `PAWLOCAL_AWS_ACCOUNT_ID` before any Terraform command. The action exports credentials only to the job environment for subsequent Terraform and plan-encryption steps. Credentials are not Terraform variables or plan metadata; do not print or copy them into workflow logs or repository files.
+For every plan or apply operation, the Environment variables required are `AWS_REGION`, `PAWLOCAL_AWS_ACCOUNT_ID`, `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_DOMAIN_NAME`, `PAWLOCAL_CERTIFICATE_ARN`, and `PAWLOCAL_TERRAFORM_PLAN_BUCKET`. Plan jobs (`plan` and `destroy-plan`) also require `PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN` in `infrastructure-plan`. Apply jobs (`apply`, `prepare-destroy`, and `destroy`) require `PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN` in `infrastructure-apply`. These are Environment variables, not repository-level variables. Each job validates that its role ARN belongs to the configured account and that the plan bucket value is present before attempting OIDC authentication. Missing values therefore fail before Terraform runs; configure the values only after the bootstrap outputs have been reviewed and applied.
+
+Do not configure SSH public-key/CIDR maps or a manually supplied backend image digest map. After Terraform initializes, each AWS-enabled job reads `terraform output -json environment_targets`, extracts development and production `api_backend_image` values, validates both as immutable PawLocal GHCR digests, and exports `TF_VAR_backend_image_digests`. If the output is missing or invalid, the workflow stops before planning or applying.
+
+Each AWS-enabled job requests `id-token: write` and uses `aws-actions/configure-aws-credentials@v5` to assume its Environment role through GitHub OIDC. The action's `allowed-account-ids` input checks the live account against `PAWLOCAL_AWS_ACCOUNT_ID`; a following step also compares the action's `aws-account-id` output before Terraform runs. Credentials are short-lived and remain in the runner environment. Do not print them or copy them into files or artifacts.
 
 ## Dispatch and approval sequence
 
 1. Open **Actions → Terraform current stack operations → Run workflow** and select `main`.
-2. For `apply`, choose `apply` and enter `APPLY PAWLOCAL`. Review the sanitized plan summary, then approve the `infrastructure-apply` job to apply the exact one-day artifact plan.
+2. For `apply`, choose `apply` and enter `APPLY PAWLOCAL`. Review the sanitized plan summary, then approve the `infrastructure-apply` job to apply the exact saved plan from the private S3 transfer bucket.
 3. For full teardown, choose `destroy` and enter `DESTROY PAWLOCAL`. Review and approve the teardown-preparation plan. This step only persists Terraform's default-off `force_destroy_on_teardown` setting; its guard permits changes only to the known frontend buckets and DSQL clusters and rejects creates, deletes, replacements, or other updates.
 4. After preparation succeeds, review the fresh destroy summary and approve the second `infrastructure-apply` job. The exact saved destroy plan empties app-owned frontend buckets and removes the current root's resources, including deletion-protected Aurora DSQL clusters.
 
-The repository is public, so workflow artifacts are downloadable by anyone with repository read access. Before upload, the workflow encrypts each binary plan with AES-256-CBC and PBKDF2, using `AWS_SECRET_ACCESS_KEY` as the passphrase. That secret stays in the Environment secret store and is not written into the plan metadata or artifact. The apply job decrypts the plan in its ephemeral runner and verifies its SHA-256 against the separate workflow job output before applying it. Artifacts expire after one day.
+The exact binary plan and metadata are transferred through the private bootstrap-owned S3 bucket with server-side AES-256 encryption. Plan roles can upload only under `plans/legacy/`; the apply role can read only that prefix. The bucket lifecycle expires current and noncurrent objects after one day. Each apply job verifies the plan metadata and SHA-256 against the producing job's output before applying it.
 
-Before any Terraform command, an AWS SDK-backed STS check validates the live account for the credentials configured in that job. Before a plan can be uploaded for approval, a separate Terraform plan gate also requires Terraform to mark it applyable and complete, rejects errors or deferred changes, and verifies the target AWS account. Apply plans are checked against the caller identity in their planned values; full destroy plans are checked against the caller identity in the plan's prior state because their planned values represent an empty state. The destroy plan must contain only deletions from resources declared in the current root or its `fullstack` module. Its review summary includes selected non-secret AWS identifiers (such as resource IDs, ARNs, bucket names, and cluster identifiers) so the owner can confirm the physical targets before approving. Unknown Terraform addresses or deletions without a reviewable identifier stop the workflow.
+Before any Terraform command, the assumed-role account is checked by `configure-aws-credentials` and by the workflow's account guard. Before a plan can be uploaded for approval, the Terraform plan gate requires Terraform to mark it applyable and complete, rejects errors or deferred changes, and verifies the target AWS account. Apply plans are checked against the caller identity in their planned values; full destroy plans are checked against the caller identity in the plan's prior state because their planned values represent an empty state. The destroy plan must contain only deletions from resources declared in the current root or its `fullstack` module. Its review summary includes selected non-secret AWS identifiers (such as resource IDs, ARNs, bucket names, and cluster identifiers) so the owner can confirm the physical targets before approving. Unknown Terraform addresses or deletions without a reviewable identifier stop the workflow.
 
 Plans are bound to the run, attempt, commit, operation, account, and state key, and applied with Terraform backend locking. The workflow invokes no AWS CLI and makes no infrastructure change outside Terraform.
 

@@ -63,9 +63,13 @@ jobs:
       plan_stage: ${{ steps.metadata.outputs.plan_stage }}
     env:
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+      TERRAFORM_ROLE_VARIABLE_NAME: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
@@ -87,17 +91,36 @@ jobs:
         shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -n "$AWS_REGION"
-          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
-          test -n "$PAWLOCAL_TF_STATE_BUCKET"
-          test -n "$TF_VAR_domain_name"
-          test -n "$TF_VAR_certificate_arn"
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub Environment variable: ${name}" >&2
+              exit 1
+            fi
+          }
+          require_env AWS_REGION
+          require_env PAWLOCAL_TF_STATE_BUCKET
+          require_env PAWLOCAL_DOMAIN_NAME
+          require_env PAWLOCAL_CERTIFICATE_ARN
+          require_env PLAN_TRANSFER_BUCKET
+          if [[ -z "$TERRAFORM_ROLE_ARN" ]]; then
+            echo "Missing required GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME}" >&2
+            exit 1
+          fi
+          if [[ ! "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo 'Invalid or missing GitHub Environment variable: PAWLOCAL_AWS_ACCOUNT_ID (expected 12 digits).' >&2
+            exit 1
+          fi
+          if [[ "$TERRAFORM_ROLE_ARN" != "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/"* ]]; then
+            echo "Invalid GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME} must belong to PAWLOCAL_AWS_ACCOUNT_ID." >&2
+            exit 1
+          fi
 
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
@@ -263,9 +286,13 @@ jobs:
       id-token: write
     env:
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      TERRAFORM_ROLE_VARIABLE_NAME: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
@@ -283,11 +310,37 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Validate required role and plan bucket variables
+        shell: bash
+        run: |
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub Environment variable: ${name}" >&2
+              exit 1
+            fi
+          }
+          for name in AWS_REGION PAWLOCAL_AWS_ACCOUNT_ID PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN PLAN_TRANSFER_BUCKET; do
+            require_env "$name"
+          done
+          if [[ -z "$TERRAFORM_ROLE_ARN" ]]; then
+            echo "Missing required GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME}" >&2
+            exit 1
+          fi
+          if [[ ! "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo 'Invalid or missing GitHub Environment variable: PAWLOCAL_AWS_ACCOUNT_ID (expected 12 digits).' >&2
+            exit 1
+          fi
+          if [[ "$TERRAFORM_ROLE_ARN" != "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/"* ]]; then
+            echo "Invalid GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME} must belong to PAWLOCAL_AWS_ACCOUNT_ID." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
@@ -369,9 +422,13 @@ jobs:
       id-token: write
     env:
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      TERRAFORM_ROLE_VARIABLE_NAME: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
@@ -389,11 +446,37 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Validate required role and plan bucket variables
+        shell: bash
+        run: |
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub Environment variable: ${name}" >&2
+              exit 1
+            fi
+          }
+          for name in AWS_REGION PAWLOCAL_AWS_ACCOUNT_ID PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN PLAN_TRANSFER_BUCKET; do
+            require_env "$name"
+          done
+          if [[ -z "$TERRAFORM_ROLE_ARN" ]]; then
+            echo "Missing required GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME}" >&2
+            exit 1
+          fi
+          if [[ ! "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo 'Invalid or missing GitHub Environment variable: PAWLOCAL_AWS_ACCOUNT_ID (expected 12 digits).' >&2
+            exit 1
+          fi
+          if [[ "$TERRAFORM_ROLE_ARN" != "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/"* ]]; then
+            echo "Invalid GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME} must belong to PAWLOCAL_AWS_ACCOUNT_ID." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
@@ -476,9 +559,13 @@ jobs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+      TERRAFORM_ROLE_VARIABLE_NAME: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
@@ -496,11 +583,37 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Validate required role and plan bucket variables
+        shell: bash
+        run: |
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub Environment variable: ${name}" >&2
+              exit 1
+            fi
+          }
+          for name in AWS_REGION PAWLOCAL_AWS_ACCOUNT_ID PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN PLAN_TRANSFER_BUCKET; do
+            require_env "$name"
+          done
+          if [[ -z "$TERRAFORM_ROLE_ARN" ]]; then
+            echo "Missing required GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME}" >&2
+            exit 1
+          fi
+          if [[ ! "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo 'Invalid or missing GitHub Environment variable: PAWLOCAL_AWS_ACCOUNT_ID (expected 12 digits).' >&2
+            exit 1
+          fi
+          if [[ "$TERRAFORM_ROLE_ARN" != "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/"* ]]; then
+            echo "Invalid GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME} must belong to PAWLOCAL_AWS_ACCOUNT_ID." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
@@ -598,9 +711,13 @@ jobs:
       id-token: write
     env:
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      TERRAFORM_ROLE_VARIABLE_NAME: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_DOMAIN_NAME: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
+      PAWLOCAL_CERTIFICATE_ARN: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_domain_name: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_certificate_arn: ${{ vars.PAWLOCAL_CERTIFICATE_ARN }}
@@ -618,11 +735,37 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Validate required role and plan bucket variables
+        shell: bash
+        run: |
+          require_env() {
+            local name="$1"
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub Environment variable: ${name}" >&2
+              exit 1
+            fi
+          }
+          for name in AWS_REGION PAWLOCAL_AWS_ACCOUNT_ID PAWLOCAL_TF_STATE_BUCKET PAWLOCAL_DOMAIN_NAME PAWLOCAL_CERTIFICATE_ARN PLAN_TRANSFER_BUCKET; do
+            require_env "$name"
+          done
+          if [[ -z "$TERRAFORM_ROLE_ARN" ]]; then
+            echo "Missing required GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME}" >&2
+            exit 1
+          fi
+          if [[ ! "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]; then
+            echo 'Invalid or missing GitHub Environment variable: PAWLOCAL_AWS_ACCOUNT_ID (expected 12 digits).' >&2
+            exit 1
+          fi
+          if [[ "$TERRAFORM_ROLE_ARN" != "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/"* ]]; then
+            echo "Invalid GitHub Environment variable: ${TERRAFORM_ROLE_VARIABLE_NAME} must belong to PAWLOCAL_AWS_ACCOUNT_ID." >&2
+            exit 1
+          fi
+
       - name: Configure AWS credentials and verify the live account
         id: aws-credentials
         uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: "true"
