@@ -216,13 +216,13 @@ def test_unhandled_api_error_keeps_specific_trace_and_log_code(client, monkeypat
         if "API request completed" in line
     )
     assert completed_log["error_code"] == "unhandled_api_error"
-    assert completed_log["exception_class"] == "DatabaseConnectError"
-    assert completed_log["database_error_code"] == "08001"
-    assert "private backend failure detail" not in captured.getvalue()
-    assert "SELECT * FROM private_table" not in captured.getvalue()
+    assert "DatabaseConnectError" in captured.getvalue()
+    assert "private backend failure detail" in captured.getvalue()
+    assert "SELECT * FROM private_table" in captured.getvalue()
+    assert "Traceback (most recent call last)" in captured.getvalue()
 
 
-def test_unhandled_api_error_logs_nested_missing_credentials_class_safely(client):
+def test_unhandled_api_error_logs_nested_database_traceback(client):
     import psycopg
     from botocore.exceptions import NoCredentialsError
     from sqlalchemy.exc import OperationalError
@@ -265,21 +265,43 @@ def test_unhandled_api_error_logs_nested_missing_credentials_class_safely(client
 
     assert response.status_code == 500
     assert response.json()["code"] == "internal_error"
+    assert "API request completed" in captured.getvalue()
+    assert "OperationalError" in captured.getvalue()
+    assert "private SQL and parameters" in captured.getvalue()
+    assert "private driver detail" in captured.getvalue()
+    assert "private sentinel" in captured.getvalue()
+    assert "Unable to locate credentials" in captured.getvalue()
+    assert "private" not in json.dumps(response.json())
+
+
+def test_privacy_filter_can_restore_bounded_exception_logging(client, monkeypatch):
+    from pawlocal.api import routes
+    from pawlocal.main import app
+
+    class BrokenQueries:
+        def search(self, **_filters):
+            raise RuntimeError("private backend failure detail")
+
+    monkeypatch.setattr(settings, "privacy_filter_exception_logs", True)
+    app.dependency_overrides[routes.get_place_queries] = lambda: BrokenQueries()
+    api_logger = logging.getLogger("pawlocal.api")
+    captured = io.StringIO()
+    handler = logging.StreamHandler(captured)
+    handler.setFormatter(_SafeJsonFormatter())
+    api_logger.addHandler(handler)
+    try:
+        response = client[0].get("/api/v1/places")
+    finally:
+        api_logger.removeHandler(handler)
+
+    assert response.status_code == 500
+    assert "private backend failure detail" not in captured.getvalue()
     completed_log = next(
         json.loads(line)
         for line in captured.getvalue().splitlines()
         if "API request completed" in line
     )
-    assert completed_log["exception_class"] == "OperationalError"
-    assert completed_log["exception_chain"] == [
-        "OperationalError",
-        "RuntimeError",
-        "NoCredentialsError",
-    ]
-    assert completed_log["database_pgconn_error_message_present"] is False
-    assert "private sentinel" not in captured.getvalue()
-    assert "Unable to locate credentials" not in captured.getvalue()
-    assert "private" not in json.dumps(response.json())
+    assert completed_log["exception_class"] == "RuntimeError"
 
 
 def test_suppressed_exception_context_is_not_emitted_to_json_log():

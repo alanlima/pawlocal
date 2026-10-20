@@ -68,6 +68,8 @@ class _SafeJsonFormatter(logging.Formatter):
             value = getattr(record, field, None)
             if value is not None:
                 fields[field] = value
+        if record.exc_info:
+            fields["exception"] = self.formatException(record.exc_info)
         return json.dumps(fields, separators=(",", ":"))
 
 
@@ -159,6 +161,23 @@ def log_request(level: int, message: str, *, span, **fields: Any) -> None:
     }
     safe_fields.update(current_correlation_fields(span))
     logger.log(level, message, extra=safe_fields)
+
+
+def log_exception(message: str, *, span, **fields: Any) -> None:
+    safe_fields = {
+        key: value
+        for key, value in fields.items()
+        if key
+        in {
+            "event_code",
+            "operation",
+            "outcome",
+            "http_status",
+            "error_code",
+        }
+    }
+    safe_fields.update(current_correlation_fields(span))
+    logger.exception(message, extra=safe_fields)
 
 
 def safe_exception_log_fields(exc: BaseException) -> dict[str, Any]:

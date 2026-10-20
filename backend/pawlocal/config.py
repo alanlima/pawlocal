@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     telemetry_enabled: bool = False
     otlp_endpoint: str = "http://otel-collector:4318"
     demo_faults_enabled: bool = False
+    privacy_filter_exception_logs: bool = False
 
     model_config = SettingsConfigDict(
         env_file=ROOT_ENV_FILE, env_prefix="PAWLOCAL_", extra="ignore"
