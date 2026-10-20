@@ -46,7 +46,14 @@ def account_state(account_id: str) -> dict[str, object]:
 
 
 class TerraformCurrentStackWorkflowTests(unittest.TestCase):
-    def run_gate(self, mode: str, plan: dict[str, object]) -> subprocess.CompletedProcess[str]:
+    def run_gate(
+        self,
+        mode: str,
+        plan: dict[str, object],
+        *,
+        stage: str | None = None,
+        destroy_prepare_guard: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temporary:
             plan_path = Path(temporary) / "plan.json"
             plan_path.write_text(json.dumps(plan), encoding="utf-8")
@@ -57,14 +64,38 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
                 TF_STATE_KEY="pawlocal/terraform.tfstate",
                 GITHUB_SHA="test-commit",
             )
+            if stage is not None:
+                environment["PLAN_STAGE"] = stage
+            command = [sys.executable, str(GATE), str(plan_path)]
+            if destroy_prepare_guard:
+                command.append("--destroy-prepare-guard")
             return subprocess.run(
-                [sys.executable, str(GATE), str(plan_path)],
+                command,
                 cwd=ROOT / "infra/terraform",
                 env=environment,
                 capture_output=True,
                 text=True,
                 check=False,
             )
+
+    def run_destroy_prepare_guard(
+        self,
+        changes: list[dict[str, object]],
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run_gate(
+            "apply",
+            {
+                "applyable": True,
+                "complete": True,
+                "errored": False,
+                "planned_values": {"root_module": {}},
+                "prior_state": {"values": account_state(EXPECTED_ACCOUNT)},
+                "resource_changes": changes,
+                "output_changes": {},
+            },
+            stage="destroy-prepare",
+            destroy_prepare_guard=True,
+        )
 
     def test_destroy_account_is_checked_from_prior_state(self) -> None:
         result = self.run_gate(
@@ -118,6 +149,115 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
             with self.subTest(workflow=workflow_path.name):
                 source = workflow_path.read_text(encoding="utf-8")
                 self.assertIn("group: pawlocal-lightsail-deploy", source)
+
+    def test_destroy_preparation_allows_only_dsql_force_destroy_and_computed_encryption(self) -> None:
+        for environment in ("development", "production"):
+            with self.subTest(environment=environment):
+                result = self.run_destroy_prepare_guard([
+                    {
+                        "address": f'module.fullstack.aws_dsql_cluster.app["{environment}"]',
+                        "mode": "managed",
+                        "change": {
+                            "actions": ["update"],
+                            "before": {
+                                "force_destroy": False,
+                                "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                                "encryption_details": [{
+                                    "encryption_status": "ENABLED",
+                                    "encryption_type": "AWS_OWNED_KMS_KEY",
+                                }],
+                            },
+                            "after": {
+                                "force_destroy": True,
+                                "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                                "encryption_details": None,
+                            },
+                            "after_unknown": {
+                                "encryption_details": [{"encryption_status": True, "encryption_type": True}],
+                            },
+                        },
+                    },
+                ])
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_destroy_preparation_still_rejects_dsql_configuration_change(self) -> None:
+        result = self.run_destroy_prepare_guard([
+            {
+                "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                "mode": "managed",
+                "change": {
+                    "actions": ["update"],
+                    "before": {
+                        "force_destroy": False,
+                        "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                        "encryption_details": [{"encryption_type": "AWS_OWNED_KMS_KEY"}],
+                    },
+                    "after": {
+                        "force_destroy": True,
+                        "kms_encryption_key": "different-key-setting",
+                        "encryption_details": None,
+                    },
+                    "after_unknown": {"encryption_details": [{"encryption_type": True}]},
+                },
+            },
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("$.kms_encryption_key", result.stderr)
+
+    def test_destroy_preparation_rejects_known_dsql_encryption_change(self) -> None:
+        result = self.run_destroy_prepare_guard([
+            {
+                "address": 'module.fullstack.aws_dsql_cluster.app["development"]',
+                "mode": "managed",
+                "change": {
+                    "actions": ["update"],
+                    "before": {
+                        "force_destroy": False,
+                        "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                        "encryption_details": [{"encryption_type": "AWS_OWNED_KMS_KEY"}],
+                    },
+                    "after": {
+                        "force_destroy": True,
+                        "kms_encryption_key": "AWS_OWNED_KMS_KEY",
+                        "encryption_details": [{"encryption_type": "CUSTOMER_MANAGED_KMS_KEY"}],
+                    },
+                    "after_unknown": {"encryption_details": False},
+                },
+            },
+        ])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("$.encryption_details", result.stderr)
+
+    def test_destroy_preparation_still_rejects_policy_changes_and_role_forget(self) -> None:
+        policy_addresses = [
+            "aws_iam_role_policy.github_deploy",
+            "aws_s3_bucket_policy.site",
+            'module.fullstack.aws_dsql_cluster_policy.api_connect["development"]',
+            'module.fullstack.aws_iam_role_policy.github_deploy["development"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["development"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["production"]',
+            'module.fullstack.aws_s3_bucket_policy.frontend["development"]',
+        ]
+        policy_updates = [
+            {
+                "address": address,
+                "mode": "managed",
+                "change": {"actions": ["update"], "before": {"policy": "before"}, "after": {"policy": "after"}},
+            }
+            for address in policy_addresses
+        ]
+        role_forget = {
+            "address": 'module.fullstack.aws_iam_role.github_deploy["development"]',
+            "mode": "managed",
+            "change": {"actions": ["forget"], "before": {"name": "pawlocal-development-github-deploy"}, "after": None},
+        }
+        result = self.run_destroy_prepare_guard(policy_updates + [role_forget])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Teardown preparation plan includes changes beyond force_destroy settings", result.stderr)
+        for address in policy_addresses:
+            with self.subTest(address=address):
+                self.assertIn(address, result.stderr)
+        self.assertIn("actions=forget", result.stderr)
 
     def test_each_aws_job_checks_live_account_before_terraform(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
