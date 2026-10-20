@@ -82,6 +82,19 @@ The independent reviewer must confirm:
 - no credential or secret value appears in the plan or review evidence; and
 - no unrelated account-level workload appears in the plan.
 
+### Recover the partial bootstrap apply
+
+The first reviewed bootstrap apply completed the approved imports, legacy policy removals, and identity work, but failed before creating the two environment apply boundaries. The bootstrap state serial advanced, so that saved plan is stale and must not be retried even if its file and digest are unchanged.
+
+AWS permits at most 6,144 non-whitespace bytes in a managed-policy document. This root enforces a 5,500-byte repository budget against the actual minified development and production boundary JSON. The compact boundary keeps mutation ceilings, environment isolation, authorization-tag conditions, and the staged CloudFront handoff; the matching identity policy retains finer provider reads and the complete CloudFront metadata-tag requirements.
+
+After merging the size-safe configuration, discard any stale plan and generate a fresh normal-refresh bootstrap plan from merged `main` using the same reviewed inputs. With no additional drift, the plan must contain exactly:
+
+- two `environment_apply_boundary` managed-policy creates; and
+- eight dependent updates: four environment Terraform roles and their four inline policies.
+
+It must contain zero imports, deletes, or replacements, and no application or unrelated resources. Any other action invalidates this recovery path and requires investigation plus a new independent review. Apply only the newly reviewed exact saved plan; never use the failed apply's plan binary.
+
 Only after that exact plan and digest receive independent approval may the owner-authorized operator run:
 
 ```powershell
