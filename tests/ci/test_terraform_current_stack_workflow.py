@@ -332,9 +332,21 @@ class TerraformCurrentStackWorkflowTests(unittest.TestCase):
         result = self.run_destroy_prepare_guard(policy_updates + [role_forget])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Teardown preparation plan includes changes beyond force_destroy settings", result.stderr)
-        for address in policy_addresses:
+        # The current root no longer declares the detached inline IAM policy
+        # resources or development publisher role. Their legacy addresses must
+        # remain rejected, but the sanitizer intentionally labels them as
+        # unlisted instead of echoing addresses outside the current roots.
+        detached_addresses = {
+            "aws_iam_role_policy.github_deploy",
+            'module.fullstack.aws_iam_role_policy.github_deploy["development"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["development"]',
+            'module.fullstack.aws_iam_role_policy.github_terraform_deploy["production"]',
+            'module.fullstack.aws_iam_role.github_deploy["development"]',
+        }
+        for address in set(policy_addresses) - detached_addresses:
             with self.subTest(address=address):
                 self.assertIn(address, result.stderr)
+        self.assertEqual(result.stderr.count("resource=<unlisted resource>"), len(detached_addresses))
         self.assertIn("actions=forget", result.stderr)
 
     def test_each_aws_job_checks_live_account_before_terraform(self) -> None:
