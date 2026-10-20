@@ -45,4 +45,10 @@ Before any Terraform command, the assumed-role account is checked by `configure-
 
 Plans are bound to the run, attempt, commit, operation, account, and state key, and applied with Terraform backend locking. The workflow invokes no AWS CLI and makes no infrastructure change outside Terraform.
 
-The destroy operation permanently deletes the current app infrastructure and objects in its app-owned frontend buckets. Run it only when the reviewed destroy plan shows the intended current stack.
+The destroy operation permanently deletes the current app infrastructure and objects in its app-owned frontend buckets. The GitHub Actions OIDC provider and release-role ARNs are retained outside the application state for later IAM bootstrap import.
+
+## Interrupted destroy and retained release roles
+
+Run [39480644777](https://github.com/alanlima/pawlocal/actions/runs/39480644777) partially destroyed the combined stack, then failed because its apply role lacked `iam:ListInstanceProfilesForRole` and `s3:PutBucketPublicAccessBlock`. The run successfully deleted the frontend publisher inline policies and both container-release inline policies before failing to delete their role objects. The follow-up Terraform handoff retains the root production publisher role and the development/production container-release roles for later bootstrap import, alongside the existing OIDC-provider handoff. It does not recreate the deleted inline policies. Frontend publishing and container release workflows that assume these roles may fail until their policies are deliberately restored.
+
+Create a fresh plan from the current remote state before any further teardown. The failed run's saved plan predates its partial changes and cannot be reused. Local Terraform execution also does not pass through the GitHub Environment approval gates; use only the owner's explicitly authorized local operation path and a local credential profile with the required state and resource permissions.

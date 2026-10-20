@@ -526,20 +526,32 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 }
 
-resource "aws_iam_role_policy" "github_deploy" {
-  for_each = local.frontend_environments
-  role     = data.aws_iam_role.github_deploy[each.key].name
-  policy   = data.aws_iam_policy_document.github_deploy[each.key].json
+# Preserve the development frontend publisher role for later bootstrap import;
+# its inline policy was removed by the interrupted destroy and stays absent.
+removed {
+  from = aws_iam_role_policy.github_deploy
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # This role can refresh the shared application's Terraform state and publish a
 # deployment only to its matching container service. All infrastructure create,
 # update, and delete permissions remain outside the release role.
-resource "aws_iam_role" "github_terraform_deploy" {
-  for_each           = local.environments
-  name               = "pawlocal-${each.key}-terraform-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_deploy_trust[each.key].json
-  description        = "Terraform state-backed release deployment for the PawLocal ${each.key} Lightsail container service."
+# Retain the GitHub Actions container-release roles for later bootstrap import.
+# Their inline policies were removed by the interrupted destroy and stay absent.
+removed {
+  from = aws_iam_role.github_terraform_deploy
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+data "aws_iam_role" "github_terraform_deploy" {
+  for_each = local.environments
+  name     = "pawlocal-${each.key}-terraform-deploy"
 }
 
 data "aws_iam_policy_document" "github_terraform_deploy" {
@@ -660,11 +672,12 @@ data "aws_iam_policy_document" "github_terraform_deploy" {
   }
 }
 
-resource "aws_iam_role_policy" "github_terraform_deploy" {
-  for_each = local.environments
-  name     = "pawlocal-${each.key}-terraform-container-release"
-  role     = aws_iam_role.github_terraform_deploy[each.key].id
-  policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
+removed {
+  from = aws_iam_role_policy.github_terraform_deploy
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # Keep the database-role mapping inputs visible in Terraform plans without

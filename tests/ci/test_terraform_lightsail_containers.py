@@ -423,12 +423,19 @@ class TerraformLightsailContainerTests(unittest.TestCase):
     def test_dsql_bootstrap_is_operator_run_and_release_role_stays_limited(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
         release = re.search(
-            r'data "aws_iam_policy_document" "github_terraform_deploy" \{(.*?)(?=\nresource "aws_iam_role_policy")',
+            r'data "aws_iam_policy_document" "github_terraform_deploy" \{(.*?)(?=\n(?:removed|resource)|\Z)',
             terraform,
             re.DOTALL,
         )
         self.assertIsNotNone(release)
         self.assertNotIn("dsql:DbConnectAdmin", release.group(1))
+        self.assertIn('data "aws_iam_role" "github_terraform_deploy"', terraform)
+        self.assertIn(
+            "from = aws_iam_role.github_terraform_deploy\n\n  lifecycle {\n    destroy = false",
+            terraform,
+        )
+        outputs = (ROOT / "infra/terraform/fullstack/outputs.tf").read_text(encoding="utf-8")
+        self.assertIn("data.aws_iam_role.github_terraform_deploy[name].arn", outputs)
         marker = re.search(
             r'resource "terraform_data" "app_dsql_role" \{(.*?)(?=\nresource|\Z)',
             terraform,

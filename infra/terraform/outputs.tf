@@ -14,8 +14,8 @@ output "cloudfront_distribution_id" {
 }
 
 output "github_deploy_role_arn" {
-  description = "Existing-root-state production frontend publisher role ARN for the GitHub Actions production environment."
-  value       = aws_iam_role.github_deploy.arn
+  description = "Existing production frontend publisher role ARN retained outside the application Terraform state for later bootstrap import."
+  value       = data.aws_iam_role.github_deploy.arn
 }
 
 output "environment_targets" {
@@ -29,7 +29,7 @@ output "environment_targets" {
       frontend_url    = "https://${local.site_fqdn}"
       frontend_bucket = aws_s3_bucket.site.bucket
       distribution_id = aws_cloudfront_distribution.site.id
-      deploy_role_arn = aws_iam_role.github_deploy.arn
+      deploy_role_arn = data.aws_iam_role.github_deploy.arn
     })
   }
 }

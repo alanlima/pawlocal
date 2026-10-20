@@ -233,10 +233,18 @@ data "aws_iam_policy_document" "github_deploy_assume_role" {
   }
 }
 
-resource "aws_iam_role" "github_deploy" {
-  name               = "pawlocal-frontend-github-deploy"
-  assume_role_policy = data.aws_iam_policy_document.github_deploy_assume_role.json
-  description        = "Allows PawLocal main-branch and production-environment workflows to publish frontend files and invalidate the existing CDN."
+# Retain the frontend publisher identity for the later bootstrap import. Its
+# inline policy was deleted by the interrupted destroy and is intentionally not recreated here.
+removed {
+  from = aws_iam_role.github_deploy
+
+  lifecycle {
+    destroy = false
+  }
+}
+
+data "aws_iam_role" "github_deploy" {
+  name = "pawlocal-frontend-github-deploy"
 }
 
 data "aws_iam_policy_document" "github_deploy" {
@@ -266,10 +274,12 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 }
 
-resource "aws_iam_role_policy" "github_deploy" {
-  name   = "pawlocal-frontend-publish"
-  role   = aws_iam_role.github_deploy.id
-  policy = data.aws_iam_policy_document.github_deploy.json
+removed {
+  from = aws_iam_role_policy.github_deploy
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 module "fullstack" {
