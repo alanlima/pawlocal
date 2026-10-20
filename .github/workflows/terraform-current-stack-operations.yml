@@ -652,6 +652,16 @@ jobs:
               exit 1
             }
 
+      - name: Export backend image digests from current Terraform outputs
+        working-directory: infra/terraform
+        shell: bash
+        run: |
+          terraform output -json environment_targets > "$RUNNER_TEMP/environment-targets.json" 2>"$RUNNER_TEMP/terraform-output.log" || {
+            echo 'Unable to read current environment targets from Terraform state.' >&2
+            exit 1
+          }
+          python ../../.github/scripts/export-backend-image-digests.py "$RUNNER_TEMP/environment-targets.json"
+
       - name: Plan full destruction
         working-directory: infra/terraform
         shell: bash
