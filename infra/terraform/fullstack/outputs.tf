@@ -18,7 +18,6 @@ output "environment_targets" {
     dsql_database_role         = config.database_role
     deploy_role_arn            = contains(keys(local.frontend_environments), name) ? aws_iam_role.github_deploy[name].arn : null
     terraform_deploy_role_arn  = aws_iam_role.github_terraform_deploy[name].arn
-    terraform_plan_role_arn    = aws_iam_role.github_terraform_plan[name].arn
     cognito_user_pool_id       = aws_cognito_user_pool.app[name].id
     cognito_client_id          = aws_cognito_user_pool_client.app[name].id
     cognito_domain             = "https://${aws_cognito_user_pool_domain.app[name].domain}.auth.${var.aws_region}.amazoncognito.com"
