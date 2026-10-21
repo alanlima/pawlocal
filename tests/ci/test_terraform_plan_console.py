@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -60,30 +59,19 @@ class TerraformPlanConsoleTests(unittest.TestCase):
             "output_changes": {"private_output": {"after": "private-output-value"}},
         }
 
-    def run_console(self, enabled: str | None) -> subprocess.CompletedProcess[str]:
+    def run_console(self) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             plan = Path(directory) / "plan.json"
             plan.write_text(json.dumps(self.sample_plan()), encoding="utf-8")
-            env = os.environ.copy()
-            if enabled is None:
-                env.pop("PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS", None)
-            else:
-                env["PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS"] = enabled
             return subprocess.run(
                 [sys.executable, str(CONSOLE), str(plan), "--environment", "development"],
                 check=True,
                 capture_output=True,
                 text=True,
-                env=env,
             )
 
-    def test_disabled_or_absent_control_prints_no_plan_details(self) -> None:
-        self.assertEqual(self.run_console(None).stdout, "")
-        self.assertEqual(self.run_console("false").stdout, "")
-        self.assertEqual(self.run_console("TRUE").stdout, "")
-
-    def test_enabled_control_prints_only_value_free_allowlisted_plan_details(self) -> None:
-        output = self.run_console("true").stdout
+    def test_inventory_always_prints_only_value_free_allowlisted_plan_details(self) -> None:
+        output = self.run_console().stdout
         self.assertIn("Saved Terraform plan diagnostic (sanitized)", output)
         self.assertIn("aws_s3_bucket | replace | tainted state requires replacement | 1", output)
         self.assertIn("aws_dsql_cluster | create | not reported | 1", output)
@@ -105,13 +93,15 @@ class TerraformPlanConsoleTests(unittest.TestCase):
             with self.subTest(sensitive=sensitive):
                 self.assertNotIn(sensitive, output)
 
-    def test_workflow_prints_before_guard_and_blanks_inherited_private_environment(self) -> None:
+    def test_workflow_always_prints_sanitized_inventory_before_guard(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         diagnostic = workflow.index("      - name: Print sanitized saved-plan diagnostics")
+        raw = workflow.index("      - name: Print raw saved plan for diagnosis")
         guard = workflow.index("      - name: Enforce ownership and publish sanitized summary")
-        self.assertLess(diagnostic, guard)
-        block = workflow[diagnostic:guard]
-        self.assertIn("if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}", block)
+        self.assertLess(diagnostic, raw)
+        self.assertLess(raw, guard)
+        block = workflow[diagnostic:raw]
+        self.assertNotIn("if:", block)
         self.assertIn("terraform-plan-console.py", block)
         for name in (
             "PAWLOCAL_AWS_ACCOUNT_ID",
@@ -120,6 +110,30 @@ class TerraformPlanConsoleTests(unittest.TestCase):
             "PLAN_TRANSFER_BUCKET",
             "TERRAFORM_ROLE_ARN",
             "TF_STATE_KEY",
+            "TF_VAR_cloudfront_certificate_arn",
+            "TF_VAR_root_domain",
+            "TF_VAR_route53_zone_id",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(f'{name}: ""', block)
+
+    def test_workflow_prints_raw_plan_only_when_diagnostics_are_enabled(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        raw = workflow.index("      - name: Print raw saved plan for diagnosis")
+        guard = workflow.index("      - name: Enforce ownership and publish sanitized summary")
+        block = workflow[raw:guard]
+        self.assertIn("if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}", block)
+        self.assertIn("script --quiet --return", block)
+        self.assertIn("--command=", block)
+        self.assertIn('terraform -chdir=\\"$TF_ROOT\\" show tfplan', block)
+        self.assertNotIn("-no-color", block)
+        self.assertNotIn("terraform-plan-diagnostic.py", block)
+        self.assertNotIn('TF_ROOT: ""', block)
+        for name in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "PAWLOCAL_AWS_ACCOUNT_ID",
             "TF_VAR_cloudfront_certificate_arn",
             "TF_VAR_root_domain",
             "TF_VAR_route53_zone_id",
