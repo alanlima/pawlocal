@@ -239,6 +239,11 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("AllowExactDevelopmentTerraformApply", roles)
         self.assertIn("AllowExactProductionTerraformApply", roles)
         self.assertIn("requirements-dsql-post-apply.txt", workflow)
+        requirements = (
+            ROOT / ".github/scripts/requirements-dsql-post-apply.txt"
+        ).read_text(encoding="utf-8")
+        self.assertIn("psycopg-pool==3.3.3", requirements)
+        self.assertIn("import aurora_dsql_psycopg.pool", workflow)
         self.assertIn("group: pawlocal-terraform-${{ inputs.environment }}", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('apply -input=false -lock-timeout=5m', workflow)
