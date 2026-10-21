@@ -66,6 +66,12 @@ jobs:
           terraform_version: 1.14.3
           terraform_wrapper: false
 
+      - name: Set up Node.js for Cognito trigger tests
+        if: matrix.root == 'modules/pawlocal-environment'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive .
 
@@ -83,6 +89,10 @@ jobs:
           AWS_SESSION_TOKEN: test
           AWS_EC2_METADATA_DISABLED: true
         run: terraform test -no-color
+
+      - name: Test Cognito pre sign-up trigger
+        if: matrix.root == 'modules/pawlocal-environment'
+        run: node --test lambda/cognito-pre-signup/index.test.mjs
 
       - name: Test DSQL setup lifecycle transitions
         if: matrix.root == 'modules/dsql-post-apply-setup'

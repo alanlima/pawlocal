@@ -12,6 +12,25 @@ variable "aws_region" {
   type        = string
 }
 
+variable "cognito_password_policy" {
+  description = "Environment-specific Cognito password-policy values; all other pool settings remain common."
+  type = object({
+    minimum_length    = number
+    require_lowercase = bool
+    require_uppercase = bool
+    require_numbers   = bool
+  })
+
+  validation {
+    condition = (
+      var.cognito_password_policy.minimum_length >= 6 &&
+      var.cognito_password_policy.minimum_length <= 99 &&
+      floor(var.cognito_password_policy.minimum_length) == var.cognito_password_policy.minimum_length
+    )
+    error_message = "cognito_password_policy.minimum_length must be a whole number from 6 through 99."
+  }
+}
+
 variable "root_domain" {
   description = "Existing public Route 53 zone name without a trailing dot."
   type        = string

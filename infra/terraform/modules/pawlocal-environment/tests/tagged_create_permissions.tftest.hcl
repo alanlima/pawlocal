@@ -32,11 +32,18 @@ run "tagged_create_permissions_are_size_safe" {
   }
 
   variables {
-    environment                = "development"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    environment                  = "development"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
     terraform_apply_role_name  = "pawlocal-development-terraform-apply"
     frontend_publish_role_name = "pawlocal-development-github-deploy"
     container_power            = "micro"
@@ -49,10 +56,12 @@ run "tagged_create_permissions_are_size_safe" {
 
   assert {
     condition = (
-      toset(keys(local.resource_suffixes)) == toset(["cert", "container_service"]) &&
+      toset(keys(local.resource_suffixes)) == toset(["cert", "cognito_pre_sign_up", "container_service"]) &&
       local.resource_suffixes.cert == "cert" &&
+      local.resource_suffixes.cognito_pre_sign_up == "cognito-pre-signup" &&
       local.resource_suffixes.container_service == "api" &&
       local.resource_names.cert == "pawlocal-development-api-cert" &&
+      local.resource_names.cognito_pre_sign_up == "pawlocal-development-cognito-pre-signup" &&
       local.resource_names.container_service == "pawlocal-development-api" &&
       aws_lightsail_container_service.api.name == "pawlocal-development-api" &&
       aws_lightsail_certificate.api.name == "pawlocal-development-api-cert" &&
@@ -183,11 +192,18 @@ run "runtime_identity_activates_protected_setup_and_deployment" {
   }
 
   variables {
-    environment                = "development"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    environment                  = "development"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
     terraform_apply_role_name  = "pawlocal-development-terraform-apply"
     frontend_publish_role_name = "pawlocal-development-github-deploy"
     runtime_role_arn           = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
@@ -232,11 +248,18 @@ run "production_resource_names_use_normalized_suffixes" {
   }
 
   variables {
-    environment                = "production"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    environment                  = "production"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-production-cognito-pre-signup"
+    cognito_password_policy = {
+      minimum_length    = 12
+      require_lowercase = true
+      require_uppercase = true
+      require_numbers   = true
+    }
     terraform_apply_role_name  = "pawlocal-production-terraform-apply"
     frontend_publish_role_name = "pawlocal-production-github-deploy"
     container_power            = "medium"
