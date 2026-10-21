@@ -84,6 +84,23 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
+    condition = (
+      toset(local.role_definitions["production-apply"].subject_environments) == toset([
+        "production-apply",
+        "production-destroy-prepare",
+        "production-destroy"
+      ]) &&
+      toset(local.role_definitions["development-apply"].subject_environments) == toset([
+        "development-apply"
+      ]) &&
+      toset(local.role_definitions["production-plan"].subject_environments) == toset([
+        "production-plan"
+      ])
+    )
+    error_message = "Only the production apply role may trust the two protected destroy Environment subjects."
+  }
+
+  assert {
     condition = alltrue([
       for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
       strcontains(policy.minified_json, "policy/pawlocal-${environment}-*") &&

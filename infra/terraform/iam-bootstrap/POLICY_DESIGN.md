@@ -8,7 +8,7 @@ Each plan role trusts only its exact `<environment>-plan` GitHub Environment sub
 
 ## Environment apply roles
 
-Each apply role trusts only its protected `<environment>-apply` GitHub Environment. Bootstrap grants state/plan access and narrowly scoped IAM policy administration so the environment root can create/update its fixed-name application, frontend-publish, and runtime policies. The boundary limits policy and role administration to the matching environment's stable name prefixes. The role's inline identity policy is narrower: it names the three exact policy ARNs, the three exact role ARNs, and the matching exact `iam:PolicyARN` attachment combinations.
+Each apply role trusts its protected `<environment>-apply` GitHub Environment. The production apply role also trusts exactly `production-destroy-prepare` and `production-destroy`, preserving the two separately protected approvals used by the standard destroy workflow; no development destroy subject is trusted. Bootstrap grants state/plan access and narrowly scoped IAM policy administration so the environment root can create/update its fixed-name application, frontend-publish, and runtime policies. The boundary limits policy and role administration to the matching environment's stable name prefixes. The role's inline identity policy is narrower: it names the exact matching policy ARNs, role ARNs, and `iam:PolicyARN` attachment combinations.
 
 The bootstrap-owned boundary is the effective maximum. It does not allow role creation/deletion, trust changes, permissions-boundary changes, `PassRole`, OIDC changes, another environment's state, policies, attachments, DNS names, or named resources.
 

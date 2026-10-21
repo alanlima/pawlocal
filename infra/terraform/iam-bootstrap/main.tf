@@ -106,8 +106,16 @@ locals {
     }
   }
   role_definitions = merge(
-    { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environment = "${env}-plan" } },
-    { for env, _ in local.environments : "${env}-apply" => { environment = env, purpose = "apply", role_name = "pawlocal-${env}-terraform-apply", subject_environment = "${env}-apply" } }
+    { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environments = ["${env}-plan"] } },
+    { for env, _ in local.environments : "${env}-apply" => {
+      environment = env
+      purpose     = "apply"
+      role_name   = "pawlocal-${env}-terraform-apply"
+      subject_environments = concat(["${env}-apply"], env == "production" ? [
+        "production-destroy-prepare",
+        "production-destroy"
+      ] : [])
+    } }
   )
   readonly_discovery_actions = [
     "acm:DescribeCertificate", "acm:ListCertificates",
@@ -154,7 +162,10 @@ data "aws_iam_policy_document" "role_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${each.value.subject_environment}"]
+      values = [
+        for subject_environment in each.value.subject_environments :
+        "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:environment:${subject_environment}"
+      ]
     }
   }
 }
