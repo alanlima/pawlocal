@@ -207,11 +207,13 @@ jobs:
         if: inputs.phase == 'foundation'
         shell: bash
         run: |
-          echo 'TF_VAR_runtime_role_arn=' >> "$GITHUB_ENV"
-          echo 'TF_VAR_cloudfront_distribution_arn=' >> "$GITHUB_ENV"
-          echo 'TF_VAR_cloudfront_oac_arn=' >> "$GITHUB_ENV"
-          echo 'TF_VAR_backend_image=' >> "$GITHUB_ENV"
-          echo 'Lifecycle phase: `foundation` (runtime deployment disabled).' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo 'TF_VAR_runtime_role_arn='
+            echo 'TF_VAR_cloudfront_distribution_arn='
+            echo 'TF_VAR_cloudfront_oac_arn='
+            echo 'TF_VAR_backend_image='
+          } >> "$GITHUB_ENV"
+          echo "Lifecycle phase: foundation (runtime deployment disabled)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure read-only plan credentials
         uses: aws-actions/configure-aws-credentials@v6
