@@ -7,6 +7,7 @@ from pathlib import Path
 
 WORKFLOW_DIRECTORY = Path(".github/workflows")
 REFERENCE = Path("docs/github-actions.md")
+OPERATIONS_GUIDE = Path("docs/terraform-greenfield-operations.md")
 REFERENCE_PATTERN = re.compile(
     r"<!-- actions-reference: (?P<workflow>[^;]+); "
     r"dispatch-inputs: (?P<dispatch>[^; ]+); call-inputs: (?P<call>[^ ]+) -->"
@@ -162,6 +163,36 @@ class GitHubActionsReferenceTests(unittest.TestCase):
             encoding="utf-8-sig"
         )
         self.assertEqual(workflow.count('      - "docs/github-actions.md"'), 2)
+        self.assertEqual(
+            workflow.count('      - "docs/terraform-greenfield-operations.md"'), 2
+        )
+
+    def test_release_and_converge_caveats_remain_explicit(self) -> None:
+        operations_guide = OPERATIONS_GUIDE.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "development Release therefore uses the current run's full commit SHA",
+            self.reference,
+        )
+        self.assertIn(
+            "Only production Converge and Release require a commit/image pair from "
+            "a prior successful verified-development deployment.",
+            self.reference,
+        )
+        documents = {
+            REFERENCE: self.reference,
+            OPERATIONS_GUIDE: operations_guide,
+        }
+        for document, source in documents.items():
+            with self.subTest(document=document):
+                self.assertIn(
+                    "Current Converge behavior is fail-open with respect to generated "
+                    "handoff readiness.",
+                    source,
+                )
+                self.assertIn("same plan and apply jobs as the other phases", source)
+                self.assertIn("successful zero-change or incomplete handoff apply", source)
+                self.assertIn("Issue #176", source)
 
 
 if __name__ == "__main__":

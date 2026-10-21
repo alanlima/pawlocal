@@ -162,6 +162,8 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 It accepts no manual inputs because the commit is the selected `main` revision and the image digest is produced by the same run.
 
+Development verification is produced after this run's Terraform Release apply and public checks. The development Release therefore uses the current run's full commit SHA and freshly published immutable image; it does not require a previously verified development deployment. Only production Converge and Release require a commit/image pair from a prior successful verified-development deployment.
+
 ### Terraform environment plan and apply
 
 <!-- actions-reference: terraform-environment.yml; dispatch-inputs: environment,phase,backend_image,release_commit,release_only; call-inputs: environment,phase,backend_image,release_commit,release_only -->
@@ -173,7 +175,7 @@ It accepts no manual inputs because the commit is the selected `main` revision a
 | `environment` | Required | Required | `development` or `production`; selects the Terraform root, state key, protected environments, roles, and naming scope. |
 | `phase` | Required; defaults to `foundation` | Optional; defaults to `release` | `foundation`, `converge`, or `release`; selects the lifecycle contract described below. |
 | `backend_image` | Optional; defaults to empty | Optional; defaults to empty | Empty for Foundation, or `ghcr.io/alanlima/pawlocal-api@sha256:<64 lowercase hex characters>` for Converge or Release. Never use a mutable tag. |
-| `release_commit` | Optional; defaults to empty | Optional; defaults to empty | Empty for Foundation, or the full 40-character commit SHA paired with the image by successful development verification. Production eligibility requires it for Converge and Release. |
+| `release_commit` | Optional; defaults to empty | Optional; defaults to empty | Empty for Foundation. The development full-stack Release supplies the current run's full SHA before that run is verified. Production Converge and Release require the full SHA from a prior successful verified-development deployment paired with the selected image. |
 | `release_only` | Required; defaults to `false` | Optional; defaults to `false` | `false` for Foundation/Converge; `true` for Release. It declares the intended version-only scope; automated rejection is temporarily skipped under Issue #148, so exact-plan review remains mandatory. |
 
 Valid combinations:
@@ -185,6 +187,8 @@ Valid combinations:
 | Production Converge | Development-verified immutable reference | Matching development-verified full SHA | `false` |
 | Development Release | Immutable reference produced by the current full-stack run | Current full SHA | `true` |
 | Production Release | Development-verified immutable reference | Matching development-verified full SHA | `true` |
+
+Current Converge behavior is fail-open with respect to generated handoff readiness. `phase=converge` uses the same plan and apply jobs as the other phases; it does not require `PAWLOCAL_RUNTIME_ROLE_ARN`, `PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN`, or `PAWLOCAL_CLOUDFRONT_OAC_ARN`. When those values are absent, Terraform may disable dependent resources and return a successful zero-change or incomplete handoff apply. Until [Issue #176](https://github.com/alanlima/pawlocal/issues/176) changes this behavior, operators must independently verify the matching Foundation outputs, bootstrap runtime identity, protected plan variables, expected plan resources, and post-apply public and runtime readiness. A green Converge run alone is not readiness evidence.
 
 ### Promote verified release to production
 
@@ -463,4 +467,3 @@ When adding, removing, renaming, or changing a workflow:
 4. Update the matching `actions-reference` metadata for both manual-dispatch and reusable-call inputs.
 5. Update the protected-configuration prose and `actions-protected-configuration` metadata when variable or secret consumption changed; the metadata records `vars.` and `secrets.` contexts separately.
 6. Run `python -m unittest tests.ci.test_github_actions_reference` and the applicable workflow tests.
-
