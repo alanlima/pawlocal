@@ -46,26 +46,26 @@ def matches(workflow: str, path: str) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
-    def test_development_seed_confirmation_uses_boolean_input_consistently(self) -> None:
+    def test_development_seed_dispatch_relies_on_environment_approval(self) -> None:
         workflow = (WORKFLOWS / "development-dsql-seed.yml").read_text(
             encoding="utf-8-sig"
         )
-        input_config = workflow.split("confirm_seed:", 1)[1].split(
+        dispatch_config = workflow.split("  workflow_dispatch:", 1)[1].split(
             "\n\npermissions:", 1
         )[0]
         seed_job = workflow.split("  seed:\n", 1)[1].split("    steps:\n", 1)[0]
-        confirmation_step = workflow.split(
+        target_guard = workflow.split(
             "      - name: Confirm the development-only target", 1
         )[1].split("      - name: Set up Python", 1)[0]
 
-        self.assertRegex(input_config, r"(?m)^\s+type: boolean$")
-        self.assertRegex(input_config, r"(?m)^\s+default: false$")
+        self.assertNotIn("inputs:", dispatch_config)
+        self.assertNotIn("confirm_seed", workflow)
+        self.assertIn("if: github.ref == 'refs/heads/main'", seed_job)
+        self.assertIn("environment: development-seed", seed_job)
         self.assertIn(
-            "if: github.ref == 'refs/heads/main' && inputs.confirm_seed == true",
-            seed_job,
+            '[[ "$GITHUB_REF" == "refs/heads/main" ]]',
+            target_guard,
         )
-        self.assertIn("CONFIRM_SEED: ${{ inputs.confirm_seed }}", confirmation_step)
-        self.assertIn('[[ "$CONFIRM_SEED" == "true" ]]', confirmation_step)
 
     def test_docs_only_changes_do_not_trigger_any_automatic_workflow(self) -> None:
         workflows = (
