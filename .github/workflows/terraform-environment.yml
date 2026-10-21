@@ -219,6 +219,34 @@ jobs:
               exit 1
             }
 
+      - name: Print sanitized saved-plan diagnostics
+        if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ""
+          AWS_DEFAULT_REGION: ""
+          AWS_REGION: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
+          PAWLOCAL_AWS_ACCOUNT_ID: ""
+          PAWLOCAL_TF_STATE_BUCKET: ""
+          PLAN_PREFIX: ""
+          PLAN_TRANSFER_BUCKET: ""
+          TERRAFORM_ROLE_ARN: ""
+          TF_ROOT: ""
+          TF_STATE_KEY: ""
+          TF_VAR_aws_region: ""
+          TF_VAR_backend_image: ""
+          TF_VAR_cloudfront_certificate_arn: ""
+          TF_VAR_cloudfront_distribution_arn: ""
+          TF_VAR_cloudfront_oac_arn: ""
+          TF_VAR_root_domain: ""
+          TF_VAR_route53_zone_id: ""
+          TF_VAR_runtime_role_arn: ""
+        run: |
+          python .github/scripts/terraform-plan-console.py "$RUNNER_TEMP/terraform-plan.json" \
+            --environment '${{ inputs.environment }}'
+
       - name: Enforce ownership and publish sanitized summary
         shell: bash
         run: |
