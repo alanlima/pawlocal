@@ -1,10 +1,25 @@
 locals {
+  environment_runtime_cluster_arns = {
+    development = var.development_dsql_cluster_arn
+    production  = var.production_dsql_cluster_arn
+  }
+  environment_cloudfront_handoff_arns = {
+    development = compact([var.development_distribution_arn, var.development_oac_arn])
+    production  = compact([var.production_distribution_arn, var.production_oac_arn])
+  }
   environment_application_policy_arns = {
     for environment in keys(local.environments) : environment => [
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
     ]
+  }
+  environment_active_application_policy_arns = {
+    for environment in keys(local.environments) : environment => slice(
+      local.environment_application_policy_arns[environment],
+      0,
+      local.environment_runtime_cluster_arns[environment] == "" ? 2 : 3
+    )
   }
   # Boundaries cap mutation while the matching identity policy retains the
   # provider's exact read list. Read-only wildcards keep the rendered boundary
@@ -16,7 +31,7 @@ locals {
     "iam:Get*", "iam:List*",
     "lightsail:Get*",
     "route53:Get*", "route53:List*",
-    "sts:GetCallerIdentity", "tag:GetResources"
+    "sts:GetCallerIdentity"
   ]
   environment_apply_boundary_max_bytes = 5500
 }
@@ -69,8 +84,8 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
-    resources = local.environment_application_policy_arns[each.key]
+    actions   = ["iam:CreatePolicy*", "iam:DeletePolicy*", "iam:Set*PolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
+    resources = local.environment_active_application_policy_arns[each.key]
   }
 
   statement {
@@ -95,21 +110,39 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     }
   }
 
-  statement {
-    effect    = "Allow"
-    actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
-    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-dsql-runtime"]
-    condition {
-      test     = "ArnEquals"
-      variable = "iam:PolicyARN"
-      values   = [local.environment_application_policy_arns[each.key][2]]
+  dynamic "statement" {
+    for_each = local.environment_runtime_cluster_arns[each.key] == "" ? [] : [true]
+    content {
+      effect    = "Allow"
+      actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-dsql-runtime"]
+      condition {
+        test     = "ArnEquals"
+        variable = "iam:PolicyARN"
+        values   = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${each.key}-runtime"]
+      }
     }
   }
 
   statement {
     effect    = "Allow"
-    actions   = ["s3:CreateBucket"]
+    actions   = ["s3:CreateBucket", "s3:TagResource"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [each.key]
+    }
+    condition {
+      test     = "ForAllValues:StringLike"
+      variable = "aws:TagKeys"
+      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
   }
 
   statement {
@@ -121,7 +154,15 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     effect = "Allow"
     actions = [
-      "s3:DeleteBucket", "s3:Get*", "s3:ListBucket", "s3:PutBucketOwnershipControls",
+      "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource"
+    ]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:DeleteBucket", "s3:PutBucketOwnershipControls",
       "s3:PutBucketPolicy", "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
@@ -139,8 +180,13 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["dsql:CreateCluster", "lightsail:CreateCertificate", "lightsail:CreateContainerService", "cognito-idp:CreateUserPool"]
+    actions   = ["cognito-idp:CreateUserPool", "cognito-idp:TagResource", "dsql:CreateCluster", "dsql:TagResource", "lightsail:CreateCertificate", "lightsail:CreateContainerService"]
     resources = ["*"]
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/environment"
+      values   = ["true"]
+    }
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
@@ -155,13 +201,15 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect = "Allow"
-    actions = [
-      "dsql:DeleteCluster", "dsql:PutClusterPolicy", "dsql:UpdateCluster",
+    actions = concat([
+      "dsql:DeleteCluster", "dsql:UpdateCluster",
       "cognito-idp:CreateUserPoolClient", "cognito-idp:CreateUserPoolDomain", "cognito-idp:DeleteUserPool",
       "cognito-idp:DeleteUserPoolClient", "cognito-idp:DeleteUserPoolDomain", "cognito-idp:UpdateUserPool",
       "cognito-idp:UpdateUserPoolClient", "cognito-idp:UpdateUserPoolDomain",
-      "lightsail:CreateContainerServiceDeployment", "lightsail:DeleteCertificate", "lightsail:DeleteContainerService", "lightsail:UpdateContainerService"
-    ]
+      "lightsail:DeleteCertificate", "lightsail:DeleteContainerService", "lightsail:UpdateContainerService"
+      ], local.environment_runtime_cluster_arns[each.key] == "" ? [] : [
+      "dsql:PutClusterPolicy", "lightsail:CreateContainerServiceDeployment"
+    ])
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -180,7 +228,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     actions = ["lightsail:TagResource"]
     resources = [
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/${each.value.service_name}",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/pawlocal-${each.key}-api"
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*"
     ]
     condition {
       test     = "Null"
@@ -275,25 +323,16 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
+    actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:TagResource", "cloudfront:UpdateFunction"]
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"]
   }
 
   dynamic "statement" {
-    for_each = each.key == "development" && var.development_distribution_arn != "" ? [var.development_distribution_arn] : each.key == "production" && var.production_distribution_arn != "" ? [var.production_distribution_arn] : []
+    for_each = length(local.environment_cloudfront_handoff_arns[each.key]) == 0 ? [] : [true]
     content {
       effect    = "Allow"
-      actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]
-      resources = [statement.value]
-    }
-  }
-
-  dynamic "statement" {
-    for_each = each.key == "development" && var.development_oac_arn != "" ? [var.development_oac_arn] : each.key == "production" && var.production_oac_arn != "" ? [var.production_oac_arn] : []
-    content {
-      effect    = "Allow"
-      actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]
-      resources = [statement.value]
+      actions   = ["cloudfront:DeleteDistribution", "cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateDistribution", "cloudfront:UpdateOriginAccessControl"]
+      resources = local.environment_cloudfront_handoff_arns[each.key]
     }
   }
 

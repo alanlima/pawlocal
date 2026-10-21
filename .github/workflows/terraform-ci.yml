@@ -66,8 +66,8 @@ jobs:
       - name: Validate Terraform configuration
         run: terraform validate -no-color
 
-      - name: Test bootstrap permissions boundaries
-        if: matrix.root == 'iam-bootstrap'
+      - name: Test rendered IAM policies
+        if: matrix.root == 'iam-bootstrap' || matrix.root == 'modules/pawlocal-environment'
         env:
           AWS_ACCESS_KEY_ID: test
           AWS_SECRET_ACCESS_KEY: test

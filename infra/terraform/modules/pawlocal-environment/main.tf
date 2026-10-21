@@ -18,7 +18,8 @@ locals {
     workload    = "application"
     costcenter  = "personal"
   }
-  deployment_enabled = var.backend_image != "" && var.runtime_role_arn != ""
+  deployment_enabled           = var.backend_image != "" && var.runtime_role_arn != ""
+  iam_managed_policy_max_bytes = 6144
 }
 
 resource "random_id" "bucket_suffix" {
@@ -34,6 +35,13 @@ resource "aws_iam_policy" "application" {
   description = "Environment-owned application permissions for PawLocal ${var.environment}."
   policy      = data.aws_iam_policy_document.application.json
   tags        = local.common_tags
+
+  lifecycle {
+    precondition {
+      condition     = length(data.aws_iam_policy_document.application.minified_json) <= local.iam_managed_policy_max_bytes
+      error_message = "The environment application policy is ${length(data.aws_iam_policy_document.application.minified_json)} bytes; it must stay within IAM's 6144-byte managed-policy limit."
+    }
+  }
 }
 
 resource "aws_iam_role_policy_attachment" "application" {
