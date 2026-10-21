@@ -160,10 +160,25 @@ class GreenfieldTerraformTests(unittest.TestCase):
         permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(encoding="utf-8")
         roles = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(encoding="utf-8")
         self.assertIn("for_each = local.identity_environment_resources", permissions)
+        self.assertIn('s3:::pawlocal-${environment}-*', permissions)
+        self.assertIn(':cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*', permissions)
+        self.assertIn(':dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*', permissions)
         self.assertIn("resources = [each.value.cluster_arn]", permissions)
+        self.assertIn('variable = "aws:ResourceTag/environment"', permissions)
+        self.assertNotIn("PENDING", permissions)
+        self.assertNotIn("identity_scope_pending", permissions)
         self.assertIn('identity_app_role_boundary["development"].arn', roles)
         self.assertIn('identity_app_role_boundary["production"].arn', roles)
         self.assertIn('to   = aws_iam_policy.identity_app_role_boundary["development"]', permissions)
+
+    def test_environment_owned_publisher_and_runtime_policies_remain_exact(self) -> None:
+        environment = (ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('resources = [aws_s3_bucket.frontend.arn]', environment)
+        self.assertIn('resources = ["${aws_s3_bucket.frontend.arn}/*"]', environment)
+        self.assertIn('resources = [aws_cloudfront_distribution.frontend.arn]', environment)
+        self.assertIn('resources = [aws_dsql_cluster.application.arn]', environment)
 
     def test_existing_development_identity_boundary_keeps_state_compatible_description(self) -> None:
         permissions = (ROOT / "infra/terraform/iam-bootstrap/identity_permissions.tf").read_text(
@@ -202,7 +217,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('resource "aws_iam_policy" "frontend_publish"', environment)
         self.assertIn('resource "aws_iam_policy" "runtime"', environment)
 
-    def test_cloudfront_tagged_create_permission_is_temporary_and_handed_off(self) -> None:
+    def test_cloudfront_boundary_is_stable_while_environment_policy_is_exact(self) -> None:
         module_permissions = (ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf").read_text(
             encoding="utf-8"
         )
@@ -215,8 +230,9 @@ class GreenfieldTerraformTests(unittest.TestCase):
         for source in (module_permissions, boundary):
             self.assertIn('"cloudfront:TagResource"', source)
             self.assertIn('variable = "aws:RequestTag/environment"', source)
-            self.assertIn('"cloudfront:CreateFunction"', source)
             self.assertNotIn("cloudfront:UntagResource", source)
+        self.assertIn('"cloudfront:CreateFunction"', module_permissions)
+        self.assertIn('"cloudfront:*Function"', boundary)
         self.assertIn('sid     = "TagOnlyNewEnvironmentResources"', module_permissions)
         self.assertIn('sid       = "ManageExactEnvironmentCloudFrontFunction"', module_permissions)
         self.assertIn('variable = "aws:TagKeys"', module_permissions)
@@ -226,8 +242,23 @@ class GreenfieldTerraformTests(unittest.TestCase):
             'var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == ""',
             module_permissions,
         )
-        self.assertIn('var.development_distribution_arn == "" && var.development_oac_arn == ""', boundary)
-        self.assertIn('var.production_distribution_arn == "" && var.production_oac_arn == ""', boundary)
+        for generated_input in (
+            "development_distribution_arn",
+            "development_oac_arn",
+            "production_distribution_arn",
+            "production_oac_arn",
+        ):
+            self.assertNotIn(generated_input, boundary)
+        self.assertIn(":distribution/*", boundary)
+        self.assertIn(":origin-access-control/*", boundary)
+        self.assertIn(
+            'actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]',
+            boundary,
+        )
+        self.assertIn(
+            'actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]',
+            boundary,
+        )
         self.assertIn("tags                = local.common_tags", distribution)
 
     def test_tagged_create_permissions_match_provider_dependencies(self) -> None:
@@ -306,7 +337,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("environment_apply_boundary_max_bytes = 6060", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
-        self.assertIn('environment_apply_boundary["development"].minified_json) == 5962', test_file)
+        self.assertIn('environment_apply_boundary["development"].minified_json) == 5973', test_file)
         self.assertIn('keys(local.environment_dsql_tags[environment])', test_file)
         self.assertIn('"aws:RequestTag/Name"', test_file)
         self.assertIn('"aws:RequestTag/purpose"', test_file)
