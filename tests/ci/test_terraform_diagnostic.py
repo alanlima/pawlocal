@@ -109,7 +109,7 @@ operation error SecretService: RevealValue, StatusCode: 299, api error SecretCod
         self.assertIn('--phase plan "$RUNNER_TEMP/terraform-plan.log"', workflow)
         self.assertIn('--phase apply "$RUNNER_TEMP/terraform-apply.log"', workflow)
         self.assertIn('> "$RUNNER_TEMP/terraform-plan.log" 2>&1', workflow)
-        self.assertIn('> "$RUNNER_TEMP/terraform-apply.log" 2>&1', workflow)
+        self.assertIn('--log "$RUNNER_TEMP/terraform-apply.log"', workflow)
 
 
 if __name__ == "__main__":
