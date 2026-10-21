@@ -95,26 +95,29 @@ locals {
   oidc_arn     = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   environments = {
     development = {
-      state_key = "pawlocal/development/terraform.tfstate"
-      api_name  = "api-dev"
-      frontend  = "pawlocal-dev"
+      state_key                  = "pawlocal/development/terraform.tfstate"
+      api_name                   = "api-dev"
+      frontend                   = "pawlocal-dev"
+      apply_subject_environments = ["development-apply"]
     }
     production = {
       state_key = "pawlocal/production/terraform.tfstate"
       api_name  = "api"
       frontend  = "pawlocal"
+      apply_subject_environments = [
+        "production-apply",
+        "production-destroy-prepare",
+        "production-destroy"
+      ]
     }
   }
   role_definitions = merge(
     { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environments = ["${env}-plan"] } },
-    { for env, _ in local.environments : "${env}-apply" => {
-      environment = env
-      purpose     = "apply"
-      role_name   = "pawlocal-${env}-terraform-apply"
-      subject_environments = concat(["${env}-apply"], env == "production" ? [
-        "production-destroy-prepare",
-        "production-destroy"
-      ] : [])
+    { for env, config in local.environments : "${env}-apply" => {
+      environment          = env
+      purpose              = "apply"
+      role_name            = "pawlocal-${env}-terraform-apply"
+      subject_environments = config.apply_subject_environments
     } }
   )
   readonly_discovery_actions = [
@@ -294,7 +297,7 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
-    for_each = contains(["development-plan", "production-plan"], each.key) ? [true] : []
+    for_each = each.value.purpose == "plan" ? [true] : []
     content {
       sid    = "ReadExactMatchingEnvironmentRolesForRefresh"
       effect = "Allow"
@@ -313,7 +316,7 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   dynamic "statement" {
-    for_each = contains(["development-plan", "production-plan"], each.key) ? [true] : []
+    for_each = each.value.purpose == "plan" ? [true] : []
     content {
       sid       = "ReadExactMatchingEnvironmentPoliciesForRefresh"
       effect    = "Allow"
@@ -342,15 +345,7 @@ data "aws_iam_policy_document" "role_permissions" {
       condition {
         test     = "ArnEquals"
         variable = "iam:PolicyARN"
-        # environment_permissions.tf defines this list ordering: index 0 is the
-        # environment application policy and index 3 is its DSQL setup policy.
-        # Production alone adds index 4, the default-off teardown policy.
-        values = concat([
-          local.environment_application_policy_arns[each.value.environment][0],
-          local.environment_application_policy_arns[each.value.environment][3]
-          ], each.value.environment == "production" ? [
-          local.environment_application_policy_arns[each.value.environment][4]
-        ] : [])
+        values   = local.environment_apply_attachment_policy_arns[each.value.environment]
       }
     }
   }
@@ -365,7 +360,7 @@ data "aws_iam_policy_document" "role_permissions" {
       condition {
         test     = "ArnEquals"
         variable = "iam:PolicyARN"
-        values   = [local.environment_application_policy_arns[each.value.environment][1]]
+        values   = [local.environment_policy_arns[each.value.environment].frontend_publish]
       }
     }
   }
@@ -380,7 +375,7 @@ data "aws_iam_policy_document" "role_permissions" {
       condition {
         test     = "ArnEquals"
         variable = "iam:PolicyARN"
-        values   = [local.environment_application_policy_arns[each.value.environment][2]]
+        values   = [local.environment_policy_arns[each.value.environment].runtime]
       }
     }
   }

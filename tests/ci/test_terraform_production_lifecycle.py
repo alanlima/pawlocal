@@ -96,8 +96,9 @@ class TerraformProductionLifecycleTests(unittest.TestCase):
         attach_block = bootstrap.split("AttachOnlyMatchingApplicationPolicyToApplyRole", 1)[1].split(
             "AttachOnlyMatchingPublishPolicyToPublishRole", 1
         )[0]
-        self.assertIn('each.value.environment == "production"', attach_block)
-        self.assertIn("[4]", attach_block)
+        self.assertIn("local.environment_apply_attachment_policy_arns", attach_block)
+        self.assertNotIn('each.value.environment == "production"', attach_block)
+        self.assertNotRegex(attach_block, r"environment_application_policy_arns[^\n]*\[\d+\]")
 
     def test_preparation_guard_accepts_only_complete_teardown_transition(self) -> None:
         module = load_module()
