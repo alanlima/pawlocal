@@ -314,6 +314,14 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('"cloudfront:GetOriginAccessControl"', bootstrap)
         self.assertNotIn("pawlocal-production-terraform-deploy", bootstrap)
 
+    def test_environment_roles_can_poll_lightsail_provider_operations(self) -> None:
+        bootstrap = (ROOT / "infra/terraform/iam-bootstrap/main.tf").read_text(encoding="utf-8")
+        regional_reads = bootstrap.split("regional_read_actions = [", 1)[1].split("\n  ]", 1)[0]
+
+        self.assertIn('"lightsail:GetOperation"', regional_reads)
+        self.assertNotIn('"lightsail:GetOperations"', regional_reads)
+        self.assertIn('"lightsail:GetOperations"', bootstrap)
+
     def test_apply_runs_only_after_a_successful_direct_plan(self) -> None:
         source = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
         apply_header = source.split("\n  apply:\n", 1)[1].split("\n    steps:\n", 1)[0]

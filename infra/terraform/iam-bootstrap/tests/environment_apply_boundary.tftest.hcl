@@ -192,6 +192,17 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
     ])
     error_message = "The boundary must not authorize role lifecycle, trust, boundary, or PassRole mutation."
   }
+
+  assert {
+    condition = alltrue([
+      for role in ["development-plan", "development-apply", "production-plan", "production-apply"] :
+      contains(flatten([
+        for statement in jsondecode(data.aws_iam_policy_document.role_permissions[role].json).Statement :
+        flatten([statement.Action])
+      ]), "lightsail:GetOperation")
+    ])
+    error_message = "Every environment Terraform role must be able to read the singular Lightsail operation polled by provider waiters."
+  }
 }
 
 run "runtime_stage_boundaries_fit_and_stay_isolated" {
