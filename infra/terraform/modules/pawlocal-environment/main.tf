@@ -6,10 +6,18 @@ locals {
   api_label      = var.environment == "development" ? "api-dev" : "api"
   database_role  = "pawlocal_${var.environment}_app"
 
+  resource_name_prefix = "pawlocal-${var.environment}"
+  resource_suffixes = {
+    cert              = "cert"
+    container_service = "api"
+  }
+  resource_names = {
+    cert              = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}-${local.resource_suffixes.cert}"
+    container_service = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}"
+  }
+
   frontend_hostname = "${local.frontend_label}.${trimsuffix(var.root_domain, ".")}"
   api_hostname      = "${local.api_label}.${trimsuffix(var.root_domain, ".")}"
-  service_name      = "pawlocal-${var.environment}-api"
-  certificate_name  = "pawlocal-${var.environment}-api"
   common_tags = {
     project     = "pawlocal"
     environment = var.environment
@@ -258,7 +266,7 @@ resource "aws_dsql_cluster_policy" "application" {
 }
 
 resource "aws_lightsail_certificate" "api" {
-  name        = local.certificate_name
+  name        = local.resource_names.cert
   domain_name = local.api_hostname
   tags        = local.common_tags
   depends_on  = [time_sleep.application_permissions_propagation]
@@ -273,7 +281,7 @@ resource "aws_route53_record" "api_certificate_validation" {
 }
 
 resource "aws_lightsail_container_service" "api" {
-  name        = local.service_name
+  name        = local.resource_names.container_service
   power       = var.container_power
   scale       = var.container_scale
   is_disabled = false

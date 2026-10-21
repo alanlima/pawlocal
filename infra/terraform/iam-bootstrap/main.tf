@@ -95,18 +95,14 @@ locals {
   oidc_arn     = var.manage_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
   environments = {
     development = {
-      state_key    = "pawlocal/development/terraform.tfstate"
-      api_name     = "api-dev"
-      frontend     = "pawlocal-dev"
-      service_name = "pawlocal-development-api"
-      certificate  = "pawlocal-development-api-migration-20261019"
+      state_key = "pawlocal/development/terraform.tfstate"
+      api_name  = "api-dev"
+      frontend  = "pawlocal-dev"
     }
     production = {
-      state_key    = "pawlocal/production/terraform.tfstate"
-      api_name     = "api"
-      frontend     = "pawlocal"
-      service_name = "pawlocal-production-api"
-      certificate  = "pawlocal-production-api-migration-20261019"
+      state_key = "pawlocal/production/terraform.tfstate"
+      api_name  = "api"
+      frontend  = "pawlocal"
     }
   }
   role_definitions = merge(

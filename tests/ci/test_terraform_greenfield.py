@@ -64,6 +64,33 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('resource "aws_iam_policy" "application"', source)
         self.assertIn('resource "aws_iam_role_policy_attachment" "application"', source)
 
+    def test_lightsail_names_use_one_suffix_map_without_bootstrap_duplicates(self) -> None:
+        module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
+            encoding="utf-8"
+        )
+        bootstrap = (ROOT / "infra/terraform/iam-bootstrap/main.tf").read_text(encoding="utf-8")
+
+        module_locals = module.split("locals {", 1)[1].split('resource "random_id"', 1)[0]
+        bootstrap_environments = bootstrap.split("environments = {", 1)[1].split(
+            "role_definitions", 1
+        )[0]
+
+        self.assertEqual(module_locals.count("resource_suffixes = {"), 1)
+        self.assertIn('cert              = "cert"', module_locals)
+        self.assertIn('container_service = "api"', module_locals)
+        self.assertIn(
+            'cert              = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}-${local.resource_suffixes.cert}"',
+            module_locals,
+        )
+        self.assertIn(
+            'container_service = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}"',
+            module_locals,
+        )
+        self.assertNotIn("certificate_name", module_locals)
+        self.assertNotIn("service_name", module_locals)
+        self.assertNotIn("certificate", bootstrap_environments)
+        self.assertNotIn("service_name", bootstrap_environments)
+
     def test_environment_creation_roots_wait_for_application_permissions(self) -> None:
         module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
             encoding="utf-8"
