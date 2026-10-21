@@ -114,6 +114,15 @@ class ActionRuntimePolicyTests(unittest.TestCase):
         self.assertIn("uses: actions/github-script@v9", source)
         self.assertIn("process.version.startsWith('v24.')", source)
 
+    def test_runtime_smoke_artifact_is_unique_per_run_attempt(self) -> None:
+        source = (WORKFLOWS / "workflow-validation.yml").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn(
+            "name: action-runtime-policy-${{ github.run_id }}-${{ github.run_attempt }}",
+            source,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
