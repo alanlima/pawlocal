@@ -136,6 +136,10 @@ Dispatch `Terraform environment plan and apply` from `main`. A normal foundation
 7. pauses at the matching protected apply Environment; and
 8. verifies the metadata and SHA-256 before applying exactly that downloaded plan.
 
+On the first apply, Terraform creates the environment application policy and attaches it to the matching apply role before starting a 30-second provider-managed IAM propagation barrier. Every independent application-resource creation root depends on that barrier, and downstream resources inherit the dependency. If an apply stops after creating the policy or attachment, its saved plan is stale: inspect the partial state, create and independently review a fresh normal-refresh plan, and apply only that newly approved plan. Never retry or reuse the failed apply's saved plan.
+
+Terraform plan and apply output remains captured and withheld by default. For time-bounded incident diagnosis, a repository administrator may set the repository Actions variable `PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS` to the exact value `true`. Failed plan and apply steps then print only a small sanitized summary that retains the generic Terraform/AWS error class, operation, and status while redacting infrastructure identifiers, account details, hostnames, plan metadata, and secret-like values. Set the variable to `false` or remove it immediately after diagnosis to restore fully withheld failure output. The control does not change Terraform behavior, permissions, plan review, or approval requirements.
+
 Development must be created, reviewed, and live-verified before production. Before any production Terraform plan, the workflow uses the GitHub API to require that the selected commit is in `main`, that the expected main-branch `fullstack-release.yml` run for that exact commit completed successfully, and that its successful development deployment carries validated schema-versioned health, database-query, migration, telemetry, frontend-digest, and backend-digest evidence from the same run/attempt.
 
 ### Generated-identifier and runtime handoff

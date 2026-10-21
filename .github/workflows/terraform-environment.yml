@@ -50,6 +50,7 @@ concurrency:
 
 env:
   TERRAFORM_VERSION: 1.14.3
+  PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
@@ -208,8 +209,8 @@ jobs:
         run: |
           terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
             > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
-              echo 'Terraform planning failed; raw provider output was withheld.' >&2
-              python .github/scripts/terraform-plan-diagnostic.py "$RUNNER_TEMP/terraform-plan.log" >&2
+              python .github/scripts/terraform-plan-diagnostic.py \
+                --phase plan "$RUNNER_TEMP/terraform-plan.log" >&2
               exit 1
             }
           terraform -chdir="$TF_ROOT" show -json tfplan > "$RUNNER_TEMP/terraform-plan.json" \
@@ -316,7 +317,8 @@ jobs:
             }
           terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m -no-color "$RUNNER_TEMP/saved-plan/tfplan" \
             > "$RUNNER_TEMP/terraform-apply.log" 2>&1 || {
-              echo 'Terraform apply failed; raw provider output was withheld.' >&2
+              python .github/scripts/terraform-plan-diagnostic.py \
+                --phase apply "$RUNNER_TEMP/terraform-apply.log" >&2
               exit 1
             }
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"

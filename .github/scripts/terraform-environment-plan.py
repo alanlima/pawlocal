@@ -28,6 +28,7 @@ ALLOWED_TYPES = {
     "aws_s3_bucket_public_access_block",
     "aws_s3_bucket_server_side_encryption_configuration",
     "random_id",
+    "time_sleep",
 }
 
 FORBIDDEN_TYPES = {
