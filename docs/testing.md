@@ -24,6 +24,25 @@ Issue #83 also establishes maintained Node.js 24 majors for every direct externa
 
 `tests/ci/test_action_runtime_policy.py` inventories every hosted job, rejects floating runner labels, enforces these action majors, and verifies that the download-artifact exception remains true. Pull-request CI safely executes the frontend, backend, Compose, Terraform, and workflow-validation jobs. Workflow validation includes a non-mutating `actions/github-script` runtime assertion plus a smoke job that configures Buildx, authenticates to GHCR with read-only package permission, builds without loading or publishing, and uploads short-lived policy evidence. Protected release, production, seed, and Terraform apply jobs are validated statically on pull requests but are not dispatched merely to test an action upgrade: they require environment approvals, runtime credentials, and in some cases would mutate AWS or application data. In particular, `aws-actions/configure-aws-credentials` remains static-plus-review evidence until the next separately authorized credentialed run. No Issue #83 validation run grants deployment, seed, Terraform plan/apply, or AWS mutation authorization.
 
+| Workflow / direct hosted job | Safe Issue #83 verification | Live credentialed verification |
+| --- | --- | --- |
+| `backend-ci.yml` / `backend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
+| `compose-ci.yml` / `compose` | Pull-request build, readiness, and smoke job runs on Ubuntu 24.04 | Not applicable |
+| `deploy-production.yml` / `verify-production` | Actionlint, policy inventory, unchanged-input review, and protected-path tests | Next separately approved production promotion only |
+| `development-dsql-seed.yml` / `seed` | Actionlint, policy inventory, unchanged-input review, and feature-branch fail-closed dispatch | Next separately approved development seed only |
+| `frontend-deploy.yml` / `frontend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
+| `frontend-production-deploy.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `fullstack-release.yml` / `publish` | Pull-request condition skips publication; the same checkout, Buildx, GHCR login, and no-push build actions run in the runtime smoke job | Next authorized `main` release only |
+| `fullstack-release.yml` / `verify-development` | Pull-request condition skips deployment; action inputs and protected-path tests are validated | Next authorized `main` release only |
+| `rollback-development.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `terraform-ci.yml` / `terraform` | All five matrix roots run on Ubuntu 24.04 | Not applicable; no AWS credentials are used |
+| `terraform-current-stack-operations.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `terraform-environment.yml` / `production-eligibility` | Actionlint, policy inventory, and production eligibility unit tests | Next separately approved production promotion only |
+| `terraform-environment.yml` / `plan` | Actionlint, policy inventory, plan-policy tests, and release workflow fail-closed path | Next separately approved environment plan only |
+| `terraform-environment.yml` / `apply` | Actionlint, policy inventory, exact-plan/apply tests, and release workflow fail-closed path | Next separately approved exact-plan apply only |
+| `workflow-validation.yml` / `action-runtime-smoke` | Pull-request no-push action smoke runs on Ubuntu 24.04 | Not applicable |
+| `workflow-validation.yml` / `validate` | Pull-request action runtime, Actionlint, security, and path tests run on Ubuntu 24.04 | Not applicable |
+
 ## CI workflow path ownership and required checks
 
 CI uses separate workflows with GitHub-native top-level `pull_request.paths` and `push.paths` filters. A docs-only change such as `README.md` or `docs/**` matches no automatic workflow, so GitHub Actions starts no run. The frontend, backend, Compose, Terraform, and workflow-validation paths are listed directly in their workflow files and verified by `tests/ci/test_workflow_paths.py`.
