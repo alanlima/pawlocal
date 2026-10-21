@@ -23,6 +23,6 @@ permissions:
 # This no-op job must not publish the mock-backed bundle to the production site.
 jobs:
   disabled:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: echo "This mock-backed production deployment is retired. Use the full-stack release workflows."

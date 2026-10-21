@@ -37,7 +37,7 @@ concurrency:
 jobs:
   backend:
     name: Backend checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17.6-alpine
@@ -60,10 +60,10 @@ jobs:
       PAWLOCAL_TEST_DATABASE_URL: postgresql+psycopg://pawlocal:pawlocal-ci-password@localhost:5432/pawlocal_test
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip

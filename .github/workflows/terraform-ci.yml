@@ -37,7 +37,7 @@ concurrency:
 jobs:
   terraform:
     name: Terraform validation (${{ matrix.root }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -52,10 +52,10 @@ jobs:
         working-directory: infra/terraform/${{ matrix.root }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.14.3
           terraform_wrapper: false
