@@ -190,7 +190,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
             self.assertIn('variable = "aws:RequestTag/environment"', source)
             self.assertIn('"cloudfront:CreateFunction"', source)
             self.assertNotIn("cloudfront:UntagResource", source)
-        self.assertIn('sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"', module_permissions)
+        self.assertIn('sid     = "TagOnlyNewEnvironmentResources"', module_permissions)
         self.assertIn('sid       = "ManageExactEnvironmentCloudFrontFunction"', module_permissions)
         self.assertIn('variable = "aws:TagKeys"', module_permissions)
         for tag_name in ("managedby", "component", "workload", "costcenter"):
@@ -203,6 +203,63 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('var.production_distribution_arn == "" && var.production_oac_arn == ""', boundary)
         self.assertIn("tags                = local.common_tags", distribution)
 
+    def test_tagged_create_permissions_match_provider_dependencies(self) -> None:
+        module_permissions = (ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf").read_text(
+            encoding="utf-8"
+        )
+        module_main = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
+            encoding="utf-8"
+        )
+        boundary = (ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf").read_text(
+            encoding="utf-8"
+        )
+        baseline = (ROOT / "infra/terraform/iam-bootstrap/main.tf").read_text(encoding="utf-8")
+        module_test = (
+            ROOT
+            / "infra/terraform/modules/pawlocal-environment/tests/tagged_create_permissions.tftest.hcl"
+        ).read_text(encoding="utf-8")
+
+        for source in (module_permissions, boundary):
+            for action in (
+                "s3:TagResource",
+                "dsql:TagResource",
+                "lightsail:TagResource",
+                "cognito-idp:TagResource",
+                "cloudfront:TagResource",
+            ):
+                self.assertIn(f'"{action}"', source)
+            self.assertIn('variable = "aws:RequestTag/project"', source)
+            self.assertIn('variable = "aws:RequestTag/environment"', source)
+            self.assertNotIn("lightsail:UntagResource", source)
+            self.assertNotIn("cloudfront:UntagResource", source)
+
+        self.assertIn('["s3:CreateBucket", "s3:TagResource"]', module_permissions)
+        self.assertIn('["s3:CreateBucket", "s3:TagResource"]', boundary)
+        self.assertIn('sid       = "CreateOnlyTaggedMatchingFrontendBucket"', module_permissions)
+        self.assertIn('sid    = "ReadOnlyMatchingFrontendBucketBeforeTagHandoff"', module_permissions)
+        self.assertIn('"s3:PutBucketTagging"', module_permissions)
+        self.assertIn('"s3:ListTagsForResource"', module_permissions)
+        self.assertIn('"s3:GetBucket*", "s3:Get*Configuration"', boundary)
+        self.assertNotIn('"s3:Get*"', boundary)
+        self.assertIn('Certificate/*', module_permissions)
+        self.assertIn('Certificate/*', boundary)
+        self.assertIn('userpool/*', module_permissions)
+        self.assertIn('iam_managed_policy_max_bytes = 6144', module_main)
+        self.assertIn('dsql_tags = merge(local.common_tags', module_main)
+        self.assertIn('tags                        = local.dsql_tags', module_main)
+        self.assertIn('sid       = "CreateAndTagOnlyNewEnvironmentDSQLCluster"', module_permissions)
+        self.assertIn('for_each = local.dsql_tags', module_permissions)
+        self.assertIn('environment_dsql_tags = {', boundary)
+        self.assertIn('for_each = local.environment_dsql_tags[each.key]', boundary)
+        self.assertIn(".minified_json", module_test)
+        self.assertIn('"aws:RequestTag/Name"', module_test)
+        self.assertIn('"aws:RequestTag/purpose"', module_test)
+        self.assertIn('toset(keys(local.dsql_tags))', module_test)
+        self.assertIn('"s3:ListTagsForResource"', baseline)
+
+        for tag_name in ("project", "environment", "managedby", "component", "workload", "costcenter"):
+            self.assertIn(f'variable = "aws:RequestTag/{tag_name}"', module_permissions)
+
     def test_environment_apply_boundaries_have_an_offline_size_and_isolation_gate(self) -> None:
         boundary = (ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf").read_text(
             encoding="utf-8"
@@ -213,13 +270,17 @@ class GreenfieldTerraformTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
 
-        self.assertIn("environment_apply_boundary_max_bytes = 5500", boundary)
+        self.assertIn("environment_apply_boundary_max_bytes = 6050", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
+        self.assertIn('keys(local.environment_dsql_tags[environment])', test_file)
+        self.assertIn('"aws:RequestTag/Name"', test_file)
+        self.assertIn('"aws:RequestTag/purpose"', test_file)
         self.assertIn("iam:UpdateAssumeRolePolicy", test_file)
         self.assertIn("lightsail:UntagResource", test_file)
         self.assertIn("cloudfront:UntagResource", test_file)
         self.assertIn("terraform test -no-color", workflow)
+        self.assertIn("matrix.root == 'modules/pawlocal-environment'", workflow)
 
     def test_lightsail_authorization_tags_are_one_time_and_cannot_be_removed(self) -> None:
         for path in (

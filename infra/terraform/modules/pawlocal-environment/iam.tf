@@ -1,15 +1,63 @@
 data "aws_iam_policy_document" "application" {
   statement {
-    sid       = "CreateOnlyMatchingFrontendBucket"
+    sid       = "CreateOnlyTaggedMatchingFrontendBucket"
     effect    = "Allow"
-    actions   = ["s3:CreateBucket"]
+    actions   = ["s3:CreateBucket", "s3:TagResource"]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [var.environment]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/managedby"
+      values   = ["terraform"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/component"
+      values   = ["fullstack-mvp"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/workload"
+      values   = ["application"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/costcenter"
+      values   = ["personal"]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
   }
 
   statement {
     sid       = "TagOnlyMatchingFrontendBucketName"
     effect    = "Allow"
     actions   = ["s3:PutBucketTagging"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
+  }
+
+  statement {
+    sid    = "ReadOnlyMatchingFrontendBucketBeforeTagHandoff"
+    effect = "Allow"
+    actions = [
+      "s3:GetAccelerateConfiguration", "s3:GetBucketAcl", "s3:GetBucketCORS", "s3:GetBucketLocation",
+      "s3:GetBucketLogging", "s3:GetBucketObjectLockConfiguration", "s3:GetBucketOwnershipControls",
+      "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketRequestPayment", "s3:GetBucketTagging",
+      "s3:GetBucketVersioning", "s3:GetBucketWebsite", "s3:GetEncryptionConfiguration", "s3:GetLifecycleConfiguration",
+      "s3:GetReplicationConfiguration", "s3:ListBucket", "s3:ListTagsForResource"
+    ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
   }
 
@@ -34,9 +82,12 @@ data "aws_iam_policy_document" "application" {
   }
 
   statement {
-    sid       = "CreateTaggedEnvironmentResources"
-    effect    = "Allow"
-    actions   = ["dsql:CreateCluster", "lightsail:CreateCertificate", "lightsail:CreateContainerService", "cognito-idp:CreateUserPool"]
+    sid    = "CreateTaggedEnvironmentResources"
+    effect = "Allow"
+    actions = concat(
+      ["cloudfront:CreateFunction", "cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
+      var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["cloudfront:CreateDistribution"] : []
+    )
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -47,6 +98,80 @@ data "aws_iam_policy_document" "application" {
       test     = "StringEquals"
       variable = "aws:RequestTag/environment"
       values   = [var.environment]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
+  }
+
+  statement {
+    sid     = "TagOnlyNewEnvironmentResources"
+    effect  = "Allow"
+    actions = ["cloudfront:TagResource", "cognito-idp:TagResource", "lightsail:TagResource"]
+    resources = concat([
+      "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${var.environment}-spa-routing",
+      "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/pawlocal-${var.environment}-api"
+      ],
+      var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"] : []
+    )
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/project"
+      values   = ["true"]
+    }
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/environment"
+      values   = ["true"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [var.environment]
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
+  }
+
+  statement {
+    sid       = "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+    effect    = "Allow"
+    actions   = ["dsql:CreateCluster", "dsql:TagResource"]
+    resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/project"
+      values   = ["true"]
+    }
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/environment"
+      values   = ["true"]
+    }
+    dynamic "condition" {
+      for_each = local.dsql_tags
+      content {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/${condition.key}"
+        values   = [condition.value]
+      }
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = keys(local.dsql_tags)
     }
   }
 
@@ -92,136 +217,6 @@ data "aws_iam_policy_document" "application" {
     }
   }
 
-  statement {
-    sid     = "SetImmutableAuthorizationTagsOnlyAtLightsailCreation"
-    effect  = "Allow"
-    actions = ["lightsail:TagResource"]
-    resources = [
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/pawlocal-${var.environment}-api",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/pawlocal-${var.environment}-api"
-    ]
-    condition {
-      test     = "Null"
-      variable = "aws:ResourceTag/project"
-      values   = ["true"]
-    }
-    condition {
-      test     = "Null"
-      variable = "aws:ResourceTag/environment"
-      values   = ["true"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/environment"
-      values   = [var.environment]
-    }
-  }
-
-  dynamic "statement" {
-    for_each = var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? [true] : []
-    content {
-      sid       = "CreateTaggedEnvironmentCloudFrontDistribution"
-      effect    = "Allow"
-      actions   = ["cloudfront:CreateDistribution"]
-      resources = ["*"]
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/project"
-        values   = ["pawlocal"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/environment"
-        values   = [var.environment]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/managedby"
-        values   = ["terraform"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/component"
-        values   = ["fullstack-mvp"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/workload"
-        values   = ["application"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/costcenter"
-        values   = ["personal"]
-      }
-      condition {
-        test     = "ForAllValues:StringEquals"
-        variable = "aws:TagKeys"
-        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
-      }
-    }
-  }
-
-  dynamic "statement" {
-    for_each = var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? [true] : []
-    content {
-      sid       = "TagOnlyNewEnvironmentCloudFrontDistribution"
-      effect    = "Allow"
-      actions   = ["cloudfront:TagResource"]
-      resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
-      condition {
-        test     = "Null"
-        variable = "aws:ResourceTag/project"
-        values   = ["true"]
-      }
-      condition {
-        test     = "Null"
-        variable = "aws:ResourceTag/environment"
-        values   = ["true"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/project"
-        values   = ["pawlocal"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/environment"
-        values   = [var.environment]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/managedby"
-        values   = ["terraform"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/component"
-        values   = ["fullstack-mvp"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/workload"
-        values   = ["application"]
-      }
-      condition {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/costcenter"
-        values   = ["personal"]
-      }
-      condition {
-        test     = "ForAllValues:StringEquals"
-        variable = "aws:TagKeys"
-        values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
-      }
-    }
-  }
-
   dynamic "statement" {
     for_each = var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? [true] : []
     content {
@@ -235,7 +230,7 @@ data "aws_iam_policy_document" "application" {
   statement {
     sid       = "ManageExactEnvironmentCloudFrontFunction"
     effect    = "Allow"
-    actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
+    actions   = ["cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"]
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${var.environment}-spa-routing"]
   }
 
