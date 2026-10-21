@@ -216,6 +216,37 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('resource "aws_iam_policy" "application"', environment)
         self.assertIn('resource "aws_iam_policy" "frontend_publish"', environment)
         self.assertIn('resource "aws_iam_policy" "runtime"', environment)
+        self.assertIn('resource "aws_iam_policy" "dsql_setup"', environment)
+
+    def test_protected_dsql_setup_permissions_and_workflow_are_fail_closed(self) -> None:
+        permissions = (
+            ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf"
+        ).read_text(encoding="utf-8")
+        boundary = (
+            ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf"
+        ).read_text(encoding="utf-8")
+        roles = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(
+            encoding="utf-8"
+        )
+        workflow = (ROOT / ".github/workflows/terraform-environment.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('actions   = ["dsql:DbConnectAdmin"]', permissions)
+        self.assertIn('actions   = ["sts:AssumeRole"]', permissions)
+        self.assertIn('"dsql:DbConnectAdmin"', boundary)
+        self.assertIn('"sts:AssumeRole"', boundary)
+        self.assertIn("AllowExactDevelopmentTerraformApply", roles)
+        self.assertIn("AllowExactProductionTerraformApply", roles)
+        self.assertIn("requirements-dsql-post-apply.txt", workflow)
+        self.assertIn("group: pawlocal-terraform-${{ inputs.environment }}", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn('apply -input=false -lock-timeout=5m', workflow)
+        self.assertLess(
+            workflow.index("Install pinned Aurora DSQL setup dependencies"),
+            workflow.index("terraform -chdir=\"$TF_ROOT\" apply"),
+        )
+        self.assertFalse((ROOT / "ops/bootstrap-development-dsql-role.ps1").exists())
 
     def test_cloudfront_boundary_is_stable_while_environment_policy_is_exact(self) -> None:
         module_permissions = (ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf").read_text(
@@ -337,7 +368,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("environment_apply_boundary_max_bytes = 6060", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
-        self.assertIn('environment_apply_boundary["development"].minified_json) == 5993', test_file)
+        self.assertIn('environment_apply_boundary["development"].minified_json) == 6040', test_file)
         self.assertIn('!contains(flatten([statement.Resource]), "*")', test_file)
         self.assertIn("Post-create DSQL and Lightsail mutations", test_file)
         self.assertIn("Post-create Cognito mutations", test_file)

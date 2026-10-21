@@ -352,6 +352,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
 
+      - name: Install pinned Aurora DSQL setup dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --no-warn-script-location \
+            -r .github/scripts/requirements-dsql-post-apply.txt
+
       - name: Download the exact saved plan
         shell: bash
         run: |

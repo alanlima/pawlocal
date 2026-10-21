@@ -293,3 +293,21 @@ data "aws_iam_policy_document" "runtime" {
     resources = [aws_dsql_cluster.application.arn]
   }
 }
+
+data "aws_iam_policy_document" "dsql_setup" {
+  count = var.runtime_role_arn == "" ? 0 : 1
+
+  statement {
+    sid       = "AdminConnectOnlyToEnvironmentDSQL"
+    effect    = "Allow"
+    actions   = ["dsql:DbConnectAdmin"]
+    resources = [aws_dsql_cluster.application.arn]
+  }
+
+  statement {
+    sid       = "AssumeOnlyMatchingEnvironmentRuntimeRole"
+    effect    = "Allow"
+    actions   = ["sts:AssumeRole"]
+    resources = [var.runtime_role_arn]
+  }
+}

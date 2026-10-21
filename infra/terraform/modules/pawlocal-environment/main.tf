@@ -30,6 +30,7 @@ locals {
     Name    = "pawlocal-${var.environment}"
     purpose = "pawlocal-app-database"
   })
+  dsql_setup_revision          = "dsql-setup-v1-dsql_0001_initial"
   deployment_enabled           = var.backend_image != "" && var.runtime_role_arn != ""
   iam_managed_policy_max_bytes = 6144
 }
@@ -93,6 +94,20 @@ resource "aws_iam_role_policy_attachment" "runtime" {
   count      = var.runtime_role_arn == "" ? 0 : 1
   role       = "pawlocal-${var.environment}-dsql-runtime"
   policy_arn = aws_iam_policy.runtime[0].arn
+}
+
+resource "aws_iam_policy" "dsql_setup" {
+  count       = var.runtime_role_arn == "" ? 0 : 1
+  name        = "pawlocal-${var.environment}-dsql-setup"
+  description = "Exact DSQL post-apply permissions for PawLocal ${var.environment}."
+  policy      = data.aws_iam_policy_document.dsql_setup[0].json
+  tags        = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "dsql_setup" {
+  count      = var.runtime_role_arn == "" ? 0 : 1
+  role       = var.terraform_apply_role_name
+  policy_arn = aws_iam_policy.dsql_setup[0].arn
 }
 
 resource "aws_s3_bucket" "frontend" {
@@ -265,6 +280,43 @@ resource "aws_dsql_cluster_policy" "application" {
   })
 }
 
+resource "time_sleep" "dsql_setup_permissions_propagation" {
+  count           = var.runtime_role_arn == "" ? 0 : 1
+  create_duration = "30s"
+  triggers = {
+    setup_policy_sha256   = sha256(data.aws_iam_policy_document.dsql_setup[0].json)
+    cluster_policy_sha256 = sha256(aws_dsql_cluster_policy.application[0].policy)
+  }
+  depends_on = [
+    aws_iam_role_policy_attachment.dsql_setup,
+    aws_iam_role_policy_attachment.runtime,
+  ]
+}
+
+module "dsql_post_apply_setup" {
+  count  = var.runtime_role_arn == "" ? 0 : 1
+  source = "../dsql-post-apply-setup"
+
+  cluster_identity  = aws_dsql_cluster.application.arn
+  runtime_identity  = var.runtime_role_arn
+  setup_revision    = local.dsql_setup_revision
+  command           = "python -m pawlocal.dsql_post_apply_setup"
+  working_directory = abspath("${path.module}/../../../..")
+  environment = {
+    PYTHONPATH                           = abspath("${path.module}/../../../../backend")
+    PAWLOCAL_DSQL_SETUP_ENVIRONMENT      = var.environment
+    PAWLOCAL_DSQL_SETUP_ENDPOINT         = "${aws_dsql_cluster.application.identifier}.dsql.${var.aws_region}.on.aws"
+    PAWLOCAL_DSQL_SETUP_REGION           = var.aws_region
+    PAWLOCAL_DSQL_SETUP_DATABASE_ROLE    = local.database_role
+    PAWLOCAL_DSQL_SETUP_RUNTIME_ROLE_ARN = var.runtime_role_arn
+  }
+
+  depends_on = [
+    aws_dsql_cluster_policy.application,
+    time_sleep.dsql_setup_permissions_propagation,
+  ]
+}
+
 resource "aws_lightsail_certificate" "api" {
   name        = local.resource_names.cert
   domain_name = local.api_hostname
@@ -333,7 +385,7 @@ resource "aws_lightsail_container_service_deployment_version" "api" {
     }
   }
 
-  depends_on = [aws_dsql_cluster_policy.application]
+  depends_on = [module.dsql_post_apply_setup]
 }
 
 resource "aws_route53_record" "api" {

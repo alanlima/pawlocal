@@ -667,9 +667,8 @@ resource "aws_iam_role_policy" "github_terraform_deploy" {
   policy   = data.aws_iam_policy_document.github_terraform_deploy[each.key].json
 }
 
-# Keep the database-role mapping inputs visible in Terraform plans without
-# executing SQL from a Terraform provisioner. An authorized local operator runs
-# ops/bootstrap-development-dsql-role.ps1 after applying a reviewed dev plan.
+# Historical combined-state marker retained only for state compatibility. The
+# clean Issue #135 environment roots own the protected DSQL setup path.
 resource "terraform_data" "app_dsql_role" {
   for_each = local.environments
 

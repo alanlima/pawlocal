@@ -331,7 +331,12 @@ data "aws_iam_policy_document" "role_permissions" {
       condition {
         test     = "ArnEquals"
         variable = "iam:PolicyARN"
-        values   = [local.environment_application_policy_arns[each.value.environment][0]]
+        # environment_permissions.tf defines this list ordering: index 0 is the
+        # environment application policy and index 3 is its DSQL setup policy.
+        values = [
+          local.environment_application_policy_arns[each.value.environment][0],
+          local.environment_application_policy_arns[each.value.environment][3]
+        ]
       }
     }
   }

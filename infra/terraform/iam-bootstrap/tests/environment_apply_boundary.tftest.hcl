@@ -50,8 +50,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 5993
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 5993-byte boundary shape."
+    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6040
+    error_message = "The real-input-equivalent development fixture must retain the reviewed 6040-byte boundary shape."
   }
 
   assert {

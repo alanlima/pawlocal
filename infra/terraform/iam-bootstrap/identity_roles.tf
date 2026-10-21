@@ -101,6 +101,18 @@ data "aws_iam_policy_document" "development_runtime_trust" {
   }
 
   statement {
+    sid     = "AllowExactDevelopmentTerraformApply"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-development-terraform-apply"
+      ]
+    }
+  }
+
+  statement {
     sid     = "AllowExactDevelopmentSeedWorkflow"
     effect  = "Allow"
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -147,6 +159,18 @@ data "aws_iam_policy_document" "production_runtime_trust" {
     principals {
       type        = "AWS"
       identifiers = [var.production_lightsail_principal_arn]
+    }
+  }
+
+  statement {
+    sid     = "AllowExactProductionTerraformApply"
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-production-terraform-apply"
+      ]
     }
   }
 }

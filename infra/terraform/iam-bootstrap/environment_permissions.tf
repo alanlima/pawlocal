@@ -15,7 +15,8 @@ locals {
     for environment in keys(local.environments) : environment => [
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish",
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime",
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
     ]
   }
   # Boundaries cap mutation while the matching identity policy retains the
@@ -34,7 +35,7 @@ locals {
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
-# three named policies and may attach them only to their matching roles.
+# four named policies and may attach them only to their matching roles.
 data "aws_iam_policy_document" "environment_apply_boundary" {
   for_each = local.environments
 
@@ -87,10 +88,10 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy"]
+    actions   = ["iam:AttachRolePolicy", "iam:DetachRolePolicy", "sts:AssumeRole"]
     resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-*"]
     condition {
-      test     = "ArnLike"
+      test     = "ArnLikeIfExists"
       variable = "iam:PolicyARN"
       values   = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${each.key}-*"]
     }
@@ -232,7 +233,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     effect = "Allow"
     actions = [
-      "dsql:DeleteCluster", "dsql:UpdateCluster",
+      "dsql:DbConnectAdmin", "dsql:DeleteCluster", "dsql:UpdateCluster",
       "dsql:PutClusterPolicy",
       "lightsail:*ContainerService*", "lightsail:DeleteCertificate"
     ]

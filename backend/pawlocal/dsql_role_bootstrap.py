@@ -1,14 +1,10 @@
-"""Create and map the app database role as part of Terraform provisioning."""
+"""Create, map, and verify an application role for Terraform DSQL setup."""
 
 from __future__ import annotations
 
-import argparse
 import re
-import sys
 
-from botocore.exceptions import BotoCoreError
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 _ROLE_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _APP_SCHEMA = "pawlocal"
@@ -17,72 +13,75 @@ _PRINCIPAL_ARN_PATTERN = re.compile(
 )
 
 
+class DSQLRolePostconditionError(RuntimeError):
+    """The application database role is absent or unsafe."""
+
+
+class DSQLMappingPostconditionError(RuntimeError):
+    """The runtime IAM mapping is absent, ambiguous, or cross-role."""
+
+
+class DSQLSchemaGrantPostconditionError(RuntimeError):
+    """The application schema grants are missing or too broad."""
+
+
 def ensure_app_role(
     engine,
     database_role: str,
     iam_principal_arn: str,
-    legacy_iam_user_arn: str | None = None,
-    legacy_iam_principal_arns: list[str] | None = None,
 ) -> None:
-    """Ensure the custom role, IAM mapping, and app schema access exist idempotently."""
+    """Ensure the custom role, singleton IAM mapping, and schema grants."""
     if not _ROLE_PATTERN.fullmatch(database_role):
         raise ValueError("database role has an invalid format")
     if not _PRINCIPAL_ARN_PATTERN.fullmatch(iam_principal_arn):
         raise ValueError("IAM principal ARN has an invalid format")
-    legacy_principals = list(legacy_iam_principal_arns or [])
-    if legacy_iam_user_arn is not None:
-        legacy_principals.append(legacy_iam_user_arn)
-    for legacy_principal_arn in legacy_principals:
-        if not _PRINCIPAL_ARN_PATTERN.fullmatch(legacy_principal_arn):
-            raise ValueError("legacy IAM principal ARN has an invalid format")
 
     with engine.begin() as connection:
-        role_exists = connection.execute(
-            text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :role"),
+        role_can_login = connection.execute(
+            text("SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = :role"),
             {"role": database_role},
         ).scalar_one_or_none()
-    if role_exists is None:
+    if role_can_login is None:
         with engine.begin() as connection:
             connection.exec_driver_sql(f'CREATE ROLE "{database_role}" WITH LOGIN')
+    elif role_can_login is not True:
+        raise DSQLRolePostconditionError(
+            "application database role exists without LOGIN"
+        )
 
     with engine.begin() as connection:
-        existing_mapping = connection.execute(
-            text(
-                "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
-                "WHERE arn = :iam_user_arn"
-            ),
-            {"iam_user_arn": iam_principal_arn},
-        ).scalar_one_or_none()
-    if existing_mapping is None:
+        role_principals = (
+            connection.execute(
+                text(
+                    "SELECT arn FROM sys.iam_pg_role_mappings "
+                    "WHERE pg_role_name = :role ORDER BY arn"
+                ),
+                {"role": database_role},
+            )
+            .scalars()
+            .all()
+        )
+        principal_roles = (
+            connection.execute(
+                text(
+                    "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
+                    "WHERE arn = :iam_user_arn ORDER BY pg_role_name"
+                ),
+                {"iam_user_arn": iam_principal_arn},
+            )
+            .scalars()
+            .all()
+        )
+    if not role_principals and not principal_roles:
         with engine.begin() as connection:
             connection.exec_driver_sql(
                 f"AWS IAM GRANT {database_role} TO '{iam_principal_arn}'"
             )
-    elif existing_mapping != database_role:
-        raise RuntimeError(
-            "IAM principal is already mapped to a different DSQL database role"
+    elif role_principals != [iam_principal_arn] or principal_roles != [database_role]:
+        raise DSQLMappingPostconditionError(
+            "application role or runtime IAM principal has a missing, duplicate, "
+            "or competing mapping"
         )
-
-    for legacy_principal_arn in dict.fromkeys(legacy_principals):
-        if legacy_principal_arn == iam_principal_arn:
-            continue
-        with engine.begin() as connection:
-            legacy_mapping = connection.execute(
-                text(
-                    "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
-                    "WHERE arn = :iam_user_arn"
-                ),
-                {"iam_user_arn": legacy_principal_arn},
-            ).scalar_one_or_none()
-        if legacy_mapping == database_role:
-            with engine.begin() as connection:
-                connection.exec_driver_sql(
-                    f"AWS IAM REVOKE {database_role} FROM '{legacy_principal_arn}'"
-                )
-        elif legacy_mapping is not None:
-            raise RuntimeError(
-                "legacy IAM user is mapped to a different DSQL database role"
-            )
 
     with engine.begin() as connection:
         schema_exists = connection.execute(
@@ -100,63 +99,88 @@ def ensure_app_role(
             f'GRANT USAGE, CREATE ON SCHEMA "{_APP_SCHEMA}" TO "{database_role}"'
         )
 
+    verify_app_role(engine, database_role, iam_principal_arn)
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--endpoint", required=True)
-    parser.add_argument("--region", required=True)
-    parser.add_argument("--database-role", required=True)
-    parser.add_argument("--iam-principal-arn", required=True)
-    parser.add_argument("--legacy-iam-user-arn")
-    parser.add_argument("--legacy-iam-principal-arn", action="append", default=[])
-    args = parser.parse_args(argv)
 
-    try:
-        import certifi
-
-        if not args.endpoint.endswith(f".dsql.{args.region}.on.aws"):
-            raise ValueError("DSQL endpoint does not match the selected region")
-        from aurora_dsql_sqlalchemy import create_dsql_engine
-
-        engine = create_dsql_engine(
-            host=args.endpoint,
-            user="admin",
-            driver="psycopg",
-            dbname="postgres",
-            sslmode="verify-full",
-            sslrootcert=certifi.where(),
-            application_name="pawlocal-terraform-role-bootstrap",
-            pool_pre_ping=True,
-        )
-        try:
-            ensure_app_role(
-                engine,
-                args.database_role,
-                args.iam_principal_arn,
-                args.legacy_iam_user_arn,
-                args.legacy_iam_principal_arn,
+def verify_app_role(engine, database_role: str, iam_principal_arn: str) -> None:
+    """Fail closed unless the role, singleton mapping, and grants are exact."""
+    with engine.begin() as connection:
+        role_can_login = connection.execute(
+            text("SELECT rolcanlogin FROM pg_catalog.pg_roles WHERE rolname = :role"),
+            {"role": database_role},
+        ).scalar_one_or_none()
+        role_principals = (
+            connection.execute(
+                text(
+                    "SELECT arn FROM sys.iam_pg_role_mappings "
+                    "WHERE pg_role_name = :role ORDER BY arn"
+                ),
+                {"role": database_role},
             )
-        finally:
-            engine.dispose()
-    except (
-        BotoCoreError,
-        ImportError,
-        OSError,
-        RuntimeError,
-        SQLAlchemyError,
-        ValueError,
-    ) as exc:
-        # Connector errors can include connection details; keep Terraform output
-        # free of tokens and credential-bearing diagnostics.
-        print(
-            f"Aurora DSQL app-role bootstrap failed ({type(exc).__name__}).",
-            file=sys.stderr,
+            .scalars()
+            .all()
         )
-        return 1
+        principal_roles = (
+            connection.execute(
+                text(
+                    "SELECT pg_role_name FROM sys.iam_pg_role_mappings "
+                    "WHERE arn = :iam_user_arn ORDER BY pg_role_name"
+                ),
+                {"iam_user_arn": iam_principal_arn},
+            )
+            .scalars()
+            .all()
+        )
+        grants = connection.execute(
+            text(
+                "SELECT "
+                "has_schema_privilege(:role, :schema, 'USAGE'), "
+                "has_schema_privilege(:role, :schema, 'CREATE')"
+            ),
+            {"role": database_role, "schema": _APP_SCHEMA},
+        ).one()
+        public_grants = connection.execute(
+            text(
+                "SELECT "
+                "EXISTS ("
+                "SELECT 1 FROM pg_catalog.pg_namespace AS schema_data "
+                "CROSS JOIN LATERAL pg_catalog.aclexplode("
+                "COALESCE(schema_data.nspacl, "
+                "pg_catalog.acldefault('n', schema_data.nspowner))"
+                ") AS privilege_data "
+                "WHERE schema_data.nspname = :schema "
+                "AND privilege_data.grantee = 0 "
+                "AND privilege_data.privilege_type = 'USAGE'"
+                "), "
+                "EXISTS ("
+                "SELECT 1 FROM pg_catalog.pg_namespace AS schema_data "
+                "CROSS JOIN LATERAL pg_catalog.aclexplode("
+                "COALESCE(schema_data.nspacl, "
+                "pg_catalog.acldefault('n', schema_data.nspowner))"
+                ") AS privilege_data "
+                "WHERE schema_data.nspname = :schema "
+                "AND privilege_data.grantee = 0 "
+                "AND privilege_data.privilege_type = 'CREATE'"
+                ")"
+            ),
+            {"schema": _APP_SCHEMA},
+        ).one()
 
-    print(f"Configured Aurora DSQL role {args.database_role}.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    if role_can_login is not True:
+        raise DSQLRolePostconditionError(
+            "application database role is absent or cannot login"
+        )
+    if role_principals != [iam_principal_arn] or principal_roles != [database_role]:
+        raise DSQLMappingPostconditionError(
+            "application database role does not have one exact IAM mapping"
+        )
+    usage, create = grants
+    public_usage, public_create = public_grants
+    if usage is not True or create is not True:
+        raise DSQLSchemaGrantPostconditionError(
+            "application database role is missing required schema grants"
+        )
+    if public_usage is True or public_create is True:
+        raise DSQLSchemaGrantPostconditionError(
+            "application schema grants access to PUBLIC"
+        )
