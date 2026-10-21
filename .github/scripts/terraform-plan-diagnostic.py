@@ -113,7 +113,10 @@ def generic_explanation(text: str) -> str | None:
     lowered = text.lower()
     if "accessdenied" in lowered or "not authorized" in lowered or "unauthorized" in lowered:
         return "The provider request was not authorized."
-    if "timeout" in lowered or "timed out" in lowered or "waiting for" in lowered:
+    if re.search(
+        r"(?<!-)\b(?:timeout|timed out|requesttimeout|context deadline exceeded)\b",
+        lowered,
+    ):
         return "Terraform timed out while waiting for the resource operation."
     if "throttl" in lowered or "toomanyrequests" in lowered:
         return "The provider request was throttled."

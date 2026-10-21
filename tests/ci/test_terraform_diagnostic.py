@@ -99,6 +99,51 @@ operation error SecretService: RevealValue, StatusCode: 299, api error SecretCod
             "No allowlisted diagnostic fields were found; provider details were withheld.\n",
         )
 
+    def test_lock_timeout_option_does_not_misclassify_local_exec_import_failure(self) -> None:
+        diagnostic = """\
+Run terraform apply -input=false -lock-timeout=5m
+Error: local-exec provisioner error
+Error running command 'python -m pawlocal.dsql_post_apply_setup': exit status 1.
+Output: Aurora DSQL protected setup failed (environment=development, phase=connection, class=ModuleNotFoundError).
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "terraform.log"
+            log.write_text(diagnostic, encoding="utf-8")
+            env = os.environ.copy()
+            env["PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS"] = "true"
+            result = subprocess.run(
+                [sys.executable, str(DIAGNOSTIC), "--phase", "apply", str(log)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        self.assertEqual(
+            result.stdout,
+            "Terraform apply failed; raw provider output was withheld.\n"
+            "No allowlisted diagnostic fields were found; provider details were withheld.\n",
+        )
+
+    def test_standalone_timeout_failure_keeps_sanitized_timeout_class(self) -> None:
+        diagnostic = "Error: timeout while waiting for the provider operation\n"
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "terraform.log"
+            log.write_text(diagnostic, encoding="utf-8")
+            env = os.environ.copy()
+            env["PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS"] = "true"
+            result = subprocess.run(
+                [sys.executable, str(DIAGNOSTIC), "--phase", "apply", str(log)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        self.assertEqual(
+            result.stdout,
+            "Terraform apply failed; raw provider output was withheld.\n"
+            "Explanation: Terraform timed out while waiting for the resource operation.\n",
+        )
+
     def test_workflow_gates_both_plan_and_apply_diagnostics(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
