@@ -103,6 +103,18 @@ run "tagged_create_permissions_are_size_safe" {
   }
 
   assert {
+    condition = contains(
+      flatten(one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        [statement.Resource]
+        if statement.Sid == "TagOnlyNewEnvironmentResources"
+      ])),
+      "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*"
+    )
+    error_message = "Lightsail container-service create-time tagging must use AWS's pre-creation ContainerService/* authorization resource."
+  }
+
+  assert {
     condition = (
       toset(one([
         for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
