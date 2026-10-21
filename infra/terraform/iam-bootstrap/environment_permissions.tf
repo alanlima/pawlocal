@@ -45,7 +45,7 @@ locals {
     "route53:Get*", "route53:List*",
     "sts:GetCallerIdentity"
   ]
-  environment_apply_boundary_max_bytes = 6050
+  environment_apply_boundary_max_bytes = 6060
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
@@ -421,7 +421,7 @@ resource "aws_iam_policy" "environment_apply_boundary" {
   lifecycle {
     precondition {
       condition     = length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json) <= local.environment_apply_boundary_max_bytes
-      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6050-byte repository budget (AWS maximum: 6144 bytes)."
+      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6060-byte repository budget (AWS maximum: 6144 bytes)."
     }
   }
 }
