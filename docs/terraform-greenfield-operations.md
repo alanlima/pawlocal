@@ -136,6 +136,8 @@ Dispatch `Terraform environment plan and apply` from `main`. A normal foundation
 7. pauses at the matching protected apply Environment; and
 8. verifies the metadata and SHA-256 before applying exactly that downloaded plan.
 
+On the first apply, Terraform creates the environment application policy and attaches it to the matching apply role before starting a 30-second provider-managed IAM propagation barrier. Every independent application-resource creation root depends on that barrier, and downstream resources inherit the dependency. If an apply stops after creating the policy or attachment, its saved plan is stale: inspect the partial state, create and independently review a fresh normal-refresh plan, and apply only that newly approved plan. Never retry or reuse the failed apply's saved plan.
+
 Development must be created, reviewed, and live-verified before production. Before any production Terraform plan, the workflow uses the GitHub API to require that the selected commit is in `main`, that the expected main-branch `fullstack-release.yml` run for that exact commit completed successfully, and that its successful development deployment carries validated schema-versioned health, database-query, migration, telemetry, frontend-digest, and backend-digest evidence from the same run/attempt.
 
 ### Generated-identifier and runtime handoff

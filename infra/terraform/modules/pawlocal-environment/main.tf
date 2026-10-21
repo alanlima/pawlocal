@@ -41,6 +41,14 @@ resource "aws_iam_role_policy_attachment" "application" {
   policy_arn = aws_iam_policy.application.arn
 }
 
+resource "time_sleep" "application_permissions_propagation" {
+  create_duration = "30s"
+  triggers = {
+    application_policy_sha256 = sha256(data.aws_iam_policy_document.application.json)
+  }
+  depends_on = [aws_iam_role_policy_attachment.application]
+}
+
 resource "aws_iam_policy" "frontend_publish" {
   name        = "pawlocal-${var.environment}-frontend-publish"
   description = "Environment-owned frontend publication permissions for PawLocal ${var.environment}."
@@ -71,7 +79,7 @@ resource "aws_s3_bucket" "frontend" {
   bucket        = "pawlocal-${var.environment}-${random_id.bucket_suffix.hex}"
   force_destroy = false
   tags          = local.common_tags
-  depends_on    = [aws_iam_role_policy_attachment.application]
+  depends_on    = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
@@ -102,7 +110,7 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
-  depends_on                        = [aws_iam_role_policy_attachment.application]
+  depends_on                        = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_cloudfront_function" "spa" {
@@ -119,7 +127,7 @@ resource "aws_cloudfront_function" "spa" {
     "}",
     ""
   ])
-  depends_on = [aws_iam_role_policy_attachment.application]
+  depends_on = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
@@ -165,7 +173,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     minimum_protocol_version = "TLSv1.2_2021"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.application]
+  depends_on = [time_sleep.application_permissions_propagation]
 }
 
 data "aws_iam_policy_document" "frontend_bucket" {
@@ -218,7 +226,7 @@ resource "aws_dsql_cluster" "application" {
   force_destroy               = false
   kms_encryption_key          = "AWS_OWNED_KMS_KEY"
   tags                        = merge(local.common_tags, { Name = "pawlocal-${var.environment}", purpose = "pawlocal-app-database" })
-  depends_on                  = [aws_iam_role_policy_attachment.application]
+  depends_on                  = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_dsql_cluster_policy" "application" {
@@ -241,7 +249,7 @@ resource "aws_lightsail_certificate" "api" {
   name        = local.certificate_name
   domain_name = local.api_hostname
   tags        = local.common_tags
-  depends_on  = [aws_iam_role_policy_attachment.application]
+  depends_on  = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_route53_record" "api_certificate_validation" {
@@ -331,7 +339,7 @@ resource "aws_cognito_user_pool" "application" {
     temporary_password_validity_days = 7
   }
   tags       = local.common_tags
-  depends_on = [aws_iam_role_policy_attachment.application]
+  depends_on = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_cognito_user_pool_domain" "application" {

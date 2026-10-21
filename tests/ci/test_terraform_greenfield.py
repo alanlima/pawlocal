@@ -64,6 +64,64 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('resource "aws_iam_policy" "application"', source)
         self.assertIn('resource "aws_iam_role_policy_attachment" "application"', source)
 
+    def test_environment_creation_roots_wait_for_application_permissions(self) -> None:
+        module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
+            encoding="utf-8"
+        )
+        versions = [
+            ROOT / "infra/terraform/modules/pawlocal-environment/versions.tf",
+            ROOT / "infra/terraform/environments/development/versions.tf",
+            ROOT / "infra/terraform/environments/production/versions.tf",
+        ]
+
+        barrier = module.split('resource "time_sleep" "application_permissions_propagation" {', 1)[1].split(
+            "\n}", 1
+        )[0]
+        self.assertIn('create_duration = "30s"', barrier)
+        self.assertIn(
+            "application_policy_sha256 = sha256(data.aws_iam_policy_document.application.json)",
+            barrier,
+        )
+        self.assertIn("depends_on = [aws_iam_role_policy_attachment.application]", barrier)
+
+        creation_roots = (
+            ("aws_s3_bucket", "frontend"),
+            ("aws_cloudfront_origin_access_control", "frontend"),
+            ("aws_cloudfront_function", "spa"),
+            ("aws_dsql_cluster", "application"),
+            ("aws_lightsail_certificate", "api"),
+            ("aws_cognito_user_pool", "application"),
+        )
+        for resource_type, resource_name in creation_roots:
+            with self.subTest(resource=f"{resource_type}.{resource_name}"):
+                block = module.split(f'resource "{resource_type}" "{resource_name}" {{', 1)[1].split(
+                    '\nresource "', 1
+                )[0]
+                self.assertIn(
+                    "depends_on",
+                    block,
+                )
+                self.assertIn("time_sleep.application_permissions_propagation", block)
+                self.assertNotIn("aws_iam_role_policy_attachment.application]", block)
+
+        for path in versions:
+            with self.subTest(path=path):
+                source = path.read_text(encoding="utf-8")
+                self.assertIn('source  = "hashicorp/time"', source)
+                self.assertIn('version = "= 0.13.1"', source)
+
+        for environment in ("development", "production"):
+            with self.subTest(environment=environment):
+                root = ROOT / f"infra/terraform/environments/{environment}"
+                self.assertIn(
+                    'source = "../../modules/pawlocal-environment"',
+                    (root / "main.tf").read_text(encoding="utf-8"),
+                )
+                self.assertIn(
+                    'provider "registry.terraform.io/hashicorp/time"',
+                    (root / ".terraform.lock.hcl").read_text(encoding="utf-8"),
+                )
+
     def test_bootstrap_declaratively_imports_only_verified_development_role(self) -> None:
         source = (ROOT / "infra/terraform/iam-bootstrap/identity_roles.tf").read_text(encoding="utf-8")
         self.assertIn("import_existing_development_deploy_role", source)
