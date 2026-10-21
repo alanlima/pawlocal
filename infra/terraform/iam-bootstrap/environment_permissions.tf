@@ -189,19 +189,9 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     effect = "Allow"
     actions = [
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
-      "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
+      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/environment"
-      values   = [each.key]
-    }
   }
 
   statement {
@@ -229,9 +219,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/${each.value.service_name}"
     ]
     condition {
-      test     = "Null"
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
       variable = "aws:ResourceTag/environment"
-      values   = ["true"]
+      values   = [each.key]
     }
     condition {
       test     = "StringEquals"
@@ -252,14 +247,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       actions   = ["dsql:CreateCluster", "dsql:TagResource"]
       resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
       condition {
-        test     = "Null"
+        test     = "StringEquals"
         variable = "aws:ResourceTag/project"
-        values   = ["true"]
+        values   = ["pawlocal"]
       }
       condition {
-        test     = "Null"
+        test     = "StringEquals"
         variable = "aws:ResourceTag/environment"
-        values   = ["true"]
+        values   = [each.key]
       }
       dynamic "condition" {
         for_each = local.environment_dsql_tags[each.key]
@@ -335,14 +330,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       actions   = ["cloudfront:TagResource"]
       resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
       condition {
-        test     = "Null"
+        test     = "StringEquals"
         variable = "aws:ResourceTag/project"
-        values   = ["true"]
+        values   = ["pawlocal"]
       }
       condition {
-        test     = "Null"
+        test     = "StringEquals"
         variable = "aws:ResourceTag/environment"
-        values   = ["true"]
+        values   = [each.key]
       }
       condition {
         test     = "StringEquals"
