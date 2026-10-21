@@ -50,25 +50,25 @@ jobs:
     name: Publish immutable backend image
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [frontend, backend]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
     outputs:
       backend_image: ${{ steps.reference.outputs.backend_image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and publish backend image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: backend/Dockerfile
@@ -109,7 +109,7 @@ jobs:
   verify-development:
     name: Publish frontend and verify development
     needs: [publish, terraform-development]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: development
     permissions:
       contents: read
@@ -127,16 +127,16 @@ jobs:
       PAWLOCAL_TELEMETRY_ENABLED: "false"
       BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Configure narrow frontend publisher credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.PAWLOCAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -210,7 +210,7 @@ jobs:
       - name: Validate development verification evidence
         run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider aurora_dsql --migration-runner dsql_baseline --migration-id dsql_0001_initial
       - name: Record successful verified development deployment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
           ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}

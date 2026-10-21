@@ -38,7 +38,7 @@ jobs:
   verify-production:
     name: Publish frontend and verify production
     needs: terraform-production
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
     permissions:
       contents: read
@@ -58,7 +58,7 @@ jobs:
       RELEASE_COMMIT: ${{ inputs.release_commit }}
     steps:
       - name: Check out selected verified source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_commit }}
           persist-credentials: false
@@ -69,12 +69,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           [[ "$BACKEND_IMAGE" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
       - name: Configure narrow production publisher credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.PAWLOCAL_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -146,7 +146,7 @@ jobs:
           EVIDENCE_FILE: release/production-verification.json
         run: bash ops/run-deployment-adapter.sh verify --environment production --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
       - name: Record successful production deployment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}

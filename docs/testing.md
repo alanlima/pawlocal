@@ -2,6 +2,47 @@
 
 This document describes the automated checks and additional operational evidence expected for each stage. Pull request CI runs the applicable frontend, backend, Compose, and Terraform checks described below; it does not provision cloud infrastructure.
 
+## GitHub-hosted runner and action runtime policy
+
+All GitHub-hosted jobs are pinned to `ubuntu-24.04`. GitHub's Ubuntu 26 migration notice says that `ubuntu-latest` begins moving from Ubuntu 24.04 to Ubuntu 26.04 on October 19, 2026, recommends the explicit `ubuntu-24.04` label when migration causes risk, and identifies `ubuntu-26.04` as the opt-in validation label. PawLocal will therefore remain on Ubuntu 24.04 until a separate change validates every hosted job on Ubuntu 26.04. This avoids changing the operating system underneath CI, release, seed, and protected Terraform jobs without review. See the [official migration notice](https://github.com/actions/runner-images/issues/14748) and [runner image labels](https://github.com/actions/runner-images#available-images).
+
+Issue #83 also establishes maintained Node.js 24 majors for every direct external JavaScript action used by PawLocal. The original warning named six action families; the review also covered the other direct external actions so a resulting full run cannot retain the same forced-runtime warning through an unreviewed dependency.
+
+| External action family | Repository policy | Official evidence |
+| --- | --- | --- |
+| `actions/checkout` | `@v7` | [`action.yml`](https://github.com/actions/checkout/blob/v7/action.yml) |
+| `actions/github-script` | `@v9` | [`action.yml`](https://github.com/actions/github-script/blob/v9/action.yml) |
+| `actions/setup-node` | `@v7` | [`action.yml`](https://github.com/actions/setup-node/blob/v7/action.yml) |
+| `actions/setup-python` | `@v7` | [`action.yml`](https://github.com/actions/setup-python/blob/v7/action.yml) |
+| `actions/upload-artifact` | `@v7` | [`action.yml`](https://github.com/actions/upload-artifact/blob/v7/action.yml) |
+| `aws-actions/configure-aws-credentials` | `@v6` | [`action.yml`](https://github.com/aws-actions/configure-aws-credentials/blob/v6/action.yml) |
+| `docker/build-push-action` | `@v7` | [`action.yml`](https://github.com/docker/build-push-action/blob/v7/action.yml) |
+| `docker/login-action` | `@v4` | [`action.yml`](https://github.com/docker/login-action/blob/v4/action.yml) |
+| `docker/setup-buildx-action` | `@v4` | [`action.yml`](https://github.com/docker/setup-buildx-action/blob/v4/action.yml) |
+| `hashicorp/setup-terraform` | `@v4` | [`action.yml`](https://github.com/hashicorp/setup-terraform/blob/v4/action.yml) |
+| `actions/download-artifact` | Not used; no action reference is required | [Current `@v8` metadata](https://github.com/actions/download-artifact/blob/v8/action.yml) is Node.js 24-compatible if a future workflow reintroduces downloads |
+
+`tests/ci/test_action_runtime_policy.py` inventories every hosted job, rejects floating runner labels, parses every step-level external `uses` value, and fails closed on quoted unreviewed families, action subpaths, floating refs, SHAs, or unsupported external forms. Repository-local actions and job-level reusable workflows remain outside this external JavaScript action policy. The same suite enforces the reviewed action majors, verifies that the download-artifact exception remains true, and keeps smoke artifacts unique across job retries. Pull-request CI safely executes the frontend, backend, Compose, Terraform, and workflow-validation jobs. Workflow validation includes a non-mutating `actions/github-script` runtime assertion plus a smoke job that configures Buildx, authenticates to GHCR without publishing, builds without loading or publishing, and uploads short-lived policy evidence. Protected release, production, seed, and Terraform apply jobs are validated statically on pull requests but are not dispatched merely to test an action upgrade: they require environment approvals, runtime credentials, and in some cases would mutate AWS or application data. In particular, `aws-actions/configure-aws-credentials` remains static-plus-review evidence until the next separately authorized credentialed run. No Issue #83 validation run grants deployment, seed, Terraform plan/apply, or AWS mutation authorization.
+
+| Workflow / direct hosted job | Safe Issue #83 verification | Live credentialed verification |
+| --- | --- | --- |
+| `backend-ci.yml` / `backend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
+| `compose-ci.yml` / `compose` | Pull-request build, readiness, and smoke job runs on Ubuntu 24.04 | Not applicable |
+| `deploy-production.yml` / `verify-production` | Actionlint, policy inventory, unchanged-input review, and protected-path tests | Next separately approved production promotion only |
+| `development-dsql-seed.yml` / `seed` | Actionlint, policy inventory, unchanged-input review, and feature-branch fail-closed unit test | Next separately approved development seed only |
+| `frontend-deploy.yml` / `frontend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
+| `frontend-production-deploy.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `fullstack-release.yml` / `publish` | Pull-request condition skips publication; the same checkout, Buildx, GHCR login, and no-push build actions run in the runtime smoke job | Next authorized `main` release only |
+| `fullstack-release.yml` / `verify-development` | Pull-request condition skips deployment; action inputs and protected-path tests are validated | Next authorized `main` release only |
+| `rollback-development.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `terraform-ci.yml` / `terraform` | All five matrix roots run on Ubuntu 24.04 | Not applicable; no AWS credentials are used |
+| `terraform-current-stack-operations.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
+| `terraform-environment.yml` / `production-eligibility` | Actionlint, policy inventory, and production eligibility unit tests | Next separately approved production promotion only |
+| `terraform-environment.yml` / `plan` | Actionlint, policy inventory, plan-policy tests, and release workflow fail-closed path | Next separately approved environment plan only |
+| `terraform-environment.yml` / `apply` | Actionlint, policy inventory, exact-plan/apply tests, and release workflow fail-closed path | Next separately approved exact-plan apply only |
+| `workflow-validation.yml` / `action-runtime-smoke` | Pull-request no-push action smoke runs on Ubuntu 24.04 | Not applicable |
+| `workflow-validation.yml` / `validate` | Pull-request action runtime, Actionlint, security, and path tests run on Ubuntu 24.04 | Not applicable |
+
 ## CI workflow path ownership and required checks
 
 CI uses separate workflows with GitHub-native top-level `pull_request.paths` and `push.paths` filters. A docs-only change such as `README.md` or `docs/**` matches no automatic workflow, so GitHub Actions starts no run. The frontend, backend, Compose, Terraform, and workflow-validation paths are listed directly in their workflow files and verified by `tests/ci/test_workflow_paths.py`.

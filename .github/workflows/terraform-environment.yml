@@ -59,10 +59,10 @@ jobs:
   production-eligibility:
     name: Require a verified development release
     if: inputs.environment == 'production'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Validate the selected development deployment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           RELEASE_COMMIT: ${{ inputs.release_commit }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}
@@ -135,7 +135,7 @@ jobs:
     name: Plan ${{ inputs.environment }}
     if: always() && (inputs.environment == 'development' || needs.production-eligibility.result == 'success')
     needs: production-eligibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ inputs.environment }}-plan
     permissions:
       contents: read
@@ -158,7 +158,7 @@ jobs:
       TF_VAR_backend_image: ${{ inputs.backend_image }}
     steps:
       - name: Check out the exact requested commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -178,7 +178,7 @@ jobs:
           fi
 
       - name: Configure read-only plan credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -186,7 +186,7 @@ jobs:
           mask-aws-account-id: "true"
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
@@ -320,7 +320,7 @@ jobs:
     name: Apply reviewed exact ${{ inputs.environment }} plan
     needs: plan
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ inputs.environment }}-apply
     permissions:
       contents: read
@@ -333,7 +333,7 @@ jobs:
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
     steps:
       - name: Check out the exact planned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -345,7 +345,7 @@ jobs:
           test -n "$PLAN_TRANSFER_BUCKET"
 
       - name: Configure bounded apply credentials
-        uses: aws-actions/configure-aws-credentials@v5
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.TERRAFORM_ROLE_ARN }}
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
@@ -377,7 +377,7 @@ jobs:
           test "$actual" = "$EXPECTED_SHA256"
 
       - name: Set up Terraform and initialize matching state
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false

@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   disabled:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - run: |
           echo 'The combined-state rollback path is retired. Recovery work remains deferred to Issue #44.'
