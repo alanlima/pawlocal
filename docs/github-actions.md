@@ -243,6 +243,38 @@ Destroy is not a rollback and does not select a previous release.
 
 ## Protected configuration used by operational workflows
 
+<!-- actions-protected-configuration
+secrets.PAWLOCAL_API_HEALTH_URL
+secrets.PAWLOCAL_AWS_ACCOUNT_ID
+secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN
+secrets.PAWLOCAL_DSQL_ENDPOINT
+secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN
+vars.AWS_REGION
+vars.PAWLOCAL_API_HEALTH_URL
+vars.PAWLOCAL_AWS_ACCOUNT_ID
+vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
+vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
+vars.PAWLOCAL_CLOUDFRONT_OAC_ARN
+vars.PAWLOCAL_DEPLOY_ADAPTER_PATH
+vars.PAWLOCAL_DEPLOY_ROLE_ARN
+vars.PAWLOCAL_DOMAIN_NAME
+vars.PAWLOCAL_FRONTEND_BUCKET
+vars.PAWLOCAL_PUBLIC_BASE_URL
+vars.PAWLOCAL_ROUTE53_ZONE_ID
+vars.PAWLOCAL_RUNTIME_ROLE_ARN
+vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
+vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS
+vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET
+vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
+vars.PAWLOCAL_TF_STATE_BUCKET
+vars.VITE_API_BASE_URL
+vars.VITE_COGNITO_CLIENT_ID
+vars.VITE_COGNITO_DOMAIN
+vars.VITE_COGNITO_LOGOUT_URI
+vars.VITE_COGNITO_REDIRECT_URI
+vars.VITE_COGNITO_SCOPES
+-->
+
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
 
 ### Environment plan/apply and destroy
@@ -429,6 +461,6 @@ When adding, removing, renaming, or changing a workflow:
 2. Update the inventory row and detailed purpose section.
 3. Update the input table and complex-parameter procedure when an input or accepted format changed.
 4. Update the matching `actions-reference` metadata for both manual-dispatch and reusable-call inputs.
-5. Update protected-configuration lists when variable or secret consumption changed.
+5. Update the protected-configuration prose and `actions-protected-configuration` metadata when variable or secret consumption changed; the metadata records `vars.` and `secrets.` contexts separately.
 6. Run `python -m unittest tests.ci.test_github_actions_reference` and the applicable workflow tests.
 

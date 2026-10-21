@@ -11,8 +11,11 @@ REFERENCE_PATTERN = re.compile(
     r"<!-- actions-reference: (?P<workflow>[^;]+); "
     r"dispatch-inputs: (?P<dispatch>[^; ]+); call-inputs: (?P<call>[^ ]+) -->"
 )
-PROTECTED_CONFIGURATION_PATTERN = re.compile(
-    r"\$\{\{\s*(?:vars|secrets)\.(?P<name>(?:PAWLOCAL|VITE)_[A-Z0-9_]+)\s*\}\}"
+WORKFLOW_PROTECTED_CONFIGURATION_PATTERN = re.compile(
+    r"\$\{\{\s*(?P<context>vars|secrets)\.(?P<name>[A-Z][A-Z0-9_]+)\s*\}\}"
+)
+DOCUMENTED_PROTECTED_CONFIGURATION_PATTERN = re.compile(
+    r"<!-- actions-protected-configuration\n(?P<entries>.*?)\n-->", re.DOTALL
 )
 
 
@@ -66,6 +69,17 @@ def documented_workflows(
             parse_input_names(match.group("call")),
         )
     return result
+
+
+def documented_protected_configuration(source: str) -> set[str]:
+    match = DOCUMENTED_PROTECTED_CONFIGURATION_PATTERN.search(source)
+    if not match:
+        raise AssertionError("Missing actions-protected-configuration metadata")
+    return {
+        entry.strip()
+        for entry in match.group("entries").splitlines()
+        if entry.strip()
+    }
 
 
 class GitHubActionsReferenceTests(unittest.TestCase):
@@ -123,15 +137,23 @@ class GitHubActionsReferenceTests(unittest.TestCase):
                     self.reference,
                 )
 
-    def test_reference_names_every_protected_configuration_key(self) -> None:
-        referenced = {
-            match.group("name")
+    def test_protected_configuration_matches_reference_exactly(self) -> None:
+        actual = {
+            f'{match.group("context")}.{match.group("name")}'
             for path in workflow_files()
-            for match in PROTECTED_CONFIGURATION_PATTERN.finditer(
+            for match in WORKFLOW_PROTECTED_CONFIGURATION_PATTERN.finditer(
                 path.read_text(encoding="utf-8-sig")
             )
+            if match.group("name") != "GITHUB_TOKEN"
         }
-        for name in sorted(referenced):
+        documented = documented_protected_configuration(self.reference)
+        self.assertEqual(
+            actual,
+            documented,
+            "Update protected configuration metadata and prose together.",
+        )
+        for entry in sorted(documented):
+            name = entry.split(".", 1)[1]
             with self.subTest(configuration=name):
                 self.assertIn(f"`{name}`", self.reference)
 
