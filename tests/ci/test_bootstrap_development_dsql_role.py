@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ SCRIPT = ROOT / "ops" / "bootstrap-development-dsql-role.ps1"
 ACCOUNT = "111111111111"
 LIGHTSAIL_ACCOUNT = "222222222222"
 REGION = "ap-southeast-2"
+STATE_BUCKET = "pawlocal-state-fixture"
 CLUSTER_ID = "abcdefghijklmnopqrstuvwx12"
 RUNTIME_ROLE = f"arn:aws:iam::{ACCOUNT}:role/pawlocal-development-dsql-runtime"
 CLUSTER_ARN = f"arn:aws:dsql:{REGION}:{ACCOUNT}:cluster/{CLUSTER_ID}"
@@ -39,10 +41,72 @@ class DevelopmentDsqlBootstrapScriptTests(unittest.TestCase):
         self.fake_terraform = self._write_command(
             "fake-terraform",
             """
+import json
 import os
+from pathlib import Path
 import sys
 
 args = sys.argv[1:]
+cwd = os.path.normcase(os.path.abspath(os.getcwd()))
+bootstrap_root = os.path.normcase(os.environ["TEST_BOOTSTRAP_ROOT"])
+development_root = os.path.normcase(os.environ["TEST_DEVELOPMENT_ROOT"])
+if cwd == bootstrap_root:
+    state_label = "BOOTSTRAP"
+elif cwd == development_root:
+    state_label = "DEVELOPMENT"
+else:
+    print("unexpected terraform root", file=sys.stderr)
+    raise SystemExit(2)
+
+if args and args[0] == "init":
+    required_flags = {"-input=false", "-reconfigure", "-no-color"}
+    if not required_flags.issubset(args):
+        print("missing init safety arguments", file=sys.stderr)
+        raise SystemExit(2)
+    backend = {}
+    for argument in args:
+        prefix = "-backend-config="
+        if argument.startswith(prefix):
+            key, value = argument[len(prefix):].split("=", 1)
+            backend[key] = value
+    expected_fields = {"bucket", "key", "region", "encrypt", "use_lockfile"}
+    if set(backend) != expected_fields:
+        print("unexpected backend arguments", file=sys.stderr)
+        raise SystemExit(2)
+    if os.environ.get("TEST_TERRAFORM_INIT_STDOUT"):
+        print(os.environ["TEST_TERRAFORM_INIT_STDOUT"])
+    if os.environ.get("TEST_TERRAFORM_INIT_STDERR"):
+        print(os.environ["TEST_TERRAFORM_INIT_STDERR"], file=sys.stderr)
+    if os.environ.get("TEST_TERRAFORM_INIT_FAIL") == state_label:
+        raise SystemExit(1)
+    if os.environ.get(f"TEST_{state_label}_KEEP_STALE") != "true":
+        config = {
+            "bucket": os.environ.get(
+                f"TEST_{state_label}_BACKEND_BUCKET", backend["bucket"]
+            ),
+            "key": os.environ.get(
+                f"TEST_{state_label}_BACKEND_KEY", backend["key"]
+            ),
+            "region": os.environ.get(
+                f"TEST_{state_label}_BACKEND_REGION", backend["region"]
+            ),
+            "encrypt": os.environ.get(
+                f"TEST_{state_label}_BACKEND_ENCRYPT", backend["encrypt"]
+            ).lower() == "true",
+            "use_lockfile": os.environ.get(
+                f"TEST_{state_label}_BACKEND_USE_LOCKFILE", backend["use_lockfile"]
+            ).lower() == "true",
+        }
+        metadata = {"backend": {"type": "s3", "config": config}}
+        metadata_path = Path.cwd() / ".terraform" / "terraform.tfstate"
+        metadata_path.parent.mkdir(exist_ok=True)
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    raise SystemExit(0)
+
+if args == ["workspace", "show"]:
+    sys.stdout.write(os.environ.get(f"TEST_{state_label}_WORKSPACE", "default"))
+    raise SystemExit(0)
+
 if len(args) != 3 or args[:2] != ["output", "-json"]:
     print("unexpected terraform arguments", file=sys.stderr)
     raise SystemExit(2)
@@ -50,15 +114,14 @@ name = args[2]
 if os.environ.get("TEST_TERRAFORM_FAIL_OUTPUT") == name:
     print(os.environ.get("TEST_PRIVATE_DIAGNOSTIC", "private"), file=sys.stderr)
     raise SystemExit(1)
-cwd = os.path.normcase(os.path.abspath(os.getcwd()))
-if cwd == os.path.normcase(os.environ["TEST_BOOTSTRAP_ROOT"]):
+if state_label == "BOOTSTRAP":
     if name == "identity_app_role_arns":
         sys.stdout.write(os.environ["TEST_BOOTSTRAP_ROLES_JSON"])
         raise SystemExit(0)
     if name == "aws_account_id":
         sys.stdout.write(os.environ["TEST_BOOTSTRAP_ACCOUNT_JSON"])
         raise SystemExit(0)
-if cwd == os.path.normcase(os.environ["TEST_DEVELOPMENT_ROOT"]) and name == "environment_targets":
+if state_label == "DEVELOPMENT" and name == "environment_targets":
     sys.stdout.write(os.environ["TEST_DEVELOPMENT_TARGETS_JSON"])
     raise SystemExit(0)
 print("unexpected terraform root or output", file=sys.stderr)
@@ -190,6 +253,8 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
                 str(self.development_root),
                 "-PythonPath",
                 str(self.fake_python),
+                "-TerraformStateBucketName",
+                STATE_BUCKET,
                 "-TerraformCommand",
                 str(self.fake_terraform),
                 "-AwsCommand",
@@ -209,6 +274,26 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
             json.loads(line)["arguments"]
             for line in self.invocation_log.read_text(encoding="utf-8").splitlines()
         ]
+
+    @staticmethod
+    def _diagnostic(result: subprocess.CompletedProcess[str]) -> str:
+        without_ansi = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
+        return " ".join(without_ansi.split())
+
+    @staticmethod
+    def _write_stale_backend(root: Path, **overrides: object) -> None:
+        config: dict[str, object] = {
+            "bucket": STATE_BUCKET,
+            "key": "pawlocal/iam-bootstrap/terraform.tfstate",
+            "region": REGION,
+            "encrypt": True,
+            "use_lockfile": True,
+        }
+        config.update(overrides)
+        metadata = {"backend": {"type": "s3", "config": config}}
+        metadata_path = root / ".terraform" / "terraform.tfstate"
+        metadata_path.parent.mkdir()
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
     def test_split_state_outputs_invoke_only_the_audited_bootstrap(self) -> None:
         result = self._run()
@@ -264,7 +349,7 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         result = self._run(development_targets=targets)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("runtime-role handoff does not match", result.stderr)
+        self.assertIn("runtime-role handoff does not match", self._diagnostic(result))
         self.assertEqual(self._invocations(), [])
 
     def test_missing_or_null_required_output_fails_closed(self) -> None:
@@ -283,7 +368,7 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
                     development_targets=development,
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("missing or invalid", result.stderr)
+                self.assertIn("missing or invalid", self._diagnostic(result))
                 self.assertEqual(self._invocations(), [])
 
     def test_cross_environment_state_is_rejected(self) -> None:
@@ -298,7 +383,9 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         result = self._run(development_targets=targets)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("selected environment state is not development", result.stderr)
+        self.assertIn(
+            "selected environment state is not development", self._diagnostic(result)
+        )
         self.assertEqual(self._invocations(), [])
 
     def test_account_mismatch_is_rejected(self) -> None:
@@ -308,7 +395,9 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         result = self._run(development_targets=targets)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("do not identify the same AWS account", result.stderr)
+        self.assertIn(
+            "do not identify the same AWS account", self._diagnostic(result)
+        )
         self.assertEqual(self._invocations(), [])
 
     def test_non_development_region_is_rejected(self) -> None:
@@ -326,7 +415,86 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         result = self._run(development_targets=targets)
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not identify the approved AWS region", result.stderr)
+        self.assertIn(
+            "does not identify the approved AWS region", self._diagnostic(result)
+        )
+        self.assertEqual(self._invocations(), [])
+
+    def test_wrong_bootstrap_backend_key_is_rejected_before_bootstrap(self) -> None:
+        result = self._run(
+            extra_env={
+                "TEST_BOOTSTRAP_BACKEND_KEY": "pawlocal/development/terraform.tfstate"
+            }
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "IAM bootstrap Terraform backend does not match the approved state identity",
+            self._diagnostic(result),
+        )
+        self.assertEqual(self._invocations(), [])
+
+    def test_wrong_development_backend_key_is_rejected_before_bootstrap(self) -> None:
+        result = self._run(
+            extra_env={
+                "TEST_DEVELOPMENT_BACKEND_KEY": (
+                    "pawlocal/iam-bootstrap/terraform.tfstate"
+                )
+            }
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "development environment Terraform backend does not match the approved state identity",
+            self._diagnostic(result),
+        )
+        self.assertEqual(self._invocations(), [])
+
+    def test_wrong_backend_safety_settings_are_rejected_before_bootstrap(self) -> None:
+        cases = {
+            "bucket": {"TEST_BOOTSTRAP_BACKEND_BUCKET": "wrong-state-fixture"},
+            "region": {"TEST_DEVELOPMENT_BACKEND_REGION": "us-east-1"},
+            "encryption": {"TEST_BOOTSTRAP_BACKEND_ENCRYPT": "false"},
+            "locking": {"TEST_DEVELOPMENT_BACKEND_USE_LOCKFILE": "false"},
+        }
+
+        for name, environment in cases.items():
+            with self.subTest(name=name):
+                if self.invocation_log.exists():
+                    self.invocation_log.unlink()
+                result = self._run(extra_env=environment)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    "Terraform backend does not match the approved state identity",
+                    self._diagnostic(result),
+                )
+                self.assertEqual(self._invocations(), [])
+
+    def test_stale_cached_backend_is_rejected_before_bootstrap(self) -> None:
+        self._write_stale_backend(
+            self.bootstrap_root,
+            key="pawlocal/development/terraform.tfstate",
+        )
+
+        result = self._run(extra_env={"TEST_BOOTSTRAP_KEEP_STALE": "true"})
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "IAM bootstrap Terraform backend does not match the approved state identity",
+            self._diagnostic(result),
+        )
+        self.assertEqual(self._invocations(), [])
+
+    def test_non_default_workspace_is_rejected_before_bootstrap(self) -> None:
+        result = self._run(
+            extra_env={"TEST_DEVELOPMENT_WORKSPACE": "unexpected-development"}
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "development environment Terraform backend is not using the approved default workspace",
+            self._diagnostic(result),
+        )
         self.assertEqual(self._invocations(), [])
 
     def test_provider_and_bootstrap_diagnostics_are_redacted(self) -> None:
@@ -356,6 +524,22 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         combined = terraform_failure.stdout + terraform_failure.stderr
         self.assertNotIn(private_marker, combined)
         self.assertIn("IAM bootstrap Terraform state", combined)
+
+        if self.invocation_log.exists():
+            self.invocation_log.unlink()
+        init_failure = self._run(
+            extra_env={
+                "TEST_TERRAFORM_INIT_FAIL": "BOOTSTRAP",
+                "TEST_TERRAFORM_INIT_STDOUT": STATE_BUCKET,
+                "TEST_TERRAFORM_INIT_STDERR": private_marker,
+            }
+        )
+        self.assertNotEqual(init_failure.returncode, 0)
+        combined = init_failure.stdout + init_failure.stderr
+        self.assertNotIn(private_marker, combined)
+        self.assertNotIn(STATE_BUCKET, combined)
+        self.assertIn("approved IAM bootstrap Terraform backend", combined)
+        self.assertEqual(self._invocations(), [])
 
 
 if __name__ == "__main__":

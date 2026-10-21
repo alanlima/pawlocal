@@ -3,6 +3,7 @@ param(
     [string]$BootstrapTerraformRoot = (Join-Path $PSScriptRoot '..\infra\terraform\iam-bootstrap'),
     [string]$DevelopmentTerraformRoot = (Join-Path $PSScriptRoot '..\infra\terraform\environments\development'),
     [string]$PythonPath = (Join-Path $PSScriptRoot '..\backend\.venv\Scripts\python.exe'),
+    [string]$TerraformStateBucketName = $env:TF_VAR_terraform_state_bucket_name,
     [string]$TerraformCommand = 'terraform',
     [string]$AwsCommand = 'aws'
 )
@@ -13,6 +14,75 @@ $DevelopmentTerraformRoot = (Resolve-Path $DevelopmentTerraformRoot).Path
 $python = (Resolve-Path $PythonPath).Path
 $terraform = (Get-Command $TerraformCommand -ErrorAction Stop).Path
 $aws = (Get-Command $AwsCommand -ErrorAction Stop).Path
+$approvedRegion = 'ap-southeast-2'
+
+if ($TerraformStateBucketName -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' -or
+    $TerraformStateBucketName.Contains('..') -or
+    $TerraformStateBucketName.Contains('.-') -or
+    $TerraformStateBucketName.Contains('-.')) {
+    throw 'The expected Terraform state bucket name is missing or invalid.'
+}
+if (-not [string]::IsNullOrWhiteSpace($env:TF_DATA_DIR)) {
+    throw 'TF_DATA_DIR must be unset so the reviewed Terraform roots own their backend metadata.'
+}
+
+function Initialize-And-ValidateTerraformBackend {
+    param(
+        [string]$Root,
+        [string]$StateKey,
+        [string]$StateLabel
+    )
+
+    Push-Location $Root
+    try {
+        $initOutput = & $terraform init `
+            -input=false `
+            -reconfigure `
+            -no-color `
+            "-backend-config=bucket=$TerraformStateBucketName" `
+            "-backend-config=key=$StateKey" `
+            "-backend-config=region=$approvedRegion" `
+            '-backend-config=encrypt=true' `
+            '-backend-config=use_lockfile=true' 2>&1
+        $initStatus = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($initStatus -ne 0) {
+        throw "Could not initialize the approved $StateLabel Terraform backend."
+    }
+
+    $metadataPath = Join-Path (Join-Path $Root '.terraform') 'terraform.tfstate'
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+        throw "The $StateLabel Terraform backend metadata is missing."
+    }
+    try {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "The $StateLabel Terraform backend metadata is invalid."
+    }
+
+    $config = $metadata.backend.config
+    if ($metadata.backend.type -ne 's3' -or
+        $config.bucket -ne $TerraformStateBucketName -or
+        $config.key -ne $StateKey -or
+        $config.region -ne $approvedRegion -or
+        $config.encrypt -ne $true -or
+        $config.use_lockfile -ne $true) {
+        throw "The $StateLabel Terraform backend does not match the approved state identity."
+    }
+
+    Push-Location $Root
+    try {
+        $workspace = & $terraform workspace show 2>$null | Out-String
+        $workspaceStatus = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($workspaceStatus -ne 0 -or $workspace.Trim() -ne 'default') {
+        throw "The $StateLabel Terraform backend is not using the approved default workspace."
+    }
+}
 
 function Read-TerraformJsonOutput {
     param(
@@ -50,6 +120,15 @@ function Require-OutputString {
     return [string]$Value
 }
 
+Initialize-And-ValidateTerraformBackend `
+    -Root $BootstrapTerraformRoot `
+    -StateKey 'pawlocal/iam-bootstrap/terraform.tfstate' `
+    -StateLabel 'IAM bootstrap'
+Initialize-And-ValidateTerraformBackend `
+    -Root $DevelopmentTerraformRoot `
+    -StateKey 'pawlocal/development/terraform.tfstate' `
+    -StateLabel 'development environment'
+
 $identityRoles = Read-TerraformJsonOutput `
     -Root $BootstrapTerraformRoot `
     -OutputName 'identity_app_role_arns' `
@@ -81,7 +160,7 @@ if ($environment -ne 'development') {
 if ($bootstrapAccountId -notmatch '^\d{12}$' -or $developmentAccountId -ne $bootstrapAccountId) {
     throw 'Bootstrap and development Terraform states do not identify the same AWS account.'
 }
-if ($developmentRegion -ne 'ap-southeast-2') {
+if ($developmentRegion -ne $approvedRegion) {
     throw 'The development Terraform state does not identify the approved AWS region.'
 }
 if ($runtimeRoleArn -notmatch '^arn:(?<partition>aws(?:-us-gov|-cn)?):iam::(?<account>\d{12}):role/pawlocal-development-dsql-runtime$') {
