@@ -62,23 +62,13 @@ data "aws_iam_policy_document" "application" {
   }
 
   statement {
-    sid    = "ManageOnlyTaggedMatchingFrontendBucket"
+    sid    = "ManageOnlyMatchingFrontendBucketName"
     effect = "Allow"
     actions = [
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
-      "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
+      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/environment"
-      values   = [var.environment]
-    }
   }
 
   statement {
@@ -119,14 +109,14 @@ data "aws_iam_policy_document" "application" {
       var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"] : []
     )
     condition {
-      test     = "Null"
+      test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["true"]
+      values   = ["pawlocal"]
     }
     condition {
-      test     = "Null"
+      test     = "StringEquals"
       variable = "aws:ResourceTag/environment"
-      values   = ["true"]
+      values   = [var.environment]
     }
     condition {
       test     = "StringEquals"
@@ -151,14 +141,14 @@ data "aws_iam_policy_document" "application" {
     actions   = ["dsql:CreateCluster", "dsql:TagResource"]
     resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
     condition {
-      test     = "Null"
+      test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["true"]
+      values   = ["pawlocal"]
     }
     condition {
-      test     = "Null"
+      test     = "StringEquals"
       variable = "aws:ResourceTag/environment"
-      values   = ["true"]
+      values   = [var.environment]
     }
     dynamic "condition" {
       for_each = local.dsql_tags

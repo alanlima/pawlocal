@@ -53,6 +53,8 @@ run "tagged_create_permissions_are_size_safe" {
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:TagResource") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:PutBucketTagging") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:ListTagsForResource") &&
+      strcontains(data.aws_iam_policy_document.application.minified_json, "s3:PutBucketPublicAccessBlock") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "s3:PutPublicAccessBlock") &&
       !strcontains(data.aws_iam_policy_document.application.minified_json, "\"s3:Get*\"") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "dsql:TagResource") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "cloudfront:CreateFunction") &&
@@ -60,6 +62,35 @@ run "tagged_create_permissions_are_size_safe" {
       !strcontains(data.aws_iam_policy_document.application.minified_json, "cloudfront:UntagResource")
     )
     error_message = "The application policy must authorize only the reviewed tagged-create handoffs and must not grant broad S3 reads or authorization-tag removal."
+  }
+
+  assert {
+    condition = (
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        flatten([statement.Action])
+        if statement.Sid == "ManageOnlyMatchingFrontendBucketName"
+        ])) == toset([
+        "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"
+      ]) &&
+      !contains(keys(one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement : statement
+        if statement.Sid == "ManageOnlyMatchingFrontendBucketName"
+      ])), "Condition")
+    )
+    error_message = "Immediate post-create S3 configuration must use only the generated environment bucket-name boundary because resource-tag authorization is not yet consistent."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+      !contains(keys(statement.Condition), "Null") &&
+      statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
+      statement.Condition.StringEquals["aws:ResourceTag/environment"] == "development"
+      if contains(["TagOnlyNewEnvironmentResources", "CreateAndTagOnlyNewEnvironmentDSQLCluster"], statement.Sid)
+    ])
+    error_message = "Create-time dependent TagResource authorization must match the surfaced authorization tags without requiring them to be absent."
   }
 
   assert {

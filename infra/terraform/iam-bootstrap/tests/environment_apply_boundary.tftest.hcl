@@ -50,8 +50,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6052
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 6052-byte boundary shape."
+    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 5985
+    error_message = "The real-input-equivalent development fixture must retain the reviewed 5985-byte boundary shape."
   }
 
   assert {
@@ -100,6 +100,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "s3:TagResource") &&
       strcontains(policy.minified_json, "s3:PutBucketTagging") &&
       strcontains(policy.minified_json, "s3:ListTagsForResource") &&
+      strcontains(policy.minified_json, "s3:PutBucketPublicAccessBlock") &&
+      !strcontains(policy.minified_json, "s3:PutPublicAccessBlock") &&
       strcontains(policy.minified_json, "s3:GetBucket*") &&
       strcontains(policy.minified_json, "s3:Get*Configuration") &&
       !strcontains(policy.minified_json, "\"s3:Get*\"") &&
@@ -114,6 +116,38 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "cloudfront:List*")
     ])
     error_message = "Tagged create dependencies, name-scoped S3 pre-tag reads, and the initial CloudFront handoff must remain available without a broad s3:Get* grant."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "s3:PutBucketOwnershipControls") &&
+        contains(flatten([statement.Action]), "s3:PutBucketPublicAccessBlock") &&
+        !contains(keys(statement), "Condition")
+      ]) == 1
+    ])
+    error_message = "Immediate post-create S3 configuration must be admitted by the generated matching environment bucket name without a resource-tag propagation dependency."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      alltrue([
+        for statement in jsondecode(policy.minified_json).Statement :
+        try(
+          !contains(keys(statement.Condition), "Null") &&
+          statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
+          statement.Condition.StringEquals["aws:ResourceTag/environment"] != "",
+          true
+        )
+        if length(setintersection(toset(flatten([statement.Action])), toset([
+          "cloudfront:TagResource", "cognito-idp:TagResource", "dsql:TagResource", "lightsail:TagResource"
+        ]))) > 0
+      ])
+    ])
+    error_message = "Create-time dependent TagResource boundary statements must match surfaced authorization tags without requiring them to be absent."
   }
 
   assert {

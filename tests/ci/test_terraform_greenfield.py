@@ -239,6 +239,8 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('sid    = "ReadOnlyMatchingFrontendBucketBeforeTagHandoff"', module_permissions)
         self.assertIn('"s3:PutBucketTagging"', module_permissions)
         self.assertIn('"s3:ListTagsForResource"', module_permissions)
+        self.assertIn('"s3:PutBucketPublicAccessBlock"', module_permissions)
+        self.assertNotIn('"s3:PutPublicAccessBlock"', module_permissions)
         self.assertIn('"s3:GetBucket*", "s3:Get*Configuration"', boundary)
         self.assertNotIn('"s3:Get*"', boundary)
         self.assertIn('Certificate/*', module_permissions)
@@ -273,7 +275,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("environment_apply_boundary_max_bytes = 6060", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
-        self.assertIn('environment_apply_boundary["development"].minified_json) == 6052', test_file)
+        self.assertIn('environment_apply_boundary["development"].minified_json) == 5985', test_file)
         self.assertIn('keys(local.environment_dsql_tags[environment])', test_file)
         self.assertIn('"aws:RequestTag/Name"', test_file)
         self.assertIn('"aws:RequestTag/purpose"', test_file)
@@ -283,7 +285,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("terraform test -no-color", workflow)
         self.assertIn("matrix.root == 'modules/pawlocal-environment'", workflow)
 
-    def test_lightsail_authorization_tags_are_one_time_and_cannot_be_removed(self) -> None:
+    def test_create_time_tagging_uses_request_tags_and_post_create_mutation_uses_resource_tags(self) -> None:
         for path in (
             ROOT / "infra/terraform/modules/pawlocal-environment/iam.tf",
             ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf",
@@ -292,7 +294,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
             self.assertIn('"lightsail:TagResource"', source)
             self.assertIn('variable = "aws:ResourceTag/project"', source)
             self.assertIn('variable = "aws:ResourceTag/environment"', source)
-            self.assertIn('values   = ["true"]', source)
+            self.assertNotIn('test     = "Null"', source)
             self.assertNotIn("lightsail:UntagResource", source)
 
     def test_plan_and_apply_use_different_matching_roles_and_exact_plan(self) -> None:
