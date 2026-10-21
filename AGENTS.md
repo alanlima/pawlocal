@@ -152,10 +152,20 @@ Implementation must happen in the following order.
 - Evaluate AWS hosting alternatives and running costs.
 - Obtain human approval before provisioning billable resources.
 - Deploy development and production environments.
-- Implement user-impact alerts and an automated incident responder.
 - Demonstrate rollback and controlled recovery.
 
-### Stage 5 — Submission
+### Stage 5 — Hosted observability and on-call support
+- Begin only after Stage 4 is complete, using its verified development deployment as the first telemetry target; keep hosted telemetry disabled throughout the initial Stage 4 release.
+- Enable Grafana Cloud in development first, with separate production configuration enabled only after development evidence, privacy review, cost approval and production approval.
+- Keep dashboard definitions and alert rules in source control with repeatable provisioning. Provide support views for the search-to-place-details journey, API and database health, releases, telemetry delivery and incident triage.
+- Correlate privacy-safe metrics, traces and structured logs across browser, API and database using shared trace context.
+- Add a signed Grafana webhook endpoint that validates, deduplicates, records and asynchronously queues firing and resolved alerts.
+- Trigger a constrained on-call support agent for approved development alerts. The agent may triage, add regression tests and open a fix Pull Request, but it must not approve or merge its own work, apply Terraform, mutate production or bypass review gates.
+- After human review and squash merge, deploy automatically to development and verify the original failure and alert are resolved. Production remains a separate manual `workflow_dispatch` promotion of the exact development-verified release.
+
+**Gate:** Review Grafana cost, residency, privacy, dashboard and alert evidence before production telemetry is enabled. Demonstrate a safe synthetic alert through webhook, agent triage, tested fix Pull Request and development verification. Independently review the agent trust boundary and permissions. No Stage 5 automation authorises automatic production deployment.
+
+### Stage 6 — Submission
 - Verify each Zoomcamp scoring criterion.
 - Prepare README, architecture diagrams and demonstration evidence.
 - Ensure the application is reproducible.

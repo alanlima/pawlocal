@@ -6,7 +6,7 @@
 
 ## Scope and release boundaries
 
-This review covers DSQL schema/query compatibility and migration preparation for the MVP. Local Docker Compose continues to use PostgreSQL. No provider switch, cloud resource creation, deployment, or DSQL connection was performed. The initial cloud release keeps telemetry disabled; telemetry enablement remains tracked by [Issue #59](https://github.com/alanlima/pawlocal/issues/59).
+This review covers DSQL schema/query compatibility and migration preparation for the MVP. Local Docker Compose continues to use PostgreSQL. No provider switch, cloud resource creation, deployment, or DSQL connection was performed. The initial Stage 4 cloud release keeps telemetry disabled; Stage 5 telemetry enablement is tracked by [Issue #59](https://github.com/alanlima/pawlocal/issues/59).
 
 Backup, HA, restore, RPO/RTO, and recovery are excluded from this release and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44), to be reviewed after the MVP is deployed to cloud. They are not gates for this DSQL compatibility work.
 
@@ -52,7 +52,7 @@ After a DSQL test environment and its per-environment SDK credentials are config
 4. Capture representative query plans and DPU measurements before making performance or cost claims.
 5. If cloud data already exists, design and test a separate PostgreSQL-to-DSQL import/backfill process with bounded DML; the current baseline does not provide it.
 
-Telemetry remains disabled in the initial release; later enablement is tracked by [Issue #59](https://github.com/alanlima/pawlocal/issues/59). Backup, HA, restore, RPO/RTO, and recovery are excluded from this release and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44) for review after the MVP is deployed to cloud. They are not DSQL validation or deployment gates.
+Telemetry remains disabled in the initial Stage 4 release; Stage 5 enablement is tracked by [Issue #59](https://github.com/alanlima/pawlocal/issues/59). Backup, HA, restore, RPO/RTO, and recovery are excluded from this release and deferred to [Issue #44](https://github.com/alanlima/pawlocal/issues/44) for review after the MVP is deployed to cloud. They are not DSQL validation or deployment gates.
 
 ## Official references
 

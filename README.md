@@ -4,7 +4,7 @@ PawLocal is a community-maintained directory of dog-friendly places across South
 
 ## Project status
 
-**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress.** Issue #135 implements a greenfield Terraform design with a standalone IAM bootstrap state and clean development and production application states while preserving the Issue #75 Lightsail Container Services and Aurora DSQL architecture. Read-only inventory verified the former application state is empty and that no PawLocal application resources survive; an unrelated account-level personal workload was verified out of scope. The configuration and workflows are not evidence of an apply or deployment. Telemetry is disabled for the initial release and backup, HA, restore, recovery, and rollback remain deferred.
+**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress; Stage 5 is planned.** Issue #135 implements a greenfield Terraform design with a standalone IAM bootstrap state and clean development and production application states while preserving the Issue #75 Lightsail Container Services and Aurora DSQL architecture. Read-only inventory verified the former application state is empty and that no PawLocal application resources survive; an unrelated account-level personal workload was verified out of scope. The configuration and workflows are not evidence of an apply or deployment. Telemetry remains disabled for the initial Stage 4 release. Stage 5 will enable Grafana Cloud and source-controlled support dashboards under Issue #59, then add webhook-triggered on-call agent support under Issue #42. Backup, HA, restore, recovery, and rollback remain deferred.
 
 Issue #43's release path runs applicable PR checks, publishes an immutable backend image from `main`, plans and applies the matching development Terraform state through protected GitHub Environments, then verifies development. Production promotion is a separate manual workflow that accepts only the same commit and image recorded by a successful development deployment. No development or production infrastructure apply is authorized by this documentation.
 
@@ -25,7 +25,7 @@ Issue #43's release path runs applicable PR checks, publishes an immutable backe
 
 ## Planned stack
 
-React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Local Compose uses PostgreSQL. The owner selected Lightsail Container Services + Aurora DSQL with short-lived GitHub OIDC deployment identities. Hosted telemetry is disabled for the initial release; backup, HA and recovery are deferred. Live DSQL compatibility and runtime credential refresh remain deployment gates.
+React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Local Compose uses PostgreSQL. The owner selected Lightsail Container Services + Aurora DSQL with short-lived GitHub OIDC deployment identities. Hosted telemetry is disabled for the initial Stage 4 release and becomes Stage 5 work with Grafana Cloud dashboards and constrained alert-driven support. Backup, HA and recovery are deferred. Live DSQL compatibility and runtime credential refresh remain deployment gates.
 
 ## Backend development
 
