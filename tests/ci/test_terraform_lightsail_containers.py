@@ -437,7 +437,11 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertNotIn("dsql_bootstrap_python", deploy)
         bootstrap = (ROOT / "ops/bootstrap-development-dsql-role.ps1").read_text(encoding="utf-8")
         self.assertIn("pawlocal.dsql_role_bootstrap", bootstrap)
-        self.assertIn("dsql_app_iam_principal_arn", bootstrap)
+        self.assertIn("infra\\terraform\\iam-bootstrap", bootstrap)
+        self.assertIn("infra\\terraform\\environments\\development", bootstrap)
+        self.assertIn("identity_app_role_arns", bootstrap)
+        self.assertIn("runtime_role_arn", bootstrap)
+        self.assertIn("lightsail_principal_arn", bootstrap)
 
     def test_cloudfront_function_code_preserves_live_crlf_bytes(self) -> None:
         expected = "\r\n".join([
