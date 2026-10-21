@@ -49,6 +49,7 @@ run "tagged_create_permissions_are_size_safe" {
 
   assert {
     condition = (
+      toset(keys(local.resource_suffixes)) == toset(["cert", "container_service"]) &&
       local.resource_suffixes.cert == "cert" &&
       local.resource_suffixes.container_service == "api" &&
       local.resource_names.cert == "pawlocal-development-api-cert" &&
