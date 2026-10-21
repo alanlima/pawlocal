@@ -63,21 +63,63 @@ class WorkflowPathTests(unittest.TestCase):
         self.assertIn("if: github.ref == 'refs/heads/main'", seed_job)
         self.assertIn("environment: development-seed", seed_job)
         self.assertIn(
-            "PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
-            seed_job,
-        )
-        self.assertIn(
-            "PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
-            seed_job,
-        )
-        self.assertIn(
-            "secrets.PAWLOCAL_DSQL_ENDPOINT) }}",
-            seed_job,
-        )
-        self.assertNotIn("vars.PAWLOCAL_DSQL_ENDPOINT", workflow)
-        self.assertIn(
             '[[ "$GITHUB_REF" == "refs/heads/main" ]]',
             target_guard,
+        )
+
+    def test_development_seed_masks_live_targets_before_use(self) -> None:
+        workflow = (WORKFLOWS / "development-dsql-seed.yml").read_text(
+            encoding="utf-8-sig"
+        )
+        job_env = workflow.split("    env:\n", 1)[1].split("\n    steps:\n", 1)[0]
+        guard = workflow.split("      - name: Confirm the development-only target", 1)[1].split(
+            "      - name: Set up Python", 1
+        )[0]
+        oidc = workflow.split(
+            "      - name: Configure development app-role credentials with GitHub OIDC", 1
+        )[1].split("      - name: Seed the fixed development catalog", 1)[0]
+        seed = workflow.split("      - name: Seed the fixed development catalog", 1)[1].split(
+            "      - name: Verify seeded records through development API", 1
+        )[0]
+        api = workflow.split(
+            "      - name: Verify seeded records through development API", 1
+        )[1].split("      - name: Upload seed outcome", 1)[0]
+
+        self.assertNotIn("vars.", workflow)
+        for name in (
+            "PAWLOCAL_AWS_ACCOUNT_ID",
+            "PAWLOCAL_DSQL_SEED_ROLE_ARN",
+            "PAWLOCAL_DSQL_ENDPOINT",
+            "PAWLOCAL_API_HEALTH_URL",
+            "PAWLOCAL_DATABASE_URL",
+        ):
+            self.assertNotIn(name, job_env)
+        for name in (
+            "PAWLOCAL_AWS_ACCOUNT_ID",
+            "PAWLOCAL_DSQL_SEED_ROLE_ARN",
+            "PAWLOCAL_DSQL_ENDPOINT",
+            "PAWLOCAL_API_HEALTH_URL",
+        ):
+            self.assertIn(f"{name}: ${{{{ secrets.{name} }}}}", guard)
+        self.assertIn("printf '::add-mask::%s\\n' \"$api_host\"", guard)
+        self.assertIn("role-to-assume: ${{ secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN }}", oidc)
+        self.assertIn("mask-aws-account-id: true", oidc)
+        self.assertIn(
+            "PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
+            seed,
+        )
+        self.assertIn(
+            "PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
+            seed,
+        )
+        self.assertIn("PAWLOCAL_DATABASE_URL=\"auroradsql+psycopg://", seed)
+        self.assertLess(
+            seed.index("printf '::add-mask::%s\\n' \"$PAWLOCAL_DATABASE_URL\""),
+            seed.index("export PAWLOCAL_DATABASE_URL"),
+        )
+        self.assertIn(
+            "PAWLOCAL_API_HEALTH_URL: ${{ secrets.PAWLOCAL_API_HEALTH_URL }}",
+            api,
         )
 
     def test_docs_only_changes_do_not_trigger_any_automatic_workflow(self) -> None:

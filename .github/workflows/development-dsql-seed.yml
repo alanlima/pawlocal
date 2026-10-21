@@ -20,12 +20,6 @@ jobs:
     environment: development-seed
     env:
       AWS_REGION: ap-southeast-2
-      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
-      PAWLOCAL_DSQL_SEED_ROLE_ARN: ${{ vars.PAWLOCAL_DSQL_SEED_ROLE_ARN }}
-      PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
-      PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
-      PAWLOCAL_DATABASE_URL: ${{ format('auroradsql+psycopg://pawlocal_development_app@{0}/postgres?application_name=pawlocal-development', secrets.PAWLOCAL_DSQL_ENDPOINT) }}
-      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
 
     steps:
       - name: Check out repository
@@ -33,6 +27,11 @@ jobs:
 
       - name: Confirm the development-only target
         shell: bash
+        env:
+          PAWLOCAL_AWS_ACCOUNT_ID: ${{ secrets.PAWLOCAL_AWS_ACCOUNT_ID }}
+          PAWLOCAL_DSQL_SEED_ROLE_ARN: ${{ secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN }}
+          PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
+          PAWLOCAL_API_HEALTH_URL: ${{ secrets.PAWLOCAL_API_HEALTH_URL }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "Seed workflow must run from main." >&2; exit 1; }
@@ -40,6 +39,13 @@ jobs:
           [[ "$PAWLOCAL_DSQL_SEED_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-development-dsql-runtime" ]] || { echo "Seed role must be the development DSQL runtime role in the configured account." >&2; exit 1; }
           [[ "$PAWLOCAL_DSQL_ENDPOINT" =~ ^[a-z0-9-]+\.dsql\.ap-southeast-2\.on\.aws$ ]] || { echo "Endpoint must be an Aurora DSQL endpoint in ap-southeast-2." >&2; exit 1; }
           [[ "$PAWLOCAL_API_HEALTH_URL" == https://* ]] || { echo "Development API health URL must use HTTPS." >&2; exit 1; }
+          api_host="${PAWLOCAL_API_HEALTH_URL#https://}"
+          api_host="${api_host%%/*}"
+          api_host="${api_host%%\?*}"
+          api_host="${api_host%%#*}"
+          api_host="${api_host%%:*}"
+          [[ -n "$api_host" ]] || { echo "Development API host is missing." >&2; exit 1; }
+          printf '::add-mask::%s\n' "$api_host"
           echo "Target guards passed for the development account, role, endpoint, and HTTPS API URL."
 
       - name: Set up Python
@@ -53,20 +59,29 @@ jobs:
       - name: Configure development app-role credentials with GitHub OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.PAWLOCAL_DSQL_SEED_ROLE_ARN }}
+          role-to-assume: ${{ secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN }}
           aws-region: ap-southeast-2
           role-session-name: PawLocalDevSeed-${{ github.run_id }}
+          mask-aws-account-id: true
 
       - name: Seed the fixed development catalog
         working-directory: backend
         shell: bash
+        env:
+          PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
+          PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
         run: |
           set -euo pipefail
+          PAWLOCAL_DATABASE_URL="auroradsql+psycopg://pawlocal_development_app@${PAWLOCAL_DSQL_ENDPOINT}/postgres?application_name=pawlocal-development"
+          printf '::add-mask::%s\n' "$PAWLOCAL_DATABASE_URL"
+          export PAWLOCAL_DATABASE_URL
           mkdir -p "$RUNNER_TEMP/pawlocal-development-seed"
           python -m pawlocal.seed_places --environment development --catalog data/seed_places.json | tee "$RUNNER_TEMP/pawlocal-development-seed/seed-outcome.txt"
 
       - name: Verify seeded records through development API
         shell: bash
+        env:
+          PAWLOCAL_API_HEALTH_URL: ${{ secrets.PAWLOCAL_API_HEALTH_URL }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pawlocal-development-seed"
