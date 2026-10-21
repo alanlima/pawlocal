@@ -125,7 +125,7 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "cloudfront:Get*") &&
       strcontains(policy.minified_json, "cloudfront:List*")
     ])
-    error_message = "Tagged create dependencies, name-scoped S3 pre-tag reads, and the initial CloudFront handoff must remain available without a broad s3:Get* grant."
+    error_message = "Tagged create dependencies, name-scoped S3 pre-tag reads, and the initial CloudFront create path must remain available without a broad s3:Get* grant."
   }
 
   assert {
