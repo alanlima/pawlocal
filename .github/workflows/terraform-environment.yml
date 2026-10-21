@@ -254,6 +254,14 @@ jobs:
           python .github/scripts/terraform-plan-console.py "$RUNNER_TEMP/terraform-plan.json" \
             --environment '${{ inputs.environment }}'
 
+      - name: Require exact-plan visibility while ownership enforcement is skipped
+        shell: bash
+        run: |
+          if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
+            echo 'Ownership enforcement may be skipped only when raw exact-plan diagnostics are enabled for reviewer inspection.' >&2
+            exit 1
+          fi
+
       - name: Print raw saved plan for diagnosis
         if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}
         shell: bash
