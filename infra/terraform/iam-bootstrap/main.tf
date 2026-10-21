@@ -128,7 +128,7 @@ locals {
     "cognito-idp:DescribeUserPool", "cognito-idp:DescribeUserPoolClient", "cognito-idp:DescribeUserPoolDomain", "cognito-idp:GetUserPoolMfaConfig", "cognito-idp:ListTagsForResource",
     "dsql:GetCluster", "dsql:GetClusterPolicy", "dsql:GetVpcEndpointServiceName", "dsql:ListTagsForResource",
     "iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
-    "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments", "lightsail:GetCertificates", "lightsail:GetOperations",
+    "lightsail:GetContainerServices", "lightsail:GetContainerServiceDeployments", "lightsail:GetCertificates", "lightsail:GetOperation",
     "route53:GetHostedZone", "route53:ListResourceRecordSets"
   ]
   app_resource_tags = {
