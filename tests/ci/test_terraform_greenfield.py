@@ -372,6 +372,35 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn("module.pawlocal", summary)
         self.assertNotIn("private-value", summary)
 
+    def test_summary_only_mode_skips_enforcement_but_marks_the_accepted_risk(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = Path(directory) / "plan.json"
+            plan.write_text(
+                json.dumps({
+                    "resource_changes": [{
+                        "type": "aws_iam_role",
+                        "change": {"actions": ["delete", "create"]},
+                    }]
+                }),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PLAN_GUARD),
+                    str(plan),
+                    "--environment",
+                    "development",
+                    "--release-only",
+                    "--skip-enforcement",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertIn("`aws_iam_role` | `replace` | 1", result.stdout)
+        self.assertIn("plan ownership enforcement was skipped", result.stdout)
+
     def test_plan_guard_ignores_provider_data_reads(self) -> None:
         module = load_module(PLAN_GUARD, "terraform_environment_plan_data")
         rows = module.validate(

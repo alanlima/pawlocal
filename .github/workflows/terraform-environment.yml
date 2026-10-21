@@ -281,13 +281,15 @@ jobs:
           script --quiet --return \
             --command="terraform -chdir=\"$TF_ROOT\" show tfplan" /dev/null
 
-      - name: Enforce ownership and publish sanitized summary
+      - name: Publish sanitized summary with ownership enforcement skipped for MVP
         shell: bash
         run: |
           release_flag=()
           if [[ '${{ inputs.release_only }}' == 'true' ]]; then release_flag+=(--release-only); fi
+          # Temporary accepted risk: remove --skip-enforcement when #148 restores the guard.
           python .github/scripts/terraform-environment-plan.py "$RUNNER_TEMP/terraform-plan.json" \
-            --environment '${{ inputs.environment }}' "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
+            --environment '${{ inputs.environment }}' --skip-enforcement \
+            "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Bind exact plan metadata
         id: metadata

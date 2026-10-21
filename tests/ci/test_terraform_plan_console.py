@@ -93,13 +93,15 @@ class TerraformPlanConsoleTests(unittest.TestCase):
             with self.subTest(sensitive=sensitive):
                 self.assertNotIn(sensitive, output)
 
-    def test_workflow_always_prints_sanitized_inventory_before_guard(self) -> None:
+    def test_workflow_always_prints_sanitized_inventory_before_summary(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         diagnostic = workflow.index("      - name: Print sanitized saved-plan diagnostics")
         raw = workflow.index("      - name: Print raw saved plan for diagnosis")
-        guard = workflow.index("      - name: Enforce ownership and publish sanitized summary")
+        summary = workflow.index(
+            "      - name: Publish sanitized summary with ownership enforcement skipped for MVP"
+        )
         self.assertLess(diagnostic, raw)
-        self.assertLess(raw, guard)
+        self.assertLess(raw, summary)
         block = workflow[diagnostic:raw]
         self.assertNotIn("if:", block)
         self.assertIn("terraform-plan-console.py", block)
@@ -120,8 +122,10 @@ class TerraformPlanConsoleTests(unittest.TestCase):
     def test_workflow_prints_raw_plan_only_when_diagnostics_are_enabled(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         raw = workflow.index("      - name: Print raw saved plan for diagnosis")
-        guard = workflow.index("      - name: Enforce ownership and publish sanitized summary")
-        block = workflow[raw:guard]
+        summary = workflow.index(
+            "      - name: Publish sanitized summary with ownership enforcement skipped for MVP"
+        )
+        block = workflow[raw:summary]
         self.assertIn("if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}", block)
         self.assertIn("script --quiet --return", block)
         self.assertIn("--command=", block)
@@ -140,6 +144,18 @@ class TerraformPlanConsoleTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertIn(f'{name}: ""', block)
+
+    def test_workflow_keeps_summary_and_skips_only_ownership_enforcement_for_mvp(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        summary = workflow.index(
+            "      - name: Publish sanitized summary with ownership enforcement skipped for MVP"
+        )
+        metadata = workflow.index("      - name: Bind exact plan metadata")
+        block = workflow[summary:metadata]
+        self.assertIn("terraform-environment-plan.py", block)
+        self.assertIn("--skip-enforcement", block)
+        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', block)
+        self.assertIn("#148", block)
 
 
 if __name__ == "__main__":
