@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Render an opt-in, value-free console view of an exact saved Terraform plan."""
+"""Render a value-free console view of an exact saved Terraform plan."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 from collections import Counter
 from pathlib import Path
 
@@ -118,9 +117,6 @@ def main() -> int:
     parser.add_argument("plan_json", type=Path)
     parser.add_argument("--environment", choices=("development", "production"), required=True)
     args = parser.parse_args()
-
-    if os.environ.get("PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS") != "true":
-        return 0
 
     try:
         plan = json.loads(args.plan_json.read_text(encoding="utf-8"))
