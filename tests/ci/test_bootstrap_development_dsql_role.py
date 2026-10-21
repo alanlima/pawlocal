@@ -278,7 +278,8 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
     @staticmethod
     def _diagnostic(result: subprocess.CompletedProcess[str]) -> str:
         without_ansi = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
-        return " ".join(without_ansi.split())
+        without_table_separators = without_ansi.replace("|", " ")
+        return " ".join(without_table_separators.split())
 
     @staticmethod
     def _write_stale_backend(root: Path, **overrides: object) -> None:
@@ -294,6 +295,21 @@ raise SystemExit(int(os.environ.get("TEST_PYTHON_EXIT", "0")))
         metadata_path = root / ".terraform" / "terraform.tfstate"
         metadata_path.parent.mkdir()
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    def test_linux_powershell_error_rendering_keeps_exact_diagnostics(self) -> None:
+        rendered = subprocess.CompletedProcess(
+            [],
+            1,
+            stderr=(
+                "\x1b[31;1mException:\x1b[0m script.ps1:1 Line | "
+                "The development Terraform state does not identify the approved AWS |\n"
+                "region."
+            ),
+        )
+
+        self.assertIn(
+            "does not identify the approved AWS region", self._diagnostic(rendered)
+        )
 
     def test_split_state_outputs_invoke_only_the_audited_bootstrap(self) -> None:
         result = self._run()
