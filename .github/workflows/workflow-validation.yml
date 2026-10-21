@@ -12,6 +12,7 @@ on:
       - '!**/*.md'
       - '!**/*.mdx'
       - "docs/github-actions.md"
+      - "docs/terraform-greenfield-operations.md"
   push:
     branches:
       - main
@@ -25,6 +26,7 @@ on:
       - '!**/*.md'
       - '!**/*.mdx'
       - "docs/github-actions.md"
+      - "docs/terraform-greenfield-operations.md"
   workflow_call:
 
 permissions:

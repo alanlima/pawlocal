@@ -163,6 +163,9 @@ class GitHubActionsReferenceTests(unittest.TestCase):
             encoding="utf-8-sig"
         )
         self.assertEqual(workflow.count('      - "docs/github-actions.md"'), 2)
+        self.assertEqual(
+            workflow.count('      - "docs/terraform-greenfield-operations.md"'), 2
+        )
 
     def test_release_and_converge_caveats_remain_explicit(self) -> None:
         operations_guide = OPERATIONS_GUIDE.read_text(encoding="utf-8")
