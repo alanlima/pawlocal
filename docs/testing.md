@@ -29,7 +29,7 @@ Issue #83 also establishes maintained Node.js 24 majors for every direct externa
 | `backend-ci.yml` / `backend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
 | `compose-ci.yml` / `compose` | Pull-request build, readiness, and smoke job runs on Ubuntu 24.04 | Not applicable |
 | `deploy-production.yml` / `verify-production` | Actionlint, policy inventory, unchanged-input review, and protected-path tests | Next separately approved production promotion only |
-| `development-dsql-seed.yml` / `seed` | Actionlint, policy inventory, unchanged-input review, and feature-branch fail-closed dispatch | Next separately approved development seed only |
+| `development-dsql-seed.yml` / `seed` | Actionlint, policy inventory, unchanged-input review, and feature-branch fail-closed unit test | Next separately approved development seed only |
 | `frontend-deploy.yml` / `frontend` | Pull-request job runs on Ubuntu 24.04 | Not applicable |
 | `frontend-production-deploy.yml` / `disabled` | Safe manual no-op dispatch on Ubuntu 24.04 | Not applicable; workflow is retired |
 | `fullstack-release.yml` / `publish` | Pull-request condition skips publication; the same checkout, Buildx, GHCR login, and no-push build actions run in the runtime smoke job | Next authorized `main` release only |
