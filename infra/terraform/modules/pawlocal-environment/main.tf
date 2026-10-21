@@ -82,6 +82,33 @@ resource "aws_iam_role_policy_attachment" "frontend_publish" {
   policy_arn = aws_iam_policy.frontend_publish.arn
 }
 
+data "aws_iam_policy_document" "frontend_teardown" {
+  count = var.teardown_enabled ? 1 : 0
+
+  statement {
+    sid       = "DeleteOnlyMatchingFrontendObjects"
+    effect    = "Allow"
+    actions   = ["s3:DeleteObject"]
+    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${var.environment}-*/*"]
+  }
+}
+
+resource "aws_iam_policy" "frontend_teardown" {
+  count       = var.teardown_enabled ? 1 : 0
+  name        = "pawlocal-${var.environment}-frontend-teardown"
+  description = "Temporary object deletion permission for reviewed PawLocal ${var.environment} teardown."
+  policy      = data.aws_iam_policy_document.frontend_teardown[0].json
+  tags        = local.common_tags
+}
+
+# Attach the exact cleanup policy to the bounded Terraform identity only while
+# protected teardown mode is enabled, so force_destroy can empty the bucket.
+resource "aws_iam_role_policy_attachment" "frontend_teardown" {
+  count      = var.teardown_enabled ? 1 : 0
+  role       = var.terraform_apply_role_name
+  policy_arn = aws_iam_policy.frontend_teardown[0].arn
+}
+
 resource "aws_iam_policy" "runtime" {
   count       = var.runtime_role_arn == "" ? 0 : 1
   name        = "pawlocal-${var.environment}-runtime"
@@ -112,9 +139,12 @@ resource "aws_iam_role_policy_attachment" "dsql_setup" {
 
 resource "aws_s3_bucket" "frontend" {
   bucket        = "pawlocal-${var.environment}-${random_id.bucket_suffix.hex}"
-  force_destroy = false
+  force_destroy = var.teardown_enabled
   tags          = local.common_tags
-  depends_on    = [time_sleep.application_permissions_propagation]
+  depends_on = [
+    time_sleep.application_permissions_propagation,
+    aws_iam_role_policy_attachment.frontend_teardown,
+  ]
 }
 
 resource "aws_s3_bucket_ownership_controls" "frontend" {
@@ -257,8 +287,8 @@ resource "aws_route53_record" "frontend_aaaa" {
 }
 
 resource "aws_dsql_cluster" "application" {
-  deletion_protection_enabled = true
-  force_destroy               = false
+  deletion_protection_enabled = !var.teardown_enabled
+  force_destroy               = var.teardown_enabled
   kms_encryption_key          = "AWS_OWNED_KMS_KEY"
   tags                        = local.dsql_tags
   depends_on                  = [time_sleep.application_permissions_propagation]

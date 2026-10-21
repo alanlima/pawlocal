@@ -12,12 +12,14 @@ locals {
     }
   }
   environment_application_policy_arns = {
-    for environment in keys(local.environments) : environment => [
+    for environment in keys(local.environments) : environment => concat([
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime",
       "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
-    ]
+      ], environment == "production" ? [
+      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-production-frontend-teardown"
+    ] : [])
   }
   # Boundaries cap mutation while the matching identity policy retains the
   # provider's exact read list. Read-only wildcards keep the rendered boundary
@@ -31,7 +33,7 @@ locals {
     "route53:Get*", "route53:List*",
     "sts:GetCallerIdentity"
   ]
-  environment_apply_boundary_max_bytes = 6060
+  environment_apply_boundary_max_bytes = 6100
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
@@ -148,11 +150,17 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect = "Allow"
-    actions = [
+    actions = concat([
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
       "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"
-    ]
-    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
+      ], each.key == "production" ? [
+      "s3:DeleteObject"
+    ] : [])
+    resources = concat([
+      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"
+      ], each.key == "production" ? [
+      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*/*"
+    ] : [])
   }
 
   statement {
@@ -371,7 +379,7 @@ resource "aws_iam_policy" "environment_apply_boundary" {
   lifecycle {
     precondition {
       condition     = length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json) <= local.environment_apply_boundary_max_bytes
-      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6060-byte repository budget (AWS maximum: 6144 bytes)."
+      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6100-byte repository budget (AWS maximum: 6144 bytes)."
     }
   }
 }

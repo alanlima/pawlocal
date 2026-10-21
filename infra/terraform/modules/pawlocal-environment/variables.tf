@@ -70,6 +70,12 @@ variable "backend_image" {
   }
 }
 
+variable "teardown_enabled" {
+  description = "Allow Terraform-managed application data deletion during an explicitly reviewed destroy. Normal plans must leave this false."
+  type        = bool
+  default     = false
+}
+
 variable "cloudfront_distribution_arn" {
   description = "Exact distribution ARN handed back after the first create-only apply. Empty denies distribution update/delete."
   type        = string

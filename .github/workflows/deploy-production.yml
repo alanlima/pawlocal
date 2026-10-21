@@ -30,6 +30,7 @@ jobs:
     uses: ./.github/workflows/terraform-environment.yml
     with:
       environment: production
+      phase: release
       backend_image: ${{ inputs.backend_image }}
       release_commit: ${{ inputs.release_commit }}
       release_only: true

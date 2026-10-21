@@ -333,10 +333,13 @@ data "aws_iam_policy_document" "role_permissions" {
         variable = "iam:PolicyARN"
         # environment_permissions.tf defines this list ordering: index 0 is the
         # environment application policy and index 3 is its DSQL setup policy.
-        values = [
+        # Production alone adds index 4, the default-off teardown policy.
+        values = concat([
           local.environment_application_policy_arns[each.value.environment][0],
           local.environment_application_policy_arns[each.value.environment][3]
-        ]
+          ], each.value.environment == "production" ? [
+          local.environment_application_policy_arns[each.value.environment][4]
+        ] : [])
       }
     }
   }

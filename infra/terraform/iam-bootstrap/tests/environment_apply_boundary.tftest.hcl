@@ -46,7 +46,7 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6060-byte repository budget."
+    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6100-byte repository budget."
   }
 
   assert {
@@ -63,6 +63,24 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       !strcontains(policy.minified_json, "plans/${environment == "development" ? "production" : "development"}/*")
     ])
     error_message = "Each boundary must remain limited to its matching state key and plan prefix."
+  }
+
+  assert {
+    condition = (
+      length([
+        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "s3:DeleteObject") &&
+        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-development-*/*")
+      ]) == 0 &&
+      length([
+        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["production"].minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "s3:DeleteObject") &&
+        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-production-*/*")
+      ]) == 1 &&
+      !strcontains(data.aws_iam_policy_document.role_permissions["development-apply"].minified_json, "pawlocal-development-frontend-teardown") &&
+      strcontains(data.aws_iam_policy_document.role_permissions["production-apply"].minified_json, "pawlocal-production-frontend-teardown")
+    )
+    error_message = "Only the production apply boundary and role may expose the default-off teardown policy ceiling."
   }
 
   assert {

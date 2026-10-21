@@ -101,6 +101,7 @@ jobs:
     uses: ./.github/workflows/terraform-environment.yml
     with:
       environment: development
+      phase: release
       backend_image: ${{ needs.publish.outputs.backend_image }}
       release_commit: ${{ github.sha }}
       release_only: true

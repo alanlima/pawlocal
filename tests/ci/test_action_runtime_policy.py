@@ -25,6 +25,10 @@ EXPECTED_HOSTED_JOBS = {
     ("terraform-environment.yml", "apply"),
     ("terraform-environment.yml", "plan"),
     ("terraform-environment.yml", "production-eligibility"),
+    ("terraform-environment-destroy.yml", "destroy-apply"),
+    ("terraform-environment-destroy.yml", "destroy-plan"),
+    ("terraform-environment-destroy.yml", "prepare-apply"),
+    ("terraform-environment-destroy.yml", "prepare-plan"),
     ("workflow-validation.yml", "action-runtime-smoke"),
     ("workflow-validation.yml", "validate"),
 }
