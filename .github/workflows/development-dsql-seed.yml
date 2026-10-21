@@ -22,9 +22,9 @@ jobs:
       AWS_REGION: ap-southeast-2
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PAWLOCAL_DSQL_SEED_ROLE_ARN: ${{ vars.PAWLOCAL_DSQL_SEED_ROLE_ARN }}
-      PAWLOCAL_DSQL_ENDPOINT: ${{ vars.PAWLOCAL_DSQL_ENDPOINT }}
-      PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ vars.PAWLOCAL_DSQL_ENDPOINT }}
-      PAWLOCAL_DATABASE_URL: ${{ format('auroradsql+psycopg://pawlocal_development_app@{0}/postgres?application_name=pawlocal-development', vars.PAWLOCAL_DSQL_ENDPOINT) }}
+      PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
+      PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}
+      PAWLOCAL_DATABASE_URL: ${{ format('auroradsql+psycopg://pawlocal_development_app@{0}/postgres?application_name=pawlocal-development', secrets.PAWLOCAL_DSQL_ENDPOINT) }}
       PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
 
     steps:
