@@ -124,6 +124,17 @@ Do not print Environment or secret values as evidence. Record only which require
 
 Foundation, Converge, and Release are one environment lifecycle with three explicit phases. Foundation and Converge cannot be one Terraform plan/apply: Foundation must first create the AWS-generated Lightsail principal and CloudFront identifiers that the bootstrap and environment states consume during the handoff. They may eventually be presented as one operator-triggered provisioning workflow, but that workflow would still execute separate reviewed Foundation, bootstrap, and Converge plans/applies. Automated handoff remains deferred under [Issue #155](https://github.com/alanlima/pawlocal/issues/155).
 
+### Why the phases are different
+
+Terraform fixes a saved plan before applying it; it cannot pause that plan, apply a second state, introduce newly generated values, and then resume the original plan. PawLocal also deliberately separates shared IAM bootstrap ownership from each environment's application state. That creates a one-time dependency sequence:
+
+1. Foundation asks AWS to create the environment resources whose identifiers cannot be predicted safely, including the Lightsail service principal and CloudFront distribution/OAC identifiers.
+2. The bootstrap state consumes the exact Lightsail principal and creates the matching runtime trust. The protected Environment handoff supplies the generated CloudFront identifiers and resulting runtime-role ARN to the environment root.
+3. Converge creates the DSQL runtime mapping and baseline, backend deployment version, API DNS, and exact generated-resource permissions that could not exist during Foundation.
+4. After Converge, those infrastructure identities are stable. Release therefore changes only the selected immutable application version, then publishes and verifies the corresponding frontend, instead of repeating infrastructure provisioning.
+
+The split is therefore caused by generated AWS identities and Terraform state ownership, not by a different application artifact or an incident-recovery path.
+
 | Phase | Purpose | Key inputs | Result |
 |---|---|---|---|
 | **Foundation** | Create the base environment and the AWS-generated identities needed by later IAM configuration. | `phase=foundation`, empty `backend_image`, empty `release_commit`, `release_only=false` | Creates the base S3/CloudFront, DSQL, Cognito, certificate, Lightsail service, and DNS infrastructure. Runtime deployment, DSQL application setup, and API DNS remain disabled. |
