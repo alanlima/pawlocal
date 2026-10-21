@@ -270,9 +270,10 @@ class GreenfieldTerraformTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
 
-        self.assertIn("environment_apply_boundary_max_bytes = 6050", boundary)
+        self.assertIn("environment_apply_boundary_max_bytes = 6060", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
+        self.assertIn('environment_apply_boundary["development"].minified_json) == 6052', test_file)
         self.assertIn('keys(local.environment_dsql_tags[environment])', test_file)
         self.assertIn('"aws:RequestTag/Name"', test_file)
         self.assertIn('"aws:RequestTag/purpose"', test_file)

@@ -29,13 +29,15 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   variables {
-    terraform_state_bucket_name = "test-state-bucket"
+    # Synthetic values match the production input lengths that render the
+    # largest reviewed boundary without exposing live identifiers.
+    terraform_state_bucket_name = "fixture-state-bucket-x"
     github_repository           = "example/pawlocal"
     github_owner_id             = "1"
     github_repository_id        = "2"
     manage_github_oidc_provider = true
-    route53_zone_id             = "ZTEST"
-    domain_name                 = "example.test"
+    route53_zone_id             = "ZFIXTURE000000"
+    domain_name                 = "fixture.example"
   }
 
   assert {
@@ -44,7 +46,12 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6050-byte repository budget."
+    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6060-byte repository budget."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6052
+    error_message = "The real-input-equivalent development fixture must retain the reviewed 6052-byte boundary shape."
   }
 
   assert {
@@ -182,7 +189,7 @@ run "runtime_stage_boundaries_fit_and_stay_isolated" {
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each runtime-stage apply boundary must stay below both the 6144-byte AWS limit and the 6050-byte repository budget."
+    error_message = "Each runtime-stage apply boundary must stay below both the 6144-byte AWS limit and the 6060-byte repository budget."
   }
 
   assert {
