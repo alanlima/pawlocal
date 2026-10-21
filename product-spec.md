@@ -74,7 +74,7 @@ Stage 3 must use these values consistently across API validation, persistence an
 ## Decisions still needed before implementation
 
 - Broader freshness and verification policy for place data.
-- Identity lifecycle beyond the Stage 3 authentication integration (signup/sign-in UX, recovery, account deletion and retention, and social federation). Stage 3 does not add deletion, retention, or federation behavior without a separate decision.
+- Identity lifecycle beyond the Stage 3 authentication integration remains unresolved. [Issue #110](https://github.com/alanlima/pawlocal/issues/110) requests GitHub-only sign-in through Cognito, but [DRAFT-009](docs/decisions.md#draft-009--github-only-sign-in-through-cognito) is a proposal, not an approval. Direct GitHub OAuth is not a Cognito-compatible OIDC provider, so implementation must wait for owner approval of the broker or alternate architecture, stable identity mapping, scopes and email handling, logout and revocation behavior, secret lifecycle, cost, and deployment sequence. Account deletion and contribution-retention behavior remain separately undecided.
 - Moderation roles and report resolution process.
 - Rating/review revision and removal behavior.
 - Permitted source policy and AI-draft operator workflow.
@@ -83,4 +83,10 @@ Stage 3 must use these values consistently across API validation, persistence an
 
 - **Identity provider:** Use an Amazon Cognito User Pool as the OIDC issuer for Stage 3 protected API operations. The API accepts user-pool access tokens and validates them as specified in `docs/specs/backend-api-persistence.md` and `openapi.yaml`. No Cognito pool or other AWS resource is provisioned as part of Stage 3.
 - **Reportable contributions:** The report dialog uses the public, paginated `GET /contributions/reportable` operation for already-published contributions. The response contains only public fields needed to identify the report target and does not include contributor or reporter identity. See `docs/decisions.md` DEC-002.
+
+## Proposed Stage 4 identity direction — not approved
+
+PawLocal intends to offer GitHub as the only user-facing sign-in method while preserving anonymous browsing and Cognito-issued access tokens for protected operations. GitHub supplies an OAuth 2.0 user-login flow, not the OIDC identity-provider contract required for direct Cognito federation. DRAFT-009 therefore recommends an owner-selected standards-compliant OIDC broker between GitHub and Cognito and compares that approach with replacing Cognito tokens or building a custom AWS bridge.
+
+No broker, new AWS service, identity-provider configuration, scope, secret-handling mechanism, infrastructure apply, or application change is approved by this direction. Issue #110 implementation begins only after the owner approves DRAFT-009's architecture and lifecycle choices. Development deployment and a real GitHub/MFA sign-in check are required before production is considered; production remains a separate reviewed and cost-approved action.
 
