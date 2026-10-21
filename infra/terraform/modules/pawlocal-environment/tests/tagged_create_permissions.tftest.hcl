@@ -175,6 +175,55 @@ run "tagged_create_permissions_are_size_safe" {
   }
 }
 
+run "runtime_identity_activates_protected_setup_and_deployment" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    environment                = "development"
+    aws_region                 = "ap-southeast-2"
+    root_domain                = "example.test"
+    route53_zone_id            = "ZTEST"
+    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name = "pawlocal-development-github-deploy"
+    runtime_role_arn           = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
+    backend_image              = "ghcr.io/alanlima/pawlocal-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    container_power            = "micro"
+  }
+
+  override_resource {
+    target          = aws_dsql_cluster.application
+    override_during = plan
+    values = {
+      arn        = "arn:aws:dsql:ap-southeast-2:111111111111:cluster/aaaaaaaaaaaaaaaaaaaaaaaaaa"
+      identifier = "aaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+
+  assert {
+    condition = (
+      length(module.dsql_post_apply_setup) == 1 &&
+      length(aws_iam_policy.dsql_setup) == 1 &&
+      length(aws_iam_role_policy_attachment.dsql_setup) == 1 &&
+      length(aws_lightsail_container_service_deployment_version.api) == 1
+    )
+    error_message = "A nonempty matching runtime identity and backend image must activate one protected setup and one gated deployment."
+  }
+
+  assert {
+    condition = module.dsql_post_apply_setup[0].trigger_digests == {
+      cluster_identity_sha256 = sha256("arn:aws:dsql:ap-southeast-2:111111111111:cluster/aaaaaaaaaaaaaaaaaaaaaaaaaa")
+      runtime_identity_sha256 = sha256("arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime")
+      setup_revision_sha256   = sha256("dsql-setup-v1-dsql_0001_initial")
+    }
+    error_message = "The active setup lifecycle must be controlled only by cluster, runtime identity, and explicit setup revision digests."
+  }
+}
+
 run "production_resource_names_use_normalized_suffixes" {
   command = plan
 

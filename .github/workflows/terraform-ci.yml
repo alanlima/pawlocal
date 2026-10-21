@@ -8,6 +8,7 @@ on:
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
+      - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
       - '!**/*.md'
       - '!**/*.mdx'
@@ -20,6 +21,7 @@ on:
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
+      - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
       - '!**/*.md'
       - '!**/*.mdx'
@@ -43,6 +45,7 @@ jobs:
           - iam-bootstrap
           - environments/development
           - environments/production
+          - modules/dsql-post-apply-setup
           - modules/pawlocal-environment
     defaults:
       run:
@@ -74,3 +77,7 @@ jobs:
           AWS_SESSION_TOKEN: test
           AWS_EC2_METADATA_DISABLED: true
         run: terraform test -no-color
+
+      - name: Test DSQL setup lifecycle transitions
+        if: matrix.root == 'modules/dsql-post-apply-setup'
+        run: python ../../../../tests/ci/test_dsql_setup_terraform_lifecycle.py

@@ -16,6 +16,7 @@ from sqlalchemy.sql import Executable
 BASELINE_REVISION = "dsql_0001_initial"
 MAX_DML_ROWS_PER_TRANSACTION = 2999
 DEFAULT_DML_BATCH_SIZE = 1000
+_ROLE_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 BASELINE_DIRECTORY = (
     Path(__file__).resolve().parents[1] / "migrations" / "dsql" / "0001_initial"
 )
@@ -23,6 +24,18 @@ VERSION_TABLE_DDL = """CREATE TABLE IF NOT EXISTS pawlocal_schema_version (
     revision varchar(64) PRIMARY KEY,
     applied_at timestamp with time zone NOT NULL DEFAULT now()
 )"""
+
+
+class DSQLRevisionPostconditionError(RuntimeError):
+    """The clean-baseline revision ledger is missing or unexpected."""
+
+
+class DSQLTablePostconditionError(RuntimeError):
+    """A baseline table is missing or has an unexpected owner."""
+
+
+class DSQLIndexPostconditionError(RuntimeError):
+    """A baseline index is missing, invalid, mismatched, or wrongly owned."""
 
 
 def _ddl_files(directory: Path = BASELINE_DIRECTORY) -> list[Path]:
@@ -66,6 +79,10 @@ _INDEX_DEFINITION = re.compile(
     r"(?:\s+WHERE\s+(?P<predicate>.+?))?\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+_TABLE_DDL = re.compile(
+    r"^CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[\w]+)\s*\(",
+    re.IGNORECASE,
+)
 
 
 def _normalize_index_expression(expression: str | None) -> str | None:
@@ -81,7 +98,12 @@ def _normalize_index_expression(expression: str | None) -> str | None:
     return re.sub(r"[\s()\"]+", "", normalized).lower()
 
 
-def _verify_async_index(engine: Engine, statement: str) -> None:
+def _verify_async_index(
+    engine: Engine,
+    statement: str,
+    *,
+    expected_owner: str | None = None,
+) -> None:
     expected = _ASYNC_INDEX_DDL.match(statement.strip())
     if expected is None:
         raise RuntimeError(f"Cannot verify Aurora DSQL async index DDL: {statement}")
@@ -92,12 +114,15 @@ def _verify_async_index(engine: Engine, statement: str) -> None:
             text(
                 "SELECT index_class.relname, table_class.relname, "
                 "index_data.indisvalid, index_data.indisunique, "
-                "pg_catalog.pg_get_indexdef(index_data.indexrelid) "
+                "pg_catalog.pg_get_indexdef(index_data.indexrelid), "
+                "index_owner.rolname "
                 "FROM pg_catalog.pg_index AS index_data "
                 "JOIN pg_catalog.pg_class AS index_class "
                 "ON index_class.oid = index_data.indexrelid "
                 "JOIN pg_catalog.pg_class AS table_class "
                 "ON table_class.oid = index_data.indrelid "
+                "JOIN pg_catalog.pg_roles AS index_owner "
+                "ON index_owner.oid = index_class.relowner "
                 "JOIN pg_catalog.pg_namespace AS index_namespace "
                 "ON index_namespace.oid = index_class.relnamespace "
                 "WHERE index_class.relname = :index_name "
@@ -108,13 +133,13 @@ def _verify_async_index(engine: Engine, statement: str) -> None:
         ).first()
 
     if row is None:
-        raise RuntimeError(
+        raise DSQLIndexPostconditionError(
             f"Aurora DSQL returned no job id and index {expected_name!r} is absent"
         )
-    index_name, table_name, is_valid, is_unique, actual_definition = row
+    index_name, table_name, is_valid, is_unique, actual_definition, actual_owner = row
     actual = _INDEX_DEFINITION.match(actual_definition)
     if actual is None:
-        raise RuntimeError(
+        raise DSQLIndexPostconditionError(
             f"Could not inspect Aurora DSQL index definition for {expected_name!r}"
         )
 
@@ -133,16 +158,19 @@ def _verify_async_index(engine: Engine, statement: str) -> None:
         or actual.group("method").lower() != "btree_index"
         or actual_columns != expected_columns
         or actual_predicate != expected_predicate
+        or (expected_owner is not None and actual_owner != expected_owner)
     ):
-        raise RuntimeError(
+        raise DSQLIndexPostconditionError(
             f"Aurora DSQL index {expected_name!r} is invalid or differs from "
             "the requested baseline definition"
         )
 
 
 def _execute_one_ddl(engine: Engine, statement: str) -> None:
-    is_async_index = statement.lstrip().upper().startswith(
-        ("CREATE INDEX ASYNC", "CREATE UNIQUE INDEX ASYNC")
+    is_async_index = (
+        statement.lstrip()
+        .upper()
+        .startswith(("CREATE INDEX ASYNC", "CREATE UNIQUE INDEX ASYNC"))
     )
     with engine.connect() as connection:
         with connection.begin():
@@ -200,6 +228,69 @@ def apply_dsql_baseline(
             {"revision": BASELINE_REVISION},
         )
     return True
+
+
+def verify_dsql_baseline(
+    engine: Engine,
+    *,
+    expected_owner: str,
+    directory: Path = BASELINE_DIRECTORY,
+) -> None:
+    """Verify the exact clean revision plus every baseline table and index."""
+    if not _ROLE_PATTERN.fullmatch(expected_owner):
+        raise ValueError("expected owner has an invalid format")
+
+    migration_statements = [
+        path.read_text(encoding="utf-8").strip() for path in _ddl_files(directory)
+    ]
+    expected_tables = {"pawlocal_schema_version"}
+    expected_indexes: list[str] = []
+    for statement in migration_statements:
+        table = _TABLE_DDL.match(statement)
+        index = _ASYNC_INDEX_DDL.match(statement)
+        if table is not None:
+            expected_tables.add(table.group("name"))
+        elif index is not None:
+            expected_indexes.append(statement)
+        else:
+            raise RuntimeError("DSQL baseline manifest contains unsupported DDL")
+
+    with engine.begin() as connection:
+        revisions = (
+            connection.execute(
+                text("SELECT revision FROM pawlocal_schema_version ORDER BY revision")
+            )
+            .scalars()
+            .all()
+        )
+    if revisions != [BASELINE_REVISION]:
+        raise DSQLRevisionPostconditionError(
+            "Aurora DSQL baseline revision is missing or unexpected"
+        )
+
+    for table_name in sorted(expected_tables):
+        with engine.begin() as connection:
+            owner = connection.execute(
+                text(
+                    "SELECT role_data.rolname "
+                    "FROM pg_catalog.pg_class AS table_data "
+                    "JOIN pg_catalog.pg_namespace AS namespace_data "
+                    "ON namespace_data.oid = table_data.relnamespace "
+                    "JOIN pg_catalog.pg_roles AS role_data "
+                    "ON role_data.oid = table_data.relowner "
+                    "WHERE namespace_data.nspname = current_schema() "
+                    "AND table_data.relkind = 'r' "
+                    "AND table_data.relname = :table_name"
+                ),
+                {"table_name": table_name},
+            ).scalar_one_or_none()
+        if owner != expected_owner:
+            raise DSQLTablePostconditionError(
+                "Aurora DSQL baseline table is missing or has an unexpected owner"
+            )
+
+    for statement in expected_indexes:
+        _verify_async_index(engine, statement, expected_owner=expected_owner)
 
 
 def execute_bounded_dml_batches(

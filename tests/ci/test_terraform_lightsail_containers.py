@@ -417,7 +417,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("user_pool.arn", cognito.group(1))
         self.assertNotIn('resources = ["*"]', cognito.group(1))
 
-    def test_dsql_bootstrap_is_operator_run_and_release_role_stays_limited(self) -> None:
+    def test_historical_release_role_stays_limited(self) -> None:
         terraform = (ROOT / "infra/terraform/fullstack/main.tf").read_text(encoding="utf-8")
         release = re.search(
             r'data "aws_iam_policy_document" "github_terraform_deploy" \{(.*?)(?=\nresource "aws_iam_role_policy")',
@@ -435,19 +435,6 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertNotIn("provisioner", marker.group(1))
         deploy = (ROOT / "ops/terraform-lightsail-container-deploy.sh").read_text(encoding="utf-8")
         self.assertNotIn("dsql_bootstrap_python", deploy)
-        bootstrap = (ROOT / "ops/bootstrap-development-dsql-role.ps1").read_text(encoding="utf-8")
-        self.assertIn("pawlocal.dsql_role_bootstrap", bootstrap)
-        self.assertIn("infra\\terraform\\iam-bootstrap", bootstrap)
-        self.assertIn("infra\\terraform\\environments\\development", bootstrap)
-        self.assertIn("identity_app_role_arns", bootstrap)
-        self.assertIn("runtime_role_arn", bootstrap)
-        self.assertIn("lightsail_principal_arn", bootstrap)
-        self.assertIn("pawlocal/iam-bootstrap/terraform.tfstate", bootstrap)
-        self.assertIn("pawlocal/development/terraform.tfstate", bootstrap)
-        self.assertIn("-backend-config=encrypt=true", bootstrap)
-        self.assertIn("-backend-config=use_lockfile=true", bootstrap)
-        self.assertIn("$metadata.backend.type -ne 's3'", bootstrap)
-        self.assertIn("$workspace.Trim() -ne 'default'", bootstrap)
 
     def test_cloudfront_function_code_preserves_live_crlf_bytes(self) -> None:
         expected = "\r\n".join([

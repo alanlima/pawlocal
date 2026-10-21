@@ -3,7 +3,6 @@
 from sqlalchemy import Engine
 
 from pawlocal.dsql_migrations import apply_dsql_baseline
-from pawlocal.infrastructure.database import engine
 
 
 def run_dsql_migrations(database_engine: Engine) -> bool:
@@ -16,6 +15,8 @@ def run_dsql_migrations(database_engine: Engine) -> bool:
 
 
 def main() -> None:
+    from pawlocal.infrastructure.database import engine
+
     try:
         applied = run_dsql_migrations(engine)
     finally:
