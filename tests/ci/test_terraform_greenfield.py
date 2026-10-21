@@ -499,6 +499,116 @@ class GreenfieldTerraformTests(unittest.TestCase):
                 self.assertNotIn("private-resource-identifier", message)
                 self.assertNotIn("private-resource-value", message)
 
+    def test_plan_guard_rejects_noop_imports_before_ignoring_noop(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_noop_imports")
+        for release_only in (False, True):
+            for import_location in ("top-level", "nested"):
+                with self.subTest(
+                    release_only=release_only,
+                    import_location=import_location,
+                ):
+                    change = {
+                        "address": "module.pawlocal.private-import-address",
+                        "type": "aws_s3_bucket",
+                        "change": {
+                            "actions": ["no-op"],
+                            "before": {"bucket": "private-import-value"},
+                            "after": {"bucket": "private-import-value"},
+                        },
+                    }
+                    if import_location == "top-level":
+                        change["importing"] = {"id": "private-import-id"}
+                    else:
+                        change["change"]["importing"] = {"id": "private-import-id"}
+
+                    with self.assertRaises(SystemExit) as error:
+                        module.validate(
+                            {"resource_changes": [change]},
+                            "development",
+                            release_only,
+                        )
+                    message = str(error.exception)
+                    self.assertIn("application-resource import is prohibited", message)
+                    for private_value in (
+                        "private-import-address",
+                        "private-import-id",
+                        "private-import-value",
+                    ):
+                        self.assertNotIn(private_value, message)
+
+    def test_plan_guard_accepts_genuine_noop_in_normal_and_release_only_modes(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_genuine_noop")
+        plan = {
+            "resource_changes": [{
+                "address": "module.pawlocal.aws_s3_bucket.frontend",
+                "type": "aws_s3_bucket",
+                "change": {"actions": ["no-op"]},
+            }],
+            "variables": {"environment": {"value": "development"}},
+        }
+        self.assertEqual(module.validate(plan, "development", False), [])
+        self.assertEqual(module.validate(plan, "development", True), [])
+
+    def test_plan_guard_rejects_forget_actions_in_normal_and_release_only_modes(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_forget")
+        for release_only in (False, True):
+            for actions in (["forget"], ["forget", "create"]):
+                with self.subTest(release_only=release_only, actions=actions):
+                    plan = {
+                        "resource_changes": [{
+                            "address": "module.pawlocal.private-forget-address",
+                            "type": "aws_s3_bucket",
+                            "change": {
+                                "actions": actions,
+                                "before": {"bucket": "private-forget-value"},
+                            },
+                        }],
+                        "variables": {"environment": {"value": "development"}},
+                    }
+                    with self.assertRaises(SystemExit) as error:
+                        module.validate(plan, "development", release_only)
+                    message = str(error.exception)
+                    self.assertIn("forget action is prohibited", message)
+                    self.assertNotIn("private-forget-address", message)
+                    self.assertNotIn("private-forget-value", message)
+
+    def test_plan_guard_allows_only_the_exact_managed_dsql_setup_actions(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_dsql_setup")
+        address = module.DSQL_SETUP_RESOURCE_ADDRESS
+        for actions in (["create"], ["delete", "create"], ["create", "delete"]):
+            with self.subTest(actions=actions):
+                plan = {
+                    "resource_changes": [{
+                        "address": address,
+                        "type": "terraform_data",
+                        "change": {"actions": actions},
+                    }],
+                    "variables": {"environment": {"value": "development"}},
+                }
+                self.assertEqual(
+                    module.validate(plan, "development", False),
+                    [("terraform_data", module.action_label(actions))],
+                )
+                with self.assertRaises(SystemExit):
+                    module.validate(plan, "development", True)
+
+        for address_suffix, actions in (
+            (".unmanaged", ["create"]),
+            ("", ["update"]),
+            ("", ["delete"]),
+        ):
+            with self.subTest(address_suffix=address_suffix, actions=actions):
+                plan = {
+                    "resource_changes": [{
+                        "address": f"{address}{address_suffix}",
+                        "type": "terraform_data",
+                        "change": {"actions": actions},
+                    }],
+                    "variables": {"environment": {"value": "development"}},
+                }
+                with self.assertRaises(SystemExit):
+                    module.validate(plan, "development", False)
+
     def test_sanitized_plan_summary_omits_addresses_and_values(self) -> None:
         module = load_module(PLAN_GUARD, "terraform_environment_plan_summary")
         plan = {

@@ -43,6 +43,14 @@ RELEASE_ACTIONS = {
     ("create", "delete"),
     ("delete", "create"),
 }
+DSQL_SETUP_RESOURCE_ADDRESS = (
+    "module.pawlocal.module.dsql_post_apply_setup[0].terraform_data.setup"
+)
+DSQL_SETUP_ACTIONS = {
+    ("create",),
+    ("create", "delete"),
+    ("delete", "create"),
+}
 
 
 def action_label(actions: list[str]) -> str:
@@ -72,15 +80,36 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
         if change.get("mode") == "data":
             continue
         resource_type = change.get("type", "")
+        resource_address = change.get("address", "")
+        managed_dsql_setup = (
+            resource_type == "terraform_data"
+            and resource_address == DSQL_SETUP_RESOURCE_ADDRESS
+        )
         reported_type = (
             resource_type
-            if resource_type in ALLOWED_TYPES or resource_type in FORBIDDEN_TYPES
+            if (
+                resource_type in ALLOWED_TYPES
+                or resource_type in FORBIDDEN_TYPES
+                or resource_type == "terraform_data"
+            )
             else "withheld_resource_type"
         )
-        actions = change.get("change", {}).get("actions", [])
+        change_details = change.get("change", {})
+        actions = change_details.get("actions", [])
+        importing = (
+            change.get("importing") is not None
+            or change_details.get("importing") is not None
+        )
+        if importing:
+            errors.append(f"application-resource import is prohibited: {reported_type}")
+        if "forget" in actions:
+            errors.append(f"forget action is prohibited: {reported_type}")
         if actions == ["no-op"]:
             continue
-        if resource_type in FORBIDDEN_TYPES or resource_type not in ALLOWED_TYPES:
+        if (
+            resource_type in FORBIDDEN_TYPES
+            or (resource_type not in ALLOWED_TYPES and not managed_dsql_setup)
+        ):
             errors.append(
                 f"resource type is outside the environment ownership boundary: {reported_type}"
             )
@@ -88,13 +117,22 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
             resource_type == RELEASE_RESOURCE_TYPE
             and set(actions) == {"create", "delete"}
         )
-        if "delete" in actions and not expected_deployment_replacement:
+        expected_dsql_setup_replacement = (
+            managed_dsql_setup and set(actions) == {"create", "delete"}
+        )
+        if (
+            "delete" in actions
+            and not expected_deployment_replacement
+            and not expected_dsql_setup_replacement
+        ):
             errors.append(
                 "delete or replacement is not allowed by the normal environment workflow: "
                 f"{reported_type}"
             )
-        if change.get("importing") is not None or change.get("change", {}).get("importing") is not None:
-            errors.append(f"application-resource import is prohibited: {reported_type}")
+        if managed_dsql_setup and tuple(actions) not in DSQL_SETUP_ACTIONS:
+            errors.append(
+                f"managed DSQL setup uses an unsupported action: {reported_type}"
+            )
         if release_only:
             if resource_type != RELEASE_RESOURCE_TYPE:
                 errors.append(
