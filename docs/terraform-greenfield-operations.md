@@ -120,9 +120,32 @@ The matching `development-apply` and `production-apply` Environments use the sam
 
 Do not print Environment or secret values as evidence. Record only which required names are configured and whether protection rules are enabled.
 
-## Environment plan/apply stages
+## Environment lifecycle phases
 
-Dispatch `Terraform environment plan and apply` from `main`. A normal foundation dispatch uses the target environment, an empty backend image, and `release_only=false`. The workflow:
+Foundation, Converge, and Release are one environment lifecycle with three explicit phases. Foundation and Converge cannot be one Terraform plan/apply: Foundation must first create the AWS-generated Lightsail principal and CloudFront identifiers that the bootstrap and environment states consume during the handoff. They may eventually be presented as one operator-triggered provisioning workflow, but that workflow would still execute separate reviewed Foundation, bootstrap, and Converge plans/applies. Automated handoff remains deferred under [Issue #155](https://github.com/alanlima/pawlocal/issues/155).
+
+| Phase | Purpose | Key inputs | Result |
+|---|---|---|---|
+| **Foundation** | Create the base environment and the AWS-generated identities needed by later IAM configuration. | `phase=foundation`, empty `backend_image`, empty `release_commit`, `release_only=false` | Creates the base S3/CloudFront, DSQL, Cognito, certificate, Lightsail service, and DNS infrastructure. Runtime deployment, DSQL application setup, and API DNS remain disabled. |
+| **Converge** | Complete the generated-identity handoff and reach the first fully deployable environment state. | `phase=converge`, exact immutable `backend_image`, `release_only=false`; production also requires its matching development-verified `release_commit` | Applies exact generated-resource permissions, completes DSQL setup, creates the backend deployment version and API DNS, and converges all remaining infrastructure. |
+| **Release** | Promote a later application version without using the lifecycle to redesign infrastructure. | `phase=release`, exact development-verified `release_commit` and `backend_image`, `release_only=true` | Permits only the container deployment-version change; the calling release workflow then publishes the frontend and verifies the public frontend, API, and database-backed journey. |
+
+The first deployment, and a deployment after a complete approved destroy, follows this sequence:
+
+```text
+Foundation apply
+  -> read the generated CloudFront distribution/OAC and Lightsail principal outputs
+  -> apply the matching bootstrap runtime-trust handoff
+  -> update the matching protected Environment variables
+  -> Converge apply
+  -> Release for subsequent verified application versions
+```
+
+Do not use `release` for the first deployment. `terraform-environment.yml` owns Foundation and Converge. `deploy-production.yml` supplies `phase=release` for the normal production promotion path after the environment has converged.
+
+### Protected plan and apply mechanics
+
+Dispatch `Terraform environment plan and apply` from `main`. The workflow:
 
 1. assumes the matching read-only plan role;
 2. initializes only `pawlocal/<environment>/terraform.tfstate`;
