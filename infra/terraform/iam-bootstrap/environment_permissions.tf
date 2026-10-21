@@ -84,7 +84,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["iam:CreatePolicy*", "iam:DeletePolicy*", "iam:Set*PolicyVersion", "iam:TagPolicy", "iam:UntagPolicy"]
+    actions   = ["iam:*Policy*"]
     resources = local.environment_active_application_policy_arns[each.key]
   }
 
@@ -139,6 +139,26 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       values   = [each.key]
     }
     condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/managedby"
+      values   = ["terraform"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/component"
+      values   = ["fullstack-mvp"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/workload"
+      values   = ["application"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/costcenter"
+      values   = ["personal"]
+    }
+    condition {
       test     = "ForAllValues:StringLike"
       variable = "aws:TagKeys"
       values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
@@ -179,9 +199,37 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["cognito-idp:CreateUserPool", "cognito-idp:TagResource", "dsql:CreateCluster", "dsql:TagResource", "lightsail:CreateCertificate", "lightsail:CreateContainerService"]
+    effect = "Allow"
+    actions = concat(
+      ["cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
+      local.environment_runtime_cluster_arns[each.key] == "" ? ["dsql:CreateCluster"] : []
+    )
     resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [each.key]
+    }
+  }
+
+  statement {
+    effect = "Allow"
+    actions = concat(
+      ["cognito-idp:TagResource", "lightsail:TagResource"],
+      local.environment_runtime_cluster_arns[each.key] == "" ? ["dsql:TagResource"] : []
+    )
+    resources = concat([
+      "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/${each.value.service_name}"
+      ],
+      local.environment_runtime_cluster_arns[each.key] == "" ? ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"] : []
+    )
     condition {
       test     = "Null"
       variable = "aws:ResourceTag/environment"
@@ -219,35 +267,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/environment"
-      values   = [each.key]
-    }
-  }
-
-  statement {
-    effect  = "Allow"
-    actions = ["lightsail:TagResource"]
-    resources = [
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/${each.value.service_name}",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*"
-    ]
-    condition {
-      test     = "Null"
-      variable = "aws:ResourceTag/project"
-      values   = ["true"]
-    }
-    condition {
-      test     = "Null"
-      variable = "aws:ResourceTag/environment"
-      values   = ["true"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/environment"
       values   = [each.key]
     }
   }
@@ -322,8 +341,11 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateFunction", "cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:TagResource", "cloudfront:UpdateFunction"]
+    effect = "Allow"
+    actions = concat(
+      ["cloudfront:DeleteFunction", "cloudfront:DescribeFunction", "cloudfront:PublishFunction", "cloudfront:UpdateFunction"],
+      length(local.environment_cloudfront_handoff_arns[each.key]) == 0 ? ["cloudfront:CreateFunction", "cloudfront:TagResource"] : []
+    )
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"]
   }
 
