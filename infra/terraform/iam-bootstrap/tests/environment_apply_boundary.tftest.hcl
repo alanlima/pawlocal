@@ -50,8 +50,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 5973
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 5973-byte boundary shape."
+    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 5993
+    error_message = "The real-input-equivalent development fixture must retain the reviewed 5993-byte boundary shape."
   }
 
   assert {
@@ -137,6 +137,26 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "cloudfront:UpdateOriginAccessControl")
     ])
     error_message = "Stable boundaries must contain the post-create CloudFront ceilings before generated identifiers exist."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      alltrue([
+        for statement in jsondecode(policy.minified_json).Statement :
+        !contains(flatten([statement.Resource]), "*") || alltrue([
+          for action in flatten([statement.Action]) :
+          can(regex("^[^:]+:(Get|List|Describe)", action)) || contains([
+            "cognito-idp:CreateUserPool",
+            "cloudfront:CreateDistribution",
+            "cloudfront:CreateOriginAccessControl",
+            "lightsail:CreateCertificate",
+            "lightsail:CreateContainerService"
+          ], action)
+        ])
+      ])
+    ])
+    error_message = "A literal wildcard resource may contain only read/discovery actions or AWS create actions without resource-level authorization."
   }
 
   assert {
@@ -270,7 +290,7 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
       strcontains(policy.minified_json, "policy/pawlocal-${environment}-*") &&
       strcontains(policy.minified_json, "role/pawlocal-${environment}-*") &&
       strcontains(policy.minified_json, "dsql:PutClusterPolicy") &&
-      strcontains(policy.minified_json, "lightsail:CreateContainerServiceDeployment") &&
+      strcontains(policy.minified_json, "lightsail:*ContainerService*") &&
       !strcontains(policy.minified_json, "pawlocal-${environment == "development" ? "production" : "development"}-")
     ])
     error_message = "Stable policy administration, attachment ceilings, and mutations must remain fixed to matching environment name prefixes and tags."
@@ -335,6 +355,38 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
       strcontains(policy.minified_json, "dsql:TagResource")
     ])
     error_message = "Stable boundaries must retain tag-constrained DSQL creation without a generated cluster handoff."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "dsql:DeleteCluster") &&
+        contains(flatten([statement.Action]), "lightsail:*ContainerService*") &&
+        contains(flatten([statement.Resource]), "arn:aws:dsql:ap-southeast-2:111111111111:cluster/*") &&
+        contains(flatten([statement.Resource]), "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*") &&
+        contains(flatten([statement.Resource]), "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*") &&
+        !contains(flatten([statement.Resource]), "*") &&
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] != ""
+      ]) == 1
+    ])
+    error_message = "Post-create DSQL and Lightsail mutations must use stable service resource families plus matching authorization tags, never a literal wildcard resource."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "cognito-idp:CreateUserPool*") &&
+        contains(flatten([statement.Action]), "cognito-idp:DeleteUserPool*") &&
+        contains(flatten([statement.Action]), "cognito-idp:UpdateUserPool*") &&
+        toset(flatten([statement.Resource])) == toset(["arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"])
+      ]) == 1
+    ])
+    error_message = "Post-create Cognito mutations must use only the stable regional account user-pool family, never a literal wildcard resource."
   }
 }
 

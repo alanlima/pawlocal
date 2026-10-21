@@ -234,12 +234,13 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     actions = [
       "dsql:DeleteCluster", "dsql:UpdateCluster",
       "dsql:PutClusterPolicy",
-      "cognito-idp:CreateUserPoolClient", "cognito-idp:CreateUserPoolDomain", "cognito-idp:DeleteUserPool",
-      "cognito-idp:DeleteUserPoolClient", "cognito-idp:DeleteUserPoolDomain", "cognito-idp:UpdateUserPool",
-      "cognito-idp:UpdateUserPoolClient", "cognito-idp:UpdateUserPoolDomain",
-      "lightsail:CreateContainerServiceDeployment", "lightsail:DeleteCertificate", "lightsail:DeleteContainerService", "lightsail:UpdateContainerService"
+      "lightsail:*ContainerService*", "lightsail:DeleteCertificate"
     ]
-    resources = ["*"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*"
+    ]
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
@@ -250,6 +251,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       variable = "aws:ResourceTag/environment"
       values   = [each.key]
     }
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "cognito-idp:CreateUserPool*", "cognito-idp:DeleteUserPool*", "cognito-idp:UpdateUserPool*"
+    ]
+    resources = ["arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*"]
   }
 
   statement {
