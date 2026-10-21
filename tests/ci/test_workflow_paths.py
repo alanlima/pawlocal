@@ -63,6 +63,19 @@ class WorkflowPathTests(unittest.TestCase):
         self.assertIn("if: github.ref == 'refs/heads/main'", seed_job)
         self.assertIn("environment: development-seed", seed_job)
         self.assertIn(
+            "PAWLOCAL_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
+            seed_job,
+        )
+        self.assertIn(
+            "PAWLOCAL_EXPECTED_DSQL_ENDPOINT: ${{ secrets.PAWLOCAL_DSQL_ENDPOINT }}",
+            seed_job,
+        )
+        self.assertIn(
+            "secrets.PAWLOCAL_DSQL_ENDPOINT) }}",
+            seed_job,
+        )
+        self.assertNotIn("vars.PAWLOCAL_DSQL_ENDPOINT", workflow)
+        self.assertIn(
             '[[ "$GITHUB_REF" == "refs/heads/main" ]]',
             target_guard,
         )

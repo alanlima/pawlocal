@@ -4,16 +4,16 @@ The `Seed development Aurora DSQL` workflow is an on-demand operation for the fi
 
 ## GitHub Environment configuration
 
-Create `development-seed` in the repository's Environments settings. Set these as Environment **variables**, using the matching development object from Terraform's `environment_targets` output:
+Create `development-seed` in the repository's Environments settings. Set each value from the matching development object in Terraform's `environment_targets` output:
 
-| Variable | Terraform output |
-|---|---|
-| `PAWLOCAL_AWS_ACCOUNT_ID` | `development.aws_account_id` |
-| `PAWLOCAL_DSQL_SEED_ROLE_ARN` | `development.dsql_app_iam_principal_arn` |
-| `PAWLOCAL_DSQL_ENDPOINT` | `development.dsql_endpoint` |
-| `PAWLOCAL_API_HEALTH_URL` | `development.api_health_url` |
+| Setting | GitHub Environment type | Terraform output |
+|---|---|---|
+| `PAWLOCAL_AWS_ACCOUNT_ID` | Variable | `development.aws_account_id` |
+| `PAWLOCAL_DSQL_SEED_ROLE_ARN` | Variable | `development.dsql_app_iam_principal_arn` |
+| `PAWLOCAL_DSQL_ENDPOINT` | Secret | `development.dsql_endpoint` |
+| `PAWLOCAL_API_HEALTH_URL` | Variable | `development.api_health_url` |
 
-These values are configuration, not credentials. Do not add database passwords, access keys, or generated DSQL tokens. The GitHub Environment must exist and be protected before the seed workflow can receive the expected `environment:development-seed` OIDC subject.
+The endpoint is not an authentication credential, but it is stored as a GitHub Environment secret so Actions masks the endpoint and the derived database URL in public run logs. Do not also define `PAWLOCAL_DSQL_ENDPOINT` as an Environment variable; the secret is the single source of truth. The other settings remain Environment variables. Do not add database passwords, access keys, or generated DSQL tokens. The GitHub Environment must exist and be protected before the seed workflow can receive the expected `environment:development-seed` OIDC subject.
 
 The full-stack Terraform root adds that OIDC subject to the existing development DSQL runtime role while preserving the Lightsail service principal trust. The role remains limited to identity-based `dsql:DbConnect` on the development cluster; the cluster policy delegates `dsql:DbConnectAdmin` to account identities. The app-specific cluster-policy `dsql:DbConnect` statement is proposed for removal. The seed workflow uses the mapped `pawlocal_development_app` role, which has `USAGE` and `CREATE` on the `pawlocal` schema and owns the application tables the catalog updates. It has no DSQL admin connection and the workflow cannot target `public` or production. The successful seed run used the app-specific grant and does not prove connectivity after its removal; rerun the seed and verify the API after the Terraform policy change is applied.
 
