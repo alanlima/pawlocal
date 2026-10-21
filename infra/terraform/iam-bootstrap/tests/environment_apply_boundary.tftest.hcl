@@ -42,16 +42,11 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
 
   assert {
     condition = alltrue([
-      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6100-byte repository budget."
-  }
-
-  assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6100
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 6100-byte boundary shape."
+    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6143-byte repository budget."
   }
 
   assert {
@@ -74,9 +69,10 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
         contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*/*")
       ]) == 1 &&
       strcontains(data.aws_iam_policy_document.role_permissions["${environment}-apply"].minified_json, local.environment_policy_arns[environment].frontend_teardown) &&
-      length(local.environment_application_policy_arns[environment]) == 5 &&
+      length(local.environment_application_policy_arns[environment]) == 6 &&
       toset(local.environment_apply_attachment_policy_arns[environment]) == toset([
         local.environment_policy_arns[environment].application,
+        local.environment_policy_arns[environment].cognito_pre_signup,
         local.environment_policy_arns[environment].dsql_setup,
         local.environment_policy_arns[environment].frontend_teardown
       ])
@@ -152,7 +148,6 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "s3:GetBucket*") &&
       strcontains(policy.minified_json, "s3:Get*Configuration") &&
       !strcontains(policy.minified_json, "\"s3:Get*\"") &&
-      strcontains(policy.minified_json, "aws:TagKeys") &&
       strcontains(policy.minified_json, "dsql:TagResource") &&
       strcontains(policy.minified_json, "cloudfront:CreateDistribution") &&
       strcontains(policy.minified_json, "cloudfront:TagResource") &&
@@ -169,8 +164,7 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       for policy in data.aws_iam_policy_document.environment_apply_boundary :
       strcontains(policy.minified_json, "cloudfront:DeleteDistribution") &&
       strcontains(policy.minified_json, "cloudfront:UpdateDistribution") &&
-      strcontains(policy.minified_json, "cloudfront:DeleteOriginAccessControl") &&
-      strcontains(policy.minified_json, "cloudfront:UpdateOriginAccessControl")
+      strcontains(policy.minified_json, "cloudfront:*OriginAccessControl")
     ])
     error_message = "Stable boundaries must contain the post-create CloudFront ceilings before generated identifiers exist."
   }
@@ -246,40 +240,71 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
         for statement in jsondecode(policy.minified_json).Statement : statement
         if contains(flatten([statement.Action]), "dsql:CreateCluster") &&
         contains(flatten([statement.Action]), "dsql:TagResource") &&
-        toset(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"]) == toset(keys(local.environment_dsql_tags[environment])) &&
-        alltrue([
-          for key, value in local.environment_dsql_tags[environment] :
-          statement.Condition.StringEquals["aws:RequestTag/${key}"] == value
-        ])
+        statement.Condition.StringEquals["aws:RequestTag/project"] == "pawlocal" &&
+        statement.Condition.StringEquals["aws:RequestTag/environment"] == environment &&
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
       ]) == 1
     ])
-    error_message = "Each initial boundary must admit DSQL create/tag only with the actual eight-key environment tag set and exact values."
+    error_message = "Each DSQL create/tag boundary must retain matching project and environment authorization while the environment-owned policy enforces the complete tag payload."
   }
 
   assert {
     condition = alltrue([
       for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
-      one([
-        for statement in jsondecode(policy.minified_json).Statement :
-        statement.Condition.StringEquals["aws:RequestTag/Name"] == "pawlocal-${environment}" &&
-        statement.Condition.StringEquals["aws:RequestTag/purpose"] == "pawlocal-app-database"
-        if contains(flatten([statement.Action]), "dsql:CreateCluster")
-      ])
-    ])
-    error_message = "Missing or incorrect DSQL Name/purpose request tags must not satisfy an initial boundary allow statement."
-  }
-
-  assert {
-    condition = alltrue([
-      for policy in data.aws_iam_policy_document.environment_apply_boundary :
       !strcontains(policy.minified_json, "iam:CreateRole") &&
       !strcontains(policy.minified_json, "iam:DeleteRole") &&
       !strcontains(policy.minified_json, "iam:UpdateAssumeRolePolicy") &&
       !strcontains(policy.minified_json, "iam:PutRolePermissionsBoundary") &&
       !strcontains(policy.minified_json, "iam:DeleteRolePermissionsBoundary") &&
-      !strcontains(policy.minified_json, "iam:PassRole")
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "iam:PassRole") &&
+        toset(flatten([statement.Resource])) == toset(["arn:aws:iam::111111111111:role/pawlocal-${environment}-cognito-pre-signup"]) &&
+        statement.Condition.StringEquals["iam:PassedToService"] == "lambda.amazonaws.com"
+      ]) == 1
     ])
-    error_message = "The boundary must not authorize role lifecycle, trust, boundary, or PassRole mutation."
+    error_message = "The boundary must deny role lifecycle, trust, and boundary mutation while allowing PassRole only for the matching Lambda role and service."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment in keys(local.environments) :
+      aws_iam_role.cognito_pre_sign_up[environment].name == "pawlocal-${environment}-cognito-pre-signup" &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags.environment == environment &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags.purpose == "cognito-pre-signup" &&
+      toset(keys(jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_trust[environment].minified_json).Statement[0].Principal)) == toset(["Service"]) &&
+      jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_trust[environment].minified_json).Statement[0].Principal.Service == "lambda.amazonaws.com" &&
+      toset(flatten([jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_trust[environment].minified_json).Statement[0].Action])) == toset(["sts:AssumeRole"]) &&
+      toset(flatten([jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_logs[environment].minified_json).Statement[0].Action])) == toset(["logs:CreateLogStream", "logs:PutLogEvents"]) &&
+      toset(flatten([jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_logs[environment].minified_json).Statement[0].Resource])) == toset(["arn:aws:logs:ap-southeast-2:111111111111:log-group:/aws/lambda/pawlocal-${environment}-cognito-pre-signup:*"]) &&
+      !strcontains(data.aws_iam_policy_document.cognito_pre_sign_up_logs[environment].minified_json, "pawlocal-${environment == "development" ? "production" : "development"}-")
+    ])
+    error_message = "Each bootstrap-owned execution role must trust only Lambda and write only its matching environment log streams."
+  }
+
+  assert {
+    condition     = toset(keys(output.cognito_pre_sign_up_role_arns)) == toset(["development", "production"])
+    error_message = "The bootstrap handoff must expose exactly one Cognito pre sign-up execution-role ARN per environment."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      strcontains(policy.minified_json, "function:pawlocal-${environment}-cognito-pre-signup") &&
+      strcontains(policy.minified_json, "log-group:/aws/lambda/pawlocal-${environment}-cognito-pre-signup") &&
+      strcontains(policy.minified_json, "role/pawlocal-${environment}-cognito-pre-signup") &&
+      strcontains(policy.minified_json, "lambda:CreateFunction") &&
+      strcontains(policy.minified_json, "lambda:UpdateFunction*") &&
+      strcontains(policy.minified_json, "logs:PutRetentionPolicy") &&
+      strcontains(data.aws_iam_policy_document.role_permissions["${environment}-plan"].minified_json, "function:pawlocal-${environment}-cognito-pre-signup") &&
+      !strcontains(policy.minified_json, "pawlocal-${environment == "development" ? "production" : "development"}-cognito-pre-signup") &&
+      !strcontains(data.aws_iam_policy_document.role_permissions["${environment}-plan"].minified_json, "pawlocal-${environment == "development" ? "production" : "development"}-cognito-pre-signup") &&
+      !strcontains(data.aws_iam_policy_document.role_permissions["${environment}-plan"].minified_json, "lambda:CreateFunction") &&
+      !strcontains(data.aws_iam_policy_document.role_permissions["${environment}-plan"].minified_json, "logs:CreateLogGroup") &&
+      !strcontains(data.aws_iam_policy_document.role_permissions["${environment}-plan"].minified_json, "iam:PassRole")
+    ])
+    error_message = "Cognito pre sign-up deployment and refresh permissions must remain isolated to the matching deterministic resources."
   }
 
   assert {
@@ -338,7 +363,7 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
       strcontains(policy.minified_json, "cloudfront:CreateDistribution") &&
       strcontains(policy.minified_json, "cloudfront:CreateOriginAccessControl") &&
       strcontains(policy.minified_json, "cloudfront:UpdateDistribution") &&
-      strcontains(policy.minified_json, "cloudfront:UpdateOriginAccessControl")
+      strcontains(policy.minified_json, "cloudfront:*OriginAccessControl")
     ])
     error_message = "Stable boundaries must cover both create-time and post-create CloudFront operations."
   }
@@ -365,14 +390,14 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
       for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
-        if contains(flatten([statement.Action]), "cloudfront:DeleteOriginAccessControl") &&
-        contains(flatten([statement.Action]), "cloudfront:UpdateOriginAccessControl") &&
+        if contains(flatten([statement.Action]), "cloudfront:*OriginAccessControl") &&
         !contains(flatten([statement.Action]), "cloudfront:DeleteDistribution") &&
         !contains(flatten([statement.Action]), "cloudfront:UpdateDistribution") &&
-        toset(flatten([statement.Resource])) == toset(["arn:aws:cloudfront::111111111111:origin-access-control/*"])
+        contains(flatten([statement.Resource]), "arn:aws:cloudfront::111111111111:origin-access-control/*") &&
+        !contains(flatten([statement.Resource]), "*")
       ]) == 1
     ])
-    error_message = "OAC update/delete actions must stay in a separate account resource-family statement."
+    error_message = "The compact OAC ceiling must retain the account resource family without distribution actions."
   }
 
   assert {
@@ -419,10 +444,11 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
         if contains(flatten([statement.Action]), "cognito-idp:CreateUserPool*") &&
         contains(flatten([statement.Action]), "cognito-idp:DeleteUserPool*") &&
         contains(flatten([statement.Action]), "cognito-idp:UpdateUserPool*") &&
-        toset(flatten([statement.Resource])) == toset(["arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"])
+        contains(flatten([statement.Resource]), "arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*") &&
+        !contains(flatten([statement.Resource]), "*")
       ]) == 1
     ])
-    error_message = "Post-create Cognito mutations must use only the stable regional account user-pool family, never a literal wildcard resource."
+    error_message = "Post-create Cognito mutations must retain the stable regional account user-pool family and never use a literal wildcard resource."
   }
 }
 

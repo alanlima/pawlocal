@@ -31,6 +31,9 @@ locals {
     purpose = "pawlocal-app-database"
   })
   dsql_setup_revision          = "dsql-setup-v1-dsql_0001_initial"
+  cognito_pre_sign_up_name     = "pawlocal-${var.environment}-cognito-pre-signup"
+  cognito_pre_sign_up_arn      = "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${local.cognito_pre_sign_up_name}"
+  cognito_pre_sign_up_log_arn  = "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.cognito_pre_sign_up_name}"
   deployment_enabled           = var.backend_image != "" && var.runtime_role_arn != ""
   iam_managed_policy_max_bytes = 6144
 }
@@ -62,12 +65,35 @@ resource "aws_iam_role_policy_attachment" "application" {
   policy_arn = aws_iam_policy.application.arn
 }
 
+resource "aws_iam_policy" "cognito_pre_sign_up_deployment" {
+  name        = "pawlocal-${var.environment}-cognito-pre-signup-deployment"
+  description = "Environment-owned deployment permissions for the PawLocal ${var.environment} Cognito pre sign-up Lambda."
+  policy      = data.aws_iam_policy_document.cognito_pre_sign_up_deployment.json
+  tags        = local.common_tags
+
+  lifecycle {
+    precondition {
+      condition     = length(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json) <= local.iam_managed_policy_max_bytes
+      error_message = "The Cognito pre sign-up deployment policy is ${length(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json)} bytes; it must stay within IAM's 6144-byte managed-policy limit."
+    }
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "cognito_pre_sign_up_deployment" {
+  role       = var.terraform_apply_role_name
+  policy_arn = aws_iam_policy.cognito_pre_sign_up_deployment.arn
+}
+
 resource "time_sleep" "application_permissions_propagation" {
   create_duration = "30s"
   triggers = {
-    application_policy_sha256 = sha256(data.aws_iam_policy_document.application.json)
+    application_policy_sha256         = sha256(data.aws_iam_policy_document.application.json)
+    cognito_pre_sign_up_policy_sha256 = sha256(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.json)
   }
-  depends_on = [aws_iam_role_policy_attachment.application]
+  depends_on = [
+    aws_iam_role_policy_attachment.application,
+    aws_iam_role_policy_attachment.cognito_pre_sign_up_deployment,
+  ]
 }
 
 resource "aws_iam_policy" "frontend_publish" {

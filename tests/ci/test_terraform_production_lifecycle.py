@@ -91,7 +91,7 @@ class TerraformProductionLifecycleTests(unittest.TestCase):
             'resource "aws_s3_bucket_ownership_controls"', 1
         )[0]
         self.assertIn("aws_iam_role_policy_attachment.frontend_teardown", bucket_block)
-        self.assertIn("teardown_enabled            = var.teardown_enabled", production)
+        self.assertRegex(production, r"teardown_enabled\s+= var\.teardown_enabled")
         self.assertNotIn("teardown_enabled", development)
         attach_block = bootstrap.split("AttachOnlyMatchingApplicationPolicyToApplyRole", 1)[1].split(
             "AttachOnlyMatchingPublishPolicyToPublishRole", 1

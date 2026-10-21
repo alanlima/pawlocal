@@ -290,6 +290,23 @@ data "aws_iam_policy_document" "role_permissions" {
   }
 
   statement {
+    sid     = "ReadExactCognitoPreSignUpResourcesForRefresh"
+    effect  = "Allow"
+    actions = ["lambda:GetFunction", "lambda:GetFunctionCodeSigningConfig", "lambda:GetPolicy", "lambda:GetRuntimeManagementConfig", "lambda:ListTags", "lambda:ListVersionsByFunction", "logs:ListTagsForResource"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:pawlocal-${each.value.environment}-cognito-pre-signup",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pawlocal-${each.value.environment}-cognito-pre-signup"
+    ]
+  }
+
+  statement {
+    sid       = "DescribeLogGroupsForRefresh"
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
+  statement {
     sid       = "ReadExactGitHubOIDCProvider"
     effect    = "Allow"
     actions   = ["iam:GetOpenIDConnectProvider"]

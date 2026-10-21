@@ -105,11 +105,16 @@ class GreenfieldTerraformTests(unittest.TestCase):
             "\n}", 1
         )[0]
         self.assertIn('create_duration = "30s"', barrier)
-        self.assertIn(
-            "application_policy_sha256 = sha256(data.aws_iam_policy_document.application.json)",
+        self.assertRegex(
             barrier,
+            r"application_policy_sha256\s+= sha256\(data\.aws_iam_policy_document\.application\.json\)",
         )
-        self.assertIn("depends_on = [aws_iam_role_policy_attachment.application]", barrier)
+        self.assertRegex(
+            barrier,
+            r"cognito_pre_sign_up_policy_sha256\s+= sha256\(data\.aws_iam_policy_document\.cognito_pre_sign_up_deployment\.json\)",
+        )
+        self.assertIn("aws_iam_role_policy_attachment.application", barrier)
+        self.assertIn("aws_iam_role_policy_attachment.cognito_pre_sign_up_deployment", barrier)
 
         creation_roots = (
             ("aws_s3_bucket", "frontend"),
@@ -292,7 +297,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
             boundary,
         )
         self.assertIn(
-            'actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]',
+            '"cloudfront:*OriginAccessControl"',
             boundary,
         )
         self.assertIn("tags                = local.common_tags", distribution)
@@ -349,8 +354,9 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn('tags                        = local.dsql_tags', module_main)
         self.assertIn('sid       = "CreateAndTagOnlyNewEnvironmentDSQLCluster"', module_permissions)
         self.assertIn('for_each = local.dsql_tags', module_permissions)
-        self.assertIn('environment_dsql_tags = {', boundary)
-        self.assertIn('for_each = local.environment_dsql_tags[each.key]', boundary)
+        self.assertNotIn('environment_dsql_tags = {', boundary)
+        self.assertIn('variable = "aws:ResourceTag/project"', boundary)
+        self.assertIn('variable = "aws:ResourceTag/environment"', boundary)
         self.assertIn(".minified_json", module_test)
         self.assertIn('"aws:RequestTag/Name"', module_test)
         self.assertIn('"aws:RequestTag/purpose"', module_test)
@@ -370,16 +376,17 @@ class GreenfieldTerraformTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
 
-        self.assertIn("environment_apply_boundary_max_bytes = 6100", boundary)
+        self.assertIn("environment_apply_boundary_max_bytes = 6143", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
-        self.assertIn('environment_apply_boundary["development"].minified_json) == 6100', test_file)
+        self.assertIn("length(policy.minified_json) <= local.environment_apply_boundary_max_bytes", test_file)
         self.assertIn('!contains(flatten([statement.Resource]), "*")', test_file)
         self.assertIn("Post-create DSQL and Lightsail mutations", test_file)
         self.assertIn("Post-create Cognito mutations", test_file)
-        self.assertIn('keys(local.environment_dsql_tags[environment])', test_file)
-        self.assertIn('"aws:RequestTag/Name"', test_file)
-        self.assertIn('"aws:RequestTag/purpose"', test_file)
+        self.assertIn('statement.Condition.StringEquals["aws:RequestTag/project"]', test_file)
+        self.assertIn('statement.Condition.StringEquals["aws:RequestTag/environment"]', test_file)
+        self.assertIn('statement.Condition.StringEquals["iam:PassedToService"]', test_file)
+        self.assertIn('role/pawlocal-${environment}-cognito-pre-signup', test_file)
         self.assertIn("iam:UpdateAssumeRolePolicy", test_file)
         self.assertIn("lightsail:UntagResource", test_file)
         self.assertIn("cloudfront:UntagResource", test_file)

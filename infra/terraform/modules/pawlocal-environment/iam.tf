@@ -262,6 +262,49 @@ data "aws_iam_policy_document" "application" {
   }
 }
 
+data "aws_iam_policy_document" "cognito_pre_sign_up_deployment" {
+  statement {
+    sid    = "ManageOnlyMatchingCognitoPreSignUpFunction"
+    effect = "Allow"
+    actions = [
+      "lambda:AddPermission", "lambda:CreateFunction", "lambda:DeleteFunction", "lambda:GetFunction",
+      "lambda:GetFunctionCodeSigningConfig", "lambda:GetPolicy", "lambda:GetRuntimeManagementConfig",
+      "lambda:ListTags", "lambda:ListVersionsByFunction", "lambda:RemovePermission", "lambda:TagResource",
+      "lambda:UntagResource", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration"
+    ]
+    resources = [local.cognito_pre_sign_up_arn]
+  }
+
+  statement {
+    sid    = "ManageOnlyMatchingCognitoPreSignUpLogGroup"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:ListTagsForResource",
+      "logs:PutRetentionPolicy", "logs:TagResource", "logs:UntagResource"
+    ]
+    resources = [local.cognito_pre_sign_up_log_arn, "${local.cognito_pre_sign_up_log_arn}:*"]
+  }
+
+  statement {
+    sid       = "DescribeLogGroupsForRefresh"
+    effect    = "Allow"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "PassOnlyMatchingCognitoPreSignUpRole"
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = [var.cognito_pre_sign_up_role_arn]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
 data "aws_iam_policy_document" "frontend_publish" {
   statement {
     sid       = "ListOnlyEnvironmentFrontendBucket"

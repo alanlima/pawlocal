@@ -32,19 +32,87 @@ run "tagged_create_permissions_are_size_safe" {
   }
 
   variables {
-    environment                = "development"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
-    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
-    frontend_publish_role_name = "pawlocal-development-github-deploy"
-    container_power            = "micro"
+    environment                  = "development"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name    = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name   = "pawlocal-development-github-deploy"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup"
+    container_power              = "micro"
   }
 
   assert {
     condition     = length(data.aws_iam_policy_document.application.minified_json) <= local.iam_managed_policy_max_bytes
     error_message = "The rendered environment application policy must stay within IAM's 6144-byte managed-policy limit."
+  }
+
+  assert {
+    condition     = length(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json) <= local.iam_managed_policy_max_bytes
+    error_message = "The dedicated Cognito pre sign-up deployment policy must stay within IAM's 6144-byte managed-policy limit."
+  }
+
+  assert {
+    condition = (
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        flatten([statement.Action])
+        if statement.Sid == "ManageOnlyMatchingCognitoPreSignUpFunction"
+        ])) == toset([
+        "lambda:AddPermission", "lambda:CreateFunction", "lambda:DeleteFunction", "lambda:GetFunction",
+        "lambda:GetFunctionCodeSigningConfig", "lambda:GetPolicy", "lambda:GetRuntimeManagementConfig",
+        "lambda:ListTags", "lambda:ListVersionsByFunction", "lambda:RemovePermission", "lambda:TagResource",
+        "lambda:UntagResource", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration"
+      ]) &&
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        flatten([statement.Resource])
+        if statement.Sid == "ManageOnlyMatchingCognitoPreSignUpFunction"
+      ])) == toset(["arn:aws:lambda:ap-southeast-2:111111111111:function:pawlocal-development-cognito-pre-signup"])
+    )
+    error_message = "The environment identity policy must grant only the reviewed Lambda lifecycle on the exact matching function."
+  }
+
+  assert {
+    condition = (
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        flatten([statement.Action])
+        if statement.Sid == "ManageOnlyMatchingCognitoPreSignUpLogGroup"
+        ])) == toset([
+        "logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:ListTagsForResource",
+        "logs:PutRetentionPolicy", "logs:TagResource", "logs:UntagResource"
+      ]) &&
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        flatten([statement.Resource])
+        if statement.Sid == "ManageOnlyMatchingCognitoPreSignUpLogGroup"
+        ])) == toset([
+        "arn:aws:logs:ap-southeast-2:111111111111:log-group:/aws/lambda/pawlocal-development-cognito-pre-signup",
+        "arn:aws:logs:ap-southeast-2:111111111111:log-group:/aws/lambda/pawlocal-development-cognito-pre-signup:*"
+      ])
+    )
+    error_message = "The environment identity policy must grant only the reviewed log-group lifecycle on the exact matching group."
+  }
+
+  assert {
+    condition = (
+      one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        statement.Resource
+        if statement.Sid == "PassOnlyMatchingCognitoPreSignUpRole"
+      ]) == "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup" &&
+      one([
+        for statement in jsondecode(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json).Statement :
+        statement.Condition.StringEquals["iam:PassedToService"]
+        if statement.Sid == "PassOnlyMatchingCognitoPreSignUpRole"
+      ]) == "lambda.amazonaws.com" &&
+      !strcontains(data.aws_iam_policy_document.cognito_pre_sign_up_deployment.minified_json, "pawlocal-production-cognito-pre-signup") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "lambda:") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "iam:PassRole")
+    )
+    error_message = "PassRole must target only the matching bootstrap role and Lambda service, isolated from the general application policy."
   }
 
   assert {
@@ -175,6 +243,28 @@ run "tagged_create_permissions_are_size_safe" {
   }
 }
 
+run "cross_environment_cognito_role_is_rejected" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    environment                  = "development"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name    = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name   = "pawlocal-development-github-deploy"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-production-cognito-pre-signup"
+    container_power              = "micro"
+  }
+
+  expect_failures = [var.cognito_pre_sign_up_role_arn]
+}
+
 run "runtime_identity_activates_protected_setup_and_deployment" {
   command = plan
 
@@ -183,16 +273,17 @@ run "runtime_identity_activates_protected_setup_and_deployment" {
   }
 
   variables {
-    environment                = "development"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
-    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
-    frontend_publish_role_name = "pawlocal-development-github-deploy"
-    runtime_role_arn           = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
-    backend_image              = "ghcr.io/alanlima/pawlocal-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    container_power            = "micro"
+    environment                  = "development"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name    = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name   = "pawlocal-development-github-deploy"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup"
+    runtime_role_arn             = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
+    backend_image                = "ghcr.io/alanlima/pawlocal-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    container_power              = "micro"
   }
 
   override_resource {
@@ -232,14 +323,15 @@ run "production_resource_names_use_normalized_suffixes" {
   }
 
   variables {
-    environment                = "production"
-    aws_region                 = "ap-southeast-2"
-    root_domain                = "example.test"
-    route53_zone_id            = "ZTEST"
-    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
-    terraform_apply_role_name  = "pawlocal-production-terraform-apply"
-    frontend_publish_role_name = "pawlocal-production-github-deploy"
-    container_power            = "medium"
+    environment                  = "production"
+    aws_region                   = "ap-southeast-2"
+    root_domain                  = "example.test"
+    route53_zone_id              = "ZTEST"
+    cloudfront_certificate_arn   = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name    = "pawlocal-production-terraform-apply"
+    frontend_publish_role_name   = "pawlocal-production-github-deploy"
+    cognito_pre_sign_up_role_arn = "arn:aws:iam::111111111111:role/pawlocal-production-cognito-pre-signup"
+    container_power              = "medium"
   }
 
   assert {

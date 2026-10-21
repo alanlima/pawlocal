@@ -60,6 +60,15 @@ variable "runtime_role_arn" {
   }
 }
 
+variable "cognito_pre_sign_up_role_arn" {
+  description = "Exact bootstrap-owned execution role for the matching Cognito pre sign-up Lambda."
+  type        = string
+  validation {
+    condition     = can(regex("^arn:[^:]+:iam::[0-9]{12}:role/pawlocal-${var.environment}-cognito-pre-signup$", var.cognito_pre_sign_up_role_arn))
+    error_message = "cognito_pre_sign_up_role_arn must be the matching bootstrap-owned Cognito pre sign-up role ARN."
+  }
+}
+
 variable "backend_image" {
   description = "Immutable public GHCR backend image. Empty creates no container deployment or API DNS record."
   type        = string

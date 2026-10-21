@@ -1,23 +1,12 @@
 locals {
-  environment_dsql_tags = {
-    for environment in keys(local.environments) : environment => {
-      project     = "pawlocal"
-      environment = environment
-      managedby   = "terraform"
-      component   = "fullstack-mvp"
-      workload    = "application"
-      costcenter  = "personal"
-      Name        = "pawlocal-${environment}"
-      purpose     = "pawlocal-app-database"
-    }
-  }
   environment_policy_arns = {
     for environment in keys(local.environments) : environment => {
-      application       = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application"
-      frontend_publish  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish"
-      runtime           = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
-      dsql_setup        = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
-      frontend_teardown = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-teardown"
+      application        = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application"
+      frontend_publish   = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish"
+      runtime            = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
+      dsql_setup         = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
+      cognito_pre_signup = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-cognito-pre-signup-deployment"
+      frontend_teardown  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-teardown"
     }
   }
   environment_application_policy_arns = {
@@ -26,12 +15,14 @@ locals {
       policies.frontend_publish,
       policies.runtime,
       policies.dsql_setup,
+      policies.cognito_pre_signup,
       policies.frontend_teardown
     ]
   }
   environment_apply_attachment_policy_arns = {
     for environment, policies in local.environment_policy_arns : environment => [
       policies.application,
+      policies.cognito_pre_signup,
       policies.dsql_setup,
       policies.frontend_teardown
     ]
@@ -45,10 +36,11 @@ locals {
     "dsql:Get*", "dsql:List*",
     "iam:Get*", "iam:List*",
     "lightsail:Get*",
+    "logs:Describe*",
     "route53:Get*", "route53:List*",
     "sts:GetCallerIdentity"
   ]
-  environment_apply_boundary_max_bytes = 6100
+  environment_apply_boundary_max_bytes = 6143
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
@@ -127,31 +119,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       test     = "StringEquals"
       variable = "aws:RequestTag/environment"
       values   = [each.key]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/managedby"
-      values   = ["terraform"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/component"
-      values   = ["fullstack-mvp"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/workload"
-      values   = ["application"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/costcenter"
-      values   = ["personal"]
-    }
-    condition {
-      test     = "ForAllValues:StringLike"
-      variable = "aws:TagKeys"
-      values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
     }
   }
 
@@ -235,18 +202,15 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       variable = "aws:ResourceTag/environment"
       values   = [each.key]
     }
-    dynamic "condition" {
-      for_each = local.environment_dsql_tags[each.key]
-      content {
-        test     = "StringEquals"
-        variable = "aws:RequestTag/${condition.key}"
-        values   = [condition.value]
-      }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/project"
+      values   = ["pawlocal"]
     }
     condition {
-      test     = "ForAllValues:StringEquals"
-      variable = "aws:TagKeys"
-      values   = keys(local.environment_dsql_tags[each.key])
+      test     = "StringEquals"
+      variable = "aws:RequestTag/environment"
+      values   = [each.key]
     }
   }
 
@@ -274,12 +238,35 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     }
   }
 
+  # These actions use disjoint service-specific resource types. Keeping them in
+  # one statement reduces policy bytes without widening any compatible ARN.
   statement {
     effect = "Allow"
     actions = [
-      "cognito-idp:CreateUserPool*", "cognito-idp:DeleteUserPool*", "cognito-idp:UpdateUserPool*"
+      "cloudfront:*OriginAccessControl",
+      "cognito-idp:CreateUserPool*", "cognito-idp:DeleteUserPool*", "cognito-idp:UpdateUserPool*",
+      "lambda:*Permission", "lambda:CreateFunction", "lambda:DeleteFunction", "lambda:Get*", "lambda:List*",
+      "lambda:TagResource", "lambda:UntagResource", "lambda:UpdateFunction*",
+      "logs:*LogGroup", "logs:*Resource", "logs:ListTagsForResource", "logs:PutRetentionPolicy"
     ]
-    resources = ["arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*"]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:origin-access-control/*",
+      "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
+      "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:pawlocal-${each.key}-cognito-pre-signup",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pawlocal-${each.key}-cognito-pre-signup",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pawlocal-${each.key}-cognito-pre-signup:*"
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${each.key}-cognito-pre-signup"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["lambda.amazonaws.com"]
+    }
   }
 
   statement {
@@ -354,12 +341,6 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]
-    resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:origin-access-control/*"]
-  }
-
-  statement {
-    effect    = "Allow"
     actions   = ["route53:ChangeResourceRecordSets"]
     resources = ["arn:${data.aws_partition.current.partition}:route53:::hostedzone/${var.route53_zone_id}"]
     condition {
@@ -391,7 +372,7 @@ resource "aws_iam_policy" "environment_apply_boundary" {
   lifecycle {
     precondition {
       condition     = length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json) <= local.environment_apply_boundary_max_bytes
-      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6100-byte repository budget (AWS maximum: 6144 bytes)."
+      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6143-byte repository budget (AWS maximum: 6144 bytes)."
     }
   }
 }
