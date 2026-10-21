@@ -46,18 +46,28 @@ def action_label(actions: list[str]) -> str:
     return "+".join(actions)
 
 
-def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str, str]]:
+def plan_rows(plan: dict) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
+    for change in plan.get("resource_changes", []):
+        if change.get("mode") == "data":
+            continue
+        actions = change.get("change", {}).get("actions", [])
+        if actions == ["no-op"]:
+            continue
+        rows.append((change.get("type", ""), action_label(actions)))
+    return rows
+
+
+def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str, str]]:
+    rows = plan_rows(plan)
     errors: list[str] = []
     for change in plan.get("resource_changes", []):
         if change.get("mode") == "data":
             continue
         resource_type = change.get("type", "")
         actions = change.get("change", {}).get("actions", [])
-        label = action_label(actions)
         if actions == ["no-op"]:
             continue
-        rows.append((resource_type, label))
         if resource_type in FORBIDDEN_TYPES or resource_type not in ALLOWED_TYPES:
             errors.append(f"resource type is outside the environment ownership boundary: {resource_type}")
         expected_deployment_replacement = (
@@ -80,7 +90,9 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
     return rows
 
 
-def render(rows: list[tuple[str, str]], environment: str) -> str:
+def render(
+    rows: list[tuple[str, str]], environment: str, enforcement_skipped: bool = False
+) -> str:
     counts = Counter(rows)
     lines = [
         f"### Sanitized Terraform plan: {environment}",
@@ -95,6 +107,13 @@ def render(rows: list[tuple[str, str]], environment: str) -> str:
     else:
         for (resource_type, action), count in sorted(counts.items()):
             lines.append(f"| `{resource_type}` | `{action}` | {count} |")
+    if enforcement_skipped:
+        lines.extend(
+            [
+                "",
+                "> Temporary MVP mode: plan ownership enforcement was skipped. Review the exact plan at the protected apply gate.",
+            ]
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -103,9 +122,15 @@ def main() -> None:
     parser.add_argument("plan_json", type=Path)
     parser.add_argument("--environment", choices=("development", "production"), required=True)
     parser.add_argument("--release-only", action="store_true")
+    parser.add_argument("--skip-enforcement", action="store_true")
     args = parser.parse_args()
     plan = json.loads(args.plan_json.read_text(encoding="utf-8"))
-    print(render(validate(plan, args.environment, args.release_only), args.environment), end="")
+    rows = (
+        plan_rows(plan)
+        if args.skip_enforcement
+        else validate(plan, args.environment, args.release_only)
+    )
+    print(render(rows, args.environment, args.skip_enforcement), end="")
 
 
 if __name__ == "__main__":
