@@ -7,7 +7,6 @@ import argparse
 import os
 import pathlib
 import re
-import sys
 
 
 PHASE_MESSAGES = {
@@ -15,41 +14,98 @@ PHASE_MESSAGES = {
     "plan": "Terraform planning failed; raw provider output was withheld.",
 }
 
+ALLOWED_AWS_OPERATIONS = {
+    "CloudFront": {
+        "CreateDistributionWithTags",
+        "CreateFunction",
+        "CreateOriginAccessControl",
+        "DescribeFunction",
+        "GetDistribution",
+        "GetOriginAccessControl",
+        "PublishFunction",
+        "UpdateDistribution",
+        "UpdateOriginAccessControl",
+    },
+    "Cognito Identity Provider": {
+        "CreateUserPool",
+        "CreateUserPoolClient",
+        "CreateUserPoolDomain",
+        "DescribeUserPool",
+        "DescribeUserPoolClient",
+        "DescribeUserPoolDomain",
+    },
+    "DSQL": {"CreateCluster", "GetCluster"},
+    "IAM": {
+        "AttachRolePolicy",
+        "CreatePolicy",
+        "GetPolicy",
+        "GetPolicyVersion",
+        "ListAttachedRolePolicies",
+    },
+    "Lightsail": {
+        "CreateCertificate",
+        "CreateContainerService",
+        "GetCertificates",
+        "GetContainerServices",
+    },
+    "Route 53": {"ChangeResourceRecordSets", "GetChange"},
+    "S3": {
+        "CreateBucket",
+        "DeleteBucket",
+        "GetBucketEncryption",
+        "GetBucketOwnershipControls",
+        "GetBucketPolicy",
+        "GetBucketTagging",
+        "GetPublicAccessBlock",
+        "HeadBucket",
+        "PutBucketEncryption",
+        "PutBucketOwnershipControls",
+        "PutBucketPolicy",
+        "PutBucketTagging",
+        "PutPublicAccessBlock",
+    },
+    "STS": {"GetCallerIdentity"},
+}
 
-def sanitize(value: str) -> str:
-    """Remove likely secret, infrastructure, and account-specific values."""
-    value = re.sub(
-        r"(?i)(access[_ -]?key(?:_id)?|secret(?:[_ -]?access)?[_ -]?key|session[_ -]?token|password|client[_ -]?secret|private[_ -]?key)\s*[:=]\s*\S+",
-        r"\1=[REDACTED]",
-        value,
-    )
-    value = re.sub(r"arn:[^\s,;]+", "[REDACTED_ARN]", value)
-    value = re.sub(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b", "[REDACTED_AWS_KEY]", value)
-    value = re.sub(r"\b\d{12}\b", "[REDACTED_ACCOUNT]", value)
-    value = re.sub(r"(?i)https?://[^\s,;]+", "[REDACTED_URL]", value)
-    value = re.sub(
-        r"(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
-        "[REDACTED_HOSTNAME]",
-        value,
-    )
-    value = re.sub(r"\bsha256:[0-9a-fA-F]{64}\b|\b[0-9a-fA-F]{64}\b", "[REDACTED_DIGEST]", value)
-    value = re.sub(
-        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b",
-        "[REDACTED_IDENTIFIER]",
-        value,
-    )
-    value = re.sub(r"\bE[A-Z0-9]{10,}\b", "[REDACTED_RESOURCE_ID]", value)
-    value = re.sub(r"(?i)\bplans/[A-Za-z0-9._/-]+", "[REDACTED_PLAN_METADATA]", value)
-    value = re.sub(r'"[^"\r\n]*"|\'[^\'\r\n]*\'', "[REDACTED_VALUE]", value)
-    value = re.sub(
-        r"(?i)\b(bucket|distribution|origin access control|oac|certificate|resource(?:\s*id)?|request\s*id|host\s*id)\s*[:=]\s*[^\s,;]+",
-        r"\1=[REDACTED_RESOURCE]",
-        value,
-    )
-    value = re.sub(r"\(([A-Za-z0-9][A-Za-z0-9._:/-]{2,})\)", "([REDACTED_RESOURCE])", value)
-    value = re.sub(r"\b[A-Za-z0-9+/]{40,}={0,2}\b", "[REDACTED_TOKEN]", value)
-    value = re.sub(r"\s+", " ", value).strip()
-    return value[:400]
+ALLOWED_AWS_ERROR_CODES = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "AuthorizationError",
+    "BucketAlreadyExists",
+    "BucketAlreadyOwnedByYou",
+    "ConflictException",
+    "EntityAlreadyExists",
+    "ExpiredToken",
+    "InternalError",
+    "InvalidClientTokenId",
+    "InvalidParameter",
+    "InvalidParameterException",
+    "LimitExceeded",
+    "MalformedPolicyDocument",
+    "NoSuchBucket",
+    "NoSuchEntity",
+    "NotFoundException",
+    "OperationAborted",
+    "RequestTimeout",
+    "ResourceAlreadyExistsException",
+    "ServiceUnavailable",
+    "Throttling",
+    "ThrottlingException",
+    "TooManyRequestsException",
+    "UnauthorizedOperation",
+    "ValidationException",
+}
+
+ALLOWED_TERRAFORM_FILES = {
+    "environment_permissions.tf",
+    "iam.tf",
+    "identity_permissions.tf",
+    "identity_roles.tf",
+    "main.tf",
+    "outputs.tf",
+    "variables.tf",
+    "versions.tf",
+}
 
 
 def generic_explanation(text: str) -> str | None:
@@ -69,37 +125,41 @@ def generic_explanation(text: str) -> str | None:
 
 
 def print_sanitized_diagnostics(text: str) -> None:
-    diagnostics = re.findall(r"(?m)^Error:\s*(.*)$", text)
-    if not diagnostics:
-        print("No standard Terraform error heading was found; provider details were withheld.")
-    for index, summary in enumerate(diagnostics[:3], start=1):
-        print(f"Diagnostic {index}: {sanitize(summary)}")
+    fields_printed = 0
 
-    operation = re.search(r"operation error\s+([A-Za-z0-9]+):\s*([A-Za-z0-9]+)", text, re.IGNORECASE)
+    operation = re.search(r"operation error\s+([^:\r\n]{1,40}):\s*([A-Za-z0-9]{1,64})", text)
     if operation:
-        print(f"AWS operation: {operation.group(1)} {operation.group(2)}")
+        service = operation.group(1).strip()
+        action = operation.group(2)
+        if action in ALLOWED_AWS_OPERATIONS.get(service, set()):
+            print(f"AWS operation: {service} {action}")
+            fields_printed += 1
 
-    error_code = re.search(r"api error\s+([A-Za-z][A-Za-z0-9._-]*)", text, re.IGNORECASE)
-    if error_code:
+    error_code = re.search(r"api error\s+([A-Za-z][A-Za-z0-9._-]{0,63})", text)
+    if error_code and error_code.group(1) in ALLOWED_AWS_ERROR_CODES:
         print(f"AWS error code: {error_code.group(1)}")
+        fields_printed += 1
 
     status_code = re.search(r"StatusCode:\s*(\d{3})", text)
-    if status_code:
-        print(f"HTTP status: {status_code.group(1)}")
+    if status_code and 400 <= int(status_code.group(1)) <= 599:
+        print(f"HTTP status: {int(status_code.group(1))}")
+        fields_printed += 1
 
     explanation = generic_explanation(text)
     if explanation:
         print(f"Explanation: {explanation}")
-
-    variable_names = re.findall(
-        r'The root module input variable "([A-Za-z_][A-Za-z0-9_]*)" is not set', text
-    )
-    for name in sorted(set(variable_names)):
-        print(f"Missing Terraform input variable: {name}")
+        fields_printed += 1
 
     location = re.search(r"(?m)^\s+on\s+([^\s]+)\s+line\s+(\d+),", text)
     if location:
-        print(f"Configuration file: {pathlib.PurePosixPath(location.group(1)).name}:{location.group(2)}")
+        filename = pathlib.PurePosixPath(location.group(1)).name
+        line_number = int(location.group(2))
+        if filename in ALLOWED_TERRAFORM_FILES and 1 <= line_number <= 99999:
+            print(f"Configuration file: {filename}:{line_number}")
+            fields_printed += 1
+
+    if fields_printed == 0:
+        print("No allowlisted diagnostic fields were found; provider details were withheld.")
 
 
 def main() -> int:

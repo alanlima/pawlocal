@@ -23,6 +23,7 @@ Error: creating S3 Bucket (private-project-development-abc123): operation error 
   with module.pawlocal.aws_s3_bucket.frontend,
   on ../../modules/pawlocal-environment/main.tf line 10, in resource "aws_s3_bucket" "frontend":
 certificate=12345678-1234-4123-8123-123456789abc domain=private.example.invalid plan=plans/development/123/1 sha256:{digest} password=do-not-print
+token=short-token api_key=short-api-key Authorization=Bearer-short unknown_field=unrecognized-value
 """
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "terraform.log"
@@ -54,6 +55,7 @@ certificate=12345678-1234-4123-8123-123456789abc domain=private.example.invalid 
         self.assertIn("HTTP status: 403", output)
         self.assertIn("The provider request was not authorized.", output)
         self.assertIn("Configuration file: main.tf:10", output)
+        self.assertNotIn("Diagnostic 1:", output)
         for sensitive in (
             "1" * 12,
             "private-project-development-abc123",
@@ -65,9 +67,37 @@ certificate=12345678-1234-4123-8123-123456789abc domain=private.example.invalid 
             "do-not-print",
             "request-private",
             "c2VjcmV0" * 8,
+            "short-token",
+            "short-api-key",
+            "Bearer-short",
+            "unrecognized-value",
         ):
             with self.subTest(sensitive=sensitive):
                 self.assertNotIn(sensitive, output)
+
+    def test_enabled_diagnostics_withhold_unrecognized_fields(self) -> None:
+        diagnostic = """\
+Error: token=raw-short api_key=other-short Authorization=Bearer-private arbitrary=unrecognized
+operation error SecretService: RevealValue, StatusCode: 299, api error SecretCode
+  on token.tf line 7, in resource "unknown" "private":
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "terraform.log"
+            log.write_text(diagnostic, encoding="utf-8")
+            env = os.environ.copy()
+            env["PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS"] = "true"
+            result = subprocess.run(
+                [sys.executable, str(DIAGNOSTIC), "--phase", "plan", str(log)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        self.assertEqual(
+            result.stdout,
+            "Terraform planning failed; raw provider output was withheld.\n"
+            "No allowlisted diagnostic fields were found; provider details were withheld.\n",
+        )
 
     def test_workflow_gates_both_plan_and_apply_diagnostics(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

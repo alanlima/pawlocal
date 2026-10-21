@@ -319,6 +319,20 @@ class GreenfieldTerraformTests(unittest.TestCase):
         )
         self.assertEqual(rows, [])
 
+    def test_plan_guard_accepts_the_initial_permissions_propagation_barrier(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_time_sleep")
+        plan = {
+            "resource_changes": [{
+                "address": "module.pawlocal.time_sleep.application_permissions_propagation",
+                "type": "time_sleep",
+                "change": {"actions": ["create"]},
+            }],
+            "variables": {"environment": {"value": "development"}},
+        }
+        self.assertEqual(module.validate(plan, "development", False), [("time_sleep", "create")])
+        rendered = module.render(module.validate(plan, "development", False), "development")
+        self.assertIn("`time_sleep`", rendered)
+
     def test_plan_guard_accepts_only_the_expected_immutable_deployment_replacement(self) -> None:
         module = load_module(PLAN_GUARD, "terraform_environment_plan_replacement")
         plan = {
