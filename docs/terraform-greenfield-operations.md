@@ -1,5 +1,7 @@
 # Issue #135 Terraform operations
 
+For the purpose, triggers, inputs, and relationships of every workflow, start with the [GitHub Actions workflow reference](github-actions.md). This guide provides the deeper Terraform state, permission, and operator procedures behind those workflows.
+
 ## Status and safety boundary
 
 The configuration, workflows, and validation described here do not prove that bootstrap or application infrastructure was applied. The latest read-only inventory found an empty former application state, no PawLocal application resources, a populated bootstrap state that remains authoritative, and one verified development publisher role eligible for adoption. An unrelated account-level personal workload was verified out of scope and must never be imported, changed, or used as PawLocal evidence.
@@ -139,7 +141,7 @@ The split is therefore caused by generated AWS identities and Terraform state ow
 |---|---|---|---|
 | **Foundation** | Create the base environment and the AWS-generated identities needed by later IAM configuration. | `phase=foundation`, empty `backend_image`, empty `release_commit`, `release_only=false` | Creates the base S3/CloudFront, DSQL, Cognito, certificate, Lightsail service, and DNS infrastructure. Runtime deployment, DSQL application setup, and API DNS remain disabled. |
 | **Converge** | Complete the generated-identity handoff and reach the first fully deployable environment state. | `phase=converge`, exact immutable `backend_image`, `release_only=false`; production also requires its matching development-verified `release_commit` | Applies exact generated-resource permissions, completes DSQL setup, creates the backend deployment version and API DNS, and converges all remaining infrastructure. |
-| **Release** | Promote a later application version without using the lifecycle to redesign infrastructure. | `phase=release`, exact development-verified `release_commit` and `backend_image`, `release_only=true` | Permits only the container deployment-version change; the calling release workflow then publishes the frontend and verifies the public frontend, API, and database-backed journey. |
+| **Release** | Promote a later application version without using the lifecycle to redesign infrastructure. | `phase=release`, exact development-verified `release_commit` and `backend_image`, `release_only=true` | Declares the container deployment version as the only intended Terraform change; the calling release workflow then publishes the frontend and verifies the public frontend, API, and database-backed journey. |
 
 The first deployment, and a deployment after a complete approved destroy, follows this sequence:
 
@@ -153,6 +155,8 @@ Foundation apply
 ```
 
 Do not use `release` for the first deployment. `terraform-environment.yml` owns Foundation and Converge. `deploy-production.yml` supplies `phase=release` for the normal production promotion path after the environment has converged.
+
+Issue #148 keeps automated ownership and release-only rejection disabled with `--skip-enforcement` for the MVP. `release_only=true` still identifies the intended scope, but the protected reviewer must reject an exact Release plan containing any change beyond the container deployment version.
 
 ### Protected plan and apply mechanics
 

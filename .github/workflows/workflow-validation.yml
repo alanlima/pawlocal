@@ -11,6 +11,7 @@ on:
       - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
+      - "docs/github-actions.md"
   push:
     branches:
       - main
@@ -23,6 +24,7 @@ on:
       - "ops/**"
       - '!**/*.md'
       - '!**/*.mdx'
+      - "docs/github-actions.md"
   workflow_call:
 
 permissions:

@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+
+WORKFLOW_DIRECTORY = Path(".github/workflows")
+REFERENCE = Path("docs/github-actions.md")
+REFERENCE_PATTERN = re.compile(
+    r"<!-- actions-reference: (?P<workflow>[^;]+); "
+    r"dispatch-inputs: (?P<dispatch>[^; ]+); call-inputs: (?P<call>[^ ]+) -->"
+)
+PROTECTED_CONFIGURATION_PATTERN = re.compile(
+    r"\$\{\{\s*(?:vars|secrets)\.(?P<name>(?:PAWLOCAL|VITE)_[A-Z0-9_]+)\s*\}\}"
+)
+
+
+def workflow_files() -> list[Path]:
+    return sorted(
+        (*WORKFLOW_DIRECTORY.glob("*.yml"), *WORKFLOW_DIRECTORY.glob("*.yaml"))
+    )
+
+
+def workflow_event_inputs(source: str, event: str) -> tuple[str, ...]:
+    """Return an event's input names in their declared order."""
+
+    lines = source.splitlines()
+    try:
+        event_start = lines.index(f"  {event}:")
+    except ValueError:
+        return ()
+
+    inputs: list[str] = []
+    in_inputs = False
+    for line in lines[event_start + 1 :]:
+        if re.match(r"^  [A-Za-z0-9_-]+:", line):
+            break
+        if line == "    inputs:":
+            in_inputs = True
+            continue
+        if not in_inputs:
+            continue
+        match = re.match(r"^      ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            inputs.append(match.group(1))
+        elif line and not line.startswith(("      ", "        ")):
+            break
+    return tuple(inputs)
+
+
+def parse_input_names(raw_inputs: str) -> tuple[str, ...]:
+    return () if raw_inputs == "-" else tuple(raw_inputs.split(","))
+
+
+def documented_workflows(
+    source: str,
+) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    result: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+    for match in REFERENCE_PATTERN.finditer(source):
+        workflow = match.group("workflow")
+        if workflow in result:
+            raise AssertionError(f"Duplicate actions-reference metadata for {workflow}")
+        result[workflow] = (
+            parse_input_names(match.group("dispatch")),
+            parse_input_names(match.group("call")),
+        )
+    return result
+
+
+class GitHubActionsReferenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.reference = REFERENCE.read_text(encoding="utf-8")
+
+    def test_reference_contains_mermaid_workflow_map(self) -> None:
+        self.assertIn("```mermaid", self.reference)
+        self.assertIn("## Workflow map", self.reference)
+
+    def test_every_workflow_is_documented_exactly_once(self) -> None:
+        actual = {path.name for path in workflow_files()}
+        documented = set(documented_workflows(self.reference))
+        self.assertEqual(
+            actual,
+            documented,
+            "Update docs/github-actions.md when workflow files are added or removed.",
+        )
+
+    def test_manual_dispatch_inputs_match_reference(self) -> None:
+        documented = documented_workflows(self.reference)
+        actual = {
+            path.name: workflow_event_inputs(
+                path.read_text(encoding="utf-8-sig"), "workflow_dispatch"
+            )
+            for path in workflow_files()
+        }
+        expected = {name: inputs[0] for name, inputs in documented.items()}
+        self.assertEqual(
+            actual,
+            expected,
+            "Update the workflow input tables and actions-reference metadata together.",
+        )
+
+    def test_reusable_call_inputs_match_reference(self) -> None:
+        documented = documented_workflows(self.reference)
+        actual = {
+            path.name: workflow_event_inputs(
+                path.read_text(encoding="utf-8-sig"), "workflow_call"
+            )
+            for path in workflow_files()
+        }
+        expected = {name: inputs[1] for name, inputs in documented.items()}
+        self.assertEqual(
+            actual,
+            expected,
+            "Update reusable inputs and actions-reference metadata together.",
+        )
+
+    def test_reference_links_every_workflow_file(self) -> None:
+        for path in workflow_files():
+            with self.subTest(workflow=path.name):
+                self.assertIn(
+                    f"(../.github/workflows/{path.name})",
+                    self.reference,
+                )
+
+    def test_reference_names_every_protected_configuration_key(self) -> None:
+        referenced = {
+            match.group("name")
+            for path in workflow_files()
+            for match in PROTECTED_CONFIGURATION_PATTERN.finditer(
+                path.read_text(encoding="utf-8-sig")
+            )
+        }
+        for name in sorted(referenced):
+            with self.subTest(configuration=name):
+                self.assertIn(f"`{name}`", self.reference)
+
+    def test_reference_change_runs_workflow_validation(self) -> None:
+        workflow = (WORKFLOW_DIRECTORY / "workflow-validation.yml").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertEqual(workflow.count('      - "docs/github-actions.md"'), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
