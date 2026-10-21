@@ -194,15 +194,23 @@ jobs:
       - name: Initialize the matching clean state
         shell: bash
         run: |
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
-            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
-            -backend-config="key=${TF_STATE_KEY}" \
-            -backend-config="region=${AWS_REGION}" \
-            -backend-config='encrypt=true' \
-            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+          if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+              -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+              -backend-config="key=${TF_STATE_KEY}" \
+              -backend-config="region=${AWS_REGION}" \
+              -backend-config='encrypt=true' \
+              -backend-config='use_lockfile=true'; then
+            :
+          else
+            status=$?
+            if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" == 'true' ]]; then
+              echo 'Terraform initialization failed after live raw diagnostics were printed above.' >&2
+            else
               echo 'Terraform initialization failed; raw provider output was withheld.' >&2
-              exit 1
-            }
+            fi
+            exit "$status"
+          fi
 
       - name: Create saved plan
         shell: bash
@@ -360,19 +368,36 @@ jobs:
       - name: Initialize matching state and apply only the reviewed plan
         shell: bash
         run: |
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
-            -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
-            -backend-config="key=${TF_STATE_KEY}" \
-            -backend-config="region=${AWS_REGION}" \
-            -backend-config='encrypt=true' \
-            -backend-config='use_lockfile=true' > "$RUNNER_TEMP/terraform-init.log" 2>&1 || {
+          if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+              -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
+              -backend-config="key=${TF_STATE_KEY}" \
+              -backend-config="region=${AWS_REGION}" \
+              -backend-config='encrypt=true' \
+              -backend-config='use_lockfile=true'; then
+            :
+          else
+            status=$?
+            if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" == 'true' ]]; then
+              echo 'Terraform initialization failed after live raw diagnostics were printed above.' >&2
+            else
               echo 'Terraform initialization failed; raw provider output was withheld.' >&2
-              exit 1
-            }
-          terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m -no-color "$RUNNER_TEMP/saved-plan/tfplan" \
-            > "$RUNNER_TEMP/terraform-apply.log" 2>&1 || {
-              python .github/scripts/terraform-plan-diagnostic.py \
-                --phase apply "$RUNNER_TEMP/terraform-apply.log" >&2
-              exit 1
-            }
+            fi
+            exit "$status"
+          fi
+
+          apply_command=(terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m)
+          if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
+            apply_command+=(-no-color)
+          fi
+          apply_command+=("$RUNNER_TEMP/saved-plan/tfplan")
+          if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-apply.log" -- \
+            "${apply_command[@]}"; then
+            :
+          else
+            status=$?
+            python .github/scripts/terraform-plan-diagnostic.py \
+              --phase apply "$RUNNER_TEMP/terraform-apply.log" >&2
+            exit "$status"
+          fi
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"
