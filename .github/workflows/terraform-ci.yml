@@ -6,10 +6,13 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
+      - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
+      - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
+      - "tests/ci/test_terraform_production_lifecycle.py"
       - '!**/*.md'
       - '!**/*.mdx'
   push:
@@ -19,10 +22,13 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
+      - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
+      - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
+      - "tests/ci/test_terraform_production_lifecycle.py"
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_call:

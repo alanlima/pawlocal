@@ -12,6 +12,7 @@ module "pawlocal" {
   backend_image               = var.backend_image
   cloudfront_distribution_arn = var.cloudfront_distribution_arn
   cloudfront_oac_arn          = var.cloudfront_oac_arn
+  teardown_enabled            = var.teardown_enabled
   container_power             = "medium"
   container_scale             = 1
 }

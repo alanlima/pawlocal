@@ -21,3 +21,8 @@ variable "cloudfront_oac_arn" {
   type    = string
   default = ""
 }
+variable "teardown_enabled" {
+  description = "Protected destroy preparation switch. Ordinary production operations must leave this false."
+  type        = bool
+  default     = false
+}

@@ -8,6 +8,12 @@ on:
         required: true
         type: choice
         options: [development, production]
+      phase:
+        description: Explicit lifecycle phase; foundation creates no runtime deployment.
+        required: true
+        default: foundation
+        type: choice
+        options: [foundation, converge, release]
       backend_image:
         description: Optional immutable ghcr.io/alanlima/pawlocal-api digest reference.
         required: false
@@ -25,6 +31,10 @@ on:
     inputs:
       environment:
         required: true
+        type: string
+      phase:
+        required: false
+        default: release
         type: string
       backend_image:
         required: false
@@ -58,7 +68,7 @@ env:
 jobs:
   production-eligibility:
     name: Require a verified development release
-    if: inputs.environment == 'production'
+    if: inputs.environment == 'production' && inputs.phase != 'foundation'
     runs-on: ubuntu-24.04
     steps:
       - name: Validate the selected development deployment
@@ -133,7 +143,7 @@ jobs:
 
   plan:
     name: Plan ${{ inputs.environment }}
-    if: always() && (inputs.environment == 'development' || needs.production-eligibility.result == 'success')
+    if: always() && (inputs.environment == 'development' || inputs.phase == 'foundation' || needs.production-eligibility.result == 'success')
     needs: production-eligibility
     runs-on: ubuntu-24.04
     environment: ${{ inputs.environment }}-plan
@@ -167,6 +177,7 @@ jobs:
         shell: bash
         run: |
           [[ '${{ inputs.environment }}' =~ ^(development|production)$ ]]
+          [[ '${{ inputs.phase }}' =~ ^(foundation|converge|release)$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
@@ -176,6 +187,33 @@ jobs:
           if [[ -n "$TF_VAR_backend_image" ]]; then
             [[ "$TF_VAR_backend_image" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
           fi
+          case '${{ inputs.phase }}' in
+            foundation)
+              test '${{ inputs.release_only }}' = 'false'
+              test -z '${{ inputs.backend_image }}'
+              test -z '${{ inputs.release_commit }}'
+              ;;
+            converge)
+              test '${{ inputs.release_only }}' = 'false'
+              test -n '${{ inputs.backend_image }}'
+              ;;
+            release)
+              test '${{ inputs.release_only }}' = 'true'
+              test -n '${{ inputs.backend_image }}'
+              ;;
+          esac
+
+      - name: Keep foundation free of generated runtime targets
+        if: inputs.phase == 'foundation'
+        shell: bash
+        run: |
+          {
+            echo 'TF_VAR_runtime_role_arn='
+            echo 'TF_VAR_cloudfront_distribution_arn='
+            echo 'TF_VAR_cloudfront_oac_arn='
+            echo 'TF_VAR_backend_image='
+          } >> "$GITHUB_ENV"
+          echo "Lifecycle phase: foundation (runtime deployment disabled)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Configure read-only plan credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -293,7 +331,7 @@ jobs:
         shell: bash
         run: |
           release_flag=()
-          if [[ '${{ inputs.release_only }}' == 'true' ]]; then release_flag+=(--release-only); fi
+          if [[ '${{ inputs.phase }}' == 'release' ]]; then release_flag+=(--release-only); fi
           # Temporary accepted risk: remove --skip-enforcement when #148 restores the guard.
           python .github/scripts/terraform-environment-plan.py "$RUNNER_TEMP/terraform-plan.json" \
             --environment '${{ inputs.environment }}' --skip-enforcement \
