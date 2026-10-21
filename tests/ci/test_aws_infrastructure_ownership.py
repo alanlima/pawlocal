@@ -86,6 +86,10 @@ ALLOWED_AWS_COMMANDS = {
     ("lightsail", "get-container-services"),
     ("s3", "sync"),
     ("s3", "cp"),
+    # Reconciliation reads the two reviewed Terraform state objects through a
+    # role that has GetObject only. State and infrastructure writes remain
+    # prohibited by both IAM and this executable-automation policy.
+    ("s3api", "get-object"),
     ("cloudfront", "create-invalidation"),
 }
 AWS_CLI_START = re.compile(
@@ -881,6 +885,7 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
         command = "aws s3api " + "\\" + "\n  put-bucket-policy --bucket pawlocal-example"
         self.assertEqual(aws_cli_commands(command), [("s3api", "put-bucket-policy")])
         self.assertNotIn(aws_cli_commands(command)[0], ALLOWED_AWS_COMMANDS)
+        self.assertIn(("s3api", "get-object"), ALLOWED_AWS_COMMANDS)
         split_service_and_operation = (
             "aws " + "\\" + "\n  ec2 " + "\\" + "\n  terminate-instances --instance-ids i-123"
         )

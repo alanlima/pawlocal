@@ -349,3 +349,11 @@ output "identity_app_role_arns" {
   description = "Bootstrap-owned publisher and conditional runtime role ARNs. Runtime values remain null until exact Lightsail principals are supplied."
   value       = local.identity_app_role_arns
 }
+
+output "runtime_lightsail_principal_arns" {
+  description = "Exact environment Lightsail principals bound into bootstrap-owned runtime trust, or null before the reviewed handoff."
+  value = {
+    development = var.development_lightsail_principal_arn == "" ? null : var.development_lightsail_principal_arn
+    production  = var.production_lightsail_principal_arn == "" ? null : var.production_lightsail_principal_arn
+  }
+}

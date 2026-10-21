@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "environments": {
+    "development": {
+      "reconciliation_environment": "development-reconcile",
+      "evidence_environment": "development",
+      "environment_state_key": "pawlocal/development/terraform.tfstate"
+    },
+    "production": {
+      "reconciliation_environment": "production-reconcile",
+      "evidence_environment": "production",
+      "environment_state_key": "pawlocal/production/terraform.tfstate"
+    }
+  },
+  "bootstrap_state_key": "pawlocal/iam-bootstrap/terraform.tfstate",
+  "mappings": [
+    {"source": "bootstrap", "output": "terraform_role_arns", "path": ["{environment}-plan"], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN"},
+    {"source": "bootstrap", "output": "terraform_role_arns", "path": ["{environment}-apply"], "targets": ["{environment}-apply"], "variable": "PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN"},
+    {"source": "bootstrap", "output": "aws_account_id", "path": [], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_AWS_ACCOUNT_ID"},
+    {"source": "bootstrap", "output": "plan_transfer_bucket_name", "path": [], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_TERRAFORM_PLAN_BUCKET"},
+    {"source": "bootstrap", "output": "identity_app_role_arns", "path": ["{environment}_frontend"], "targets": ["{environment}"], "variable": "PAWLOCAL_DEPLOY_ROLE_ARN"},
+    {"source": "bootstrap", "output": "identity_app_role_arns", "path": ["{environment}_runtime"], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_RUNTIME_ROLE_ARN", "optional_first_stage": true},
+    {"source": "environment", "output": "environment_targets", "path": ["frontend_url"], "targets": ["{environment}"], "variable": "PAWLOCAL_PUBLIC_BASE_URL"},
+    {"source": "environment", "output": "environment_targets", "path": ["api_health_url"], "targets": ["{environment}"], "variable": "PAWLOCAL_API_HEALTH_URL"},
+    {"source": "environment", "output": "environment_targets", "path": ["frontend_bucket"], "targets": ["{environment}"], "variable": "PAWLOCAL_FRONTEND_BUCKET"},
+    {"source": "environment", "output": "environment_targets", "path": ["cloudfront_distribution_id"], "targets": ["{environment}"], "variable": "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID"},
+    {"source": "environment", "output": "environment_targets", "path": ["cloudfront_distribution_arn"], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN"},
+    {"source": "environment", "output": "environment_targets", "path": ["cloudfront_oac_arn"], "targets": ["{environment}-plan", "{environment}-apply"], "variable": "PAWLOCAL_CLOUDFRONT_OAC_ARN"},
+    {"source": "environment", "output": "environment_targets", "path": ["cognito_client_id"], "targets": ["{environment}"], "variable": "VITE_COGNITO_CLIENT_ID"},
+    {"source": "environment", "output": "environment_targets", "path": ["api_base_url"], "targets": ["{environment}"], "variable": "VITE_API_BASE_URL"},
+    {"source": "environment", "output": "environment_targets", "path": ["cognito_domain"], "targets": ["{environment}"], "variable": "VITE_COGNITO_DOMAIN"},
+    {"source": "environment", "output": "environment_targets", "path": ["cognito_redirect_uri"], "targets": ["{environment}"], "variable": "VITE_COGNITO_REDIRECT_URI"},
+    {"source": "environment", "output": "environment_targets", "path": ["cognito_logout_uri"], "targets": ["{environment}"], "variable": "VITE_COGNITO_LOGOUT_URI"},
+    {"source": "environment", "output": "environment_targets", "path": ["cognito_scopes"], "targets": ["{environment}"], "variable": "VITE_COGNITO_SCOPES"}
+  ],
+  "destroy_invalidation_variables": [
+    "PAWLOCAL_RUNTIME_ROLE_ARN",
+    "PAWLOCAL_PUBLIC_BASE_URL",
+    "PAWLOCAL_API_HEALTH_URL",
+    "PAWLOCAL_FRONTEND_BUCKET",
+    "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID",
+    "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN",
+    "PAWLOCAL_CLOUDFRONT_OAC_ARN",
+    "VITE_COGNITO_CLIENT_ID",
+    "VITE_API_BASE_URL",
+    "VITE_COGNITO_DOMAIN",
+    "VITE_COGNITO_REDIRECT_URI",
+    "VITE_COGNITO_LOGOUT_URI",
+    "VITE_COGNITO_SCOPES"
+  ],
+  "legacy_variables": [
+    "PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON",
+    "PAWLOCAL_CERTIFICATE_ARN",
+    "PAWLOCAL_COGNITO_APP_CLIENT_ID",
+    "PAWLOCAL_COGNITO_ISSUER",
+    "PAWLOCAL_DEPLOY_HOST",
+    "PAWLOCAL_DEPLOY_KNOWN_HOSTS",
+    "PAWLOCAL_DEPLOY_MODE",
+    "PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON",
+    "PAWLOCAL_DOMAIN_NAME",
+    "PAWLOCAL_DSQL_DATABASE_ROLE",
+    "PAWLOCAL_DSQL_ENDPOINT",
+    "PAWLOCAL_TERRAFORM_ROLE_ARN",
+    "PAWLOCAL_TF_STATE_BUCKET"
+  ],
+  "legacy_secrets": [
+    "PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY",
+    "PAWLOCAL_DSQL_ACCESS_KEY_ID",
+    "PAWLOCAL_DSQL_SECRET_ACCESS_KEY"
+  ]
+}

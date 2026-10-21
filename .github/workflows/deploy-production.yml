@@ -25,7 +25,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-      deployments: read
+      deployments: write
       id-token: write
     uses: ./.github/workflows/terraform-environment.yml
     with:
@@ -57,6 +57,21 @@ jobs:
       BACKEND_IMAGE: ${{ inputs.backend_image }}
       RELEASE_COMMIT: ${{ inputs.release_commit }}
     steps:
+      - name: Check out current production control plane
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .pawlocal-control
+          persist-credentials: false
+      - name: Require current production output readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python .pawlocal-control/.github/scripts/reconcile-environment-outputs.py gate \
+            --environment production \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$GH_TOKEN" \
+            --expected-source-commit "$GITHUB_SHA"
       - name: Check out selected verified source
         uses: actions/checkout@v7
         with:

@@ -19,18 +19,21 @@ EXPECTED_HOSTED_JOBS = {
     ("frontend-production-deploy.yml", "disabled"),
     ("fullstack-release.yml", "publish"),
     ("fullstack-release.yml", "verify-development"),
+    ("invalidate-environment-outputs.yml", "invalidate"),
     ("rollback-development.yml", "disabled"),
     ("terraform-ci.yml", "terraform"),
     ("terraform-current-stack-operations.yml", "disabled"),
     ("terraform-environment.yml", "apply"),
     ("terraform-environment.yml", "plan"),
     ("terraform-environment.yml", "production-eligibility"),
+    ("terraform-environment.yml", "reconcile"),
     ("workflow-validation.yml", "action-runtime-smoke"),
     ("workflow-validation.yml", "validate"),
 }
 
 REQUIRED_ACTION_MAJORS = {
     "actions/checkout": "v7",
+    "actions/create-github-app-token": "v3",
     "actions/github-script": "v9",
     "actions/setup-node": "v7",
     "actions/setup-python": "v7",

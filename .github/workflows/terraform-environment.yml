@@ -61,6 +61,23 @@ jobs:
     if: inputs.environment == 'production'
     runs-on: ubuntu-24.04
     steps:
+      - name: Check out reconciliation gate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Require current development output readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py gate \
+            --environment development \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$GH_TOKEN" \
+            --expected-source-commit "$RELEASE_COMMIT"
+
       - name: Validate the selected development deployment
         uses: actions/github-script@v9
         env:
@@ -324,6 +341,7 @@ jobs:
     environment: ${{ inputs.environment }}-apply
     permissions:
       contents: read
+      deployments: write
       id-token: write
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -376,6 +394,18 @@ jobs:
             --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
           test "$actual" = "$EXPECTED_SHA256"
 
+      - name: Invalidate older reconciliation readiness before Terraform mutation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py pending \
+            --allowlist .github/generated-output-allowlist.json \
+            --environment '${{ inputs.environment }}' \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$GH_TOKEN" \
+            --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET"
+
       - name: Set up Terraform and initialize matching state
         uses: hashicorp/setup-terraform@v4
         with:
@@ -418,3 +448,210 @@ jobs:
             exit "$status"
           fi
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"
+
+  reconcile:
+    name: Reconcile protected ${{ inputs.environment }} outputs
+    needs: apply
+    if: ${{ !cancelled() && needs.apply.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: ${{ format('{0}-reconcile', inputs.environment) }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      RECONCILIATION_ROLE_ARN: ${{ vars.PAWLOCAL_RECONCILIATION_ROLE_ARN }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Check out the exact applied source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate protected reconciliation configuration
+        shell: bash
+        run: |
+          reconciliation_directory="$RUNNER_TEMP/pawlocal-output-reconciliation"
+          echo "RECONCILIATION_DIRECTORY=$reconciliation_directory" >> "$GITHUB_ENV"
+          for name in AWS_REGION PAWLOCAL_AWS_ACCOUNT_ID PAWLOCAL_TF_STATE_BUCKET RECONCILIATION_ROLE_ARN; do
+            [[ -n "${!name}" ]] || { echo "Missing required protected reconciliation configuration: $name" >&2; exit 1; }
+          done
+          [[ "$PAWLOCAL_AWS_ACCOUNT_ID" =~ ^[0-9]{12}$ ]]
+          [[ "$RECONCILIATION_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-output-reconciliation" ]]
+          install -d -m 700 "$reconciliation_directory"
+
+      - name: Mint repository-scoped Environment token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.PAWLOCAL_RECONCILIATION_APP_ID }}
+          private-key: ${{ secrets.PAWLOCAL_RECONCILIATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-deployments: write
+          permission-environments: write
+
+      - name: Configure read-only reconciliation state credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.RECONCILIATION_ROLE_ARN }}
+          allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: "true"
+
+      - name: Read exact pre-mutation state snapshots
+        id: pre-state
+        continue-on-error: true
+        shell: bash
+        run: |
+          bootstrap_key='pawlocal/iam-bootstrap/terraform.tfstate'
+          environment_key='pawlocal/${{ inputs.environment }}/terraform.tfstate'
+          aws s3api get-object --bucket "$PAWLOCAL_TF_STATE_BUCKET" --key "$bootstrap_key" \
+            "$RECONCILIATION_DIRECTORY/bootstrap-before.json" > /dev/null 2> "$RECONCILIATION_DIRECTORY/bootstrap-before.error" || {
+              echo 'The expected bootstrap state could not be read; details were withheld.' >&2
+              exit 1
+            }
+          aws s3api get-object --bucket "$PAWLOCAL_TF_STATE_BUCKET" --key "$environment_key" \
+            "$RECONCILIATION_DIRECTORY/environment-before.json" > /dev/null 2> "$RECONCILIATION_DIRECTORY/environment-before.error" || {
+              echo 'The matching environment state could not be read; details were withheld.' >&2
+              exit 1
+            }
+
+      - name: Prepare value-free reconciliation evidence
+        id: prepare
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py prepare \
+            --allowlist .github/generated-output-allowlist.json \
+            --environment '${{ inputs.environment }}' \
+            --mode reconcile \
+            --bootstrap-state "$RECONCILIATION_DIRECTORY/bootstrap-before.json" \
+            --environment-state "$RECONCILIATION_DIRECTORY/environment-before.json" \
+            --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" \
+            --plan "$RECONCILIATION_DIRECTORY/private-plan.json" \
+            --evidence "$RECONCILIATION_DIRECTORY/evidence.json"
+
+      - name: Prove legacy release configuration is unused
+        id: legacy-proof
+        if: steps.prepare.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py prove-legacy-unused \
+            --allowlist .github/generated-output-allowlist.json \
+            --root . \
+            --proof "$RECONCILIATION_DIRECTORY/legacy-proof.json"
+
+      - name: Reconcile only allowlisted generated variables
+        id: mutate
+        if: steps.prepare.outcome == 'success' && steps.legacy-proof.outcome == 'success'
+        continue-on-error: true
+        env:
+          RECONCILIATION_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py mutate \
+            --allowlist .github/generated-output-allowlist.json \
+            --environment '${{ inputs.environment }}' \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$RECONCILIATION_TOKEN" \
+            --plan "$RECONCILIATION_DIRECTORY/private-plan.json" \
+            --evidence "$RECONCILIATION_DIRECTORY/evidence.json"
+
+      - name: Re-read exact state identities after mutation
+        id: post-state
+        if: always() && steps.prepare.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          bootstrap_key='pawlocal/iam-bootstrap/terraform.tfstate'
+          environment_key='pawlocal/${{ inputs.environment }}/terraform.tfstate'
+          aws s3api get-object --bucket "$PAWLOCAL_TF_STATE_BUCKET" --key "$bootstrap_key" \
+            "$RECONCILIATION_DIRECTORY/bootstrap-after.json" > /dev/null 2> "$RECONCILIATION_DIRECTORY/bootstrap-after.error" || {
+              echo 'The bootstrap state could not be re-read; details were withheld.' >&2
+              exit 1
+            }
+          aws s3api get-object --bucket "$PAWLOCAL_TF_STATE_BUCKET" --key "$environment_key" \
+            "$RECONCILIATION_DIRECTORY/environment-after.json" > /dev/null 2> "$RECONCILIATION_DIRECTORY/environment-after.error" || {
+              echo 'The matching environment state could not be re-read; details were withheld.' >&2
+              exit 1
+            }
+
+      - name: Verify state stability and every generated variable
+        id: verify
+        if: always() && steps.prepare.outcome == 'success'
+        continue-on-error: true
+        env:
+          RECONCILIATION_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py verify \
+            --allowlist .github/generated-output-allowlist.json \
+            --environment '${{ inputs.environment }}' \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$RECONCILIATION_TOKEN" \
+            --plan "$RECONCILIATION_DIRECTORY/private-plan.json" \
+            --evidence "$RECONCILIATION_DIRECTORY/evidence.json" \
+            --bootstrap-state "$RECONCILIATION_DIRECTORY/bootstrap-after.json" \
+            --environment-state "$RECONCILIATION_DIRECTORY/environment-after.json"
+
+      - name: Remove proven-unused legacy release configuration
+        id: cleanup
+        if: steps.verify.outcome == 'success' && steps.legacy-proof.outcome == 'success'
+        continue-on-error: true
+        env:
+          RECONCILIATION_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          python .github/scripts/reconcile-environment-outputs.py cleanup-legacy \
+            --allowlist .github/generated-output-allowlist.json \
+            --environment '${{ inputs.environment }}' \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$RECONCILIATION_TOKEN" \
+            --root . \
+            --legacy-proof "$RECONCILIATION_DIRECTORY/legacy-proof.json" \
+            --evidence "$RECONCILIATION_DIRECTORY/evidence.json"
+
+      - name: Publish authoritative value-free readiness record
+        id: publish
+        if: always()
+        env:
+          RECONCILIATION_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          test -f "$RECONCILIATION_DIRECTORY/evidence.json" || {
+            echo 'No readiness evidence was produced; publication failed closed.' >&2
+            exit 1
+          }
+          python .github/scripts/reconcile-environment-outputs.py publish \
+            --environment '${{ inputs.environment }}' \
+            --repository "$GITHUB_REPOSITORY" \
+            --token "$RECONCILIATION_TOKEN" \
+            --evidence "$RECONCILIATION_DIRECTORY/evidence.json"
+
+      - name: Enforce reconciliation readiness for a release
+        if: always()
+        env:
+          RELEASE_ONLY: ${{ inputs.release_only }}
+        shell: bash
+        run: |
+          python - "$RECONCILIATION_DIRECTORY/evidence.json" "$RELEASE_ONLY" <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          if not path.is_file():
+              raise SystemExit('Reconciliation evidence is missing')
+          evidence = json.loads(path.read_text(encoding='utf-8'))
+          if evidence.get('failure'):
+              raise SystemExit('Generated-output reconciliation failed closed')
+          if sys.argv[2] == 'true' and evidence.get('ready') is not True:
+              raise SystemExit('Release publication requires complete generated-output readiness')
+          print(f"Generated-output reconciliation status: {evidence.get('status')}")
+          PY

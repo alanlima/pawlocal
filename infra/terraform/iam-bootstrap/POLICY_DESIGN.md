@@ -41,6 +41,8 @@ The publisher and runtime boundaries use stable resource families from the first
 
 Development and production runtime roles are still created only after bootstrap receives the exact Lightsail `principal_arn` from the matching foundation output. This is a trust-principal handoff, not a permissions-boundary resource handoff or an exception to the stable-boundary rule. The environment root creates the exact DSQL connection policy and attachment. No generated application resource ARN is an input to a bootstrap-owned boundary.
 
+Each environment also has a dedicated output-reconciliation role trusted only by the matching protected `<environment>-reconcile` GitHub Environment. Its inline policy grants `s3:GetObject` for exactly the bootstrap state and that environment's application state plus `s3:GetBucketLocation`. It has no list, lock, write, Terraform-plan, provider-discovery, or application-resource permissions. This role supports read-only output and state-revision binding; GitHub Environment mutation uses a separately scoped short-lived GitHub App token.
+
 ## Saved plan handling
 
 Plan roles upload opaque plans and metadata only beneath their environment prefix. Apply roles can only read that prefix. Metadata binds the plan SHA-256 to repository ID, commit, run, attempt, environment, state key, and a one-way account/backend/region fingerprint. GitHub summaries contain only resource type/action/count. Raw provider logs, raw plan JSON, plan binaries, Terraform state, credentials, secret values, account identifiers, and resource identifiers are not public evidence.

@@ -169,4 +169,34 @@ Lightsail certificate and container-service create/delete operations are asynchr
 
 `Promote verified release to production` is manual. Supply the full verified commit SHA and exact immutable image reference recorded by development. The environment workflow rejects production before it finds the matching successful development deployment. It plans/applies only the production root, after production approval, then builds the selected commit's production frontend and runs the same public verification.
 
+## Generated-output reconciliation and release readiness
+
+Terraform-generated targets are never copied from logs or reconstructed from names. The fixed mapping in [`.github/generated-output-allowlist.json`](../.github/generated-output-allowlist.json) is the only set of Terraform outputs, protected Environments, and variable names that reconciliation may use. The helper rejects an unknown environment, output path, target, variable name, or operator-controlled input. API and Cognito outputs use canonical values from the managed resources: the API base ends in `/api/v1`, the Cognito domain is a full HTTPS origin, the callback and logout values are full HTTPS URLs, and scopes are the whitespace-delimited `openid email profile` string.
+
+The bootstrap state creates one read-only reconciliation role per application environment. Its OIDC trust is limited to the matching `<environment>-reconcile` GitHub Environment, and its policy can read only the bootstrap state object, the matching application state object, and the state bucket location. It cannot list, lock, write, import, remove, unlock, or otherwise mutate Terraform state or AWS resources.
+
+Create `development-reconcile` and `production-reconcile` as protected Environments restricted to `main` and requiring a reviewer. Each needs these operator-provided references:
+
+- variables `AWS_REGION`, `PAWLOCAL_AWS_ACCOUNT_ID`, `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_RECONCILIATION_ROLE_ARN`, and `PAWLOCAL_RECONCILIATION_APP_ID`;
+- secret `PAWLOCAL_RECONCILIATION_APP_PRIVATE_KEY`.
+
+The GitHub App must be installed only on this repository. Grant repository `Environments: write` for Environment-variable and legacy Environment-secret reconciliation, `Actions: read` for the final in-flight release/rollback check, and `Deployments: write` for its authoritative readiness or invalidation record. Do not grant repository administration, contents write, or a classic broad-scope token. The workflow's normal `GITHUB_TOKEN`, limited to `deployments: write`, can publish only the pre-mutation pending record. A release gate accepts a ready record only when both its deployment and status were created by the same non-Actions GitHub App bot.
+
+Every environment apply first publishes a not-ready deployment record before Terraform can mutate state. Cancellation or apply failure therefore leaves the newest authoritative record not ready. After a successful apply, the protected reconciliation job:
+
+1. reads the exact bootstrap and matching environment states;
+2. validates the environment marker and the Lightsail-principal/runtime-role handoff;
+3. compares and writes only allowlisted generated variables, then reads each one back;
+4. re-reads both state identities and rejects any lineage or serial change;
+5. removes the 13 allowlisted legacy release variables and three superseded release secrets only after static usage proof and an in-flight workflow check;
+6. publishes a deployment record containing only environment/operation, source commit, run/attempt, status, and SHA-256 fingerprints for backend/state/configuration/cleanup evidence.
+
+The first foundation apply intentionally remains not ready. Its generated Lightsail principal must be supplied to a separately reviewed bootstrap plan through the documented bootstrap handoff. Reconciliation then publishes the bootstrap runtime role to the plan/apply Environments, but readiness remains incomplete until a normal environment plan/apply records that same runtime role in the matching application state. A stale bootstrap principal after destroy/recreate causes the runtime variable to be absent and keeps publication blocked.
+
+Development artifact publication reads the latest development reconciliation record at its downstream job boundary. Production eligibility requires the current development record for the selected release, and production artifact publication independently requires the current production record after the approved production apply. Missing, partial, stale, cross-environment, failed-readback, or older records fail closed.
+
+The standard destroy workflow must publish a pending record before destructive mutation, then call [`.github/workflows/invalidate-environment-outputs.yml`](../.github/workflows/invalidate-environment-outputs.yml) after the reviewed destroy has produced a present, empty matching state. Missing state is not proof of destroy. The protected invalidation deletes only the generated target and dependent runtime variables in the destroy allowlist, verifies their absence and unchanged state identity, and publishes `ready=false`. A later clean foundation/bootstrap/environment sequence repopulates fresh values; no special recovery path or stale value reuse exists.
+
+A failed or rate-limited GitHub API call records names and statuses only, publishes no valid ready record, and leaves releases blocked. Resolve the authentication, rate-limit, state, or read-back cause and rerun the normal reviewed environment workflow. The operation is idempotent: matching values are verified no-ops and a later run converges partial writes. The final record carries the independently verified variable-set digest as well as the two state-revision digests. Reconciler logs and readiness records never contain Terraform output values, account/domain/bucket/distribution/role identifiers, raw state, plans, tokens, or secret values.
+
 Passing CI or Terraform apply is not deployment completion. Before closing Issue #135, evidence must separately show the exact saved plans, approvals, successful development verification, production promotion of the same digest, live public health and database-query smoke, and current runtime state. DSQL identity/credential refresh remains a mandatory live gate. Telemetry, backup, HA, restore, rollback, and recovery are not part of Issue #135.
