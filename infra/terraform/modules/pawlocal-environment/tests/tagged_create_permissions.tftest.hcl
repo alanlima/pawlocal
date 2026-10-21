@@ -49,6 +49,19 @@ run "tagged_create_permissions_are_size_safe" {
 
   assert {
     condition = (
+      local.resource_suffixes.cert == "cert" &&
+      local.resource_suffixes.container_service == "api" &&
+      local.resource_names.cert == "pawlocal-development-api-cert" &&
+      local.resource_names.container_service == "pawlocal-development-api" &&
+      aws_lightsail_container_service.api.name == "pawlocal-development-api" &&
+      aws_lightsail_certificate.api.name == "pawlocal-development-api-cert" &&
+      aws_lightsail_container_service.api.name != aws_lightsail_certificate.api.name
+    )
+    error_message = "Lightsail names must use the normalized suffix map and keep the service and certificate names distinct."
+  }
+
+  assert {
+    condition = (
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:CreateBucket") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:TagResource") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "s3:PutBucketTagging") &&
@@ -158,5 +171,34 @@ run "tagged_create_permissions_are_size_safe" {
       ]) == "pawlocal-app-database"
     )
     error_message = "Missing or incorrect DSQL Name/purpose request tags must not satisfy the rendered allow statement."
+  }
+}
+
+run "production_resource_names_use_normalized_suffixes" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    environment                = "production"
+    aws_region                 = "ap-southeast-2"
+    root_domain                = "example.test"
+    route53_zone_id            = "ZTEST"
+    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name  = "pawlocal-production-terraform-apply"
+    frontend_publish_role_name = "pawlocal-production-github-deploy"
+    container_power            = "medium"
+  }
+
+  assert {
+    condition = (
+      local.resource_names.cert == "pawlocal-production-api-cert" &&
+      local.resource_names.container_service == "pawlocal-production-api" &&
+      aws_lightsail_certificate.api.name == "pawlocal-production-api-cert" &&
+      aws_lightsail_container_service.api.name == "pawlocal-production-api"
+    )
+    error_message = "Production Lightsail names must use the same normalized cert and container-service suffixes."
   }
 }
