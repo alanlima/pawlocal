@@ -37,6 +37,13 @@ FORBIDDEN_TYPES = {
     "aws_iam_role_policy",
 }
 
+RELEASE_RESOURCE_TYPE = "aws_lightsail_container_service_deployment_version"
+RELEASE_ACTIONS = {
+    ("create",),
+    ("create", "delete"),
+    ("delete", "create"),
+}
+
 
 def action_label(actions: list[str]) -> str:
     if not actions:
@@ -65,21 +72,39 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
         if change.get("mode") == "data":
             continue
         resource_type = change.get("type", "")
+        reported_type = (
+            resource_type
+            if resource_type in ALLOWED_TYPES or resource_type in FORBIDDEN_TYPES
+            else "withheld_resource_type"
+        )
         actions = change.get("change", {}).get("actions", [])
         if actions == ["no-op"]:
             continue
         if resource_type in FORBIDDEN_TYPES or resource_type not in ALLOWED_TYPES:
-            errors.append(f"resource type is outside the environment ownership boundary: {resource_type}")
+            errors.append(
+                f"resource type is outside the environment ownership boundary: {reported_type}"
+            )
         expected_deployment_replacement = (
-            resource_type == "aws_lightsail_container_service_deployment_version"
+            resource_type == RELEASE_RESOURCE_TYPE
             and set(actions) == {"create", "delete"}
         )
         if "delete" in actions and not expected_deployment_replacement:
-            errors.append(f"delete or replacement is not allowed by the normal environment workflow: {resource_type}")
+            errors.append(
+                "delete or replacement is not allowed by the normal environment workflow: "
+                f"{reported_type}"
+            )
         if change.get("importing") is not None or change.get("change", {}).get("importing") is not None:
-            errors.append(f"application-resource import is prohibited: {resource_type}")
-        if release_only and resource_type != "aws_lightsail_container_service_deployment_version":
-            errors.append(f"release-only plan changes a non-release resource: {resource_type}")
+            errors.append(f"application-resource import is prohibited: {reported_type}")
+        if release_only:
+            if resource_type != RELEASE_RESOURCE_TYPE:
+                errors.append(
+                    f"release-only plan changes a non-release resource: {reported_type}"
+                )
+            elif tuple(actions) not in RELEASE_ACTIONS:
+                errors.append(
+                    "release-only plan uses an unsupported deployment action: "
+                    f"{reported_type}"
+                )
 
     variables = plan.get("variables", {})
     selected = variables.get("environment", {}).get("value")
@@ -90,9 +115,7 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
     return rows
 
 
-def render(
-    rows: list[tuple[str, str]], environment: str, enforcement_skipped: bool = False
-) -> str:
+def render(rows: list[tuple[str, str]], environment: str) -> str:
     counts = Counter(rows)
     lines = [
         f"### Sanitized Terraform plan: {environment}",
@@ -107,13 +130,6 @@ def render(
     else:
         for (resource_type, action), count in sorted(counts.items()):
             lines.append(f"| `{resource_type}` | `{action}` | {count} |")
-    if enforcement_skipped:
-        lines.extend(
-            [
-                "",
-                "> Temporary MVP mode: plan ownership enforcement was skipped. Review the exact plan at the protected apply gate.",
-            ]
-        )
     return "\n".join(lines) + "\n"
 
 
@@ -122,15 +138,10 @@ def main() -> None:
     parser.add_argument("plan_json", type=Path)
     parser.add_argument("--environment", choices=("development", "production"), required=True)
     parser.add_argument("--release-only", action="store_true")
-    parser.add_argument("--skip-enforcement", action="store_true")
     args = parser.parse_args()
     plan = json.loads(args.plan_json.read_text(encoding="utf-8"))
-    rows = (
-        plan_rows(plan)
-        if args.skip_enforcement
-        else validate(plan, args.environment, args.release_only)
-    )
-    print(render(rows, args.environment, args.skip_enforcement), end="")
+    rows = validate(plan, args.environment, args.release_only)
+    print(render(rows, args.environment), end="")
 
 
 if __name__ == "__main__":

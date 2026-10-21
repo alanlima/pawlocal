@@ -469,6 +469,36 @@ class GreenfieldTerraformTests(unittest.TestCase):
                 True,
             )
 
+    def test_release_only_guard_rejects_every_non_deployment_resource_family(self) -> None:
+        module = load_module(PLAN_GUARD, "terraform_environment_plan_release_scope")
+        resource_types = (
+            "aws_s3_bucket",
+            "aws_iam_policy",
+            "aws_route53_record",
+            "aws_lightsail_certificate",
+            "aws_dsql_cluster",
+            "aws_iam_role",
+        )
+        for resource_type in resource_types:
+            with self.subTest(resource_type=resource_type):
+                plan = {
+                    "resource_changes": [{
+                        "address": "module.pawlocal.private-resource-identifier",
+                        "type": resource_type,
+                        "change": {
+                            "actions": ["create"],
+                            "after": {"name": "private-resource-value"},
+                        },
+                    }],
+                    "variables": {"environment": {"value": "development"}},
+                }
+                with self.assertRaises(SystemExit) as error:
+                    module.validate(plan, "development", True)
+                message = str(error.exception)
+                self.assertIn("Plan guard rejected the saved plan", message)
+                self.assertNotIn("private-resource-identifier", message)
+                self.assertNotIn("private-resource-value", message)
+
     def test_sanitized_plan_summary_omits_addresses_and_values(self) -> None:
         module = load_module(PLAN_GUARD, "terraform_environment_plan_summary")
         plan = {
@@ -483,7 +513,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn("module.pawlocal", summary)
         self.assertNotIn("private-value", summary)
 
-    def test_summary_only_mode_skips_enforcement_but_marks_the_accepted_risk(self) -> None:
+    def test_plan_guard_has_no_enforcement_bypass(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = Path(directory) / "plan.json"
             plan.write_text(
@@ -505,12 +535,47 @@ class GreenfieldTerraformTests(unittest.TestCase):
                     "--release-only",
                     "--skip-enforcement",
                 ],
-                check=True,
+                check=False,
                 capture_output=True,
                 text=True,
             )
-        self.assertIn("`aws_iam_role` | `replace` | 1", result.stdout)
-        self.assertIn("plan ownership enforcement was skipped", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --skip-enforcement", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_plan_guard_withholds_unapproved_types_addresses_and_values_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = Path(directory) / "plan.json"
+            plan.write_text(
+                json.dumps({
+                    "resource_changes": [{
+                        "address": "module.pawlocal.private-resource-identifier",
+                        "type": "private_resource_type",
+                        "change": {
+                            "actions": ["create"],
+                            "after": {"name": "private-resource-value"},
+                        },
+                    }]
+                }),
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(PLAN_GUARD),
+                    str(plan),
+                    "--environment",
+                    "development",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("withheld_resource_type", result.stderr)
+        self.assertNotIn("private_resource_type", result.stderr)
+        self.assertNotIn("private-resource-identifier", result.stderr)
+        self.assertNotIn("private-resource-value", result.stderr)
 
     def test_plan_guard_ignores_provider_data_reads(self) -> None:
         module = load_module(PLAN_GUARD, "terraform_environment_plan_data")
@@ -548,6 +613,30 @@ class GreenfieldTerraformTests(unittest.TestCase):
             module.validate(plan, "development", True),
             [("aws_lightsail_container_service_deployment_version", "replace")],
         )
+
+        create_plan = {
+            "resource_changes": [{
+                "type": "aws_lightsail_container_service_deployment_version",
+                "change": {"actions": ["create"]},
+            }],
+            "variables": {"environment": {"value": "development"}},
+        }
+        self.assertEqual(
+            module.validate(create_plan, "development", True),
+            [("aws_lightsail_container_service_deployment_version", "create")],
+        )
+
+        for actions in (["update"], ["delete"]):
+            with self.subTest(actions=actions):
+                invalid_plan = {
+                    "resource_changes": [{
+                        "type": "aws_lightsail_container_service_deployment_version",
+                        "change": {"actions": actions},
+                    }],
+                    "variables": {"environment": {"value": "development"}},
+                }
+                with self.assertRaises(SystemExit):
+                    module.validate(invalid_plan, "development", True)
         plan["resource_changes"][0]["type"] = "aws_lightsail_container_service"
         with self.assertRaises(SystemExit):
             module.validate(plan, "development", False)

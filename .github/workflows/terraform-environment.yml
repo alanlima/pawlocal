@@ -254,14 +254,6 @@ jobs:
           python .github/scripts/terraform-plan-console.py "$RUNNER_TEMP/terraform-plan.json" \
             --environment '${{ inputs.environment }}'
 
-      - name: Require exact-plan visibility while ownership enforcement is skipped
-        shell: bash
-        run: |
-          if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
-            echo 'Ownership enforcement may be skipped only when raw exact-plan diagnostics are enabled for reviewer inspection.' >&2
-            exit 1
-          fi
-
       - name: Print raw saved plan for diagnosis
         if: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS == 'true' }}
         shell: bash
@@ -289,14 +281,13 @@ jobs:
           script --quiet --return \
             --command="terraform -chdir=\"$TF_ROOT\" show tfplan" /dev/null
 
-      - name: Publish sanitized summary with ownership enforcement skipped for MVP
+      - name: Enforce plan ownership and publish sanitized summary
         shell: bash
         run: |
           release_flag=()
           if [[ '${{ inputs.release_only }}' == 'true' ]]; then release_flag+=(--release-only); fi
-          # Temporary accepted risk: remove --skip-enforcement when #148 restores the guard.
           python .github/scripts/terraform-environment-plan.py "$RUNNER_TEMP/terraform-plan.json" \
-            --environment '${{ inputs.environment }}' --skip-enforcement \
+            --environment '${{ inputs.environment }}' \
             "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Bind exact plan metadata
