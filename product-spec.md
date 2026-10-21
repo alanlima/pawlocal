@@ -1,6 +1,6 @@
 # PawLocal product specification
 
-**Status:** Approved for Stage 1 implementation on 2026-10-17; the Stage 4 Cognito password-authentication design was approved on 2026-10-22; unresolved design decisions remain open for their relevant later stages.
+**Status:** Approved for Stage 1 implementation on 2026-10-17; unresolved design decisions remain open for their relevant later stages.
 
 **Scope:** MVP only; future scope requires explicit approval.
 
@@ -75,7 +75,7 @@ Stage 3 must use these values consistently across API validation, persistence an
 ## Decisions still needed before implementation
 
 - Broader freshness and verification policy for place data.
-- Identity lifecycle beyond the approved Stage 4 username/password sign-up and sign-in behavior, including self-service password recovery, account deletion and retention, and social federation.
+- Identity lifecycle beyond the Stage 3 authentication integration (signup/sign-in UX, recovery, account deletion and retention, and social federation). Stage 3 does not add deletion, retention, or federation behavior without a separate decision.
 - Moderation roles and report resolution process.
 - Rating/review revision and removal behavior.
 - Permitted source policy and AI-draft operator workflow.
@@ -84,14 +84,4 @@ Stage 3 must use these values consistently across API validation, persistence an
 
 - **Identity provider:** Use an Amazon Cognito User Pool as the OIDC issuer for Stage 3 protected API operations. The API accepts user-pool access tokens and validates them as specified in `docs/specs/backend-api-persistence.md` and `openapi.yaml`. No Cognito pool or other AWS resource is provisioned as part of Stage 3.
 - **Reportable contributions:** The report dialog uses the public, paginated `GET /contributions/reportable` operation for already-published contributions. The response contains only public fields needed to identify the report target and does not include contributor or reporter identity. See `docs/decisions.md` DEC-002.
-
-## Approved Stage 4 authentication design
-
-- **User pools:** Provision one Amazon Cognito user pool per environment through Terraform. Each pool uses username and password sign-in, case-insensitive usernames, open self sign-up, the required standard `name` profile attribute, no email or phone verification, and MFA off.
-- **Password-policy input:** The shared environment module receives one password-policy object. Development uses a minimum length of 8 with lowercase, uppercase, number, and symbol requirements off. Production uses a minimum length of 12 with lowercase, uppercase, and number requirements on and symbols off. Only minimum length and the lowercase, uppercase, and number requirements differ between environments; every other pool setting is identical.
-- **Immediate confirmation:** Attach a pre sign-up Lambda in both environments. For `PreSignUp_SignUp` only, it sets `autoConfirmUser = true`; all other trigger sources are returned unchanged. A Lambda is not generally required by Cognito: users can instead be confirmed with a verification code or a privileged `AdminConfirmSignUp` call. PawLocal selects the trigger because this design requires immediate sign-in after open self sign-up without either alternative.
-- **Administrator-created users:** The trigger does not change the normal temporary-password and `FORCE_CHANGE_PASSWORD` lifecycle for users created by an administrator.
-- **Accepted replacement:** Replacing the existing empty user pools and their dependent clients and domains is intentional. There are no users to migrate, and no user-data recovery work is required.
-- **Scope boundary:** Social identity providers, database or data-layer changes, user migration, self-service password recovery, sign-up CAPTCHA or rate limiting, and Cognito deletion protection or Terraform `prevent_destroy` are not included. Issues #185 and #187 do not configure or test a self-service password-recovery policy. Users without a verified email address or phone number cannot use Cognito `ForgotPassword`; a future recovery policy remains a separate decision.
-- **Delivery:** [Issue #184](https://github.com/alanlima/pawlocal/issues/184) is the master issue. The documentation change in [Issue #185](https://github.com/alanlima/pawlocal/issues/185) must merge first. [Issue #186](https://github.com/alanlima/pawlocal/issues/186) owns IAM/bootstrap permissions, and [Issue #187](https://github.com/alanlima/pawlocal/issues/187) owns the Cognito pool and Lambda resources. The implementation workstreams may proceed in parallel after the documentation merge, but #186 must be complete and merged before #187 can complete or merge. No Terraform apply is authorized by this design approval.
 
