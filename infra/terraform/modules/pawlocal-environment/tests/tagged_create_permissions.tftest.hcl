@@ -70,4 +70,50 @@ run "tagged_create_permissions_are_size_safe" {
     ])
     error_message = "Tagged creation must require every expected application tag value."
   }
+
+  assert {
+    condition = (
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        flatten([statement.Action])
+        if statement.Sid == "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+      ])) == toset(["dsql:CreateCluster", "dsql:TagResource"])
+    )
+    error_message = "DSQL create and its dependent TagResource authorization must share one service-specific statement."
+  }
+
+  assert {
+    condition = (
+      toset(one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"]
+        if statement.Sid == "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+      ])) == toset(keys(local.dsql_tags)) &&
+      alltrue([
+        for key, value in local.dsql_tags :
+        one([
+          for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+          statement.Condition.StringEquals["aws:RequestTag/${key}"]
+          if statement.Sid == "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+        ]) == value
+      ])
+    )
+    error_message = "The rendered DSQL authorization must fail closed unless all eight actual cluster tag keys and values are present."
+  }
+
+  assert {
+    condition = (
+      one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        statement.Condition.StringEquals["aws:RequestTag/Name"]
+        if statement.Sid == "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+      ]) == "pawlocal-development" &&
+      one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        statement.Condition.StringEquals["aws:RequestTag/purpose"]
+        if statement.Sid == "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+      ]) == "pawlocal-app-database"
+    )
+    error_message = "Missing or incorrect DSQL Name/purpose request tags must not satisfy the rendered allow statement."
+  }
 }

@@ -18,6 +18,10 @@ locals {
     workload    = "application"
     costcenter  = "personal"
   }
+  dsql_tags = merge(local.common_tags, {
+    Name    = "pawlocal-${var.environment}"
+    purpose = "pawlocal-app-database"
+  })
   deployment_enabled           = var.backend_image != "" && var.runtime_role_arn != ""
   iam_managed_policy_max_bytes = 6144
 }
@@ -233,7 +237,7 @@ resource "aws_dsql_cluster" "application" {
   deletion_protection_enabled = true
   force_destroy               = false
   kms_encryption_key          = "AWS_OWNED_KMS_KEY"
-  tags                        = merge(local.common_tags, { Name = "pawlocal-${var.environment}", purpose = "pawlocal-app-database" })
+  tags                        = local.dsql_tags
   depends_on                  = [time_sleep.application_permissions_propagation]
 }
 

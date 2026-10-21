@@ -44,7 +44,7 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 5500-byte repository budget."
+    error_message = "Each minified environment apply boundary must stay below both the 6144-byte AWS limit and the 6050-byte repository budget."
   }
 
   assert {
@@ -111,6 +111,36 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
 
   assert {
     condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "dsql:CreateCluster") &&
+        contains(flatten([statement.Action]), "dsql:TagResource") &&
+        toset(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"]) == toset(keys(local.environment_dsql_tags[environment])) &&
+        alltrue([
+          for key, value in local.environment_dsql_tags[environment] :
+          statement.Condition.StringEquals["aws:RequestTag/${key}"] == value
+        ])
+      ]) == 1
+    ])
+    error_message = "Each initial boundary must admit DSQL create/tag only with the actual eight-key environment tag set and exact values."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      one([
+        for statement in jsondecode(policy.minified_json).Statement :
+        statement.Condition.StringEquals["aws:RequestTag/Name"] == "pawlocal-${environment}" &&
+        statement.Condition.StringEquals["aws:RequestTag/purpose"] == "pawlocal-app-database"
+        if contains(flatten([statement.Action]), "dsql:CreateCluster")
+      ])
+    ])
+    error_message = "Missing or incorrect DSQL Name/purpose request tags must not satisfy an initial boundary allow statement."
+  }
+
+  assert {
+    condition = alltrue([
       for policy in data.aws_iam_policy_document.environment_apply_boundary :
       !strcontains(policy.minified_json, "iam:CreateRole") &&
       !strcontains(policy.minified_json, "iam:DeleteRole") &&
@@ -152,7 +182,7 @@ run "runtime_stage_boundaries_fit_and_stay_isolated" {
       length(policy.minified_json) < 6144 &&
       length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
     ])
-    error_message = "Each runtime-stage apply boundary must stay below both the 6144-byte AWS limit and the 5500-byte repository budget."
+    error_message = "Each runtime-stage apply boundary must stay below both the 6144-byte AWS limit and the 6050-byte repository budget."
   }
 
   assert {
@@ -180,5 +210,14 @@ run "runtime_stage_boundaries_fit_and_stay_isolated" {
       strcontains(policy.minified_json, "cloudfront:UpdateOriginAccessControl")
     ])
     error_message = "The runtime stage must remove broad first-create CloudFront actions after exact handoff ARNs are available."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      !strcontains(policy.minified_json, "dsql:CreateCluster") &&
+      !strcontains(policy.minified_json, "dsql:TagResource")
+    ])
+    error_message = "The runtime boundary must remove DSQL pre-create authorization after the exact cluster ARN is handed off."
   }
 }

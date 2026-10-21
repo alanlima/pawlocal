@@ -3,6 +3,18 @@ locals {
     development = var.development_dsql_cluster_arn
     production  = var.production_dsql_cluster_arn
   }
+  environment_dsql_tags = {
+    for environment in keys(local.environments) : environment => {
+      project     = "pawlocal"
+      environment = environment
+      managedby   = "terraform"
+      component   = "fullstack-mvp"
+      workload    = "application"
+      costcenter  = "personal"
+      Name        = "pawlocal-${environment}"
+      purpose     = "pawlocal-app-database"
+    }
+  }
   environment_cloudfront_handoff_arns = {
     development = compact([var.development_distribution_arn, var.development_oac_arn])
     production  = compact([var.production_distribution_arn, var.production_oac_arn])
@@ -33,7 +45,7 @@ locals {
     "route53:Get*", "route53:List*",
     "sts:GetCallerIdentity"
   ]
-  environment_apply_boundary_max_bytes = 5500
+  environment_apply_boundary_max_bytes = 6050
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
@@ -166,15 +178,9 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    effect    = "Allow"
-    actions   = ["s3:PutBucketTagging"]
-    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
-  }
-
-  statement {
     effect = "Allow"
     actions = [
-      "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource"
+      "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource", "s3:PutBucketTagging"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
   }
@@ -182,8 +188,8 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     effect = "Allow"
     actions = [
-      "s3:DeleteBucket", "s3:PutBucketOwnershipControls",
-      "s3:PutBucketPolicy", "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
+      "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
+      "s3:PutEncryptionConfiguration", "s3:PutPublicAccessBlock"
     ]
     resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
     condition {
@@ -199,11 +205,8 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    effect = "Allow"
-    actions = concat(
-      ["cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
-      local.environment_runtime_cluster_arns[each.key] == "" ? ["dsql:CreateCluster"] : []
-    )
+    effect    = "Allow"
+    actions   = ["cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -218,18 +221,13 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   statement {
-    effect = "Allow"
-    actions = concat(
-      ["cognito-idp:TagResource", "lightsail:TagResource"],
-      local.environment_runtime_cluster_arns[each.key] == "" ? ["dsql:TagResource"] : []
-    )
-    resources = concat([
+    effect  = "Allow"
+    actions = ["cognito-idp:TagResource", "lightsail:TagResource"]
+    resources = [
       "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/${each.value.service_name}"
-      ],
-      local.environment_runtime_cluster_arns[each.key] == "" ? ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"] : []
-    )
+    ]
     condition {
       test     = "Null"
       variable = "aws:ResourceTag/environment"
@@ -244,6 +242,38 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
       test     = "StringEquals"
       variable = "aws:RequestTag/environment"
       values   = [each.key]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.environment_runtime_cluster_arns[each.key] == "" ? [true] : []
+    content {
+      effect    = "Allow"
+      actions   = ["dsql:CreateCluster", "dsql:TagResource"]
+      resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
+      condition {
+        test     = "Null"
+        variable = "aws:ResourceTag/project"
+        values   = ["true"]
+      }
+      condition {
+        test     = "Null"
+        variable = "aws:ResourceTag/environment"
+        values   = ["true"]
+      }
+      dynamic "condition" {
+        for_each = local.environment_dsql_tags[each.key]
+        content {
+          test     = "StringEquals"
+          variable = "aws:RequestTag/${condition.key}"
+          values   = [condition.value]
+        }
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "aws:TagKeys"
+        values   = keys(local.environment_dsql_tags[each.key])
+      }
     }
   }
 
@@ -391,7 +421,7 @@ resource "aws_iam_policy" "environment_apply_boundary" {
   lifecycle {
     precondition {
       condition     = length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json) <= local.environment_apply_boundary_max_bytes
-      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 5500-byte repository budget (AWS maximum: 6144 bytes)."
+      error_message = "The ${each.key} apply boundary is ${length(data.aws_iam_policy_document.environment_apply_boundary[each.key].minified_json)} bytes; it must stay within the 6050-byte repository budget (AWS maximum: 6144 bytes)."
     }
   }
 }

@@ -85,7 +85,7 @@ data "aws_iam_policy_document" "application" {
     sid    = "CreateTaggedEnvironmentResources"
     effect = "Allow"
     actions = concat(
-      ["cloudfront:CreateFunction", "cognito-idp:CreateUserPool", "dsql:CreateCluster", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
+      ["cloudfront:CreateFunction", "cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
       var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["cloudfront:CreateDistribution"] : []
     )
     resources = ["*"]
@@ -109,11 +109,10 @@ data "aws_iam_policy_document" "application" {
   statement {
     sid     = "TagOnlyNewEnvironmentResources"
     effect  = "Allow"
-    actions = ["cloudfront:TagResource", "cognito-idp:TagResource", "dsql:TagResource", "lightsail:TagResource"]
+    actions = ["cloudfront:TagResource", "cognito-idp:TagResource", "lightsail:TagResource"]
     resources = concat([
       "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${var.environment}-spa-routing",
       "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
-      "arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/pawlocal-${var.environment}-api"
       ],
@@ -143,6 +142,36 @@ data "aws_iam_policy_document" "application" {
       test     = "ForAllValues:StringEquals"
       variable = "aws:TagKeys"
       values   = ["project", "environment", "managedby", "component", "workload", "costcenter"]
+    }
+  }
+
+  statement {
+    sid       = "CreateAndTagOnlyNewEnvironmentDSQLCluster"
+    effect    = "Allow"
+    actions   = ["dsql:CreateCluster", "dsql:TagResource"]
+    resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/project"
+      values   = ["true"]
+    }
+    condition {
+      test     = "Null"
+      variable = "aws:ResourceTag/environment"
+      values   = ["true"]
+    }
+    dynamic "condition" {
+      for_each = local.dsql_tags
+      content {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/${condition.key}"
+        values   = [condition.value]
+      }
+    }
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "aws:TagKeys"
+      values   = keys(local.dsql_tags)
     }
   }
 
