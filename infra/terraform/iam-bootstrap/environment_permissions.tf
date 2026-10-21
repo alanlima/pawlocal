@@ -15,9 +15,19 @@ locals {
       purpose     = "pawlocal-app-database"
     }
   }
+  environment_cloudfront_distribution_arns = {
+    development = var.development_distribution_arn
+    production  = var.production_distribution_arn
+  }
+  environment_cloudfront_oac_arns = {
+    development = var.development_oac_arn
+    production  = var.production_oac_arn
+  }
   environment_cloudfront_handoff_arns = {
-    development = compact([var.development_distribution_arn, var.development_oac_arn])
-    production  = compact([var.production_distribution_arn, var.production_oac_arn])
+    for environment in keys(local.environments) : environment => compact([
+      local.environment_cloudfront_distribution_arns[environment],
+      local.environment_cloudfront_oac_arns[environment]
+    ])
   }
   environment_application_policy_arns = {
     for environment in keys(local.environments) : environment => [
@@ -375,11 +385,20 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   }
 
   dynamic "statement" {
-    for_each = length(local.environment_cloudfront_handoff_arns[each.key]) == 0 ? [] : [true]
+    for_each = local.environment_cloudfront_distribution_arns[each.key] == "" ? [] : [local.environment_cloudfront_distribution_arns[each.key]]
     content {
       effect    = "Allow"
-      actions   = ["cloudfront:DeleteDistribution", "cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateDistribution", "cloudfront:UpdateOriginAccessControl"]
-      resources = local.environment_cloudfront_handoff_arns[each.key]
+      actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]
+      resources = [statement.value]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.environment_cloudfront_oac_arns[each.key] == "" ? [] : [local.environment_cloudfront_oac_arns[each.key]]
+    content {
+      effect    = "Allow"
+      actions   = ["cloudfront:DeleteOriginAccessControl", "cloudfront:UpdateOriginAccessControl"]
+      resources = [statement.value]
     }
   }
 

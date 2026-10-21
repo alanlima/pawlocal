@@ -121,6 +121,17 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   assert {
     condition = alltrue([
       for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      !strcontains(policy.minified_json, "cloudfront:DeleteDistribution") &&
+      !strcontains(policy.minified_json, "cloudfront:UpdateDistribution") &&
+      !strcontains(policy.minified_json, "cloudfront:DeleteOriginAccessControl") &&
+      !strcontains(policy.minified_json, "cloudfront:UpdateOriginAccessControl")
+    ])
+    error_message = "Initial-stage boundaries must fail closed for CloudFront update/delete actions until exact resource ARNs are handed off."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
         if contains(flatten([statement.Action]), "s3:PutBucketOwnershipControls") &&
@@ -278,10 +289,115 @@ run "runtime_stage_boundaries_fit_and_stay_isolated" {
 
   assert {
     condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "cloudfront:DeleteDistribution") &&
+        contains(flatten([statement.Action]), "cloudfront:UpdateDistribution") &&
+        !contains(flatten([statement.Action]), "cloudfront:DeleteOriginAccessControl") &&
+        !contains(flatten([statement.Action]), "cloudfront:UpdateOriginAccessControl") &&
+        toset(flatten([statement.Resource])) == toset([
+          environment == "development" ? var.development_distribution_arn : var.production_distribution_arn
+        ])
+      ]) == 1
+    ])
+    error_message = "Distribution update/delete actions must target only the matching exact distribution ARN."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "cloudfront:DeleteOriginAccessControl") &&
+        contains(flatten([statement.Action]), "cloudfront:UpdateOriginAccessControl") &&
+        !contains(flatten([statement.Action]), "cloudfront:DeleteDistribution") &&
+        !contains(flatten([statement.Action]), "cloudfront:UpdateDistribution") &&
+        toset(flatten([statement.Resource])) == toset([
+          environment == "development" ? var.development_oac_arn : var.production_oac_arn
+        ])
+      ]) == 1
+    ])
+    error_message = "OAC update/delete actions must target only the matching exact OAC ARN."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
+      !strcontains(
+        policy.minified_json,
+        environment == "development" ? var.production_distribution_arn : var.development_distribution_arn
+      ) &&
+      !strcontains(
+        policy.minified_json,
+        environment == "development" ? var.production_oac_arn : var.development_oac_arn
+      )
+    ])
+    error_message = "Exact CloudFront handoff resources must remain isolated to their matching environment boundary."
+  }
+
+  assert {
+    condition = alltrue([
       for policy in data.aws_iam_policy_document.environment_apply_boundary :
       !strcontains(policy.minified_json, "dsql:CreateCluster") &&
       !strcontains(policy.minified_json, "dsql:TagResource")
     ])
     error_message = "The runtime boundary must remove DSQL pre-create authorization after the exact cluster ARN is handed off."
+  }
+}
+
+run "partial_cloudfront_handoffs_stay_resource_specific" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    terraform_state_bucket_name  = "test-state-bucket"
+    github_repository            = "example/pawlocal"
+    github_owner_id              = "1"
+    github_repository_id         = "2"
+    manage_github_oidc_provider  = true
+    route53_zone_id              = "ZTEST"
+    domain_name                  = "example.test"
+    development_distribution_arn = "arn:aws:cloudfront::111111111111:distribution/DEVELOPMENT"
+    production_oac_arn           = "arn:aws:cloudfront::111111111111:origin-access-control/PRODUCTION"
+  }
+
+  assert {
+    condition = (
+      length([
+        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "cloudfront:UpdateDistribution") &&
+        toset(flatten([statement.Resource])) == toset([var.development_distribution_arn])
+      ]) == 1 &&
+      !strcontains(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json, "cloudfront:UpdateOriginAccessControl") &&
+      !strcontains(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json, var.production_oac_arn)
+    )
+    error_message = "A distribution-only handoff must authorize only the exact matching distribution actions and resource."
+  }
+
+  assert {
+    condition = (
+      length([
+        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["production"].minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "cloudfront:UpdateOriginAccessControl") &&
+        toset(flatten([statement.Resource])) == toset([var.production_oac_arn])
+      ]) == 1 &&
+      !strcontains(data.aws_iam_policy_document.environment_apply_boundary["production"].minified_json, "cloudfront:UpdateDistribution") &&
+      !strcontains(data.aws_iam_policy_document.environment_apply_boundary["production"].minified_json, var.development_distribution_arn)
+    )
+    error_message = "An OAC-only handoff must authorize only the exact matching OAC actions and resource."
+  }
+
+  assert {
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.environment_apply_boundary :
+      !strcontains(policy.minified_json, "cloudfront:CreateDistribution") &&
+      !strcontains(policy.minified_json, "cloudfront:CreateOriginAccessControl") &&
+      length(policy.minified_json) <= local.environment_apply_boundary_max_bytes
+    ])
+    error_message = "A partial handoff must stay fail closed for broad create actions and within the repository policy-size budget."
   }
 }
