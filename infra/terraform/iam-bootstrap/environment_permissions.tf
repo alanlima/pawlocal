@@ -11,15 +11,30 @@ locals {
       purpose     = "pawlocal-app-database"
     }
   }
+  environment_policy_arns = {
+    for environment in keys(local.environments) : environment => {
+      application       = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application"
+      frontend_publish  = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish"
+      runtime           = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
+      dsql_setup        = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
+      frontend_teardown = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-teardown"
+    }
+  }
   environment_application_policy_arns = {
-    for environment in keys(local.environments) : environment => concat([
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-application",
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-publish",
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime",
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
-      ], environment == "production" ? [
-      "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-production-frontend-teardown"
-    ] : [])
+    for environment, policies in local.environment_policy_arns : environment => [
+      policies.application,
+      policies.frontend_publish,
+      policies.runtime,
+      policies.dsql_setup,
+      policies.frontend_teardown
+    ]
+  }
+  environment_apply_attachment_policy_arns = {
+    for environment, policies in local.environment_policy_arns : environment => [
+      policies.application,
+      policies.dsql_setup,
+      policies.frontend_teardown
+    ]
   }
   # Boundaries cap mutation while the matching identity policy retains the
   # provider's exact read list. Read-only wildcards keep the rendered boundary
@@ -37,7 +52,7 @@ locals {
 }
 
 # Bootstrap owns this maximum-permission envelope. Environment roots own the
-# four named policies and may attach them only to their matching roles.
+# named policies and may attach them only to their matching roles.
 data "aws_iam_policy_document" "environment_apply_boundary" {
   for_each = local.environments
 
@@ -150,17 +165,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect = "Allow"
-    actions = concat([
+    actions = [
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
-      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration"
-      ], each.key == "production" ? [
-      "s3:DeleteObject"
-    ] : [])
-    resources = concat([
-      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"
-      ], each.key == "production" ? [
+      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration", "s3:DeleteObject"
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*",
       "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*/*"
-    ] : [])
+    ]
   }
 
   statement {

@@ -373,7 +373,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("environment_apply_boundary_max_bytes = 6100", boundary)
         self.assertIn(".minified_json", boundary)
         self.assertIn("length(policy.minified_json) < 6144", test_file)
-        self.assertIn('environment_apply_boundary["development"].minified_json) == 6040', test_file)
+        self.assertIn('environment_apply_boundary["development"].minified_json) == 6100', test_file)
         self.assertIn('!contains(flatten([statement.Resource]), "*")', test_file)
         self.assertIn("Post-create DSQL and Lightsail mutations", test_file)
         self.assertIn("Post-create Cognito mutations", test_file)
@@ -385,6 +385,23 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn("cloudfront:UntagResource", test_file)
         self.assertIn("terraform test -no-color", workflow)
         self.assertIn("matrix.root == 'modules/pawlocal-environment'", workflow)
+
+    def test_shared_bootstrap_permissions_are_environment_data_driven(self) -> None:
+        bootstrap = (ROOT / "infra/terraform/iam-bootstrap/main.tf").read_text(encoding="utf-8")
+        permissions = (
+            ROOT / "infra/terraform/iam-bootstrap/environment_permissions.tf"
+        ).read_text(encoding="utf-8")
+        policy_design = (
+            ROOT / "infra/terraform/iam-bootstrap/POLICY_DESIGN.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("subject_environments = config.apply_subject_environments", bootstrap)
+        self.assertIn("local.environment_apply_attachment_policy_arns", bootstrap)
+        self.assertIn("environment_policy_arns = {", permissions)
+        self.assertIn("environment_apply_attachment_policy_arns = {", permissions)
+        self.assertNotRegex(bootstrap, r'(?:env|environment|each\.key)\s*==\s*"(?:development|production)"')
+        self.assertNotRegex(permissions, r'(?:environment|each\.key)\s*==\s*"(?:development|production)"')
+        self.assertIn("must not branch on literal environment names", policy_design)
 
     def test_create_time_tagging_uses_request_tags_and_post_create_mutation_uses_resource_tags(self) -> None:
         for path in (

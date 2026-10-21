@@ -50,8 +50,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6040
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 6040-byte boundary shape."
+    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6100
+    error_message = "The real-input-equivalent development fixture must retain the reviewed 6100-byte boundary shape."
   }
 
   assert {
@@ -66,21 +66,22 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition = (
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
       length([
-        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json).Statement : statement
+        for statement in jsondecode(policy.minified_json).Statement : statement
         if contains(flatten([statement.Action]), "s3:DeleteObject") &&
-        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-development-*/*")
-      ]) == 0 &&
-      length([
-        for statement in jsondecode(data.aws_iam_policy_document.environment_apply_boundary["production"].minified_json).Statement : statement
-        if contains(flatten([statement.Action]), "s3:DeleteObject") &&
-        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-production-*/*")
+        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*/*")
       ]) == 1 &&
-      !strcontains(data.aws_iam_policy_document.role_permissions["development-apply"].minified_json, "pawlocal-development-frontend-teardown") &&
-      strcontains(data.aws_iam_policy_document.role_permissions["production-apply"].minified_json, "pawlocal-production-frontend-teardown")
-    )
-    error_message = "Only the production apply boundary and role may expose the default-off teardown policy ceiling."
+      strcontains(data.aws_iam_policy_document.role_permissions["${environment}-apply"].minified_json, local.environment_policy_arns[environment].frontend_teardown) &&
+      length(local.environment_application_policy_arns[environment]) == 5 &&
+      toset(local.environment_apply_attachment_policy_arns[environment]) == toset([
+        local.environment_policy_arns[environment].application,
+        local.environment_policy_arns[environment].dsql_setup,
+        local.environment_policy_arns[environment].frontend_teardown
+      ])
+    ])
+    error_message = "Each environment apply role must have the same matching-environment policy families and object-deletion boundary ceiling."
   }
 
   assert {
