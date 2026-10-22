@@ -370,7 +370,8 @@ def publish():
                                 else "Operation step did not start."
                             )
                             row.mutation = "possible" if started else "none"
-            except Exception:  # noqa: BLE001 - only a fixed incomplete report
+            except Exception as error:  # noqa: BLE001 - preserve incomplete report and operational context
+                print(f"Cannot build configuration summary inventory: {type(error).__name__}: {error}", file=sys.stderr)
                 report.inventory = False
             content = report.render()
         if os.environ.get("JOB_STATUS") == "cancelled":
@@ -387,9 +388,9 @@ def publish():
             os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8", newline="\n"
         ) as output:
             output.write(content)
-    except Exception:  # noqa: BLE001 - never render paths or data-bearing exceptions
+    except Exception as error:  # noqa: BLE001 - keep standard operational errors
         print(
-            "Cannot publish configuration summary; inspect the job privately.",
+            f"Cannot publish configuration summary: {type(error).__name__}: {error}",
             file=sys.stderr,
         )
         return 1

@@ -334,14 +334,15 @@ class SummaryTests(unittest.TestCase):
             "\n".join(r for r in content.splitlines() if r.startswith("| /pawlocal/")),
         )
 
-    def test_summary_write_failure_fails_entrypoint_without_payload(self):
+    def test_summary_write_failure_fails_entrypoint_with_operational_reason(self):
         with (
-            patch.object(job_summary.Report, "write", side_effect=OSError(SENTINEL)),
+            patch.object(job_summary.Report, "write", side_effect=OSError("disk quota exceeded")),
             patch.dict(os.environ, {"PAWLOCAL_CONFIG_GITHUB_TOKEN": ""}),
             contextlib.redirect_stderr(io.StringIO()) as error,
         ):
             self.assertEqual(module.main(["--environment", "development"]), 1)
         self.assertNotIn(SENTINEL, error.getvalue())
+        self.assertIn("Cannot write configuration summary: disk quota exceeded", error.getvalue())
 
     def test_secret_write_rejection_and_unknown_acceptance(self):
         mapping = module.Mapping(
@@ -383,6 +384,20 @@ class SummaryTests(unittest.TestCase):
                 report.row(mapping).mutation, "none" if code == 403 else "possible"
             )
             self.assertNotIn(SENTINEL, report.render())
+
+    def test_cleanup_entrypoint_retains_standard_failure_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "summary.md")}),
+                patch.object(cleanup, "GitHub", return_value=object()),
+                patch.object(cleanup, "cleanup", side_effect=RuntimeError("GitHub HTTP 403: permission denied")),
+                contextlib.redirect_stderr(io.StringIO()) as errors,
+            ):
+                status = cleanup.main(["--environment", "development", "--operation", "legacy-cleanup",
+                                       "--confirmation", "CLEAN legacy development"])
+            self.assertEqual(status, 1)
+            self.assertIn("RuntimeError: GitHub HTTP 403: permission denied", errors.getvalue())
+            self.assertNotIn(SENTINEL, errors.getvalue())
 
     def test_cleanup_invalid_confirmation_never_reports_deletion(self):
         api = CleanupAPI()
@@ -751,6 +766,32 @@ class SummaryTests(unittest.TestCase):
             self.assertIn("**FAILED**", text)
             self.assertIn("| Created |", text)
             self.assertNotIn("**INCOMPLETE**", text)
+
+    def test_publisher_preserves_inventory_and_destination_failure_reasons(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "published.md"
+            args = ["summary", "--environment", "development", "--mode", "audit",
+                    "--selection", "all", "--operation", "reconcile"]
+            with (
+                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
+                                        "GITHUB_STEP_SUMMARY": str(destination)}),
+                patch("sys.argv", args),
+                patch.object(module, "load_mappings", side_effect=ValueError("configuration mapping schema invalid")),
+                contextlib.redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(job_summary.publish(), 0)
+            self.assertIn("ValueError: configuration mapping schema invalid", errors.getvalue())
+            self.assertIn("**INCOMPLETE**", destination.read_text())
+            self.assertNotIn("configuration mapping schema invalid", destination.read_text())
+            with (
+                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
+                                        "GITHUB_STEP_SUMMARY": str(destination)}),
+                patch("sys.argv", args),
+                patch("builtins.open", side_effect=PermissionError("summary destination permission denied")),
+                contextlib.redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(job_summary.publish(), 1)
+            self.assertIn("PermissionError: summary destination permission denied", errors.getvalue())
 
     def test_interrupted_cleanup_fallback_has_exact_targets(self):
         with tempfile.TemporaryDirectory() as directory:

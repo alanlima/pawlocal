@@ -25,13 +25,13 @@ def check(plan, client, allowed):
             raise ReconciliationError("Parameter replacement requires separate review")
         try:
             client.get_parameter(Name=name, WithDecryption=False)
-        except Exception as error:  # noqa: BLE001 - never render SDK payloads
+        except Exception as error:  # noqa: BLE001 - retain normal SDK error context
             if (
                 getattr(error, "response", {}).get("Error", {}).get("Code")
                 == "ParameterNotFound"
             ):
                 continue
-            raise ReconciliationError("Parameter collision inventory failed") from None
+            raise ReconciliationError(f"Parameter collision inventory failed: {error}") from error
         raise ReconciliationError("Existing parameter blocks new Terraform ownership")
 
 
@@ -73,10 +73,10 @@ def main():
             boto3.client("ssm"),
             allowed,
         )
-    except Exception:  # noqa: BLE001 - never print plan/SDK payloads
+    except Exception as error:  # noqa: BLE001 - keep standard operational errors
         raise SystemExit(
-            "Parameter collision check failed; inspect ownership privately"
-        ) from None
+            f"Parameter collision check failed: {type(error).__name__}: {error}"
+        ) from error
     print("Parameter creation collision inventory passed")
 
 

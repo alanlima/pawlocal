@@ -1,36 +1,25 @@
 #!/usr/bin/env python3
-"""Run Terraform with either captured output or live pseudo-terminal diagnostics."""
+"""Run Terraform with live output, its existing local log, and exact exit status."""
 
 from __future__ import annotations
 
 import argparse
-import os
 import shlex
 import subprocess
 from pathlib import Path
 
 
 def run_command(log_path: Path, command: list[str]) -> int:
-    if os.environ.get("PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS") == "true":
-        completed = subprocess.run(
-            [
-                "script",
-                "--quiet",
-                "--return",
-                f"--command={shlex.join(command)}",
-                str(log_path),
-            ],
-            check=False,
-        )
-        return completed.returncode
-
-    with log_path.open("wb") as captured:
-        completed = subprocess.run(
-            command,
-            check=False,
-            stdout=captured,
-            stderr=subprocess.STDOUT,
-        )
+    completed = subprocess.run(
+        [
+            "script",
+            "--quiet",
+            "--return",
+            f"--command={shlex.join(command)}",
+            str(log_path),
+        ],
+        check=False,
+    )
     return completed.returncode
 
 

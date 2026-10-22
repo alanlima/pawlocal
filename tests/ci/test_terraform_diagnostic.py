@@ -144,17 +144,15 @@ Output: Aurora DSQL protected setup failed (environment=development, phase=conne
             "Explanation: Terraform timed out while waiting for the resource operation.\n",
         )
 
-    def test_workflow_gates_both_plan_and_apply_diagnostics(self) -> None:
+    def test_workflow_streams_real_errors_without_legacy_failure_sanitizer(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn(
-            "PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}",
-            workflow,
-        )
-        self.assertEqual(workflow.count("terraform-plan-diagnostic.py"), 2)
-        self.assertIn('--phase plan "$RUNNER_TEMP/terraform-plan.log"', workflow)
-        self.assertIn('--phase apply "$RUNNER_TEMP/terraform-apply.log"', workflow)
-        self.assertIn('> "$RUNNER_TEMP/terraform-plan.log" 2>&1', workflow)
+        self.assertNotIn("terraform-plan-diagnostic.py", workflow)
+        self.assertNotIn('> "$RUNNER_TEMP/terraform-plan.log" 2>&1', workflow)
+        self.assertIn('--log "$RUNNER_TEMP/terraform-plan.log"', workflow)
         self.assertIn('--log "$RUNNER_TEMP/terraform-apply.log"', workflow)
+        # The existing exact-plan inspection/ownership gate remains opt-in.
+        self.assertIn("PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}", workflow)
+
 
 
 if __name__ == "__main__":

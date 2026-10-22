@@ -2,6 +2,8 @@
 
 This is the central operator and contributor reference for PawLocal's GitHub Actions workflows. It explains when each workflow runs, what it does, which parameters it accepts, and how to obtain inputs that must be copied exactly.
 
+Temporary MVP logging policy (owner-approved 23 October 2026): all GitHub Actions jobs retain ordinary operational stdout/stderr and useful failure context in their logs, using GitHub's normal secret masking. Terraform init/plan/apply and destroy plans use live output by default, independently of the optional exact-plan inspection flag. Programmatic plan/state JSON and credential/secret transport remain internal. The owner accepts operational-log exposure risk while broader workflow review, log purging and Environment recreation are deferred; this changes no approval, ownership or production-promotion gate.
+
 The workflow files remain authoritative. The synchronization test in `tests/ci/test_github_actions_reference.py` fails when a workflow, manual-dispatch input, reusable-call input, or protected configuration reference is added, removed, or renamed without updating this document. Reviewers must still verify that the purpose, sequence, accepted values, and parameter instructions remain accurate when workflow behavior changes.
 
 ## Configuration reconciliation delivery contract
@@ -340,7 +342,7 @@ It also provides the secret `PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN`. Foundation de
 
 The matching `<environment>-apply` Environment provides `AWS_REGION`, `PAWLOCAL_AWS_ACCOUNT_ID`, `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_TERRAFORM_PLAN_BUCKET`, and `PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN`. The `production-destroy-prepare` and `production-destroy` approval Environments provide that same apply-side set. They do not supply Terraform configuration values because they apply the exact saved plan produced under `production-plan`.
 
-`PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS` is read through the GitHub `vars` context and controls only diagnostic visibility; it does not change the plan or permissions.
+`PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS` is read through the GitHub `vars` context and retains its existing explicit saved-plan inspection and ownership-review gate behavior. Ordinary operation logs are always visible under the temporary MVP policy; enabling normal logging does not set this flag or bypass its review requirement.
 
 Lambda and CloudWatch Logs operations for the Cognito pre sign-up trigger use the stable Terraform provider alias `aws.cognito_deployment`; Cognito itself and every unrelated resource continue to use the default provider. Each plan or destroy-plan job constructs the delegated role `pawlocal-<environment>-cognito-terraform-plan`. Each apply, teardown-preparation apply, or destroy-apply job constructs `pawlocal-<environment>-cognito-terraform-apply`. The ARN is derived from the workflow-local `AWS_PARTITION=aws`, the already required 12-digit `PAWLOCAL_AWS_ACCOUNT_ID`, the exact environment, and the normalized `plan` or `apply` purpose. No new GitHub role-ARN variable and no default `TF_VAR_cognito_pre_sign_up_role_arn` are used.
 

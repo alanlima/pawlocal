@@ -237,13 +237,16 @@ class ReconcileTests(unittest.TestCase):
         for value in (
             {"Type": "SecureString", "Value": SENTINEL},
             {"Type": "String", "Value": ""},
-            Exception(SENTINEL),
+            Exception("AccessDeniedException: caller cannot perform ssm:GetParameter"),
         ):
             with (
                 self.subTest(value=value),
                 self.assertRaises(module.ReconciliationError) as failure,
             ):
                 module.ParameterStore(FakeSSM({mapping.store_key: value})).read(mapping)
+            if isinstance(value, Exception):
+                self.assertIn("AccessDeniedException", str(failure.exception))
+                self.assertIn("ssm:GetParameter", str(failure.exception))
             self.assertNotIn(SENTINEL, str(failure.exception))
 
     def test_secret_encrypted_write_only_and_non_disclosure(self):
@@ -303,26 +306,29 @@ class ReconcileTests(unittest.TestCase):
         self.assertTrue(any(r.startswith("unchanged ") for r in reports))
         self.assertNotIn(SENTINEL, "\n".join(reports))
 
-    def test_authentication_and_api_transport_errors_are_value_free(self):
+    def test_authentication_and_api_transport_errors_retain_status_and_reason(self):
         for repository, token in (("other/repo", SENTINEL), ("alanlima/pawlocal", "")):
             with self.assertRaises(module.ReconciliationError):
                 module.GitHub(repository, token)
         for code in (401, 403, 429, 500):
 
             def denied(request, timeout, code=code):
-                raise HTTPError(request.full_url, code, SENTINEL, {}, None)
+                raise HTTPError(request.full_url, code, "Resource not accessible by integration", {}, None)
 
             with self.assertRaises(module.ReconciliationError) as failure:
                 self.github(denied).request(
                     "GET", "environments/development/variables/TEST", missing=True
                 )
+            self.assertIn(f"HTTP Error {code}", str(failure.exception))
+            self.assertIn("Resource not accessible by integration", str(failure.exception))
             self.assertNotIn(SENTINEL, str(failure.exception))
 
         def disconnected(request, timeout):
-            raise URLError(SENTINEL)
+            raise URLError("connection reset by peer")
 
-        with self.assertRaises(module.ReconciliationError):
+        with self.assertRaises(module.ReconciliationError) as failure:
             self.github(disconnected).request("GET", "test")
+        self.assertIn("connection reset by peer", str(failure.exception))
 
     def test_recovery_targets_only_accept_exact_existing_sources(self):
         for suffix, name in (
@@ -392,7 +398,7 @@ class ReconcileTests(unittest.TestCase):
             },
         )
 
-    def test_main_suppresses_unexpected_exception_and_rejects_unknown_mode(self):
+    def test_main_reports_operational_exception_and_rejects_unknown_mode(self):
         captured = io.StringIO()
         with (
             patch.dict(
@@ -402,11 +408,12 @@ class ReconcileTests(unittest.TestCase):
                     "PAWLOCAL_CONFIG_GITHUB_TOKEN": SENTINEL,
                 },
             ),
-            patch.object(module, "reconcile", side_effect=RuntimeError(SENTINEL)),
+            patch.object(module, "reconcile", side_effect=RuntimeError("SSM endpoint connection refused")),
             contextlib.redirect_stderr(captured),
         ):
             self.assertEqual(module.main(["--environment", "development"]), 1)
         self.assertNotIn(SENTINEL, captured.getvalue())
+        self.assertIn("RuntimeError: SSM endpoint connection refused", captured.getvalue())
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             module.main(["--environment", "development", "--mode", "invalid"])
 

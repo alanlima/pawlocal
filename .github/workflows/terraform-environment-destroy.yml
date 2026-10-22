@@ -146,8 +146,8 @@ jobs:
         shell: bash
         run: |
           python .github/scripts/verify-terraform-source-checkout.py
-          terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=destroy-prepare.tfplan \
-            > "$RUNNER_TEMP/terraform-destroy-prepare.log" 2>&1
+          python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-destroy-prepare.log" -- \
+            terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=destroy-prepare.tfplan
           terraform -chdir="$TF_ROOT" show -json destroy-prepare.tfplan > "$RUNNER_TEMP/destroy-prepare.json"
           python .github/scripts/terraform-production-lifecycle.py validate-preparation "$RUNNER_TEMP/destroy-prepare.json"
           echo 'The saved preparation plan contains only the complete default-off teardown-control transition.' >> "$GITHUB_STEP_SUMMARY"
@@ -326,8 +326,8 @@ jobs:
             -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
           python .github/scripts/verify-terraform-source-checkout.py
-          terraform -chdir="$TF_ROOT" plan -destroy -input=false -lock-timeout=5m -no-color -out=destroy.tfplan \
-            > "$RUNNER_TEMP/terraform-destroy.log" 2>&1
+          python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-destroy.log" -- \
+            terraform -chdir="$TF_ROOT" plan -destroy -input=false -lock-timeout=5m -no-color -out=destroy.tfplan
           terraform -chdir="$TF_ROOT" show -json destroy.tfplan > "$RUNNER_TEMP/destroy.json"
           python .github/scripts/terraform-production-lifecycle.py validate-destroy "$RUNNER_TEMP/destroy.json"
           python .github/scripts/terraform-destroy-summary.py "$RUNNER_TEMP/destroy.json" >> "$GITHUB_STEP_SUMMARY"

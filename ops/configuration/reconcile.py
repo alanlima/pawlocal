@@ -23,7 +23,7 @@ from job_summary import Report
 
 
 class ReconciliationError(Exception):
-    """A fixed, value-free error safe for public reports."""
+    """A reconciliation failure with operational context for Actions logs."""
 
     mutation_rejected = False
 
@@ -335,13 +335,13 @@ class ParameterStore:
             parameter = self.client.get_parameter(
                 Name=mapping.store_key, WithDecryption=mapping.secret
             )["Parameter"]
-        except Exception as error:  # noqa: BLE001 - never render SDK payloads
+        except Exception as error:  # noqa: BLE001 - retain normal SDK error context
             if (
                 getattr(error, "response", {}).get("Error", {}).get("Code")
                 == "ParameterNotFound"
             ):
                 return None
-            raise ReconciliationError("Parameter Store access failed") from None
+            raise ReconciliationError(f"Parameter Store access failed: {error}") from error
         expected = "SecureString" if mapping.secret else "String"
         if (
             parameter.get("Type") != expected
@@ -386,13 +386,13 @@ class GitHub:
         except HTTPError as error:
             if missing and error.code == 404:
                 return None
-            failure = ReconciliationError("GitHub API request failed")
+            failure = ReconciliationError(f"GitHub API request failed: {error}")
             failure.mutation_rejected = 400 <= error.code < 500 and error.code != 408
-            raise failure from None
-        except (URLError, OSError, ValueError):
+            raise failure from error
+        except (URLError, OSError, ValueError) as error:
             raise ReconciliationError(
-                "GitHub API transport or response failed"
-            ) from None
+                f"GitHub API transport or response failed: {error}"
+            ) from error
 
     def mutate(self, method, path, payload=None, progress=None):
         if progress:
@@ -636,17 +636,16 @@ def main(argv=None):
     except ReconciliationError as error:
         print(str(error), file=sys.stderr)
         status = 1
-    except Exception:  # noqa: BLE001 - final non-disclosure boundary
-        # SDK/library exceptions can contain response payloads. Never render them.
+    except Exception as error:  # noqa: BLE001 - keep standard operational errors
         print(
-            "Reconciliation failed; inspect configuration and permissions privately",
+            f"Reconciliation failed: {type(error).__name__}: {error}",
             file=sys.stderr,
         )
         status = 1
     try:
         summary.write()
-    except Exception:  # noqa: BLE001 - summary failure never authorizes publication
-        print("Cannot write configuration summary.", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 - summary failure never authorizes publication
+        print(f"Cannot write configuration summary: {error}", file=sys.stderr)
         status = 1
     return status
 

@@ -492,26 +492,37 @@ class DiagnosticsTests(unittest.TestCase):
                 self.assertEqual(stderr.getvalue(), result.stderr.decode())
 
     def test_programmatic_show_json_is_returned_privately_without_log_dump(self):
-        result = Mock(returncode=0, stdout=b'{"planned_values":{"PRIVATE_PLAN_SENTINEL":true}}', stderr=b"PRIVATE_SHOW_CONTEXT")
+        result = Mock(returncode=0, stdout=b'{"planned_values":{"PRIVATE_PLAN_SENTINEL":true}}', stderr=b"Useful Terraform show error context")
         with patch.object(bootstrap, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()) as stdout, \
              contextlib.redirect_stderr(io.StringIO()) as stderr:
             self.assertIs(bootstrap.tf("show", "-json", "private-plan"), result)
             self.assertEqual(stdout.getvalue(), "")
-            self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(stderr.getvalue(), result.stderr.decode())
 
-    def test_raw_exception_never_reaches_console_or_job_summary(self):
+    def test_runtime_error_context_is_logged_while_summary_retains_fixed_code(self):
         with tempfile.TemporaryDirectory() as directory:
             summary = Path(directory) / "summary.md"
             with patch.object(bootstrap, "PRIVATE", Path(directory) / "private"), \
-                 patch.object(bootstrap, "make_plan", side_effect=Exception("SECRET_KEY PRIVATE_POLICY RAW_TERRAFORM")), \
+                 patch.object(bootstrap, "make_plan", side_effect=Exception("AccessDenied: missing s3:ListBucket on the state bucket")), \
                  patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), \
-                 patch("sys.argv", [str(SCRIPT), "plan"]), contextlib.redirect_stdout(io.StringIO()) as console:
+                 patch("sys.argv", [str(SCRIPT), "plan"]), contextlib.redirect_stdout(io.StringIO()) as console, \
+                 contextlib.redirect_stderr(io.StringIO()) as stderr:
                 self.assertEqual(bootstrap.main(), 1)
             text = summary.read_text() + console.getvalue()
-            self.assertNotIn("SECRET_KEY", text)
-            self.assertNotIn("PRIVATE_POLICY", text)
+            self.assertIn("AccessDenied: missing s3:ListBucket", stderr.getvalue())
             self.assertIn("OPERATION_FAILED", text)
             self.assertIn("fresh **plan**", text)
+
+    def test_github_http_error_preserves_status_without_dumping_response_or_token(self):
+        error = bootstrap.urllib.error.HTTPError("https://api.github.com/repos/alanlima/pawlocal/actions", 403,
+            "Forbidden", {}, io.BytesIO(b"PRIVATE_GITHUB_RESPONSE_BODY"))
+        with patch.object(bootstrap.urllib.request, "urlopen", side_effect=error), \
+             patch.dict(os.environ, {"GH_TOKEN": "PRIVATE_GITHUB_TOKEN"}), contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with self.assertRaisesRegex(bootstrap.Stop, "GITHUB_REQUEST_FAILED"):
+                bootstrap.api("/repos/alanlima/pawlocal/actions")
+        self.assertIn("403: Forbidden", stderr.getvalue())
+        self.assertNotIn("PRIVATE_GITHUB_TOKEN", stderr.getvalue())
+        self.assertNotIn("PRIVATE_GITHUB_RESPONSE_BODY", stderr.getvalue())
 
     def test_partial_apply_reports_recovery_without_replay(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -101,6 +101,8 @@ def tf(*arguments, allowed=(0,)):
     if arguments[0] in {"init", "plan", "apply", "workspace"}:
         sys.stdout.write(result.stdout.decode("utf-8", errors="replace"))
         sys.stderr.write(result.stderr.decode("utf-8", errors="replace"))
+    elif arguments[0] == "show":
+        sys.stderr.write(result.stderr.decode("utf-8", errors="replace"))
     if result.returncode not in allowed:
         operation = arguments[0].upper() if arguments[0] in {"init", "plan", "show", "apply", "workspace"} else "COMMAND"
         raise Stop(f"TERRAFORM_{operation}_FAILED") from None
@@ -116,7 +118,8 @@ def api(path):
         with urllib.request.urlopen(request, timeout=30) as response:
             raw = response.read()
             return json.loads(raw) if raw else None
-    except urllib.error.HTTPError:
+    except urllib.error.HTTPError as error:
+        print(str(error), file=sys.stderr)
         raise Stop("GITHUB_REQUEST_FAILED") from None
 
 
@@ -531,7 +534,7 @@ def failure_summary(command, code):
     }.get(code, "The execution safety check did not pass. Correct the named condition before dispatching a fresh plan.")
     if code.startswith("MISSING_"):
         explanation = f"Configure the required Environment variable or secret **`{code[8:]}`**. Its value is omitted."
-    summary("Incomplete", f"**{command} stopped safely** (`{code}`). {status}\n\n{explanation}\n\nFor failed or partial apply, dispatch a fresh **plan** and review it again. If a reader-role identity changed after a successful apply, use the owner setup script **publish-reader-roles**, then the existing configuration reconciliation workflow. Ordinary Terraform operation output is available in the step logs under the temporary MVP logging exception. Programmatic plan JSON and direct state/API payloads remain internal.")
+    summary("Incomplete", f"**{command} stopped safely** (`{code}`). {status}\n\n{explanation}\n\nFor failed or partial apply, dispatch a fresh **plan** and review it again. If a reader-role identity changed after a successful apply, use the owner setup script **publish-reader-roles**, then the existing configuration reconciliation workflow. Ordinary Terraform operation output is available in the step logs under the temporary MVP logging exception. Programmatic plan JSON stdout and direct state/API payloads remain internal; Terraform show errors are available in the step logs.")
 
 
 def main():
@@ -555,6 +558,8 @@ def main():
         elif args.command == "apply":
             apply_plan()
     except Exception as error:
+        if not isinstance(error, Stop):
+            print(str(error), file=sys.stderr)
         code = str(error) if isinstance(error, Stop) else "OPERATION_FAILED"
         failure_summary(args.command, code)
         print(f"::error::IAM bootstrap stopped ({code}). See the job summary for next steps.")
