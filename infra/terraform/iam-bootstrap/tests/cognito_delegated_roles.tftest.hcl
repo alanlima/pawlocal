@@ -171,7 +171,10 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
         for statement in jsondecode(policy.minified_json).Statement : statement
         if statement.Sid == "TagNewLogGroup" &&
         toset(flatten([statement.Action])) == toset(["logs:TagResource"]) &&
-        toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].log_group_tags]) &&
+        toset(flatten([statement.Resource])) == toset([
+          local.cognito_resource_arns[environment].log_group_tags,
+          local.cognito_resource_arns[environment].log_group
+        ]) &&
         toset(keys(statement.Condition)) == toset(["StringEquals", "ForAllValues:StringEquals"]) &&
         statement.Condition.StringEquals == {
           for key, value in local.cognito_application_tags[environment] : "aws:RequestTag/${key}" => value
@@ -204,22 +207,25 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
           jsondecode(aws_iam_role_policy.cognito_terraform["${environment}-apply"].policy),
           jsondecode(aws_iam_policy.cognito_apply_boundary[environment].policy)
           ] : [for request in [
-            { tags = local.cognito_application_tags[environment], target = environment, allowed = true },
-            { tags = {}, target = environment, allowed = false },
-            { tags = { for key, value in local.cognito_application_tags[environment] : key => value if key != "managedby" }, target = environment, allowed = false },
-            { tags = merge(local.cognito_application_tags[environment], { environment = "wrong" }), target = environment, allowed = false },
-            { tags = merge(local.cognito_application_tags[environment], { project = "wrong" }), target = environment, allowed = false },
-            { tags = merge(local.cognito_application_tags[environment], { unexpected = "tag" }), target = environment, allowed = false },
-            { tags = local.cognito_application_tags[environment], target = environment == "development" ? "production" : "development", allowed = false }
-            ] : alltrue([
+            { tags = local.cognito_application_tags[environment], target = environment, name_suffix = "", allowed = true },
+            { tags = {}, target = environment, name_suffix = "", allowed = false },
+            { tags = { for key, value in local.cognito_application_tags[environment] : key => value if key != "managedby" }, target = environment, name_suffix = "", allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { environment = "wrong" }), target = environment, name_suffix = "", allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { project = "wrong" }), target = environment, name_suffix = "", allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { unexpected = "tag" }), target = environment, name_suffix = "", allowed = false },
+            { tags = local.cognito_application_tags[environment], target = environment == "development" ? "production" : "development", name_suffix = "", allowed = false },
+            { tags = local.cognito_application_tags[environment], target = environment, name_suffix = "-other", allowed = false }
+            ] : [for tag_arn_suffix in ["", ":*"] : alltrue([
               for operation in [
-                { action = "logs:CreateLogGroup", resource = local.cognito_resource_arns[request.target].log_group },
-                { action = "logs:TagResource", resource = local.cognito_resource_arns[request.target].log_group_tags }
+                { action = "logs:CreateLogGroup", resource = "${local.cognito_resource_arns[request.target].log_group_tags}${request.name_suffix}:*" },
+                { action = "logs:TagResource", resource = "${local.cognito_resource_arns[request.target].log_group_tags}${request.name_suffix}${tag_arn_suffix}" }
                 ] : anytrue([
                   for statement in document.Statement : try(
                     statement.Effect == "Allow" &&
                     contains(flatten([statement.Action]), operation.action) &&
-                    contains(flatten([statement.Resource]), operation.resource) &&
+                    anytrue([for pattern in flatten([statement.Resource]) :
+                      can(regex("^${replace(replace(pattern, ".", "\\."), "*", ".*")}$", operation.resource))
+                    ]) &&
                     alltrue([for key, value in statement.Condition.StringEquals :
                       lookup({ for tag, tag_value in request.tags : "aws:RequestTag/${tag}" => tag_value }, key, "") == value
                     ]) &&
@@ -227,10 +233,26 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
                     false
                   )
               ])
-        ]) == request.allowed]
+        ]) == request.allowed]]
       ]
     ]))
     error_message = "Create-with-tags must pass identity and boundary without ResourceTags; missing, wrong, extra, or cross-environment requests must fail."
+  }
+
+  # IAM's :* pattern also matches stream suffixes beneath this same group.
+  # Do not confuse this with service authorization: Logs TagResource supports
+  # log-group, not log-stream. No stream action is added by this statement.
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      alltrue([for statement in jsondecode(policy.minified_json).Statement :
+        anytrue([for pattern in flatten([statement.Resource]) :
+          can(regex("^${replace(replace(pattern, ".", "\\."), "*", ".*")}$", "${local.cognito_resource_arns[environment].log_group_tags}:log-stream:fixture"))
+        ]) && toset(flatten([statement.Action])) == toset(["logs:TagResource"])
+        if statement.Sid == "TagNewLogGroup"
+      ])
+    ])
+    error_message = "The exact-group suffix wildcard must be modeled honestly and grant only TagResource, not stream creation, writes, or reads."
   }
 
   assert {
@@ -437,13 +459,16 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
         ] : [
         for environment, policy in policies : alltrue([
           for statement in jsondecode(policy.minified_json).Statement :
-          toset(flatten([statement.Resource])) == toset([
+          toset(flatten([statement.Resource])) == (statement.Sid == "TagNewLogGroup" ? toset([
+            local.cognito_resource_arns[environment].log_group_tags,
+            local.cognito_resource_arns[environment].log_group
+            ]) : toset([
             contains(flatten([statement.Action]), "logs:ListTagsForResource") ||
             contains(flatten([statement.Action]), "logs:TagResource") ||
             contains(flatten([statement.Action]), "logs:UntagResource")
             ? local.cognito_resource_arns[environment].log_group_tags
             : local.cognito_resource_arns[environment].log_group
-          ])
+          ]))
           if length([for action in flatten([statement.Action]) : action if startswith(action, "logs:") && action != "logs:DescribeLogGroups"]) > 0
         ])
       ]
