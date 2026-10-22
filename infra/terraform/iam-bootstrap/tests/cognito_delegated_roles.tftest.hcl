@@ -142,7 +142,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
             if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
           ]
         ]
-        ])) == 13 && toset(flatten([
+        ])) == 14 && toset(flatten([
         for statement in jsondecode(policy.minified_json).Statement : [
           for operator, conditions in try(statement.Condition, {}) : [
             for variable, values in conditions : flatten([values])
@@ -159,7 +159,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
-        if statement.Sid == "CreateExactTaggedPreSignUpLambda" &&
+        if statement.Sid == "CreateLambda" &&
         toset(flatten([statement.Action])) == toset(["lambda:CreateFunction", "lambda:TagResource"]) &&
         toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].function]) &&
         statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
@@ -176,7 +176,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
-        if statement.Sid == "TagNewPreSignUpLogGroupWithApprovedValues" &&
+        if statement.Sid == "TagNewLogGroup" &&
         toset(flatten([statement.Action])) == toset(["logs:TagResource"]) &&
         toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].log_group_tags]) &&
         statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
@@ -192,6 +192,25 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       ])
     ])
     error_message = "Every Lambda or Logs TagResource grant must require existing or surfaced matching ownership tags and deny adoption of an unowned exact-name resource."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if statement.Sid == "GrantCognitoInvoke" &&
+        toset(flatten([statement.Action])) == toset(["lambda:AddPermission"]) &&
+        toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].function]) &&
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment &&
+        statement.Condition.StringEquals["lambda:Principal"] == "cognito-idp.amazonaws.com"
+        ]) == 1 && length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if contains(flatten([statement.Action]), "lambda:AddPermission") && statement.Sid != "GrantCognitoInvoke"
+      ]) == 0
+    ])
+    error_message = "AddPermission must be isolated to the exact owned function and Cognito service principal."
   }
 
   assert {
@@ -277,6 +296,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
         local.cognito_logs_mutation_actions,
         [
           "iam:PassRole",
+          "lambda:AddPermission",
           "lambda:CreateFunction",
           "lambda:TagResource",
           "lambda:UntagResource",

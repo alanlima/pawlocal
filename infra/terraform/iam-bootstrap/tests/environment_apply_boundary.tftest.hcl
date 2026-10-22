@@ -55,6 +55,14 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
+    condition = (
+      length(data.aws_iam_policy_document.cognito_apply_permissions["development"].minified_json) == 6096 &&
+      length(data.aws_iam_policy_document.cognito_apply_permissions["production"].minified_json) == 6069
+    )
+    error_message = "Default-project delegated Cognito apply policies must retain the reviewed size-safe shape."
+  }
+
+  assert {
     condition = alltrue([
       for environment, policy in data.aws_iam_policy_document.environment_apply_boundary :
       strcontains(policy.minified_json, "pawlocal/${environment}/terraform.tfstate") &&

@@ -56,7 +56,6 @@ locals {
     "lambda:ListVersionsByFunction"
   ]
   cognito_lambda_mutation_actions = [
-    "lambda:AddPermission",
     "lambda:DeleteFunction",
     "lambda:RemovePermission",
     "lambda:UpdateFunctionCode",
@@ -117,14 +116,14 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   for_each = local.environments
 
   statement {
-    sid       = "ReadExactPreSignUpLambda"
+    sid       = "ReadLambda"
     effect    = "Allow"
     actions   = local.cognito_lambda_read_actions
     resources = [local.cognito_resource_arns[each.key].function]
   }
 
   statement {
-    sid       = "CreateExactTaggedPreSignUpLambda"
+    sid       = "CreateLambda"
     effect    = "Allow"
     actions   = ["lambda:CreateFunction", "lambda:TagResource"]
     resources = [local.cognito_resource_arns[each.key].function]
@@ -160,7 +159,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "ManageExactTaggedPreSignUpLambda"
+    sid       = "ManageLambda"
     effect    = "Allow"
     actions   = local.cognito_lambda_mutation_actions
     resources = [local.cognito_resource_arns[each.key].function]
@@ -177,7 +176,29 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "TagExactPreSignUpLambdaWithApprovedValues"
+    sid       = "GrantCognitoInvoke"
+    effect    = "Allow"
+    actions   = ["lambda:AddPermission"]
+    resources = [local.cognito_resource_arns[each.key].function]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/environment"
+      values   = [each.key]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "lambda:Principal"
+      values   = ["cognito-idp.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid       = "UpdateLambdaTags"
     effect    = "Allow"
     actions   = ["lambda:TagResource"]
     resources = [local.cognito_resource_arns[each.key].function]
@@ -207,7 +228,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "UntagOnlyNonRequiredPreSignUpLambdaTags"
+    sid       = "RemoveLambdaTags"
     effect    = "Allow"
     actions   = ["lambda:UntagResource"]
     resources = [local.cognito_resource_arns[each.key].function]
@@ -229,7 +250,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "CreateExactTaggedPreSignUpLogGroup"
+    sid       = "CreateLogGroup"
     effect    = "Allow"
     actions   = ["logs:CreateLogGroup"]
     resources = [local.cognito_resource_arns[each.key].log_group]
@@ -251,7 +272,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   # CloudWatch Logs requires the no-trailing-":*" ARN specifically for
   # TagResource, UntagResource, and ListTagsForResource.
   statement {
-    sid       = "TagNewPreSignUpLogGroupWithApprovedValues"
+    sid       = "TagNewLogGroup"
     effect    = "Allow"
     actions   = ["logs:TagResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
@@ -286,14 +307,14 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "ReadExactPreSignUpLogGroupTags"
+    sid       = "ReadLogGroupTags"
     effect    = "Allow"
     actions   = ["logs:ListTagsForResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
   }
 
   statement {
-    sid       = "ManageExactTaggedPreSignUpLogGroup"
+    sid       = "ManageLogGroup"
     effect    = "Allow"
     actions   = local.cognito_logs_mutation_actions
     resources = [local.cognito_resource_arns[each.key].log_group]
@@ -310,7 +331,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "TagExactPreSignUpLogGroupWithApprovedValues"
+    sid       = "UpdateLogGroupTags"
     effect    = "Allow"
     actions   = ["logs:TagResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
@@ -340,7 +361,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "UntagOnlyNonRequiredPreSignUpLogGroupTags"
+    sid       = "RemoveLogGroupTags"
     effect    = "Allow"
     actions   = ["logs:UntagResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
@@ -374,7 +395,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
   }
 
   statement {
-    sid       = "PassOnlyExactPreSignUpExecutionRoleToLambda"
+    sid       = "PassExecutionRole"
     effect    = "Allow"
     actions   = ["iam:PassRole"]
     resources = [local.cognito_resource_arns[each.key].execution_role]

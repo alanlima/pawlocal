@@ -115,12 +115,24 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         body = source.split(
-            'sid       = "CreateExactTaggedPreSignUpLambda"', 1
-        )[1].split('sid       = "ManageExactTaggedPreSignUpLambda"', 1)[0]
+            'sid       = "CreateLambda"', 1
+        )[1].split('sid       = "ManageLambda"', 1)[0]
         self.assertIn('variable = "aws:ResourceTag/project"', body)
         self.assertIn('variable = "aws:ResourceTag/environment"', body)
-        self.assertIn('statement.Sid == "CreateExactTaggedPreSignUpLambda"', semantic_test)
-        self.assertIn('statement.Sid == "TagNewPreSignUpLogGroupWithApprovedValues"', semantic_test)
+        self.assertIn('statement.Sid == "CreateLambda"', semantic_test)
+        self.assertIn('statement.Sid == "TagNewLogGroup"', semantic_test)
+
+    def test_add_permission_is_limited_to_cognito_principal(self) -> None:
+        source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
+        semantic_test = (
+            BOOTSTRAP / "tests" / "cognito_delegated_roles.tftest.hcl"
+        ).read_text(encoding="utf-8")
+
+        self.assertEqual(1, source.count('"lambda:AddPermission"'))
+        self.assertIn('variable = "lambda:Principal"', source)
+        self.assertIn('values   = ["cognito-idp.amazonaws.com"]', source)
+        self.assertIn('statement.Sid == "GrantCognitoInvoke"', semantic_test)
+        self.assertIn('statement.Condition.StringEquals["lambda:Principal"]', semantic_test)
 
     def test_describe_log_groups_exception_is_dedicated_and_region_limited(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
