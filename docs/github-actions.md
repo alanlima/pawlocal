@@ -29,19 +29,21 @@ flowchart TD
   DEV --> FE
   DEV --> BE
   DEV --> IMAGE["Publish immutable backend image"]
-  IMAGE --> TF_RELEASE_DEV["Terraform environment: development release"]
-  TF_RELEASE_DEV --> VERIFY_DEV["Publish and verify development"]
+  IMAGE --> TF_RELEASE_DEV["Reviewed Terraform + enforced config: development"]
+  TF_RELEASE_DEV -->|verified public config| VERIFY_DEV["Build, publish and verify development"]
 
   OPERATOR["Operator"] --> TF_FOUNDATION["Terraform environment: foundation"]
-  TF_FOUNDATION --> HANDOFF["Generated identity and protected-variable handoff"]
+  TF_FOUNDATION --> HANDOFF["Audit config + reviewed bootstrap runtime trust"]
   HANDOFF --> TF_CONVERGE["Terraform environment: converge"]
 
   VERIFY_DEV --> PROD["Promote verified release to production"]
-  PROD --> TF_RELEASE_PROD["Terraform environment: production release"]
-  TF_RELEASE_PROD --> VERIFY_PROD["Publish and verify production"]
+  PROD --> TF_RELEASE_PROD["Reviewed Terraform + enforced config: production"]
+  TF_RELEASE_PROD -->|verified public config| VERIFY_PROD["Build, publish and verify production"]
 
+  OPERATOR --> RECONCILE["Protected configuration audit/enforce"]
   OPERATOR --> SEED["Seed development Aurora DSQL"]
   OPERATOR --> DESTROY["Terraform production destroy"]
+  DESTROY -->|confirmed empty state| CLEANUP["Exact generated-target cleanup"]
 
   RETIRED["Retired entry points"] -. no-op .-> LEGACY_TF["Legacy combined-state Terraform operations"]
   RETIRED -. no-op .-> LEGACY_ROLLBACK["Legacy development rollback"]
