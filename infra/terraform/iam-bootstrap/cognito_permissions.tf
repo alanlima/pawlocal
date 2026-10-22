@@ -129,6 +129,21 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     actions   = ["lambda:CreateFunction", "lambda:TagResource"]
     resources = [local.cognito_resource_arns[each.key].function]
 
+    # AWS evaluates the dependent TagResource authorization during the
+    # CreateFunction request after surfacing the requested tags as resource
+    # tags. Requiring both views prevents this statement from authorizing a
+    # standalone retag of an unowned exact-name function.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/environment"
+      values   = [each.key]
+    }
+
     dynamic "condition" {
       for_each = local.cognito_application_tags[each.key]
       content {
@@ -233,8 +248,6 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
       values   = keys(local.cognito_application_tags[each.key])
     }
   }
-
-
   # CloudWatch Logs requires the no-trailing-":*" ARN specifically for
   # TagResource, UntagResource, and ListTagsForResource.
   statement {
@@ -242,6 +255,20 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     effect    = "Allow"
     actions   = ["logs:TagResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
+    # CreateLogGroup sends tags inline and evaluates TagResource as a
+    # dependent authorization after surfacing those requested tags as current
+    # resource tags. Requiring both views denies standalone adoption of an
+    # unowned exact-name log group.
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/environment"
+      values   = [each.key]
+    }
 
     dynamic "condition" {
       for_each = local.cognito_application_tags[each.key]

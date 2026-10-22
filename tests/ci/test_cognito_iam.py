@@ -29,6 +29,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn("LogGroup API ARN guidance", design)
         self.assertIn("`ListVersionsByFunction`", design)
         self.assertIn("awslambda-ListVersionsByFunction", design)
+        self.assertIn("CreateFunctionInput", design)
+        self.assertIn("CreateLogGroupInput", design)
         self.assertIn("Where a state-backed plan is available before merge", design)
         self.assertIn("backend-disabled plan was not run", design)
         self.assertIn(
@@ -72,6 +74,53 @@ class CognitoDelegatedIamTests(unittest.TestCase):
                 r'(?m)^\s+tags\s*=\s*\{[^}]*\b(?:project|managedby)\s*=',
                 msg=f"{path.name} must inherit shared resource tags from provider default_tags",
             )
+
+    def test_project_name_propagates_through_application_roots_and_module(self) -> None:
+        module = ROOT / "infra" / "terraform" / "modules" / "pawlocal-environment"
+        module_sources = "\n".join(
+            path.read_text(encoding="utf-8") for path in module.glob("*.tf")
+        )
+
+        self.assertRegex(
+            (module / "variables.tf").read_text(encoding="utf-8"),
+            r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
+        )
+        self.assertIn("project     = var.project_name", module_sources)
+        self.assertNotRegex(module_sources, r'values\s*=\s*\["pawlocal"\]')
+
+        for environment in ("development", "production"):
+            root = ROOT / "infra" / "terraform" / "environments" / environment
+            variables = (root / "variables.tf").read_text(encoding="utf-8")
+            versions = (root / "versions.tf").read_text(encoding="utf-8")
+            main = (root / "main.tf").read_text(encoding="utf-8")
+
+            self.assertRegex(
+                variables,
+                r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
+            )
+            self.assertIn("project     = var.project_name", versions)
+            self.assertIn("project_name                = var.project_name", main)
+
+        semantic_test = (
+            module / "tests" / "tagged_create_permissions.tftest.hcl"
+        ).read_text(encoding="utf-8")
+        self.assertIn('project_name               = "pawhub"', semantic_test)
+        self.assertIn('local.common_tags.project == "pawhub"', semantic_test)
+        self.assertIn('local.common_tags.project == "pawlocal"', semantic_test)
+
+    def test_create_time_tagging_cannot_adopt_unowned_exact_name_resources(self) -> None:
+        source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
+        semantic_test = (
+            BOOTSTRAP / "tests" / "cognito_delegated_roles.tftest.hcl"
+        ).read_text(encoding="utf-8")
+
+        body = source.split(
+            'sid       = "CreateExactTaggedPreSignUpLambda"', 1
+        )[1].split('sid       = "ManageExactTaggedPreSignUpLambda"', 1)[0]
+        self.assertIn('variable = "aws:ResourceTag/project"', body)
+        self.assertIn('variable = "aws:ResourceTag/environment"', body)
+        self.assertIn('statement.Sid == "CreateExactTaggedPreSignUpLambda"', semantic_test)
+        self.assertIn('statement.Sid == "TagNewPreSignUpLogGroupWithApprovedValues"', semantic_test)
 
     def test_describe_log_groups_exception_is_dedicated_and_region_limited(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")

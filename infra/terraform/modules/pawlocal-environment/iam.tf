@@ -7,7 +7,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -82,7 +82,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -111,7 +111,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -121,7 +121,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -143,7 +143,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -178,7 +178,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -198,7 +198,7 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"

@@ -142,7 +142,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
             if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
           ]
         ]
-        ])) == 11 && toset(flatten([
+        ])) == 13 && toset(flatten([
         for statement in jsondecode(policy.minified_json).Statement : [
           for operator, conditions in try(statement.Condition, {}) : [
             for variable, values in conditions : flatten([values])
@@ -152,6 +152,46 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       ])) == toset(["pawhub"])
     ])
     error_message = "A non-default project_name must propagate to every request-tag and resource-tag project condition."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if statement.Sid == "CreateExactTaggedPreSignUpLambda" &&
+        toset(flatten([statement.Action])) == toset(["lambda:CreateFunction", "lambda:TagResource"]) &&
+        toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].function]) &&
+        statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:RequestTag/environment"] == environment &&
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
+      ]) == 1
+    ])
+    error_message = "Lambda create-time TagResource must require matching request and surfaced resource ownership tags on only the exact function ARN."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      length([
+        for statement in jsondecode(policy.minified_json).Statement : statement
+        if statement.Sid == "TagNewPreSignUpLogGroupWithApprovedValues" &&
+        toset(flatten([statement.Action])) == toset(["logs:TagResource"]) &&
+        toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].log_group_tags]) &&
+        statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:RequestTag/environment"] == environment &&
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
+        ]) == 1 && alltrue([
+        for statement in jsondecode(policy.minified_json).Statement :
+        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
+        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
+        if contains(flatten([statement.Action]), "lambda:TagResource") ||
+        contains(flatten([statement.Action]), "logs:TagResource")
+      ])
+    ])
+    error_message = "Every Lambda or Logs TagResource grant must require existing or surfaced matching ownership tags and deny adoption of an unowned exact-name resource."
   }
 
   assert {

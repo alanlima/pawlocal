@@ -12,6 +12,16 @@ variable "aws_region" {
   type        = string
 }
 
+variable "project_name" {
+  description = "Project tag value shared with the bootstrap IAM tag conditions. Deterministic pawlocal-* resource names remain fixed by DEC-009."
+  type        = string
+  default     = "pawlocal"
+  validation {
+    condition     = var.project_name == trimspace(var.project_name) && length(var.project_name) >= 1 && length(var.project_name) <= 128
+    error_message = "project_name must contain 1 through 128 characters without leading or trailing whitespace."
+  }
+}
+
 variable "root_domain" {
   description = "Existing public Route 53 zone name without a trailing dot."
   type        = string
