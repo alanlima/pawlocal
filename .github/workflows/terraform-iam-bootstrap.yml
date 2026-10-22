@@ -65,7 +65,7 @@ jobs:
     steps:
       - name: Start friendly job report
         run: |
-          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; raw operational values are withheld.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; Terraform operation output is available in the step logs.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
@@ -145,7 +145,7 @@ jobs:
     steps:
       - name: Start friendly job report
         run: |
-          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; raw operational values are withheld.' >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; Terraform operation output is available in the step logs.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}

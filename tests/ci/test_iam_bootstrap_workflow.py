@@ -478,6 +478,27 @@ class DiagnosticsTests(unittest.TestCase):
 
 
 
+    def test_normal_terraform_logs_are_preserved_on_success_and_failure(self):
+        for exit_code in (0, 1):
+            result = Mock(returncode=exit_code, stdout=b"Normal plan resource context\n", stderr=b"Actual provider error: API_OPERATION\n")
+            with patch.object(bootstrap, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                 contextlib.redirect_stderr(io.StringIO()) as stderr, self.subTest(exit_code=exit_code):
+                if exit_code:
+                    with self.assertRaisesRegex(bootstrap.Stop, "TERRAFORM_PLAN_FAILED"):
+                        bootstrap.tf("plan")
+                else:
+                    self.assertIs(bootstrap.tf("plan"), result)
+                self.assertEqual(stdout.getvalue(), result.stdout.decode())
+                self.assertEqual(stderr.getvalue(), result.stderr.decode())
+
+    def test_programmatic_show_json_is_returned_privately_without_log_dump(self):
+        result = Mock(returncode=0, stdout=b'{"planned_values":{"PRIVATE_PLAN_SENTINEL":true}}', stderr=b"PRIVATE_SHOW_CONTEXT")
+        with patch.object(bootstrap, "run", return_value=result), contextlib.redirect_stdout(io.StringIO()) as stdout, \
+             contextlib.redirect_stderr(io.StringIO()) as stderr:
+            self.assertIs(bootstrap.tf("show", "-json", "private-plan"), result)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(stderr.getvalue(), "")
+
     def test_raw_exception_never_reaches_console_or_job_summary(self):
         with tempfile.TemporaryDirectory() as directory:
             summary = Path(directory) / "summary.md"

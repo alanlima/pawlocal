@@ -1,4 +1,4 @@
-"""Protected IAM bootstrap runtime. Raw Terraform/state/API responses never leave memory.
+"""Protected IAM bootstrap runtime with owner-approved MVP operational logging.
 
 Only the approved bootstrap root is executable. This module also owns the strict,
 pure manifest/classification checks exercised by offline CI.
@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -89,17 +90,21 @@ def run(arguments, *, cwd=None, allowed=(0,)):
                "BOOTSTRAP_KEY_ID", "BOOTSTRAP_SECRET_KEY"}}
     env.update(TF_LOG="", TF_IN_AUTOMATION="true", TF_INPUT="false")
     result = subprocess.run(arguments, cwd=cwd, env=env, capture_output=True, check=False)
-    require(result.returncode in allowed, "COMMAND_FAILED")
+    require(allowed is None or result.returncode in allowed, "COMMAND_FAILED")
     return result
 
 
 def tf(*arguments, allowed=(0,)):
-    try:
-        return run(["terraform", *arguments], cwd=ROOT, allowed=allowed)
-    except Stop:
-        # The operation is from our fixed call sites, never an external message.
+    result = run(["terraform", *arguments], cwd=ROOT, allowed=None)
+    # Temporary owner-approved MVP exception: preserve ordinary Terraform logs
+    # for diagnosis. Programmatic show JSON and direct state reads stay private.
+    if arguments[0] in {"init", "plan", "apply", "workspace"}:
+        sys.stdout.write(result.stdout.decode("utf-8", errors="replace"))
+        sys.stderr.write(result.stderr.decode("utf-8", errors="replace"))
+    if result.returncode not in allowed:
         operation = arguments[0].upper() if arguments[0] in {"init", "plan", "show", "apply", "workspace"} else "COMMAND"
         raise Stop(f"TERRAFORM_{operation}_FAILED") from None
+    return result
 
 
 def api(path):
@@ -516,17 +521,17 @@ def failure_summary(command, code):
         applied, started = applied or status.get("applied", False), status.get("started", False)
     status = "AWS apply succeeded." if applied else ("Apply started and may have partially changed AWS. Do not replay the saved plan." if started else "No successful AWS apply is claimed by this job.")
     explanation = {
-        "TERRAFORM_INIT_FAILED": "Terraform could not initialize the existing bootstrap backend and locked providers. Check state/lock object permissions, backend configuration, and provider availability.",
-        "TERRAFORM_PLAN_FAILED": "The refreshed Terraform plan failed. Check the dedicated identity's provider read permissions, existing resource ownership, and current inputs before creating a fresh plan.",
+        "TERRAFORM_INIT_FAILED": "Terraform could not initialize the existing bootstrap backend and locked providers. Read the Terraform init output in the failed step for the actual cause.",
+        "TERRAFORM_PLAN_FAILED": "The refreshed Terraform plan failed. Read the Terraform plan output in the failed step for the actual cause, then create a fresh plan.",
         "TERRAFORM_SHOW_FAILED": "Terraform could not decode the private saved plan. Verify the locked Terraform version and dispatch a fresh plan.",
-        "TERRAFORM_APPLY_FAILED": "Terraform could not finish the approved apply. Inspect private operator evidence and AWS/state readback to determine partial changes; never retry this saved plan.",
+        "TERRAFORM_APPLY_FAILED": "Terraform could not finish the approved apply. Read its Terraform output and inspect AWS/state readback to determine partial changes; never retry this saved plan.",
         "TERRAFORM_WORKSPACE_FAILED": "Terraform could not verify the default bootstrap workspace. Check the existing backend configuration.",
         "JOB_SETUP_OR_EXECUTION_INCOMPLETE": "Runner setup, credential setup, or a workflow step did not complete. Check the failed step name and the required Environment configuration; this summary makes no success claim.",
         "OPERATION_FAILED": "An AWS/API or private runtime operation failed. Verify the dedicated identity's scoped permissions, connectivity, and backend availability; private response details are withheld.",
     }.get(code, "The execution safety check did not pass. Correct the named condition before dispatching a fresh plan.")
     if code.startswith("MISSING_"):
         explanation = f"Configure the required Environment variable or secret **`{code[8:]}`**. Its value is omitted."
-    summary("Incomplete", f"**{command} stopped safely** (`{code}`). {status}\n\n{explanation}\n\nFor failed or partial apply, dispatch a fresh **plan** and review it again. If a reader-role identity changed after a successful apply, use the owner setup script **publish-reader-roles**, then the existing configuration reconciliation workflow. Raw Terraform, state, credential and API responses are intentionally withheld.")
+    summary("Incomplete", f"**{command} stopped safely** (`{code}`). {status}\n\n{explanation}\n\nFor failed or partial apply, dispatch a fresh **plan** and review it again. If a reader-role identity changed after a successful apply, use the owner setup script **publish-reader-roles**, then the existing configuration reconciliation workflow. Ordinary Terraform operation output is available in the step logs under the temporary MVP logging exception. Programmatic plan JSON and direct state/API payloads remain internal.")
 
 
 def main():
