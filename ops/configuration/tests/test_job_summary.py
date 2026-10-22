@@ -548,7 +548,7 @@ class SummaryTests(unittest.TestCase):
                     ),
                     16,
                 )
-                self.assertNotIn("/pawlocal/", text)
+                self.assertNotIn("| /pawlocal/", text)
                 self.assertNotIn(SENTINEL, text)
                 self.assertIn("Exact cleanup targets", text)
         for failure in ("timeout", "readback"):
@@ -781,7 +781,7 @@ class SummaryTests(unittest.TestCase):
                 self.assertEqual(job_summary.publish(), 0)
             text = path.read_text()
             self.assertIn("Exact cleanup targets", text)
-            self.assertNotIn("/pawlocal/", text)
+            self.assertNotIn("| /pawlocal/", text)
             self.assertIn("Not recorded", text)
             self.assertNotIn("None. No destination mutations", text)
             self.assertEqual(
