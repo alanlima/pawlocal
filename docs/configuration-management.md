@@ -21,14 +21,14 @@ One reconciliation job uses the matching protected `<environment>-apply` Environ
 
 ## Run and verify
 
-The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default and the only mode in #205; #206 adds enforce and pipeline integration. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
+The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default; choose enforce to require all selected values before synchronization/publication. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
 
-The script is `ops/configuration/reconcile.py`; install its pinned `requirements.txt` first. It validates the manifest and existing destination Environments, then reports names/statuses only. The workflow exposes the scoped token only to the protected credential check and reconciliation steps and creates no payload artifacts. Test locally with `uv run --with-requirements ops/configuration/requirements.txt python -m unittest discover -s ops/configuration/tests -v`. Prefer the protected workflow for operations so approval and ordering are enforced.
+The script is `ops/configuration/reconcile.py`; install its pinned `requirements.txt` first. It validates the manifest and existing destination Environments, then reports names/statuses only. The workflow exposes the scoped token only to protected credential/mutation steps and creates no payload artifacts. Test locally with `uv run --with-requirements ops/configuration/requirements.txt python -m unittest discover -s ops/configuration/tests -v`. Prefer the protected workflow for operations so approval and ordering are enforced.
 Reusable callers pass only the required named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret; the matching protected Environment supplies its value. A nonempty check runs before AWS access. No repository-global credential copy is needed.
 
-For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge. #205 leaves existing deployment workflows unchanged.
+For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge.
 
-| Invocation after #206 | Mode | Required-value behavior |
+| Invocation | Mode | Required-value behavior |
 |---|---|---|
 | On demand | Audit default; enforce selectable | Warn/skip or fail according to mode |
 | After Foundation apply | Audit | Missing runtime values may be expected; publication blocked |
@@ -75,10 +75,12 @@ Variables use compare-before-write and read-back, including no-ops. Secrets use 
 
 Use actual managed attributes: API HTTPS origin plus `/api/v1`, health `/health`; Cognito full HTTPS origin `https://<managed-domain>.auth.<region>.amazoncognito.com`; managed public client ID; managed callback `/auth/callback`, logout `/`, and space-joined scopes (currently `openid email profile`). Validate account/environment bindings and matching frontend/API origins; never copy across environments.
 
-In #206 pass the same reconciliation's verified public values directly to the build, rebuild/publish, then observe the served OAuth host/client/callback. Variable read-back or a healthy homepage alone is insufficient. Do not introduce reconciliation-specific commit/hash binding, fingerprints or state-generation machinery.
+Pass the same reconciliation's verified public values directly to the build, rebuild/publish, then observe the served OAuth host/client/callback/scopes. Variable read-back or a healthy homepage alone is insufficient. Do not introduce reconciliation-specific commit/hash binding, fingerprints or state-generation machinery.
 
 Writes are not atomic. Correct partial failures and rerun; completed writes should be checked and skipped. Failed Terraform applies require a fresh reviewed normal-refresh plan. Missing source/state/mapping never deletes targets. Only confirmed reviewed destroy clears exact affected generated targets/dependent runtime variables; reapply must republish/reconcile before publication. Legacy cleanup needs consumer proof and exact environment/name deletion from the inventory; preserve same-named plan/apply inputs, unrelated static/certificate settings and `development-seed`.
 
 Test both environments: partial writes and safe reruns, missing optional/required values, replacement Cognito settings, a stale served bundle, and confirmed destroy/reapply recovery.
 
 Before token expiry, create its scoped replacement, replace both protected secrets through hidden input, run an authorized audit, then revoke the predecessor. Keep rotation records free of values.
+
+For approved legacy cleanup, dispatch the reconciliation workflow with `operation=legacy-cleanup` and exact `confirmation=CLEAN legacy <environment>`. Review the protected job and its consumer checks before approval. It deletes only the inventory's legacy release names; static plan/apply and seed settings are untouched. Destroy cleanup is internal to the existing reviewed destroy workflow after successful apply and empty-state verification. Never substitute missing sources for that confirmation.

@@ -849,7 +849,7 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
                 self.assertIsInstance(node.args[0], ast.Constant)
                 self.assertEqual(node.args[0].value, "ssm")
                 clients.append(node)
-            if isinstance(owner, ast.Attribute) and isinstance(owner.value, ast.Name) and owner.value.id == "self" and owner.attr == "client":
+            if (isinstance(owner, ast.Attribute) and isinstance(owner.value, ast.Name) and owner.value.id == "self" and owner.attr == "client") or (isinstance(owner, ast.Name) and owner.id == "client"):
                 operations.append(node.func.attr)
         self.assertEqual(len(clients), 1)
         self.assertEqual(operations, ["get_parameter"])
@@ -880,7 +880,7 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 if path == ROOT / ".github/scripts/terraform-plan-transfer.py":
                     self.assert_plan_transfer_helper_is_s3_object_only(source)
-                elif path == ROOT / "ops/configuration/reconcile.py":
+                elif path in {ROOT / "ops/configuration/reconcile.py", ROOT / "ops/configuration/check-collisions.py"}:
                     self.assert_configuration_helper_is_parameter_read_only(source)
                 else:
                     self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
@@ -1477,8 +1477,10 @@ cp.execFile("terraform", args);
             "deploy-production.yml",
         ):
             source = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
-            self.assertIn("vars.PAWLOCAL_FRONTEND_BUCKET", source)
-            self.assertIn("vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID", source)
+            self.assertIn("outputs.frontend_config", source)
+            self.assertIn("Load same-run reconciled public configuration", source)
+            self.assertNotIn("vars.PAWLOCAL_FRONTEND_BUCKET", source)
+            self.assertNotIn("vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID", source)
             terraform_step = source.index("./.github/workflows/terraform-environment.yml")
             publish_step = source.index("run-deployment-adapter.sh deploy")
             self.assertLess(terraform_step, publish_step)

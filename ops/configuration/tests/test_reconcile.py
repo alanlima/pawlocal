@@ -280,7 +280,15 @@ class ReconcileTests(unittest.TestCase):
         )
         store = module.ParameterStore(
             FakeSSM(
-                {m.store_key: {"Type": "String", "Value": SENTINEL} for m in mappings}
+                {
+                    m.store_key: {
+                        "Type": "String",
+                        "Value": "https://pawlocal-development-test.auth.ap-southeast-2.amazoncognito.com"
+                        if m.env_name == "VITE_COGNITO_DOMAIN"
+                        else SENTINEL,
+                    }
+                    for m in mappings
+                }
             )
         )
         api = FakeAPI()
@@ -383,7 +391,7 @@ class ReconcileTests(unittest.TestCase):
             },
         )
 
-    def test_main_suppresses_unexpected_exception_and_has_no_enforce(self):
+    def test_main_suppresses_unexpected_exception_and_rejects_unknown_mode(self):
         captured = io.StringIO()
         with (
             patch.dict(
@@ -399,7 +407,7 @@ class ReconcileTests(unittest.TestCase):
             self.assertEqual(module.main(["--environment", "development"]), 1)
         self.assertNotIn(SENTINEL, captured.getvalue())
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            module.main(["--environment", "development", "--mode", "enforce"])
+            module.main(["--environment", "development", "--mode", "invalid"])
 
     def test_workflow_protection_serialization_and_feature_harness(self):
         workflow = yaml.safe_load(
@@ -416,7 +424,9 @@ class ReconcileTests(unittest.TestCase):
                 "cancel-in-progress": False,
             },
         )
-        self.assertNotIn("concurrency", workflow)
+        self.assertNotEqual(
+            workflow["concurrency"]["group"], job["concurrency"]["group"]
+        )
         self.assertNotIn("PAWLOCAL_CONFIG_GITHUB_TOKEN", job["env"])
         harness = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         self.assertNotIn("concurrency", harness)

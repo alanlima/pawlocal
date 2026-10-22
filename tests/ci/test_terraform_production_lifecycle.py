@@ -270,7 +270,7 @@ class TerraformProductionLifecycleTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/terraform-environment-destroy.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("group: pawlocal-terraform-${{ inputs.environment }}", workflow)
+        self.assertIn("group: pawlocal-lifecycle-production", workflow)
         self.assertIn("environment: production-destroy-prepare", workflow)
         self.assertIn("environment: production-destroy", workflow)
         self.assertEqual(workflow.count("terraform-plan-metadata.py create"), 2)

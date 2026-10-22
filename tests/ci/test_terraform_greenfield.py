@@ -244,7 +244,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("psycopg-pool==3.3.3", requirements)
         self.assertIn("import aurora_dsql_psycopg.pool", workflow)
-        self.assertIn("group: pawlocal-terraform-${{ inputs.environment }}", workflow)
+        self.assertIn("format('pawlocal-lifecycle-{0}', inputs.environment)", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('apply -input=false -lock-timeout=5m', workflow)
         self.assertLess(
@@ -448,7 +448,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         source = (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
         apply_header = source.split("\n  apply:\n", 1)[1].split("\n    steps:\n", 1)[0]
 
-        self.assertIn("needs: plan", apply_header)
+        self.assertIn("needs: [plan, reconcile-preflight]", apply_header)
         self.assertIn("if: ${{ !cancelled() && needs.plan.result == 'success' }}", apply_header)
         self.assertNotIn("always()", apply_header)
         self.assertNotIn("production-eligibility", apply_header)

@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-production-release
+  group: pawlocal-lifecycle-production
   cancel-in-progress: false
 
 jobs:
@@ -34,7 +34,9 @@ jobs:
       backend_image: ${{ inputs.backend_image }}
       release_commit: ${{ inputs.release_commit }}
       release_only: true
-    secrets: inherit
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+      PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
 
   verify-production:
     name: Publish frontend and verify production
@@ -47,12 +49,7 @@ jobs:
       id-token: write
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
-      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
-      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-      PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
-      PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
       PAWLOCAL_TELEMETRY_ENABLED: "false"
       BACKEND_IMAGE: ${{ inputs.backend_image }}
@@ -69,6 +66,16 @@ jobs:
           [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           [[ "$BACKEND_IMAGE" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+      - name: Check out current configuration tools
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: .configuration-tools
+          persist-credentials: false
+      - name: Load same-run reconciled public configuration
+        env:
+          RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-production.outputs.frontend_config }}
+        run: python .configuration-tools/ops/configuration/build-config.py
       - name: Configure narrow production publisher credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -86,12 +93,6 @@ jobs:
           VITE_RELEASE_ENV: production
           VITE_USE_MOCK_BACKEND: "false"
           VITE_TELEMETRY_ENABLED: "false"
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_COGNITO_DOMAIN: ${{ vars.VITE_COGNITO_DOMAIN }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
-          VITE_COGNITO_REDIRECT_URI: ${{ vars.VITE_COGNITO_REDIRECT_URI }}
-          VITE_COGNITO_LOGOUT_URI: ${{ vars.VITE_COGNITO_LOGOUT_URI }}
-          VITE_COGNITO_SCOPES: ${{ vars.VITE_COGNITO_SCOPES }}
           VITE_APP_COMMIT: ${{ inputs.release_commit }}
         run: npm ci && npm run build
       - name: Create production release manifest and frontend archive
@@ -146,10 +147,17 @@ jobs:
           RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/production-verification.json
         run: bash ops/run-deployment-adapter.sh verify --environment production --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+      - name: Install browser for served authentication verification
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Verify served OAuth configuration
+        env:
+          RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-production.outputs.frontend_config }}
+        run: node .configuration-tools/ops/configuration/verify-served-auth.mjs
       - name: Record successful production deployment
         uses: actions/github-script@v9
         env:
-          ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          ENVIRONMENT_URL: ${{ env.PAWLOCAL_PUBLIC_BASE_URL }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}
         with:
           script: |

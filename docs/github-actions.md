@@ -6,7 +6,7 @@ The workflow files remain authoritative. The synchronization test in `tests/ci/t
 
 ## Configuration reconciliation delivery contract
 
-[#203](https://github.com/alanlima/pawlocal/issues/203) introduces the [configuration management specification](configuration-management.md) and [source/destination inventory](configuration-inventory.md). #204 is documentation only: it does not add a workflow or change the current manual handoff. #205 then adds on-demand/reusable reconciliation and reader roles, with a protected apply-Environment mutation job and repository-scoped GitHub credential. #206 adds Terraform publication and pipeline calls: Foundation audit, Converge/Release selected-input preflight enforce, then successful post-apply enforce before dependent frontend publication. Enforce prevalidates all selected sources before writes; failed apply/reconciliation/cancellation blocks publication. Verified public build values must come directly from the same reconciliation execution, avoiding stale job vars and old served bundles. Preserve saved-plan/review and production promotion controls. Detailed setup, feature-branch CI-only testing, concurrency, secret boundaries, recovery and cleanup are defined by the linked specification; no reconciliation-specific fingerprints or state-evidence protocol is required.
+[#203](https://github.com/alanlima/pawlocal/issues/203) delivers the [mapping contract](configuration-management.md) and [inventory](configuration-inventory.md). Foundation uses post-apply audit. Converge/Release use preflight enforce, then post-apply enforce before building/publishing from the same verified public snapshot. Failures block publication. Existing saved-plan review and production promotion gates remain unchanged. See the guide for setup, cleanup and recovery.
 
 ## Workflow map
 
@@ -29,19 +29,21 @@ flowchart TD
   DEV --> FE
   DEV --> BE
   DEV --> IMAGE["Publish immutable backend image"]
-  IMAGE --> TF_RELEASE_DEV["Terraform environment: development release"]
-  TF_RELEASE_DEV --> VERIFY_DEV["Publish and verify development"]
+  IMAGE --> TF_RELEASE_DEV["Reviewed Terraform + enforced config: development"]
+  TF_RELEASE_DEV -->|verified public config| VERIFY_DEV["Build, publish and verify development"]
 
   OPERATOR["Operator"] --> TF_FOUNDATION["Terraform environment: foundation"]
-  TF_FOUNDATION --> HANDOFF["Generated identity and protected-variable handoff"]
+  TF_FOUNDATION --> HANDOFF["Audit config + reviewed bootstrap runtime trust"]
   HANDOFF --> TF_CONVERGE["Terraform environment: converge"]
 
   VERIFY_DEV --> PROD["Promote verified release to production"]
-  PROD --> TF_RELEASE_PROD["Terraform environment: production release"]
-  TF_RELEASE_PROD --> VERIFY_PROD["Publish and verify production"]
+  PROD --> TF_RELEASE_PROD["Reviewed Terraform + enforced config: production"]
+  TF_RELEASE_PROD -->|verified public config| VERIFY_PROD["Build, publish and verify production"]
 
+  OPERATOR --> RECONCILE["Protected configuration audit/enforce"]
   OPERATOR --> SEED["Seed development Aurora DSQL"]
   OPERATOR --> DESTROY["Terraform production destroy"]
+  DESTROY -->|confirmed empty state| CLEANUP["Exact generated-target cleanup"]
 
   RETIRED["Retired entry points"] -. no-op .-> LEGACY_TF["Legacy combined-state Terraform operations"]
   RETIRED -. no-op .-> LEGACY_ROLLBACK["Legacy development rollback"]
@@ -55,7 +57,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | Workflow | Trigger | Purpose | Manual or reusable inputs |
 |---|---|---|---|
 | [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
-| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all reusable CI suites, or the opt-in protected development reconciliation smoke call. | `reconciliation_smoke` |
+| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all CI suites, or the protected development reconciliation smoke call. | `reconciliation_smoke` |
 | [`compose-ci.yml`](../.github/workflows/compose-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate, build, start, smoke-test, and tear down the local Compose stack. | None |
 | [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | Manual | Promote one development-verified commit and immutable image to production, publish the frontend, and verify the release. | `release_commit`, `backend_image` |
 | [`development-dsql-seed.yml`](../.github/workflows/development-dsql-seed.yml) | Manual from `main` | Seed the fixed development-only DSQL catalog and verify it through the development API. | None; uses protected secrets |
@@ -152,25 +154,25 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ### Reconcile Environment configuration
 
-<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,mode; call-inputs: environment,mode -->
+<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,operation,confirmation,mode; call-inputs: environment,mode,selection,operation,confirmation,destroy_confirmed,caller_holds_lifecycle_lock -->
 
-[`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) accepts required `environment` (`development` or `production`) and optional `mode` (`audit`, default). #205 deliberately has no enforce mode. It validates selection before binding one mutation job to `<environment>-apply`, obtaining OIDC reader access and `PAWLOCAL_CONFIG_GITHUB_TOKEN` there. The job serializes by environment with cancellation disabled; callers must not hold that same group. It validates all destination Environments already exist before reading/writing values, uses exact manifest keys, warns/skips missing sources, compares variables before writes and reads all available variables back. Generic SecureString/secret support encrypts with the Environment public key and verifies API acceptance, never plaintext equality. No active secret mapping is currently required. Names/statuses only are reported; no artifacts or secret outputs are created. A successful audit does not establish release readiness.
+`reconcile-environment.yml` accepts `environment` (development/production), `mode` (audit default or enforce), and `operation` (reconcile default or explicit legacy-cleanup). Cleanup also requires exact `confirmation` (`CLEAN legacy development` or `CLEAN legacy production`). Reusable calls additionally accept `selection` (all/default or preflight), internal destroy-cleanup and `destroy_confirmed`; confirmed destroy cleanup is callable only after the existing protected destroy succeeds and verifies the same state empty.
 
-Complete [initial reader/credential and target setup](configuration-management.md#fresh-operator-setup), including protected production recovery target creation, before dispatch. From `main` after #205 merge:
+Reusable callers that already hold the environment lifecycle lock pass `caller_holds_lifecycle_lock: true`. Other callers, including manual and CI runs, take that lock themselves.
+
+One mutation job uses `<environment>-apply` for approval and the named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret. Callers pass that secret explicitly; see [GitHub's reusable secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows). Audit warns/skips missing sources and does not establish release readiness. Enforce validates all selected values before writes. Existing-target checks, variable compare/write/read-back and encrypted secret API writes remain mandatory. Reports contain names/statuses only; secret payloads never enter outputs or artifacts.
+
+Converge and Release enforce required handoff inputs before planning; Foundation audit runs after apply without authorizing publication. Successful Converge/Release applies return a verified non-secret `frontend_config` output to the same run's build. Missing/invalid values, failed writes, failed apply or cancellation block publication. `selection=preflight` checks only the seven generated plan/apply handoff inputs; `selection=all` checks the full manifest and public build snapshot. No lifecycle fields are added to YAML.
+
+Use the [setup guide](configuration-management.md#set-up-access), then dispatch:
 
 ```powershell
-gh workflow run reconcile-environment.yml --repo alanlima/pawlocal --ref main -f environment=development -f mode=audit
+gh workflow run reconcile-environment.yml --repo alanlima/pawlocal --ref main -f environment=development -f mode=enforce
 ```
 
-For the reviewed feature branch while its PR remains open:
+A reviewed open-PR development smoke call remains available through `ci.yml` with `reconciliation_smoke=true` on the exact allowed branch. On-demand/CI calls take the same environment lifecycle lock as apply/publication. The four outer pipeline callers hold that lock themselves; nested reconciliation uses a separate call group and its per-environment mutation lock, preventing deadlock. All mutation locks disable cancellation of an active run.
 
-```powershell
-gh workflow run ci.yml --repo alanlima/pawlocal --ref codex/205-configuration-reconciliation -f reconciliation_smoke=true
-```
-
-Review the resulting matching protected job before approval. A failure leaves partial writes explicit; correct access/configuration and rerun idempotently. Missing values or removed mappings never delete targets. Deployment integration, required-value enforcement and actual generated publication remain #206 work.
-
-Reusable callers must pass the named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret explicitly; the called job then resolves the matching protected Environment's value. A job's Environment alone does not make an unpassed secret available. The workflow requires this named contract and checks it is nonempty before assuming AWS access. See [GitHub's reusable workflow secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows).
+Explicit legacy cleanup checks the active release/recovery consumers and exact configured adapter before deleting only the approved release-Environment names. Removing a mapping or missing a source never deletes anything. See the [inventory](configuration-inventory.md) for history and the [recovery guide](configuration-management.md#values-and-recovery) for retry/destroy/reapply rules.
 
 ## Deployment and operations workflows
 
@@ -215,7 +217,7 @@ Valid combinations:
 | Development Release | Immutable reference produced by the current full-stack run | Current full SHA | `true` |
 | Production Release | Development-verified immutable reference | Matching development-verified full SHA | `true` |
 
-Current Converge behavior is fail-open with respect to generated handoff readiness. `phase=converge` uses the same plan and apply jobs as the other phases; it does not require `PAWLOCAL_RUNTIME_ROLE_ARN`, `PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN`, or `PAWLOCAL_CLOUDFRONT_OAC_ARN`. When those values are absent, Terraform may disable dependent resources and return a successful zero-change or incomplete handoff apply. Until [Issue #176](https://github.com/alanlima/pawlocal/issues/176) changes this behavior, operators must independently verify the matching Foundation outputs, bootstrap runtime identity, protected plan variables, expected plan resources, and post-apply public and runtime readiness. A green Converge run alone is not readiness evidence.
+Converge and Release enforce required handoff inputs before planning. The preflight output supplies the current generated values directly to the plan/apply jobs; successful post-apply enforce supplies the public build snapshot. Foundation audit warns about expected missing runtime values and cannot authorize publication. A green apply still requires the existing live release verification.
 
 ### Promote verified release to production
 
@@ -282,17 +284,12 @@ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN
 secrets.PAWLOCAL_DSQL_ENDPOINT
 secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN
 vars.AWS_REGION
-vars.PAWLOCAL_API_HEALTH_URL
 vars.PAWLOCAL_AWS_ACCOUNT_ID
 vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
-vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
 vars.PAWLOCAL_CLOUDFRONT_OAC_ARN
 vars.PAWLOCAL_CONFIG_READER_ROLE_ARN
 vars.PAWLOCAL_DEPLOY_ADAPTER_PATH
-vars.PAWLOCAL_DEPLOY_ROLE_ARN
 vars.PAWLOCAL_DOMAIN_NAME
-vars.PAWLOCAL_FRONTEND_BUCKET
-vars.PAWLOCAL_PUBLIC_BASE_URL
 vars.PAWLOCAL_ROUTE53_ZONE_ID
 vars.PAWLOCAL_RUNTIME_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
@@ -300,12 +297,6 @@ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS
 vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET
 vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
 vars.PAWLOCAL_TF_STATE_BUCKET
-vars.VITE_API_BASE_URL
-vars.VITE_COGNITO_CLIENT_ID
-vars.VITE_COGNITO_DOMAIN
-vars.VITE_COGNITO_LOGOUT_URI
-vars.VITE_COGNITO_REDIRECT_URI
-vars.VITE_COGNITO_SCOPES
 -->
 
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
@@ -359,7 +350,7 @@ The matching release Environment provides:
 - `VITE_COGNITO_LOGOUT_URI`
 - `VITE_COGNITO_SCOPES`
 
-Generated-value reconciliation remains manual while Issue #155 is deferred.
+Generated values now synchronize through the reviewed Parameter Store mapping and protected reconciliation workflow. The bootstrap Lightsail runtime-trust handoff remains a separate reviewed operation.
 
 ### Development seed environment
 

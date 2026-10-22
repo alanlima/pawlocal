@@ -13,7 +13,7 @@ REFERENCE_PATTERN = re.compile(
     r"dispatch-inputs: (?P<dispatch>[^; ]+); call-inputs: (?P<call>[^ ]+) -->"
 )
 WORKFLOW_PROTECTED_CONFIGURATION_PATTERN = re.compile(
-    r"\$\{\{\s*(?P<context>vars|secrets)\.(?P<name>[A-Z][A-Z0-9_]+)\s*\}\}"
+    r"(?P<context>vars|secrets)\.(?P<name>[A-Z][A-Z0-9_]+)\b"
 )
 DOCUMENTED_PROTECTED_CONFIGURATION_PATTERN = re.compile(
     r"<!-- actions-protected-configuration\n(?P<entries>.*?)\n-->", re.DOTALL
@@ -185,14 +185,10 @@ class GitHubActionsReferenceTests(unittest.TestCase):
         }
         for document, source in documents.items():
             with self.subTest(document=document):
-                self.assertIn(
-                    "Current Converge behavior is fail-open with respect to generated "
-                    "handoff readiness.",
-                    source,
-                )
-                self.assertIn("same plan and apply jobs as the other phases", source)
-                self.assertIn("successful zero-change or incomplete handoff apply", source)
-                self.assertIn("Issue #176", source)
+                self.assertIn("Converge and Release enforce required handoff inputs before planning", source)
+                self.assertIn("Foundation audit", source)
+                self.assertIn("publication", source)
+
 
 
 if __name__ == "__main__":

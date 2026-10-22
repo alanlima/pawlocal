@@ -34,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-fullstack-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('pawlocal-fullstack-pr-{0}', github.event.pull_request.number) || 'pawlocal-lifecycle-development' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -105,7 +105,9 @@ jobs:
       backend_image: ${{ needs.publish.outputs.backend_image }}
       release_commit: ${{ github.sha }}
       release_only: true
-    secrets: inherit
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+      PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
 
   verify-development:
     name: Publish frontend and verify development
@@ -118,12 +120,7 @@ jobs:
       id-token: write
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
-      PAWLOCAL_DEPLOY_ROLE_ARN: ${{ vars.PAWLOCAL_DEPLOY_ROLE_ARN }}
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
-      PAWLOCAL_PUBLIC_BASE_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
-      PAWLOCAL_API_HEALTH_URL: ${{ vars.PAWLOCAL_API_HEALTH_URL }}
-      PAWLOCAL_FRONTEND_BUCKET: ${{ vars.PAWLOCAL_FRONTEND_BUCKET }}
-      PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID }}
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
       PAWLOCAL_TELEMETRY_ENABLED: "false"
       BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
@@ -131,6 +128,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Load same-run reconciled public configuration
+        env:
+          RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-development.outputs.frontend_config }}
+        run: python ops/configuration/build-config.py
       - name: Configure narrow frontend publisher credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -148,12 +149,6 @@ jobs:
           VITE_RELEASE_ENV: development
           VITE_USE_MOCK_BACKEND: "false"
           VITE_TELEMETRY_ENABLED: "false"
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_COGNITO_DOMAIN: ${{ vars.VITE_COGNITO_DOMAIN }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
-          VITE_COGNITO_REDIRECT_URI: ${{ vars.VITE_COGNITO_REDIRECT_URI }}
-          VITE_COGNITO_LOGOUT_URI: ${{ vars.VITE_COGNITO_LOGOUT_URI }}
-          VITE_COGNITO_SCOPES: ${{ vars.VITE_COGNITO_SCOPES }}
           VITE_APP_COMMIT: ${{ github.sha }}
         run: npm ci && npm run build
       - name: Create release manifest and frontend archive
@@ -208,13 +203,20 @@ jobs:
           RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/development-verification.json
         run: bash ops/run-deployment-adapter.sh verify --environment development --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+      - name: Install browser for served authentication verification
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Verify served OAuth configuration
+        env:
+          RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-development.outputs.frontend_config }}
+        run: node ops/configuration/verify-served-auth.mjs
       - name: Validate development verification evidence
         run: python ops/validate-release-metadata.py --manifest release/release-manifest.json --evidence release/development-verification.json --environment development --database-provider aurora_dsql --migration-runner dsql_baseline --migration-id dsql_0001_initial
       - name: Record successful verified development deployment
         uses: actions/github-script@v9
         env:
           BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
-          ENVIRONMENT_URL: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+          ENVIRONMENT_URL: ${{ env.PAWLOCAL_PUBLIC_BASE_URL }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |

@@ -37,6 +37,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  configuration-recovery:
+    name: Reconciled frontend recovery fixture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install isolated fixture dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
+          npm ci --prefix frontend
+          cd frontend
+          npx playwright install --with-deps chromium
+      - name: Verify real rebuilt and served OAuth configuration
+        run: |
+          for environment in development production; do
+            python ops/configuration/tests/run_frontend_recovery.py "$RUNNER_TEMP/config-recovery/$environment" --environment "$environment"
+            node ops/configuration/tests/frontend-recovery.mjs "$RUNNER_TEMP/config-recovery/$environment/old.json" "$RUNNER_TEMP/config-recovery/$environment/replacement.json" "$environment"
+          done
+
   action-runtime-smoke:
     name: External action runtime smoke
     runs-on: ubuntu-24.04
