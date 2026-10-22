@@ -29,16 +29,28 @@ Prefix every key suffix with `/pawlocal/{environment}/config/`. R = `{environmen
 
 Sources refer to `infra/terraform/iam-bootstrap/{main,identity_roles,outputs}.tf` and `infra/terraform/modules/pawlocal-environment/{main,outputs}.tf`. Missing canonical public outputs are added in #206 directly from the attributes above. Consumers are `.github/workflows/terraform-environment.yml`, `fullstack-release.yml`, `deploy-production.yml`, the frontend auth/service configuration and `ops/deployment-adapters/lightsail-dsql.sh`. P consumes the generated handoff values when planning; A applies the exact saved plan and consumes its AWS/account/plan-transfer settings. The agreed P/A destinations are retained even where A does not independently evaluate a value. Keep destroy/recovery consumption in the review before retiring any target.
 
+### Additional existing production recovery destinations
+
+These six destinations use three existing source keys above, with the same String type, false secret flag, required validation, bootstrap lifecycle owner and purpose. Their `environment` is `[production]` only. Each row expands into two mapping entries, one for each exact target; no new source parameter is added.
+
+| `store_key` | GitHub `env_name` | Exact `github_environment` targets | Consumer |
+|---|---|---|---|
+| /pawlocal/production/config/iam/terraform-apply-role-arn | PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN | production-destroy-prepare, production-destroy | Existing protected production teardown-preparation/final-destroy apply OIDC |
+| /pawlocal/production/config/aws/account-id | PAWLOCAL_AWS_ACCOUNT_ID | production-destroy-prepare, production-destroy | Existing production recovery account and delegated-role validation |
+| /pawlocal/production/config/terraform/plan-bucket | PAWLOCAL_TERRAFORM_PLAN_BUCKET | production-destroy-prepare, production-destroy | Existing production recovery private saved-plan download |
+
+`terraform-environment-destroy.yml` is the actual consumer. Both target Environments were absent in the 2026-10-22 read-only GitHub inventory; create/review their required reviewer and main-only branch policies explicitly before reconciliation. Never let synchronization create an unprotected Environment. No plan-role ARN is consumed by these apply jobs, so do not map one there. No development destroy target or reader-role OIDC trust is added.
+
 ## Entry settings and operator inputs (outside synchronization)
 
 These are not automatically added as Parameter Store mappings. Their lifecycle owner is the operator unless stated otherwise.
 
 | Setting | Location/consumer | Type and validation | Setup/status |
 |---|---|---|---|
-| AWS_REGION | Matching release and plan/apply Environments; AWS session setup | Variable; supported AWS region, must match owned resources | Required before AWS reads; retain existing operator configuration |
+| AWS_REGION | Matching release and plan/apply Environments, plus production-destroy-prepare and production-destroy; AWS session setup | Variable; supported AWS region, must match owned resources | Required before AWS reads; retain existing operator configuration; explicitly initialize protected production recovery targets |
 | PAWLOCAL_CONFIG_READER_ROLE_ARN | Matching protected apply Environment for reconciliation OIDC; matching release Environment for required initial setup/read-back | Variable; exact reviewed bootstrap output, matching account/environment | #205 initial setup/read-back in both locations; bootstrap owns role; no current live reader-role claim |
 | PAWLOCAL_CONFIG_GITHUB_TOKEN | Matching protected apply Environment, callable workflow secret | Secret; fine-grained PAT selected only for `alanlima/pawlocal`, Environments write and implicit Metadata read | Scoped credential configured in both apply Environments 2026-10-22; read-only API access checked; runtime writes remain #205 verification; no token payload in this inventory |
-| PAWLOCAL_TF_STATE_BUCKET | P, A; Terraform backend | Variable; approved existing state bucket | Existing entry setting, not automatically synchronized |
+| PAWLOCAL_TF_STATE_BUCKET | P, A, production-destroy-prepare, production-destroy; Terraform backend | Variable; approved existing state bucket | Existing entry setting, not automatically synchronized; explicitly initialize protected production recovery targets |
 | PAWLOCAL_DOMAIN_NAME, PAWLOCAL_ROUTE53_ZONE_ID | P; environment root domain/DNS inputs | Variables; approved matching domain and hosted zone | Existing operator inputs; naming is not DNS authorization |
 | PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN | P; Terraform certificate input | Existing secret setting; approved matching certificate ARN | Preserve current storage/configuration; no copying into Parameter Store |
 | PAWLOCAL_DEPLOY_ADAPTER_PATH | R; frontend release adapter | Variable; reviewed repository adapter path | Static input; retain |
