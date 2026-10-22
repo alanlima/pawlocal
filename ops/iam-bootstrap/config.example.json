@@ -1,0 +1,5 @@
+{
+  "account_id": "111111111111",
+  "region": "ap-southeast-2",
+  "state_bucket": "replace-with-existing-reviewed-state-bucket"
+}

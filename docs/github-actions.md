@@ -26,6 +26,13 @@ flowchart TD
   CI --> WV
 
   MAIN["Application change on main or manual main dispatch"] --> DEV["Full-stack release to development"]
+  BOOT_MAIN["Bootstrap change on reviewed main or manual main dispatch"] --> BOOT_PLAN["IAM bootstrap: refreshed saved plan + summary"]
+  BOOT_PLAN --> BOOT_CHANGE{"Complete no-op?"}
+  BOOT_CHANGE -->|yes| BOOT_DONE["Success; no approval or apply"]
+  BOOT_CHANGE -->|no| BOOT_APPROVE["iam-bootstrap-apply: alanlima approval"]
+  BOOT_APPROVE --> BOOT_APPLY["Revalidate and apply exact private saved plan"]
+  OPERATOR --> BOOT_SETUP["Setup script publishes actual reader ARN entry settings"]
+  BOOT_SETUP -. authentication prerequisite .-> RECONCILE
   DEV --> FE
   DEV --> BE
   DEV --> IMAGE["Publish immutable backend image"]
@@ -56,6 +63,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 
 | Workflow | Trigger | Purpose | Manual or reusable inputs |
 |---|---|---|---|
+| [`terraform-iam-bootstrap.yml`](../.github/workflows/terraform-iam-bootstrap.yml) | Relevant pushes to `main`, manual from `main` | Normal-refresh bootstrap plan, no-op completion and owner-approved exact-plan apply. | None |
 | [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
 | [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all CI suites, or the protected development reconciliation smoke call. | `reconciliation_smoke` |
 | [`compose-ci.yml`](../.github/workflows/compose-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate, build, start, smoke-test, and tear down the local Compose stack. | None |
@@ -279,6 +287,8 @@ Destroy is not a rollback and does not select a previous release.
 <!-- actions-protected-configuration
 secrets.PAWLOCAL_API_HEALTH_URL
 secrets.PAWLOCAL_AWS_ACCOUNT_ID
+secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID
+secrets.PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY
 secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN
 secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN
 secrets.PAWLOCAL_DSQL_ENDPOINT
@@ -301,7 +311,15 @@ vars.PAWLOCAL_TF_STATE_BUCKET
 
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
 
-Reconciliation consumes `AWS_REGION`, `PAWLOCAL_CONFIG_READER_ROLE_ARN` and the scoped `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret in the matching protected apply Environment. The role ARN is additionally initialized in the matching release Environment as documented; it is not the bootstrap automatically published handoff deferred to #191. Existing deployment workflow configuration is unchanged by #205.
+Reconciliation consumes `AWS_REGION`, `PAWLOCAL_CONFIG_READER_ROLE_ARN` and the scoped `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret in the matching protected apply Environment. The owner-operated setup script publishes actual reader-role ARNs to matching release/apply pairs during initial setup or identity changes; existing reconciliation retains ongoing configuration synchronization. Bootstrap Actions do not duplicate it.
+
+### IAM bootstrap plan and apply
+
+<!-- actions-reference: terraform-iam-bootstrap.yml; dispatch-inputs: -; call-inputs: - -->
+
+`terraform-iam-bootstrap.yml` has no manual inputs. Relevant trusted-main pushes or manual main dispatch plan the existing bootstrap state. PRs run backend-free checks only. A complete refreshed no-op succeeds without approval. Changed plans use existing private S3 transfer and wait for `alanlima` in main-only `iam-bootstrap-apply`, with administrator bypass disabled. Apply verifies exact plan digest, source, effective inputs, backend/state generation, run/attempt, supersession and six-hour expiry; it never replans after approval. There is no automatic reader-role publication job. The owner-operated setup script maintains those entry settings; existing reconciliation remains unchanged. Summaries report safe status/action counts and next steps; raw Terraform, state, credential and API values are withheld.
+
+Both bootstrap Environments provide `AWS_REGION`, `PAWLOCAL_AWS_ACCOUNT_ID`, `PAWLOCAL_TF_STATE_BUCKET`, `PAWLOCAL_TERRAFORM_PLAN_BUCKET` and dedicated `PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID` / `PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY` secrets. They also provide `TF_VAR_github_repository`, `TF_VAR_github_owner_id`, `TF_VAR_github_repository_id`, `TF_VAR_route53_zone_id`, `TF_VAR_domain_name`, `TF_VAR_manage_github_oidc_provider`, `TF_VAR_development_lightsail_principal_arn` and `TF_VAR_production_lightsail_principal_arn`. Bootstrap does not consume `PAWLOCAL_CONFIG_GITHUB_TOKEN`; that shared repository secret remains available to existing reconciliation under the owner's accepted location risk. All import flags, root, workspace, project and backend key are fixed in code. See [bootstrap setup and recovery](iam-bootstrap-actions.md) and [identity setup tooling](../ops/iam-bootstrap/README.md).
 
 ### Environment plan/apply and destroy
 

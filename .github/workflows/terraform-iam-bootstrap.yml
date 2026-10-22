@@ -1,0 +1,195 @@
+name: Terraform IAM bootstrap plan and apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/terraform/iam-bootstrap/**
+      - .github/workflows/terraform-iam-bootstrap.yml
+      - .github/scripts/bootstrap*.py
+      - .github/scripts/terraform-plan-transfer.py
+      - .github/scripts/requirements-terraform-plan-transfer.txt
+      - .github/scripts/requirements-iam-bootstrap.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pawlocal-terraform-iam-bootstrap
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.14.3
+  TF_ROOT: infra/terraform/iam-bootstrap
+  TF_STATE_KEY: pawlocal/iam-bootstrap/terraform.tfstate
+  TF_WORKSPACE: default
+  TF_IN_AUTOMATION: 'true'
+  TF_LOG: ''
+  TF_VAR_project_name: pawlocal
+  TF_VAR_import_existing_github_oidc_provider: 'false'
+  TF_VAR_import_existing_development_deploy_role: 'false'
+  TF_VAR_import_existing_dsql_service_linked_role: 'false'
+  PLAN_PREFIX: plans/iam-bootstrap/${{ github.run_id }}/${{ github.run_attempt }}
+
+jobs:
+  plan:
+    name: Review refreshed IAM bootstrap plan
+    if: >-
+      github.repository == 'alanlima/pawlocal' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: iam-bootstrap-plan
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+      plan_sha256: ${{ steps.plan.outputs.plan_sha256 }}
+      manifest_version: ${{ steps.plan.outputs.manifest_version }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_github_repository: ${{ vars.TF_VAR_github_repository }}
+      TF_VAR_github_owner_id: ${{ vars.TF_VAR_github_owner_id }}
+      TF_VAR_github_repository_id: ${{ vars.TF_VAR_github_repository_id }}
+      TF_VAR_route53_zone_id: ${{ vars.TF_VAR_route53_zone_id }}
+      TF_VAR_domain_name: ${{ vars.TF_VAR_domain_name }}
+      TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
+      TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
+      TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
+    steps:
+      - name: Start friendly job report
+        run: |
+          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; raw operational values are withheld.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install pinned HCL parser and private-transfer dependencies
+        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-iam-bootstrap.txt
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Validate trusted request and required configuration
+        env:
+          BOOTSTRAP_KEY_ID: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          BOOTSTRAP_SECRET_KEY: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+        run: python .github/scripts/bootstrap-workflow.py validate --mode plan
+      - name: Configure dedicated bootstrap identity
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
+          aws-access-key-id: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+          mask-aws-account-id: true
+          unset-current-credentials: true
+      - name: Plan, classify and publish exact private plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/bootstrap-workflow.py plan
+      - name: Report incomplete setup or execution
+        if: failure() || cancelled()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [[ -f .github/scripts/bootstrap-workflow.py ]]; then
+            python .github/scripts/bootstrap-workflow.py report --mode plan
+          else
+            printf '%s\n' '## IAM bootstrap — incomplete' '' 'Runner setup or checkout did not finish. No successful AWS apply is claimed. Repair runner access and dispatch a fresh plan; approval remains required for changes.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Remove private local plan files
+        if: always()
+        run: |
+          if [[ -f .github/scripts/bootstrap-workflow.py ]]; then
+            python .github/scripts/bootstrap-workflow.py cleanup
+          fi
+
+  apply:
+    name: Apply exact owner-approved IAM plan
+    needs: plan
+    if: >-
+      github.repository == 'alanlima/pawlocal' &&
+      github.ref == 'refs/heads/main' &&
+      needs.plan.result == 'success' && needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: iam-bootstrap-apply
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+      TF_VAR_terraform_state_bucket_name: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
+      TF_VAR_github_repository: ${{ vars.TF_VAR_github_repository }}
+      TF_VAR_github_owner_id: ${{ vars.TF_VAR_github_owner_id }}
+      TF_VAR_github_repository_id: ${{ vars.TF_VAR_github_repository_id }}
+      TF_VAR_route53_zone_id: ${{ vars.TF_VAR_route53_zone_id }}
+      TF_VAR_domain_name: ${{ vars.TF_VAR_domain_name }}
+      TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
+      TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
+      TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
+      EXPECTED_PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+      EXPECTED_MANIFEST_VERSION: ${{ needs.plan.outputs.manifest_version }}
+    steps:
+      - name: Start friendly job report
+        run: |
+          printf '%s\n' '## IAM bootstrap — starting' '' 'This job uses the existing standalone bootstrap state. Configuration and execution results appear below; raw operational values are withheld.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install pinned HCL parser and private-transfer dependencies
+        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-iam-bootstrap.txt
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Validate trusted request and required configuration
+        env:
+          BOOTSTRAP_KEY_ID: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          BOOTSTRAP_SECRET_KEY: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+        run: python .github/scripts/bootstrap-workflow.py validate --mode apply
+      - name: Configure dedicated bootstrap identity
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
+          aws-access-key-id: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PAWLOCAL_BOOTSTRAP_AWS_SECRET_ACCESS_KEY }}
+          mask-aws-account-id: true
+          unset-current-credentials: true
+      - name: Revalidate and apply only the exact saved plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/bootstrap-workflow.py apply
+      - name: Report incomplete setup or execution
+        if: failure() || cancelled()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [[ -f .github/scripts/bootstrap-workflow.py ]]; then
+            python .github/scripts/bootstrap-workflow.py report --mode apply
+          else
+            printf '%s\n' '## IAM bootstrap — incomplete' '' 'Runner setup or checkout did not finish. No successful AWS apply is claimed. Repair runner access and dispatch a fresh plan; approval remains required for changes.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Remove private local plan files
+        if: always()
+        run: |
+          if [[ -f .github/scripts/bootstrap-workflow.py ]]; then
+            python .github/scripts/bootstrap-workflow.py cleanup
+          fi
