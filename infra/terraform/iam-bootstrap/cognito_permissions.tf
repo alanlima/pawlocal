@@ -50,7 +50,8 @@ locals {
     "lambda:GetFunction",
     "lambda:GetFunctionCodeSigningConfig",
     "lambda:GetPolicy",
-    "lambda:ListTags"
+    "lambda:ListTags",
+    "lambda:ListVersionsByFunction"
   ]
   cognito_lambda_mutation_actions = [
     "lambda:AddPermission",

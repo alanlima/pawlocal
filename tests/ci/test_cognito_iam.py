@@ -27,6 +27,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
 
         self.assertIn("`DescribeLogGroups` with the exact `LogGroupNamePrefix`", design)
         self.assertIn("LogGroup API ARN guidance", design)
+        self.assertIn("`ListVersionsByFunction`", design)
+        self.assertIn("awslambda-ListVersionsByFunction", design)
 
     def test_bootstrap_scope_contains_no_application_resources_or_action_wildcards(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
@@ -37,6 +39,7 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertNotIn('"logs:Describe*"', source)
         self.assertNotIn('"cognito-idp:', source)
         self.assertNotIn('"s3:', source)
+        self.assertEqual(1, source.count('"lambda:ListVersionsByFunction"'))
 
     def test_describe_log_groups_exception_is_dedicated_and_region_limited(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
@@ -62,6 +65,7 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn('"logs:GetLogEvents"', test_source)
         self.assertIn('"logs:StartLiveTail"', test_source)
         self.assertIn('action == "iam:PassRole"', test_source)
+        self.assertIn('contains(flatten([statement.Action]), "lambda:ListVersionsByFunction")', test_source)
         self.assertIn("length(policy.minified_json) < local.iam_managed_policy_max_bytes", test_source)
 
 

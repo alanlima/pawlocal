@@ -86,6 +86,17 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
   }
 
   assert {
+    condition = toset(local.cognito_lambda_read_actions) == toset([
+      "lambda:GetFunction",
+      "lambda:GetFunctionCodeSigningConfig",
+      "lambda:GetPolicy",
+      "lambda:ListTags",
+      "lambda:ListVersionsByFunction"
+    ])
+    error_message = "Lambda refresh permissions must retain the complete provider 6.69.1 read call set."
+  }
+
+  assert {
     condition = alltrue([
       for environment, policy in data.aws_iam_policy_document.cognito_plan_permissions :
       toset(flatten([
@@ -123,6 +134,23 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       !strcontains(policy.minified_json, "pawlocal-${environment == "development" ? "production" : "development"}-")
     ])
     error_message = "Delegated apply policies must contain only the enumerated Lambda, Logs, and exact PassRole lifecycle."
+  }
+
+  assert {
+    condition = alltrue(flatten([
+      for policies in [
+        data.aws_iam_policy_document.cognito_plan_permissions,
+        data.aws_iam_policy_document.cognito_apply_permissions
+        ] : [
+        for environment, policy in policies :
+        length([
+          for statement in jsondecode(policy.minified_json).Statement : statement
+          if contains(flatten([statement.Action]), "lambda:ListVersionsByFunction") &&
+          toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].function])
+        ]) == 1
+      ]
+    ]))
+    error_message = "Both delegated policies must authorize ListVersionsByFunction on only the exact matching function ARN."
   }
 
   assert {
