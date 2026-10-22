@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 import zipfile
 
@@ -13,10 +15,43 @@ import zipfile
 MODULE_VERSION = "8.12.0"
 PLANNED_SOURCE = "export const marker = 'reviewed-plan';\n"
 CHANGED_SOURCE = "export const marker = 'changed-source';\n"
+STS_ENDPOINT = ""
+
+
+class StubStsHandler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        response = b"""<?xml version="1.0" encoding="UTF-8"?>
+<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <GetCallerIdentityResult>
+    <Arn>arn:aws:iam::111111111111:user/terraform-package-test</Arn>
+    <UserId>AIDATESTUSER</UserId>
+    <Account>111111111111</Account>
+  </GetCallerIdentityResult>
+  <ResponseMetadata><RequestId>00000000-0000-0000-0000-000000000000</RequestId></ResponseMetadata>
+</GetCallerIdentityResponse>
+"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/xml")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
 
 TERRAFORM_CONFIGURATION = f"""
 terraform {{
   required_version = "= 1.14.3"
+}}
+
+provider "aws" {{
+  region                      = "ap-southeast-2"
+  access_key                  = "test"
+  secret_key                  = "test"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
+  skip_requesting_account_id  = true
 }}
 
 variable "create_consumer" {{
@@ -71,13 +106,23 @@ output "package_filename" {{
 def run_terraform(
     directory: Path, *arguments: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
+    terraform_environment = {
+        **os.environ,
+        "AWS_ACCESS_KEY_ID": "test",
+        "AWS_SECRET_ACCESS_KEY": "test",
+        "AWS_SESSION_TOKEN": "test",
+        "AWS_REGION": "ap-southeast-2",
+        "AWS_EC2_METADATA_DISABLED": "true",
+        "AWS_ENDPOINT_URL_STS": STS_ENDPOINT,
+        "TF_IN_AUTOMATION": "true",
+    }
     result = subprocess.run(
         ["terraform", *arguments],
         cwd=directory,
         check=False,
         capture_output=True,
         text=True,
-        env={**os.environ, "TF_IN_AUTOMATION": "true"},
+        env=terraform_environment,
     )
     if check and result.returncode != 0:
         raise AssertionError(
@@ -133,6 +178,21 @@ def assert_package(test: unittest.TestCase, path: Path, expected_source: str) ->
     "set PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION=1 to run Terraform integration",
 )
 class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        global STS_ENDPOINT
+        cls.sts_server = ThreadingHTTPServer(("127.0.0.1", 0), StubStsHandler)
+        cls.sts_thread = threading.Thread(target=cls.sts_server.serve_forever, daemon=True)
+        cls.sts_thread.start()
+        host, port = cls.sts_server.server_address
+        STS_ENDPOINT = f"http://{host}:{port}"
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.sts_server.shutdown()
+        cls.sts_server.server_close()
+        cls.sts_thread.join()
+
     def setUp(self) -> None:
         if shutil.which("terraform") is None:
             self.skipTest("terraform is required for the saved-plan integration test")

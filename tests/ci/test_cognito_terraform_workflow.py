@@ -331,6 +331,15 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
                     "registry.terraform.io/hashicorp/time",
                 },
             )
+            for provider in providers:
+                provider_block = lock.split(f'provider "{provider}" {{', 1)[1].split(
+                    "\n}", 1
+                )[0]
+                self.assertEqual(
+                    provider_block.count('"h1:'),
+                    2,
+                    f"{environment} must lock Windows and Linux packages for {provider}",
+                )
 
     def test_ci_runs_the_cross_workspace_lambda_module_contract(self) -> None:
         workflow = self._load(TERRAFORM_CI_WORKFLOW)
