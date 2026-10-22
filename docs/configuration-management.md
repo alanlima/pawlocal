@@ -76,4 +76,6 @@ In #206 pass the same reconciliation's verified public values directly to the bu
 
 Writes are not atomic. Correct partial failures and rerun; completed writes should be checked and skipped. Failed Terraform applies require a fresh reviewed normal-refresh plan. Missing source/state/mapping never deletes targets. Only confirmed reviewed destroy clears exact affected generated targets/dependent runtime variables; reapply must republish/reconcile before publication. Legacy cleanup needs consumer proof and exact environment/name deletion from the inventory; preserve same-named plan/apply inputs, unrelated static/certificate settings and `development-seed`.
 
+Test both environments: partial writes and safe reruns, missing optional/required values, replacement Cognito settings, a stale served bundle, and confirmed destroy/reapply recovery.
+
 Before token expiry, create its scoped replacement, replace both protected secrets through hidden input, run an authorized audit, then revoke the predecessor. Keep rotation records free of values.
