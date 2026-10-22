@@ -189,6 +189,50 @@ class PlanInputTests(unittest.TestCase):
             bootstrap.verify_plan_inputs(plan)
 
 
+    @unittest.skipUnless(shutil.which("terraform"), "Terraform executable required for local saved-plan persistence fixture")
+    def test_real_normal_saved_noop_plan_persists_refreshed_state_on_exact_apply(self):
+        terraform = shutil.which("terraform")
+        version = subprocess.run([terraform, "version", "-json"], capture_output=True, check=True)
+        if json.loads(version.stdout)["terraform_version"] != "1.14.3":
+            self.skipTest("Persistence fixture uses workflow-pinned Terraform 1.14.3")
+        environment = {name: value for name, value in os.environ.items()
+                       if not name.startswith(("TF_", "AWS_", "CHECKPOINT_"))}
+        environment.update(TF_IN_AUTOMATION="true", TF_INPUT="false", CHECKPOINT_DISABLE="true")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment["TF_DATA_DIR"] = str(root / ".terraform")
+            external = root / "external.tfstate"
+            def observed(value):
+                external.write_text(json.dumps({"version": 4, "terraform_version": "1.14.3", "serial": 1,
+                    "lineage": "synthetic-external-fixture", "outputs": {"observation": {"value": value,
+                    "type": "string", "sensitive": False}}, "resources": []}), encoding="utf-8")
+            observed("before")
+            (root / "main.tf").write_text('data "terraform_remote_state" "observed" {\n backend = "local"\n config = { path = "' +
+                external.as_posix() + '" }\n}\nresource "terraform_data" "anchor" { input = "fixed" }\n', encoding="utf-8")
+            def execute(*arguments):
+                result = subprocess.run([terraform, *arguments], cwd=root, env=environment, capture_output=True)
+                self.assertEqual(result.returncode, 0, "Local built-in Terraform " + arguments[0] + " failed")
+                return result
+            execute("init", "-backend=false", "-input=false")
+            execute("apply", "-input=false", "-auto-approve")
+            before = json.loads((root / "terraform.tfstate").read_text(encoding="utf-8"))
+            observed("after")
+            execute("plan", "-input=false", "-detailed-exitcode", "-out=normal.plan")
+            plan = json.loads(execute("show", "-json", "normal.plan").stdout)
+            self.assertFalse(plan["applyable"])
+            self.assertTrue(all(item["change"]["actions"] == ["no-op"] for item in plan.get("resource_changes", [])))
+            self.assertEqual(before, json.loads((root / "terraform.tfstate").read_text(encoding="utf-8")))
+            execute("apply", "-input=false", "normal.plan")
+            after = json.loads((root / "terraform.tfstate").read_text(encoding="utf-8"))
+            def observation(state):
+                data = next(item for item in state["resources"] if item["mode"] == "data")
+                return data["instances"][0]["attributes"]["outputs"]["value"]["observation"]
+            self.assertEqual(observation(before), "before")
+            self.assertEqual(observation(after), "after")
+            self.assertGreater(after["serial"], before["serial"])
+            self.assertEqual(after["lineage"], before["lineage"])
+
+
 class ClassificationTests(unittest.TestCase):
     def test_only_complete_genuine_noop_bypasses_gate(self):
         changes, counts, rows = bootstrap.classify(plan_fixture())
@@ -221,8 +265,38 @@ class ClassificationTests(unittest.TestCase):
         plan = plan_fixture(["no-op"])
         plan["applyable"] = False
         plan["resource_drift"] = copy.deepcopy(plan_fixture(["update"])["resource_changes"])
-        with self.assertRaisesRegex(bootstrap.Stop, "DRIFT_REQUIRES_REVIEW"):
-            bootstrap.classify(plan)
+        changes, counts, rows = bootstrap.classify(plan)
+        self.assertTrue(changes)
+        self.assertTrue(bootstrap.state_only_drift(plan, counts))
+        self.assertEqual(counts["drift"], 1)
+        self.assertEqual(len(rows), 1)
+        bootstrap.verify_plan_exit(plan, changes, counts, 0)
+        with self.assertRaisesRegex(bootstrap.Stop, "EXIT_CODE_PLAN_DISAGREEMENT"):
+            bootstrap.verify_plan_exit(plan, changes, counts, 2)
+
+    def test_drift_cannot_hide_unreported_state_delta_or_unknown_drift(self):
+        for kind in ("state", "unknown", "output", "resource"):
+            plan = plan_fixture(["no-op"])
+            plan["applyable"] = False
+            plan["resource_drift"] = copy.deepcopy(plan_fixture(["update"])["resource_changes"])
+            if kind == "state":
+                plan["planned_values"]["outputs"] = {"changed": {"value": "PRIVATE"}}
+            elif kind == "unknown":
+                plan["resource_drift"][0]["change"]["after_unknown"] = True
+            elif kind == "output":
+                plan["output_changes"] = {"changed": {"actions": ["update"]}}
+            else:
+                plan["resource_changes"][0]["change"]["actions"] = ["update"]
+            with self.subTest(kind=kind), self.assertRaisesRegex(bootstrap.Stop, "NON_APPLYABLE_CHANGES"):
+                bootstrap.classify(plan)
+
+    def test_native_exit_applyable_and_review_state_must_agree(self):
+        for code, applyable, actions in ((2, False, None), (0, True, None), (2, True, None), (0, True, ["update"])):
+            plan = plan_fixture(actions)
+            plan["applyable"] = applyable
+            changes, counts, _ = bootstrap.classify(plan)
+            with self.subTest(code=code, applyable=applyable, actions=actions), self.assertRaisesRegex(bootstrap.Stop, "EXIT_CODE_PLAN_DISAGREEMENT"):
+                bootstrap.verify_plan_exit(plan, changes, counts, code)
 
     def test_each_supported_change_requires_approval(self):
         for actions in (["create"], ["update"], ["delete"], ["delete", "create"], ["create", "delete"], ["read"]):
@@ -469,6 +543,52 @@ class PlanExecutionTests(unittest.TestCase):
             aws.assert_not_called()
             output.assert_not_called()
             summary.assert_not_called()
+
+    def test_state_only_drift_publishes_private_plan_and_requests_owner_approval(self):
+        plan = plan_fixture(["no-op"])
+        plan["applyable"] = False
+        plan["resource_drift"] = copy.deepcopy(plan_fixture(["update"])["resource_changes"])
+        client = Mock()
+        client.put_object.return_value = {"VersionId": "immutable-version"}
+        with tempfile.TemporaryDirectory() as directory, patch.object(bootstrap, "PRIVATE", Path(directory)), \
+             patch.object(bootstrap, "preflight", return_value={"serial": 1}), patch.object(bootstrap, "init"), \
+             patch.object(bootstrap, "generation", return_value=({"serial": 1}, {})), \
+             patch.object(bootstrap, "effective_inputs", return_value={}), patch.object(bootstrap, "binding", return_value={}), \
+             patch.object(bootstrap, "prefix", return_value="private/run"), patch.object(bootstrap, "collision_check"), \
+             patch.object(bootstrap, "tf", side_effect=[Mock(returncode=0), Mock(stdout=json.dumps(plan).encode())]), \
+             patch.object(bootstrap, "aws", return_value=client), patch.object(bootstrap, "output") as output, \
+             patch.object(bootstrap, "summary") as summary, patch.dict(os.environ, {"PLAN_TRANSFER_BUCKET": "private"}):
+            (Path(directory) / "tfplan").write_bytes(b"exact normal saved plan")
+            bootstrap.make_plan()
+        self.assertEqual(client.put_object.call_count, 2)
+        self.assertIn(unittest.mock.call("has_changes", "true"), output.call_args_list)
+        text = summary.call_args.args[1]
+        self.assertIn("State-only drift acceptance; no AWS resource changes", text)
+        self.assertIn("does not restore policies", text)
+        self.assertIn("iam-bootstrap-apply", text)
+        self.assertIn("drift: update", text)
+
+    def test_owner_approved_state_only_drift_applies_exact_binary_without_replanning(self):
+        plan = plan_fixture(["no-op"])
+        plan["applyable"] = False
+        plan["resource_drift"] = copy.deepcopy(plan_fixture(["update"])["resource_changes"])
+        client = Mock()
+        client.get_object.side_effect = [{"Body": io.BytesIO(b'{"plan_version":"v1"}')},
+                                         {"Body": io.BytesIO(b"exact approved binary")}]
+        with tempfile.TemporaryDirectory() as directory, patch.object(bootstrap, "PRIVATE", Path(directory)), \
+             patch.object(bootstrap, "preflight", return_value={"serial": 1}), patch.object(bootstrap, "init"), \
+             patch.object(bootstrap, "generation", return_value=({"serial": 1}, {})), \
+             patch.object(bootstrap, "effective_inputs", return_value={}), patch.object(bootstrap, "binding", return_value={}), \
+             patch.object(bootstrap, "prefix", return_value="private/run"), patch.object(bootstrap, "collision_check"), \
+             patch.object(bootstrap, "trusted_run"), patch.object(bootstrap, "check_manifest") as check, \
+             patch.object(bootstrap, "tf", side_effect=[Mock(stdout=json.dumps(plan).encode()), Mock(returncode=0)]) as tf, \
+             patch.object(bootstrap, "aws", return_value=client), patch.object(bootstrap, "summary") as summary, \
+             patch.dict(os.environ, {"PLAN_TRANSFER_BUCKET": "private", "EXPECTED_MANIFEST_VERSION": "v2"}):
+            bootstrap.apply_plan()
+            self.assertEqual((Path(directory) / "approved.tfplan").read_bytes(), b"exact approved binary")
+        self.assertEqual(check.call_count, 2)
+        self.assertEqual([call.args[0] for call in tf.call_args_list], ["show", "apply"])
+        self.assertEqual(summary.call_args.args[0], "State-only drift accepted")
 
     def test_noop_never_uploads_or_requests_approval(self):
         plan = plan_fixture()
