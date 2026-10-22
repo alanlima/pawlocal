@@ -465,7 +465,7 @@ module "cognito_pre_sign_up" {
 }
 
 resource "aws_cognito_user_pool" "application" {
-  name = "pawlocal-${var.environment}"
+  name = "${var.project_name}-${var.environment}"
 
   admin_create_user_config {
     allow_admin_create_user_only = false

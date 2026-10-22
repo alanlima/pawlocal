@@ -183,6 +183,38 @@ run "production_uses_strict_password_policy_and_exact_override" {
   }
 }
 
+run "non_default_project_name_sets_user_pool_name" {
+  command = plan
+
+  providers = {
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
+  }
+
+  variables {
+    project_name               = "dogapp"
+    environment                = "development"
+    aws_region                 = "ap-southeast-2"
+    root_domain                = "example.test"
+    route53_zone_id            = "ZTEST"
+    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name = "pawlocal-development-github-deploy"
+    container_power            = "micro"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
+  }
+
+  assert {
+    condition     = aws_cognito_user_pool.application.name == "dogapp-development"
+    error_message = "The user pool name must use the configured project name and environment."
+  }
+}
+
 run "password_minimum_below_cognito_range_is_rejected" {
   command = plan
 
