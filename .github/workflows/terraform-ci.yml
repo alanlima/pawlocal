@@ -6,14 +6,11 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
-      - ".github/scripts/terraform-plan-transfer.py"
       - ".github/scripts/terraform-production-lifecycle.py"
-      - ".github/scripts/terraform-cognito-archive.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
       - ".github/scripts/verify-cognito-provider-contract.py"
-      - ".github/scripts/verify-cognito-archive-provider-contract.py"
-      - "tests/ci/test_cognito_archive_saved_plan.py"
+      - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
       - ".github/workflows/terraform-environment-destroy.yml"
@@ -30,14 +27,11 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
-      - ".github/scripts/terraform-plan-transfer.py"
       - ".github/scripts/terraform-production-lifecycle.py"
-      - ".github/scripts/terraform-cognito-archive.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
       - ".github/scripts/verify-cognito-provider-contract.py"
-      - ".github/scripts/verify-cognito-archive-provider-contract.py"
-      - "tests/ci/test_cognito_archive_saved_plan.py"
+      - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
       - ".github/workflows/terraform-environment-destroy.yml"
@@ -115,19 +109,15 @@ jobs:
         if: matrix.root == 'modules/pawlocal-environment'
         run: node --test lambda/cognito-pre-signup/index.test.mjs
 
-      - name: Test Cognito archive across saved-plan runners
+      - name: Test pinned Lambda module across saved-plan runners
         if: matrix.root == 'modules/pawlocal-environment'
         env:
-          PAWLOCAL_RUN_TERRAFORM_ARCHIVE_INTEGRATION: "1"
-        run: python ../../../../tests/ci/test_cognito_archive_saved_plan.py -v
+          PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION: "1"
+        run: python ../../../../tests/ci/test_cognito_lambda_module_saved_plan.py -v
 
       - name: Verify AWS provider Cognito log-group refresh contract
         if: matrix.root == 'modules/pawlocal-environment'
         run: python ../../../../.github/scripts/verify-cognito-provider-contract.py
-
-      - name: Verify archive provider plan-time package contract
-        if: matrix.root == 'modules/pawlocal-environment'
-        run: python ../../../../.github/scripts/verify-cognito-archive-provider-contract.py
 
       - name: Test DSQL setup lifecycle transitions
         if: matrix.root == 'modules/dsql-post-apply-setup'

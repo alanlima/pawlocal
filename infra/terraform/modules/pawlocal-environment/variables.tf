@@ -56,6 +56,17 @@ variable "cognito_pre_sign_up_role_arn" {
   }
 }
 
+variable "cognito_package_build_id" {
+  description = "Plan-bound identifier added to the pre sign-up package hash. Protected workflows supply a unique value per run attempt; local validation uses the safe default."
+  type        = string
+  default     = "local"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", var.cognito_package_build_id))
+    error_message = "cognito_package_build_id must contain 1 through 128 ASCII letters, digits, periods, underscores, or hyphens and start with a letter or digit."
+  }
+}
+
 variable "root_domain" {
   description = "Existing public Route 53 zone name without a trailing dot."
   type        = string

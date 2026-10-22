@@ -63,6 +63,7 @@ env:
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
+  TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.environment }}-${{ inputs.phase }}
   TF_VAR_project_name: pawlocal
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
 
@@ -178,12 +179,19 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Validate selection and required configuration
         shell: bash
         run: |
           [[ '${{ inputs.environment }}' =~ ^(development|production)$ ]]
           [[ '${{ inputs.phase }}' =~ ^(foundation|converge|release)$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
           done
@@ -361,8 +369,7 @@ jobs:
           digest="$(python .github/scripts/terraform-plan-metadata.py create "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json" \
             --environment '${{ inputs.environment }}' --state-key "$TF_STATE_KEY" --commit "$GITHUB_SHA" \
             --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
-            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --archive "$TF_ROOT/.terraform/pawlocal-${{ inputs.environment }}-cognito-pre-signup.zip")"
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
           echo "plan_sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "Exact saved-plan digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
 
@@ -370,17 +377,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
-          python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
-            "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json" \
-            --archive "$TF_ROOT/.terraform/pawlocal-${{ inputs.environment }}-cognito-pre-signup.zip"
-
-      - name: Remove plan-runner Cognito package
-        if: always()
-        shell: bash
-        run: |
-          python .github/scripts/terraform-cognito-archive.py cleanup \
-            --environment '${{ inputs.environment }}' --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/saved-plan"
+          python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json"
 
       - name: Remove delegated Cognito profile
         if: always()
@@ -413,10 +410,17 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Validate the matching apply identity
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-apply" ]]
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           test -n "$PLAN_TRANSFER_BUCKET"
 
       - name: Configure bounded apply credentials
@@ -442,8 +446,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
-          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
-            "$RUNNER_TEMP/saved-plan" plan-metadata.json --archive
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$RUNNER_TEMP/saved-plan" plan-metadata.json
 
       - name: Verify exact saved plan metadata and digest
         shell: bash
@@ -453,8 +456,7 @@ jobs:
           actual="$(python .github/scripts/terraform-plan-metadata.py verify "$RUNNER_TEMP/saved-plan/tfplan" "$RUNNER_TEMP/saved-plan/plan-metadata.json" \
             --environment '${{ inputs.environment }}' --state-key "$TF_STATE_KEY" --commit "$GITHUB_SHA" \
             --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
-            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --archive "$RUNNER_TEMP/saved-plan/cognito-pre-sign-up.zip")"
+            --repository-id "$GITHUB_REPOSITORY_ID" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
           test "$actual" = "$EXPECTED_SHA256"
 
       - name: Set up Terraform and initialize matching state
@@ -484,11 +486,6 @@ jobs:
             exit "$status"
           fi
 
-          python .github/scripts/terraform-cognito-archive.py restore \
-            --environment '${{ inputs.environment }}' --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/saved-plan" \
-            --metadata "$RUNNER_TEMP/saved-plan/plan-metadata.json"
-
           apply_command=(terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m)
           if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
             apply_command+=(-no-color)
@@ -504,14 +501,6 @@ jobs:
             exit "$status"
           fi
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Remove transferred Cognito package
-        if: always()
-        shell: bash
-        run: |
-          python .github/scripts/terraform-cognito-archive.py cleanup \
-            --environment '${{ inputs.environment }}' --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/saved-plan"
 
       - name: Remove delegated Cognito profile
         if: always()

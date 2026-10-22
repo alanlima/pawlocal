@@ -7,9 +7,6 @@ import json
 from pathlib import Path
 
 
-COGNITO_ARCHIVE_NAME = "cognito-pre-sign-up.zip"
-
-
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -32,7 +29,6 @@ def main() -> None:
     parser.add_argument("--repository-id", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--run-attempt", required=True)
-    parser.add_argument("--archive", type=Path)
     args = parser.parse_args()
 
     expected = {
@@ -44,22 +40,10 @@ def main() -> None:
         "run_id": args.run_id,
         "run_attempt": args.run_attempt,
     }
-    archive = None
-    if args.archive is not None:
-        archive = {
-            "name": COGNITO_ARCHIVE_NAME,
-            "terraform_path": (
-                f".terraform/pawlocal-{args.environment}-cognito-pre-signup.zip"
-            ),
-            "sha256": digest(args.archive),
-        }
     plan_digest = digest(args.plan)
     if args.mode == "create":
-        payload = {**expected, "sha256": plan_digest}
-        if archive is not None:
-            payload["cognito_archive"] = archive
         args.metadata.write_text(
-            json.dumps(payload, separators=(",", ":")),
+            json.dumps({**expected, "sha256": plan_digest}, separators=(",", ":")),
             encoding="utf-8",
         )
         print(plan_digest)
@@ -70,11 +54,6 @@ def main() -> None:
         raise SystemExit("Saved plan metadata does not match this workflow run")
     if actual.get("sha256") != plan_digest:
         raise SystemExit("Saved Terraform plan digest mismatch")
-    if archive is None:
-        if "cognito_archive" in actual:
-            raise SystemExit("Saved plan unexpectedly requires a Cognito archive")
-    elif actual.get("cognito_archive") != archive:
-        raise SystemExit("Saved Cognito archive metadata or digest mismatch")
     print(plan_digest)
 
 

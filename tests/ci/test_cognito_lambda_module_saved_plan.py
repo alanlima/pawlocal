@@ -1,0 +1,279 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import unittest
+import zipfile
+
+
+MODULE_VERSION = "8.12.0"
+PLANNED_SOURCE = "export const marker = 'reviewed-plan';\n"
+CHANGED_SOURCE = "export const marker = 'changed-source';\n"
+
+TERRAFORM_CONFIGURATION = f"""
+terraform {{
+  required_version = "= 1.14.3"
+}}
+
+variable "create_consumer" {{
+  type    = bool
+  default = false
+}}
+
+variable "package_build_id" {{
+  type = string
+}}
+
+module "lambda_package" {{
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "= {MODULE_VERSION}"
+
+  create_function          = false
+  create_role              = false
+  source_path              = "${{path.root}}/index.mjs"
+  artifacts_dir            = "${{path.root}}/.terraform/lambda-builds"
+  recreate_missing_package = true
+  trigger_on_package_timestamp = true
+  hash_extra               = var.package_build_id
+}}
+
+resource "terraform_data" "lambda_consumer" {{
+  count = var.create_consumer ? 1 : 0
+  input = module.lambda_package.local_filename
+
+  provisioner "local-exec" {{
+    interpreter = ["python", "-c"]
+    command     = "import pathlib,sys; sys.exit(0 if pathlib.Path(r'${{module.lambda_package.local_filename}}').is_file() else 23)"
+  }}
+
+  depends_on = [module.lambda_package]
+}}
+
+output "package_filename" {{
+  value = module.lambda_package.local_filename
+}}
+""".lstrip()
+
+
+def run_terraform(
+    directory: Path, *arguments: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        ["terraform", *arguments],
+        cwd=directory,
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TF_IN_AUTOMATION": "true"},
+    )
+    if check and result.returncode != 0:
+        raise AssertionError(
+            f"terraform {' '.join(arguments)} failed in {directory}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    return result
+
+
+def write_configuration(directory: Path, source: str = PLANNED_SOURCE) -> None:
+    (directory / "main.tf").write_text(TERRAFORM_CONFIGURATION, encoding="utf-8")
+    (directory / "index.mjs").write_text(source, encoding="utf-8", newline="")
+
+
+def initialize(directory: Path) -> None:
+    run_terraform(directory, "init", "-backend=false", "-input=false")
+
+
+def copy_saved_plan_workspace(
+    plan_workspace: Path,
+    apply_workspace: Path,
+    plan_name: str,
+    *,
+    source: str,
+    include_state: bool,
+) -> None:
+    apply_workspace.mkdir()
+    write_configuration(apply_workspace, source)
+    shutil.copy2(plan_workspace / ".terraform.lock.hcl", apply_workspace)
+    shutil.copy2(plan_workspace / plan_name, apply_workspace)
+    if include_state:
+        shutil.copy2(plan_workspace / "terraform.tfstate", apply_workspace)
+    initialize(apply_workspace)
+
+
+def package_path(workspace: Path) -> Path:
+    value = run_terraform(workspace, "output", "-raw", "package_filename").stdout.strip()
+    path = Path(value)
+    return path if path.is_absolute() else workspace / path
+
+
+def assert_package(test: unittest.TestCase, path: Path, expected_source: str) -> None:
+    test.assertTrue(path.is_file(), f"expected Lambda package at {path}")
+    with zipfile.ZipFile(path) as package:
+        test.assertEqual(package.read("index.mjs").decode(), expected_source)
+
+
+@unittest.skipUnless(
+    os.environ.get("PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION") == "1",
+    "set PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION=1 to run Terraform integration",
+)
+class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        if shutil.which("terraform") is None:
+            self.skipTest("terraform is required for the saved-plan integration test")
+
+    def test_initial_saved_plan_builds_package_on_fresh_apply_runner(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-initial-") as temporary:
+            root = Path(temporary)
+            plan_workspace = root / "plan"
+            apply_workspace = root / "apply"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            initialize(plan_workspace)
+            run_terraform(
+                plan_workspace,
+                "plan",
+                "-input=false",
+                "-var=create_consumer=true",
+                "-var=package_build_id=initial-plan",
+                "-out=tfplan",
+            )
+
+            copy_saved_plan_workspace(
+                plan_workspace,
+                apply_workspace,
+                "tfplan",
+                source=PLANNED_SOURCE,
+                include_state=False,
+            )
+            self.assertEqual(list((apply_workspace / ".terraform/lambda-builds").glob("*.zip")), [])
+            run_terraform(apply_workspace, "apply", "-input=false", "-auto-approve", "tfplan")
+            assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
+
+    def test_missing_unchanged_package_is_rebuilt_before_pending_consumer(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-retry-") as temporary:
+            root = Path(temporary)
+            plan_workspace = root / "plan"
+            apply_workspace = root / "apply"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            initialize(plan_workspace)
+            run_terraform(
+                plan_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=package_build_id=initial-state",
+            )
+            shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
+
+            run_terraform(
+                plan_workspace,
+                "plan",
+                "-input=false",
+                "-var=create_consumer=true",
+                "-var=package_build_id=retry-plan",
+                "-out=retry.tfplan",
+            )
+            copy_saved_plan_workspace(
+                plan_workspace,
+                apply_workspace,
+                "retry.tfplan",
+                source=PLANNED_SOURCE,
+                include_state=True,
+            )
+            self.assertEqual(list((apply_workspace / ".terraform/lambda-builds").glob("*.zip")), [])
+            run_terraform(
+                apply_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "retry.tfplan",
+            )
+            assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
+
+    def test_source_change_gets_a_new_package_identity_and_scoped_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-source-") as temporary:
+            workspace = Path(temporary) / "workspace"
+            workspace.mkdir()
+            write_configuration(workspace)
+            initialize(workspace)
+            run_terraform(
+                workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=package_build_id=source-one",
+            )
+            original_package = package_path(workspace)
+            assert_package(self, original_package, PLANNED_SOURCE)
+
+            (workspace / "index.mjs").write_text(
+                CHANGED_SOURCE, encoding="utf-8", newline=""
+            )
+            run_terraform(
+                workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=package_build_id=source-two",
+            )
+            changed_package = package_path(workspace)
+            self.assertNotEqual(original_package.name, changed_package.name)
+            assert_package(self, changed_package, CHANGED_SOURCE)
+
+            build_directory = workspace / ".terraform/lambda-builds"
+            shutil.rmtree(build_directory)
+            self.assertFalse(build_directory.exists())
+            self.assertEqual(
+                (workspace / "index.mjs").read_text(encoding="utf-8"),
+                CHANGED_SOURCE,
+            )
+
+    def test_final_destroy_saved_plan_needs_no_package_on_fresh_runner(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-destroy-") as temporary:
+            root = Path(temporary)
+            plan_workspace = root / "plan"
+            apply_workspace = root / "apply"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            initialize(plan_workspace)
+            run_terraform(
+                plan_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=package_build_id=destroy-state",
+            )
+            shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
+            run_terraform(
+                plan_workspace,
+                "plan",
+                "-destroy",
+                "-input=false",
+                "-var=package_build_id=destroy-plan",
+                "-out=destroy.tfplan",
+            )
+
+            copy_saved_plan_workspace(
+                plan_workspace,
+                apply_workspace,
+                "destroy.tfplan",
+                source=PLANNED_SOURCE,
+                include_state=True,
+            )
+            self.assertEqual(list((apply_workspace / ".terraform/lambda-builds").glob("*")), [])
+            run_terraform(
+                apply_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "destroy.tfplan",
+            )
+            self.assertEqual(list((apply_workspace / ".terraform/lambda-builds").glob("*")), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

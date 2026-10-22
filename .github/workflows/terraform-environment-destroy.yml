@@ -31,6 +31,7 @@ env:
   TF_ROOT: infra/terraform/environments/production
   TF_STATE_KEY: pawlocal/production/terraform.tfstate
   TF_VAR_backend_image: ${{ inputs.backend_image }}
+  TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-production-teardown
   TF_VAR_project_name: pawlocal
   TF_VAR_teardown_enabled: "true"
 
@@ -70,12 +71,19 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Validate operator selection and static configuration
         shell: bash
         run: |
           test "$TARGET_ENVIRONMENT" = 'production'
           test "$DESTROY_CONFIRMATION" = 'DESTROY production'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
           done
@@ -155,8 +163,7 @@ jobs:
             --environment production --state-key "$TF_STATE_KEY" --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
             --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
             --commit "$GITHUB_SHA" --repository-id "$GITHUB_REPOSITORY_ID" \
-            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --archive "$TF_ROOT/.terraform/pawlocal-production-cognito-pre-signup.zip")"
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
           echo "plan_sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "Exact preparation-plan digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
 
@@ -166,16 +173,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
-            "$TF_ROOT/destroy-prepare.tfplan" "$TF_ROOT/plan-metadata.json" \
-            --archive "$TF_ROOT/.terraform/pawlocal-production-cognito-pre-signup.zip"
-
-      - name: Remove preparation-plan Cognito package
-        if: always()
-        shell: bash
-        run: |
-          python .github/scripts/terraform-cognito-archive.py cleanup \
-            --environment production --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/preparation"
+            "$TF_ROOT/destroy-prepare.tfplan" "$TF_ROOT/plan-metadata.json"
 
       - name: Remove delegated Cognito profile
         if: always()
@@ -207,10 +205,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
       - name: Validate protected preparation identity
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-apply" ]]
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || exit 1
           done
@@ -231,8 +235,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
-          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
-            "$RUNNER_TEMP/preparation" plan-metadata.json --archive
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$RUNNER_TEMP/preparation" plan-metadata.json
       - name: Initialize and verify preparation plan against current state
         shell: bash
         env:
@@ -246,25 +249,12 @@ jobs:
             --environment production --state-key "$TF_STATE_KEY" --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
             --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
             --commit "$GITHUB_SHA" --repository-id "$GITHUB_REPOSITORY_ID" \
-            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --archive "$RUNNER_TEMP/preparation/cognito-pre-sign-up.zip")"
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
           test "$actual" = "$EXPECTED_SHA256"
-          python .github/scripts/terraform-cognito-archive.py restore \
-            --environment production --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/preparation" \
-            --metadata "$RUNNER_TEMP/preparation/plan-metadata.json"
       - name: Apply only the reviewed preparation plan
         shell: bash
         run: |
           terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/preparation/tfplan"
-
-      - name: Remove transferred preparation Cognito package
-        if: always()
-        shell: bash
-        run: |
-          python .github/scripts/terraform-cognito-archive.py cleanup \
-            --environment production --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/preparation"
 
       - name: Remove delegated Cognito profile
         if: always()
@@ -305,10 +295,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
       - name: Validate current destroy configuration
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-plan" ]]
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TF_VAR_runtime_role_arn TF_VAR_cloudfront_distribution_arn TF_VAR_cloudfront_oac_arn TF_VAR_backend_image; do
             [[ -n "${!name}" ]] || exit 1
           done
@@ -355,14 +351,6 @@ jobs:
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
             "$TF_ROOT/destroy.tfplan" "$TF_ROOT/plan-metadata.json"
 
-      - name: Remove destroy-plan Cognito package
-        if: always()
-        shell: bash
-        run: |
-          python .github/scripts/terraform-cognito-archive.py cleanup \
-            --environment production --terraform-root "$TF_ROOT" \
-            --download-directory "$RUNNER_TEMP/destroy"
-
       - name: Remove delegated Cognito profile
         if: always()
         shell: bash
@@ -393,10 +381,16 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
       - name: Validate protected destroy identity
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-apply" ]]
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || exit 1
           done

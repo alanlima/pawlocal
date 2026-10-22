@@ -432,41 +432,35 @@ resource "aws_route53_record" "api" {
   depends_on = [aws_lightsail_container_service_deployment_version.api]
 }
 
-data "archive_file" "cognito_pre_sign_up" {
-  type             = "zip"
-  source_file      = "${path.module}/lambda/cognito-pre-signup/index.mjs"
-  output_file_mode = "0666"
-  output_path      = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"
-}
+module "cognito_pre_sign_up" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "= 8.12.0"
 
-resource "aws_cloudwatch_log_group" "cognito_pre_sign_up" {
-  provider          = aws.cognito_deployment
-  name              = "/aws/lambda/${local.cognito_pre_sign_up_name}"
-  retention_in_days = 30
-  tags              = local.common_tags
-}
-
-resource "aws_lambda_function" "cognito_pre_sign_up" {
-  provider         = aws.cognito_deployment
-  function_name    = local.cognito_pre_sign_up_name
-  description      = "Confirm PawLocal ${var.environment} self-service Cognito sign-ups."
-  role             = local.cognito_pre_sign_up_role_arn
-  filename         = data.archive_file.cognito_pre_sign_up.output_path
-  source_code_hash = data.archive_file.cognito_pre_sign_up.output_base64sha256
-  handler          = "index.handler"
-  runtime          = "nodejs22.x"
-  timeout          = 3
-  memory_size      = 128
-  tags             = local.common_tags
-
-  lifecycle {
-    precondition {
-      condition     = var.cognito_pre_sign_up_role_arn == null || var.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn
-      error_message = "cognito_pre_sign_up_role_arn must match the current partition, account, environment, and exact pre sign-up role name."
-    }
+  providers = {
+    aws = aws.cognito_deployment
   }
 
-  depends_on = [aws_cloudwatch_log_group.cognito_pre_sign_up]
+  function_name = local.cognito_pre_sign_up_name
+  description   = "Confirm PawLocal ${var.environment} self-service Cognito sign-ups."
+  handler       = "index.handler"
+  runtime       = "nodejs22.x"
+  timeout       = 3
+  memory_size   = 128
+
+  create_role = false
+  lambda_role = local.cognito_pre_sign_up_role_arn
+
+  source_path              = "${path.module}/lambda/cognito-pre-signup/index.mjs"
+  artifacts_dir            = "${path.root}/.terraform/lambda-builds"
+  recreate_missing_package = true
+  hash_extra               = var.cognito_package_build_id
+
+  cloudwatch_logs_retention_in_days = 30
+  create_sam_metadata               = false
+  allowed_triggers                  = {}
+  tags                              = local.common_tags
+
+  depends_on = [time_sleep.application_permissions_propagation]
 }
 
 resource "aws_cognito_user_pool" "application" {
@@ -477,7 +471,7 @@ resource "aws_cognito_user_pool" "application" {
   }
 
   lambda_config {
-    pre_sign_up = aws_lambda_function.cognito_pre_sign_up.arn
+    pre_sign_up = module.cognito_pre_sign_up.lambda_function_arn
   }
 
   mfa_configuration = "OFF"
@@ -510,10 +504,17 @@ resource "aws_lambda_permission" "allow_cognito_pre_sign_up" {
   provider       = aws.cognito_deployment
   statement_id   = "AllowCognitoPreSignUp"
   action         = "lambda:InvokeFunction"
-  function_name  = aws_lambda_function.cognito_pre_sign_up.function_name
+  function_name  = module.cognito_pre_sign_up.lambda_function_name
   principal      = "cognito-idp.amazonaws.com"
   source_arn     = aws_cognito_user_pool.application.arn
   source_account = data.aws_caller_identity.current.account_id
+
+  lifecycle {
+    precondition {
+      condition     = var.cognito_pre_sign_up_role_arn == null || var.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn
+      error_message = "cognito_pre_sign_up_role_arn must match the current partition, account, environment, and exact pre sign-up role name."
+    }
+  }
 }
 
 resource "aws_cognito_user_pool_domain" "application" {

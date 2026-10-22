@@ -22,6 +22,7 @@ module "pawlocal" {
   container_scale             = 1
 
   cognito_pre_sign_up_role_arn = var.cognito_pre_sign_up_role_arn
+  cognito_package_build_id     = var.cognito_package_build_id
   cognito_password_policy = {
     minimum_length    = 8
     require_lowercase = false
