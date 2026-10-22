@@ -149,7 +149,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
         self.assertIn("PAWLOCAL_RELEASE_IMAGE_DIGEST", module)
         self.assertIn("running_image_digest", adapter)
 
-    def test_deploy_adapter_cleans_frontend_temp_dir_after_publication(self) -> None:
+    def test_deploy_adapter_replaces_same_size_epoch_index_before_invalidation(self) -> None:
         if os.name == "nt":
             self.skipTest("Adapter subprocess paths are exercised by the Ubuntu CI runner")
         bash = shutil.which("bash")
@@ -189,18 +189,55 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             archive_path = temp / "frontend.tar.gz"
             source = temp / "dist"
             source.mkdir()
-            (source / "index.html").write_text("<html></html>", encoding="utf-8")
+            old_index = '<html><script src="/assets/old.js"></script></html>'
+            new_index = '<html><script src="/assets/new.js"></script></html>'
+            self.assertEqual(len(old_index), len(new_index))
+            (source / "index.html").write_text(new_index, encoding="utf-8")
+            (source / "assets").mkdir()
+            (source / "assets/new.js").write_text("new asset", encoding="utf-8")
+
+            def epoch_mtime(member: tarfile.TarInfo) -> tarfile.TarInfo:
+                member.mtime = 0
+                return member
+
             with tarfile.open(archive_path, "w:gz") as archive:
-                archive.add(source / "index.html", arcname="index.html")
+                archive.add(source, arcname=".", filter=epoch_mtime)
             manifest["frontend"]["artifact_digest"] = "sha256:" + hashlib.sha256(archive_path.read_bytes()).hexdigest()
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             fake_bin = temp / "bin"
             fake_bin.mkdir()
             aws_log = temp / "aws.log"
+            published = temp / "published"
+            (published / "assets").mkdir(parents=True)
+            (published / "index.html").write_text(old_index, encoding="utf-8")
+            (published / "assets/old.js").write_text("old asset", encoding="utf-8")
+            os.utime(published / "index.html", (1700000000, 1700000000))
             aws = fake_bin / "aws"
             aws.write_text(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$AWS_CALL_LOG\"\n",
+                """#!/usr/bin/env python3
+import json, os, pathlib, shutil, sys
+args = sys.argv[1:]
+with open(os.environ['AWS_CALL_LOG'], 'a') as log:
+    log.write(json.dumps(args) + '\\n')
+destination = pathlib.Path(os.environ['PUBLISHED_DIRECTORY'])
+if args[:2] == ['s3', 'sync']:
+    source = pathlib.Path(args[2])
+    for target in destination.rglob('*'):
+        if target.is_file() and not (source / target.relative_to(destination)).exists():
+            target.unlink()
+    for item in source.rglob('*'):
+        if item.is_file():
+            target = destination / item.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if (not target.exists() or item.stat().st_size != target.stat().st_size
+                    or item.stat().st_mtime > target.stat().st_mtime):
+                shutil.copy2(item, target)
+elif args[:2] == ['s3', 'cp'] and args[3].endswith('/index.html'):
+    if os.environ.get('FAIL_INDEX_COPY') == '1':
+        sys.exit(37)
+    shutil.copyfile(args[2], destination / 'index.html')
+""",
                 encoding="utf-8",
             )
             aws.chmod(0o755)
@@ -208,6 +245,7 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             environment.update({
                 "PATH": str(fake_bin) + os.pathsep + environment.get("PATH", ""),
                 "AWS_CALL_LOG": str(aws_log),
+                "PUBLISHED_DIRECTORY": str(published),
                 "RUNNER_TEMP": directory,
                 "PAWLOCAL_DEPLOY_ADAPTER_PATH": "ops/deployment-adapters/lightsail-dsql.sh",
                 "PAWLOCAL_FRONTEND_BUCKET": "test-frontend-bucket",
@@ -226,11 +264,33 @@ class TerraformLightsailContainerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("Published development frontend artifact", result.stdout)
             self.assertNotIn("app_dir: unbound variable", result.stderr)
-            calls = aws_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(calls), 3)
-            self.assertTrue(calls[0].startswith("s3 sync "))
-            self.assertTrue(calls[1].startswith("s3 cp "))
-            self.assertTrue(calls[2].startswith("cloudfront create-invalidation "))
+            calls = [json.loads(line) for line in aws_log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(calls), 4)
+            self.assertEqual(calls[0][:2], ["s3", "sync"])
+            self.assertEqual(calls[1][:2], ["s3", "cp"])
+            self.assertEqual(calls[1][3], "s3://test-frontend-bucket/index.html")
+            self.assertEqual(calls[1][calls[1].index("--content-type") + 1], "text/html; charset=utf-8")
+            self.assertEqual(calls[1][calls[1].index("--cache-control") + 1], "no-cache, max-age=0, must-revalidate")
+            self.assertEqual(calls[2][:2], ["s3", "cp"])
+            self.assertEqual(calls[3][:2], ["cloudfront", "create-invalidation"])
+            self.assertEqual((published / "index.html").read_text(encoding="utf-8"), new_index)
+            self.assertTrue((published / "assets/new.js").is_file())
+            self.assertFalse((published / "assets/old.js").exists())
+            self.assertEqual(list(temp.glob("pawlocal-frontend.*")), [])
+
+            # A failed entrypoint upload must never invalidate the incomplete
+            # publication or report success, and still removes extracted files.
+            aws_log.write_text("", encoding="utf-8")
+            environment["FAIL_INDEX_COPY"] = "1"
+            result = subprocess.run(
+                [bash, "ops/run-deployment-adapter.sh", "deploy", "--environment", "development",
+                 "--manifest", str(manifest_path), "--frontend-archive", str(archive_path)],
+                cwd=test_repo, env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 37, result.stderr)
+            failed_calls = [json.loads(line) for line in aws_log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(failed_calls), 2)
+            self.assertNotIn("Published development frontend artifact", result.stdout)
             self.assertEqual(list(temp.glob("pawlocal-frontend.*")), [])
 
     def test_verify_adapter_reports_query_500_without_cleanup_error(self) -> None:
