@@ -21,3 +21,8 @@ output "targets" {
     backend_image               = var.backend_image == "" ? null : var.backend_image
   }
 }
+
+output "cognito_package_build_id" {
+  description = "Plan-bound identifier last applied for the Cognito pre-sign-up Lambda package."
+  value       = var.cognito_package_build_id
+}

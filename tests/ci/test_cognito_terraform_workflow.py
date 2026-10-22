@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -17,6 +18,7 @@ CLEANUP_SCRIPT = ROOT / ".github/scripts/cleanup-cognito-terraform-profile.sh"
 ENVIRONMENT_WORKFLOW = ROOT / ".github/workflows/terraform-environment.yml"
 DESTROY_WORKFLOW = ROOT / ".github/workflows/terraform-environment-destroy.yml"
 TERRAFORM_CI_WORKFLOW = ROOT / ".github/workflows/terraform-ci.yml"
+VERIFY_SOURCE_SCRIPT = ROOT / ".github/scripts/verify-terraform-source-checkout.py"
 
 
 class CognitoTerraformProfileTests(unittest.TestCase):
@@ -285,128 +287,163 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         module = (
             ROOT / "infra/terraform/modules/pawlocal-environment/main.tf"
         ).read_text(encoding="utf-8")
-        self.assertEqual(module.count("provider          = aws.cognito_deployment"), 1)
-        self.assertEqual(module.count("provider         = aws.cognito_deployment"), 1)
+        self.assertEqual(module.count("aws = aws.cognito_deployment"), 1)
         self.assertEqual(module.count("provider       = aws.cognito_deployment"), 1)
 
         pool_start = module.index('resource "aws_cognito_user_pool" "application"')
         pool_end = module.index('resource "aws_lambda_permission"', pool_start)
         self.assertNotIn("provider", module[pool_start:pool_end])
 
-        self.assertIn('data "archive_file" "cognito_pre_sign_up"', module)
-        self.assertNotIn('resource "archive_file" "cognito_pre_sign_up"', module)
+        self.assertIn('source  = "terraform-aws-modules/lambda/aws"', module)
+        self.assertIn('version = "= 8.12.0"', module)
+        self.assertIn("aws = aws.cognito_deployment", module)
+        self.assertIn("create_role = false", module)
+        self.assertIn("lambda_role = local.cognito_pre_sign_up_role_arn", module)
         self.assertIn(
-            'source_file      = "${path.module}/lambda/cognito-pre-signup/index.mjs"',
+            'source_path                  = "${path.module}/lambda/cognito-pre-signup/index.mjs"',
             module,
         )
-        self.assertIn('output_file_mode = "0666"', module)
-        self.assertIn(
-            'output_path      = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"',
-            module,
-        )
-        self.assertIn("filename         = data.archive_file.cognito_pre_sign_up.output_path", module)
-        self.assertIn("source_code_hash = data.archive_file.cognito_pre_sign_up.output_base64sha256", module)
+        self.assertIn('artifacts_dir                = "${path.root}/.terraform/lambda-builds"', module)
+        self.assertIn("recreate_missing_package     = true", module)
+        self.assertIn("trigger_on_package_timestamp = false", module)
+        self.assertIn("hash_extra                   = var.cognito_package_build_id", module)
+        self.assertIn("cloudwatch_logs_retention_in_days = 30", module)
+        self.assertIn("allowed_triggers                  = {}", module)
 
-        versions = (
-            ROOT / "infra/terraform/modules/pawlocal-environment/versions.tf"
-        ).read_text(encoding="utf-8")
-        self.assertIn('version = "= 2.8.1"', versions)
         for environment in ("development", "production"):
             lock = (
                 ROOT
                 / f"infra/terraform/environments/{environment}/.terraform.lock.hcl"
             ).read_text(encoding="utf-8")
-            archive_lock = lock.split(
-                'provider "registry.terraform.io/hashicorp/archive"', 1
-            )[1].split("}", 1)[0]
-            self.assertIn('version     = "2.8.1"', archive_lock)
+            providers = {
+                line.split('"')[1]
+                for line in lock.splitlines()
+                if line.startswith('provider "registry.terraform.io/hashicorp/')
+            }
+            self.assertEqual(
+                providers,
+                {
+                    "registry.terraform.io/hashicorp/aws",
+                    "registry.terraform.io/hashicorp/external",
+                    "registry.terraform.io/hashicorp/local",
+                    "registry.terraform.io/hashicorp/null",
+                    "registry.terraform.io/hashicorp/random",
+                    "registry.terraform.io/hashicorp/time",
+                },
+            )
 
-    def test_ci_runs_the_cross_workspace_saved_plan_archive_contract(self) -> None:
+    def test_ci_runs_the_cross_workspace_lambda_module_contract(self) -> None:
         workflow = self._load(TERRAFORM_CI_WORKFLOW)
         steps = workflow["jobs"]["terraform"]["steps"]
-        archive_step = next(
+        integration_step = next(
             step
             for step in steps
-            if step.get("name") == "Test Cognito archive across saved-plan runners"
+            if step.get("name") == "Test pinned Lambda module across saved-plan runners"
         )
         self.assertEqual(
-            archive_step["if"], "matrix.root == 'modules/pawlocal-environment'"
+            integration_step["if"], "matrix.root == 'modules/pawlocal-environment'"
         )
         self.assertEqual(
-            archive_step["env"]["PAWLOCAL_RUN_TERRAFORM_ARCHIVE_INTEGRATION"],
+            integration_step["env"]["PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION"],
             "1",
         )
         self.assertEqual(
-            archive_step["run"],
-            "python ../../../../tests/ci/test_cognito_archive_saved_plan.py -v",
+            integration_step["run"],
+            "python ../../../../tests/ci/test_cognito_lambda_module_saved_plan.py -v",
         )
 
         source = TERRAFORM_CI_WORKFLOW.read_text(encoding="utf-8")
-        self.assertEqual(source.count('"tests/ci/test_cognito_archive_saved_plan.py"'), 2)
         self.assertEqual(
-            source.count(
-                '".github/scripts/verify-cognito-archive-provider-contract.py"'
-            ),
-            2,
+            source.count('"tests/ci/test_cognito_lambda_module_saved_plan.py"'), 2
         )
         self.assertEqual(
-            source.count('".github/scripts/terraform-cognito-archive.py"'), 2
-        )
-        self.assertEqual(
-            source.count('".github/scripts/terraform-plan-transfer.py"'), 2
+            source.count('".github/scripts/verify-terraform-source-checkout.py"'), 2
         )
 
-    def test_archive_is_bound_transferred_restored_and_cleaned_for_apply_paths(
-        self,
-    ) -> None:
-        workflow = self._load(ENVIRONMENT_WORKFLOW)
-        plan_steps = {step.get("name"): step for step in workflow["jobs"]["plan"]["steps"]}
-        apply_steps = {
-            step.get("name"): step for step in workflow["jobs"]["apply"]["steps"]
-        }
-        self.assertIn("--archive", plan_steps["Bind exact plan metadata"]["run"])
-        self.assertIn("--archive", plan_steps["Upload opaque plan to the private transfer bucket"]["run"])
-        self.assertEqual(plan_steps["Remove plan-runner Cognito package"]["if"], "always()")
-        self.assertIn("--archive", apply_steps["Download the exact saved plan"]["run"])
-        self.assertIn("--archive", apply_steps["Verify exact saved plan metadata and digest"]["run"])
+    def test_normal_plans_use_fresh_build_ids_and_teardown_reuses_state(self) -> None:
+        environment = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
+        destroy = self._load(DESTROY_WORKFLOW)
         self.assertIn(
-            "terraform-cognito-archive.py restore",
-            apply_steps["Initialize matching state and apply only the reviewed plan"]["run"],
+            "TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.environment }}-${{ inputs.phase }}",
+            environment,
         )
-        self.assertEqual(apply_steps["Remove transferred Cognito package"]["if"], "always()")
 
-        destroy_workflow = self._load(DESTROY_WORKFLOW)
-        preparation_plan = {
-            step.get("name"): step
-            for step in destroy_workflow["jobs"]["prepare-plan"]["steps"]
+        destroy_source = DESTROY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertNotIn("production-teardown", destroy_source)
+        preparation_steps = {
+            step.get("name"): step for step in destroy["jobs"]["prepare-plan"]["steps"]
         }
-        preparation_apply = {
-            step.get("name"): step
-            for step in destroy_workflow["jobs"]["prepare-apply"]["steps"]
-        }
-        self.assertIn("--archive", preparation_plan["Bind preparation plan to state and workflow identity"]["run"])
-        self.assertIn("--archive", preparation_plan["Upload opaque preparation plan to private transfer storage"]["run"])
-        self.assertEqual(preparation_plan["Remove preparation-plan Cognito package"]["if"], "always()")
-        self.assertIn("--archive", preparation_apply["Download exact preparation plan"]["run"])
-        self.assertIn("--archive", preparation_apply["Initialize and verify preparation plan against current state"]["run"])
-        self.assertIn("terraform-cognito-archive.py restore", preparation_apply["Initialize and verify preparation plan against current state"]["run"])
-        self.assertEqual(preparation_apply["Remove transferred preparation Cognito package"]["if"], "always()")
+        reuse = preparation_steps["Reuse the applied configuration build identifier"]["run"]
+        self.assertIn("terraform -chdir=\"$TF_ROOT\" output -raw cognito_package_build_id", reuse)
+        self.assertIn("TF_VAR_cognito_package_build_id=$build_id", reuse)
+        for job_name in ("prepare-apply", "destroy-plan", "destroy-apply"):
+            job = destroy["jobs"][job_name]
+            self.assertNotIn("TF_VAR_cognito_package_build_id", job.get("env", {}))
+            self.assertNotIn("cognito_package_build_id", str(job))
 
-    def test_final_destroy_does_not_transfer_or_restore_the_unused_archive(self) -> None:
-        workflow = self._load(DESTROY_WORKFLOW)
-        destroy_plan = {
-            step.get("name"): step
-            for step in workflow["jobs"]["destroy-plan"]["steps"]
-        }
-        destroy_apply = {
-            step.get("name"): step
-            for step in workflow["jobs"]["destroy-apply"]["steps"]
-        }
-        self.assertNotIn("--archive", destroy_plan["Bind destroy plan to state and workflow identity"]["run"])
-        self.assertNotIn("--archive", destroy_plan["Upload opaque destroy plan to private transfer storage"]["run"])
-        self.assertEqual(destroy_plan["Remove destroy-plan Cognito package"]["if"], "always()")
-        self.assertNotIn("--archive", destroy_apply["Download, initialize, and verify exact destroy plan"]["run"])
-        self.assertNotIn("terraform-cognito-archive.py restore", destroy_apply["Download, initialize, and verify exact destroy plan"]["run"])
+    def test_all_environment_inits_enforce_readonly_lockfiles(self) -> None:
+        environment = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
+        destroy = DESTROY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(environment.count("terraform -chdir=\"$TF_ROOT\" init"), 2)
+        self.assertEqual(environment.count("-lockfile=readonly"), 2)
+        self.assertEqual(destroy.count("terraform -chdir=\"$TF_ROOT\" init"), 4)
+        self.assertEqual(destroy.count("-lockfile=readonly"), 4)
+
+        workflow = self._load(TERRAFORM_CI_WORKFLOW)
+        steps = workflow["jobs"]["terraform"]["steps"]
+        locked = next(
+            step for step in steps if step.get("name") == "Initialize locked environment providers without configuring the backend"
+        )
+        self.assertEqual(locked["if"], "startsWith(matrix.root, 'environments/')")
+        self.assertIn("-lockfile=readonly", locked["run"])
+
+    def test_exact_commit_and_tracked_tree_are_checked_immediately_before_plan_and_apply(self) -> None:
+        for workflow_path, expected in (
+            (ENVIRONMENT_WORKFLOW, {"plan": "plan", "apply": "apply"}),
+            (
+                DESTROY_WORKFLOW,
+                {
+                    "prepare-plan": "plan",
+                    "prepare-apply": "apply",
+                    "destroy-plan": "plan",
+                    "destroy-apply": "apply",
+                },
+            ),
+        ):
+            workflow = self._load(workflow_path)
+            for job_name, command in expected.items():
+                runs = "\n".join(
+                    step.get("run", "") for step in workflow["jobs"][job_name]["steps"]
+                )
+                guard = "python .github/scripts/verify-terraform-source-checkout.py"
+                command_index = runs.rfind(f"terraform -chdir=\"$TF_ROOT\" {command}")
+                guard_index = runs.rfind(guard, 0, command_index)
+                self.assertGreater(command_index, guard_index, job_name)
+                self.assertNotIn("terraform -chdir=", runs[guard_index + len(guard):command_index])
+
+    def test_source_checkout_guard_rejects_lambda_source_tampering(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="pawlocal-source-guard-") as temporary:
+            repository = Path(temporary)
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "PawLocal test"], cwd=repository, check=True)
+            source = repository / "index.mjs"
+            source.write_text("export const handler = async () => {};\n", encoding="utf-8")
+            subprocess.run(["git", "add", "index.mjs"], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repository, check=True)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=repository, check=True, capture_output=True, text=True
+            ).stdout.strip()
+            env = {**os.environ, "GITHUB_SHA": head}
+            clean = subprocess.run(
+                [sys.executable, str(VERIFY_SOURCE_SCRIPT)], cwd=repository, env=env, check=False
+            )
+            self.assertEqual(clean.returncode, 0)
+            source.write_text("export const handler = async () => ({ tampered: true });\n", encoding="utf-8")
+            tampered = subprocess.run(
+                [sys.executable, str(VERIFY_SOURCE_SCRIPT)], cwd=repository, env=env, check=False
+            )
+            self.assertNotEqual(tampered.returncode, 0)
 
     def test_environment_roots_pass_only_the_four_approved_policy_values(self) -> None:
         expected = {

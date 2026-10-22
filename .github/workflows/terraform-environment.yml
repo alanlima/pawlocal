@@ -250,7 +250,7 @@ jobs:
         shell: bash
         run: |
           if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
-            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
               -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
               -backend-config="key=${TF_STATE_KEY}" \
               -backend-config="region=${AWS_REGION}" \
@@ -270,6 +270,7 @@ jobs:
       - name: Create saved plan
         shell: bash
         run: |
+          python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
             > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
               python .github/scripts/terraform-plan-diagnostic.py \
@@ -469,7 +470,7 @@ jobs:
         shell: bash
         run: |
           if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
-            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
               -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
               -backend-config="key=${TF_STATE_KEY}" \
               -backend-config="region=${AWS_REGION}" \
@@ -486,6 +487,7 @@ jobs:
             exit "$status"
           fi
 
+          python .github/scripts/verify-terraform-source-checkout.py
           apply_command=(terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m)
           if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
             apply_command+=(-no-color)

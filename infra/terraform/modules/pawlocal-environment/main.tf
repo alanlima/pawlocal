@@ -450,10 +450,11 @@ module "cognito_pre_sign_up" {
   create_role = false
   lambda_role = local.cognito_pre_sign_up_role_arn
 
-  source_path              = "${path.module}/lambda/cognito-pre-signup/index.mjs"
-  artifacts_dir            = "${path.root}/.terraform/lambda-builds"
-  recreate_missing_package = true
-  hash_extra               = var.cognito_package_build_id
+  source_path                  = "${path.module}/lambda/cognito-pre-signup/index.mjs"
+  artifacts_dir                = "${path.root}/.terraform/lambda-builds"
+  recreate_missing_package     = true
+  trigger_on_package_timestamp = false
+  hash_extra                   = var.cognito_package_build_id
 
   cloudwatch_logs_retention_in_days = 30
   create_sam_metadata               = false

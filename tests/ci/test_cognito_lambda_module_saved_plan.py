@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -27,6 +28,11 @@ variable "package_build_id" {{
   type = string
 }}
 
+variable "teardown_enabled" {{
+  type    = bool
+  default = false
+}}
+
 module "lambda_package" {{
   source  = "terraform-aws-modules/lambda/aws"
   version = "= {MODULE_VERSION}"
@@ -36,7 +42,7 @@ module "lambda_package" {{
   source_path              = "${{path.root}}/index.mjs"
   artifacts_dir            = "${{path.root}}/.terraform/lambda-builds"
   recreate_missing_package = true
-  trigger_on_package_timestamp = true
+  trigger_on_package_timestamp = false
   hash_extra               = var.package_build_id
 }}
 
@@ -50,6 +56,10 @@ resource "terraform_data" "lambda_consumer" {{
   }}
 
   depends_on = [module.lambda_package]
+}}
+
+resource "terraform_data" "teardown_control" {{
+  input = var.teardown_enabled
 }}
 
 output "package_filename" {{
@@ -82,8 +92,11 @@ def write_configuration(directory: Path, source: str = PLANNED_SOURCE) -> None:
     (directory / "index.mjs").write_text(source, encoding="utf-8", newline="")
 
 
-def initialize(directory: Path) -> None:
-    run_terraform(directory, "init", "-backend=false", "-input=false")
+def initialize(directory: Path, *, readonly: bool = False) -> None:
+    arguments = ["init", "-backend=false", "-input=false"]
+    if readonly:
+        arguments.append("-lockfile=readonly")
+    run_terraform(directory, *arguments)
 
 
 def copy_saved_plan_workspace(
@@ -100,7 +113,7 @@ def copy_saved_plan_workspace(
     shutil.copy2(plan_workspace / plan_name, apply_workspace)
     if include_state:
         shutil.copy2(plan_workspace / "terraform.tfstate", apply_workspace)
-    initialize(apply_workspace)
+    initialize(apply_workspace, readonly=True)
 
 
 def package_path(workspace: Path) -> Path:
@@ -124,8 +137,14 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
         if shutil.which("terraform") is None:
             self.skipTest("terraform is required for the saved-plan integration test")
 
+    def temporary_directory(self, prefix: str) -> tempfile.TemporaryDirectory[str]:
+        root = os.environ.get("PAWLOCAL_TEST_TEMP_DIR")
+        if root:
+            Path(root).mkdir(parents=True, exist_ok=True)
+        return tempfile.TemporaryDirectory(prefix=prefix, dir=root)
+
     def test_initial_saved_plan_builds_package_on_fresh_apply_runner(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-initial-") as temporary:
+        with self.temporary_directory("pawlocal-lambda-module-initial-") as temporary:
             root = Path(temporary)
             plan_workspace = root / "plan"
             apply_workspace = root / "apply"
@@ -153,7 +172,7 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
             assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
 
     def test_missing_unchanged_package_is_rebuilt_before_pending_consumer(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-retry-") as temporary:
+        with self.temporary_directory("pawlocal-lambda-module-retry-") as temporary:
             root = Path(temporary)
             plan_workspace = root / "plan"
             apply_workspace = root / "apply"
@@ -195,45 +214,7 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
             assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
 
     def test_source_change_gets_a_new_package_identity_and_scoped_cleanup(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-source-") as temporary:
-            workspace = Path(temporary) / "workspace"
-            workspace.mkdir()
-            write_configuration(workspace)
-            initialize(workspace)
-            run_terraform(
-                workspace,
-                "apply",
-                "-input=false",
-                "-auto-approve",
-                "-var=package_build_id=source-one",
-            )
-            original_package = package_path(workspace)
-            assert_package(self, original_package, PLANNED_SOURCE)
-
-            (workspace / "index.mjs").write_text(
-                CHANGED_SOURCE, encoding="utf-8", newline=""
-            )
-            run_terraform(
-                workspace,
-                "apply",
-                "-input=false",
-                "-auto-approve",
-                "-var=package_build_id=source-two",
-            )
-            changed_package = package_path(workspace)
-            self.assertNotEqual(original_package.name, changed_package.name)
-            assert_package(self, changed_package, CHANGED_SOURCE)
-
-            build_directory = workspace / ".terraform/lambda-builds"
-            shutil.rmtree(build_directory)
-            self.assertFalse(build_directory.exists())
-            self.assertEqual(
-                (workspace / "index.mjs").read_text(encoding="utf-8"),
-                CHANGED_SOURCE,
-            )
-
-    def test_final_destroy_saved_plan_needs_no_package_on_fresh_runner(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="pawlocal-lambda-module-destroy-") as temporary:
+        with self.temporary_directory("pawlocal-lambda-module-source-") as temporary:
             root = Path(temporary)
             plan_workspace = root / "plan"
             apply_workspace = root / "apply"
@@ -245,6 +226,116 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "apply",
                 "-input=false",
                 "-auto-approve",
+                "-var=package_build_id=source-one",
+            )
+            original_package = package_path(plan_workspace)
+            assert_package(self, original_package, PLANNED_SOURCE)
+
+            (plan_workspace / "index.mjs").write_text(
+                CHANGED_SOURCE, encoding="utf-8", newline=""
+            )
+            run_terraform(
+                plan_workspace,
+                "plan",
+                "-input=false",
+                "-var=package_build_id=source-two",
+                "-out=source.tfplan",
+            )
+            copy_saved_plan_workspace(
+                plan_workspace,
+                apply_workspace,
+                "source.tfplan",
+                source=CHANGED_SOURCE,
+                include_state=True,
+            )
+            run_terraform(
+                apply_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "source.tfplan",
+            )
+            changed_package = package_path(apply_workspace)
+            self.assertNotEqual(original_package.name, changed_package.name)
+            assert_package(self, changed_package, CHANGED_SOURCE)
+
+            build_directory = apply_workspace / ".terraform/lambda-builds"
+            shutil.rmtree(build_directory)
+            self.assertFalse(build_directory.exists())
+            self.assertEqual(
+                (apply_workspace / "index.mjs").read_text(encoding="utf-8"),
+                CHANGED_SOURCE,
+            )
+
+    def test_teardown_preparation_reuses_state_build_id_without_package_work(self) -> None:
+        with self.temporary_directory("pawlocal-lambda-module-prepare-") as temporary:
+            root = Path(temporary)
+            plan_workspace = root / "plan"
+            apply_workspace = root / "apply"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            initialize(plan_workspace)
+            run_terraform(
+                plan_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=package_build_id=applied-build",
+            )
+            shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
+
+            run_terraform(
+                plan_workspace,
+                "plan",
+                "-input=false",
+                "-var=package_build_id=applied-build",
+                "-var=teardown_enabled=true",
+                "-out=prepare.tfplan",
+            )
+            plan = json.loads(
+                run_terraform(plan_workspace, "show", "-json", "prepare.tfplan").stdout
+            )
+            changed = {
+                change["address"]: change["change"]["actions"]
+                for change in plan.get("resource_changes", [])
+                if change["change"]["actions"] != ["no-op"]
+            }
+            self.assertEqual(
+                changed,
+                {"terraform_data.teardown_control": ["update"]},
+            )
+
+            copy_saved_plan_workspace(
+                plan_workspace,
+                apply_workspace,
+                "prepare.tfplan",
+                source=PLANNED_SOURCE,
+                include_state=True,
+            )
+            self.assertFalse((apply_workspace / ".terraform/lambda-builds").exists())
+            run_terraform(
+                apply_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "prepare.tfplan",
+            )
+            self.assertFalse((apply_workspace / ".terraform/lambda-builds").exists())
+
+    def test_final_destroy_saved_plan_needs_no_package_on_fresh_runner(self) -> None:
+        with self.temporary_directory("pawlocal-lambda-module-destroy-") as temporary:
+            root = Path(temporary)
+            plan_workspace = root / "plan"
+            apply_workspace = root / "apply"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            initialize(plan_workspace)
+            run_terraform(
+                plan_workspace,
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "-var=create_consumer=true",
                 "-var=package_build_id=destroy-state",
             )
             shutil.rmtree(plan_workspace / ".terraform/lambda-builds")

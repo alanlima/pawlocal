@@ -9,6 +9,7 @@ on:
       - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
+      - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
@@ -30,6 +31,7 @@ on:
       - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
+      - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
@@ -85,7 +87,12 @@ jobs:
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive .
 
-      - name: Initialize providers without configuring the backend
+      - name: Initialize locked environment providers without configuring the backend
+        if: startsWith(matrix.root, 'environments/')
+        run: terraform init -backend=false -input=false -lockfile=readonly
+
+      - name: Initialize reusable-module providers without configuring the backend
+        if: ${{ !startsWith(matrix.root, 'environments/') }}
         run: terraform init -backend=false -input=false
 
       - name: Validate Terraform configuration

@@ -31,7 +31,6 @@ env:
   TF_ROOT: infra/terraform/environments/production
   TF_STATE_KEY: pawlocal/production/terraform.tfstate
   TF_VAR_backend_image: ${{ inputs.backend_image }}
-  TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-production-teardown
   TF_VAR_project_name: pawlocal
   TF_VAR_teardown_enabled: "true"
 
@@ -83,7 +82,6 @@ jobs:
           test "$TARGET_ENVIRONMENT" = 'production'
           test "$DESTROY_CONFIRMATION" = 'DESTROY production'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
           done
@@ -111,7 +109,7 @@ jobs:
       - name: Initialize the production application state
         shell: bash
         run: |
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
             -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" \
@@ -143,10 +141,19 @@ jobs:
           done
           [[ "$TF_VAR_backend_image" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
 
+      - name: Reuse the applied configuration build identifier
+        if: steps.state-status.outputs.already_empty != 'true'
+        shell: bash
+        run: |
+          build_id="$(terraform -chdir="$TF_ROOT" output -raw cognito_package_build_id)"
+          test -n "$build_id"
+          echo "TF_VAR_cognito_package_build_id=$build_id" >> "$GITHUB_ENV"
+
       - name: Create exact teardown-preparation plan
         if: steps.state-status.outputs.already_empty != 'true'
         shell: bash
         run: |
+          python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=destroy-prepare.tfplan \
             > "$RUNNER_TEMP/terraform-destroy-prepare.log" 2>&1
           terraform -chdir="$TF_ROOT" show -json destroy-prepare.tfplan > "$RUNNER_TEMP/destroy-prepare.json"
@@ -214,7 +221,6 @@ jobs:
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-apply" ]]
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || exit 1
           done
@@ -241,7 +247,7 @@ jobs:
         env:
           EXPECTED_SHA256: ${{ needs.prepare-plan.outputs.plan_sha256 }}
         run: |
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
             -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
           actual="$(python .github/scripts/terraform-plan-metadata.py verify \
@@ -254,6 +260,7 @@ jobs:
       - name: Apply only the reviewed preparation plan
         shell: bash
         run: |
+          python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/preparation/tfplan"
 
       - name: Remove delegated Cognito profile
@@ -304,7 +311,6 @@ jobs:
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-plan" ]]
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TF_VAR_runtime_role_arn TF_VAR_cloudfront_distribution_arn TF_VAR_cloudfront_oac_arn TF_VAR_backend_image; do
             [[ -n "${!name}" ]] || exit 1
           done
@@ -324,9 +330,10 @@ jobs:
       - name: Initialize and create exact destroy plan
         shell: bash
         run: |
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
             -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
+          python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" plan -destroy -input=false -lock-timeout=5m -no-color -out=destroy.tfplan \
             > "$RUNNER_TEMP/terraform-destroy.log" 2>&1
           terraform -chdir="$TF_ROOT" show -json destroy.tfplan > "$RUNNER_TEMP/destroy.json"
@@ -390,7 +397,6 @@ jobs:
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-production-terraform-apply" ]]
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production-teardown"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || exit 1
           done
@@ -414,7 +420,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$RUNNER_TEMP/destroy" plan-metadata.json
-          terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+          terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
             -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}" -backend-config='encrypt=true' -backend-config='use_lockfile=true'
           actual="$(python .github/scripts/terraform-plan-metadata.py verify \
@@ -426,7 +432,9 @@ jobs:
           test "$actual" = "$EXPECTED_SHA256"
       - name: Apply only the reviewed destroy plan
         shell: bash
-        run: terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/destroy/tfplan"
+        run: |
+          python .github/scripts/verify-terraform-source-checkout.py
+          terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/destroy/tfplan"
       - name: Require the same production state to be present and empty
         shell: bash
         run: |

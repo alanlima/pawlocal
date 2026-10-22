@@ -34,7 +34,7 @@ override_data {
 }
 
 override_resource {
-  target          = aws_lambda_function.cognito_pre_sign_up
+  target          = module.cognito_pre_sign_up.aws_lambda_function.this[0]
   override_during = plan
   values = {
     arn           = "arn:aws:lambda:ap-southeast-2:111111111111:function:pawlocal-development-cognito-pre-signup"
@@ -113,24 +113,17 @@ run "development_uses_relaxed_password_policy_and_default_role" {
     condition = (
       local.default_cognito_pre_sign_up_role_arn == "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup" &&
       local.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn &&
-      data.archive_file.cognito_pre_sign_up.source_file == "${path.module}/lambda/cognito-pre-signup/index.mjs" &&
-      data.archive_file.cognito_pre_sign_up.output_file_mode == "0666" &&
-      data.archive_file.cognito_pre_sign_up.output_path == "${path.root}/.terraform/pawlocal-development-cognito-pre-signup.zip" &&
-      aws_lambda_function.cognito_pre_sign_up.role == local.default_cognito_pre_sign_up_role_arn &&
-      aws_cloudwatch_log_group.cognito_pre_sign_up.name == "/aws/lambda/pawlocal-development-cognito-pre-signup" &&
-      aws_cloudwatch_log_group.cognito_pre_sign_up.retention_in_days == 30 &&
-      aws_lambda_function.cognito_pre_sign_up.function_name == "pawlocal-development-cognito-pre-signup" &&
-      aws_lambda_function.cognito_pre_sign_up.handler == "index.handler" &&
-      aws_lambda_function.cognito_pre_sign_up.runtime == "nodejs22.x"
+      module.cognito_pre_sign_up.lambda_function_name == "pawlocal-development-cognito-pre-signup" &&
+      module.cognito_pre_sign_up.lambda_function_arn == "arn:aws:lambda:ap-southeast-2:111111111111:function:pawlocal-development-cognito-pre-signup"
     )
-    error_message = "The default execution role, function, and finite-retention log group must be deterministic and environment-specific."
+    error_message = "The default execution role and function identity must be deterministic and environment-specific."
   }
 
   assert {
     condition = (
-      aws_cognito_user_pool.application.lambda_config[0].pre_sign_up == aws_lambda_function.cognito_pre_sign_up.arn &&
+      aws_cognito_user_pool.application.lambda_config[0].pre_sign_up == module.cognito_pre_sign_up.lambda_function_arn &&
       aws_lambda_permission.allow_cognito_pre_sign_up.action == "lambda:InvokeFunction" &&
-      aws_lambda_permission.allow_cognito_pre_sign_up.function_name == aws_lambda_function.cognito_pre_sign_up.function_name &&
+      aws_lambda_permission.allow_cognito_pre_sign_up.function_name == module.cognito_pre_sign_up.lambda_function_name &&
       aws_lambda_permission.allow_cognito_pre_sign_up.principal == "cognito-idp.amazonaws.com" &&
       aws_lambda_permission.allow_cognito_pre_sign_up.source_arn == aws_cognito_user_pool.application.arn &&
       aws_lambda_permission.allow_cognito_pre_sign_up.source_account == "111111111111"
@@ -184,8 +177,7 @@ run "production_uses_strict_password_policy_and_exact_override" {
 
   assert {
     condition = (
-      local.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn &&
-      aws_lambda_function.cognito_pre_sign_up.role == local.default_cognito_pre_sign_up_role_arn
+      local.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn
     )
     error_message = "The exact approved override must retain the same sole execution-role identity as the default path."
   }
@@ -273,7 +265,7 @@ run "wrong_account_override_is_rejected" {
     }
   }
 
-  expect_failures = [aws_lambda_function.cognito_pre_sign_up]
+  expect_failures = [aws_lambda_permission.allow_cognito_pre_sign_up]
 }
 
 run "wrong_partition_override_is_rejected" {
@@ -302,7 +294,7 @@ run "wrong_partition_override_is_rejected" {
     }
   }
 
-  expect_failures = [aws_lambda_function.cognito_pre_sign_up]
+  expect_failures = [aws_lambda_permission.allow_cognito_pre_sign_up]
 }
 
 run "wrong_environment_override_is_rejected" {
@@ -331,7 +323,7 @@ run "wrong_environment_override_is_rejected" {
     }
   }
 
-  expect_failures = [aws_lambda_function.cognito_pre_sign_up]
+  expect_failures = [aws_lambda_permission.allow_cognito_pre_sign_up]
 }
 
 run "wrong_role_name_override_is_rejected" {
