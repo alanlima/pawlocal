@@ -379,6 +379,13 @@ data "aws_iam_policy_document" "role_permissions" {
       }
     }
   }
+
+  statement {
+    sid       = "AssumeOnlyMatchingCognitoTerraformRole"
+    effect    = "Allow"
+    actions   = ["sts:AssumeRole"]
+    resources = [local.cognito_terraform_role_arns[each.key]]
+  }
 }
 
 resource "aws_iam_role_policy" "github_terraform" {
@@ -387,6 +394,8 @@ resource "aws_iam_role_policy" "github_terraform" {
   name   = "${each.value.role_name}-permissions"
   role   = aws_iam_role.github_terraform[each.key].id
   policy = data.aws_iam_policy_document.role_permissions[each.key].json
+
+  depends_on = [aws_iam_role.cognito_terraform]
 }
 
 import {

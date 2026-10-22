@@ -22,3 +22,18 @@ output "legacy_terraform_role_arns" {
   description = "GitHub OIDC plan/apply role ARNs for the legacy combined-state operations workflow."
   value       = { for key, role in aws_iam_role.legacy_terraform : key => role.arn }
 }
+
+output "cognito_terraform_role_arns" {
+  description = "Delegated Cognito Terraform role ARNs, keyed by environment and plan/apply purpose. Verification evidence only; workflows construct deterministic ARNs instead of consuming this output."
+  value = {
+    for environment in keys(local.environments) : environment => {
+      plan  = aws_iam_role.cognito_terraform["${environment}-plan"].arn
+      apply = aws_iam_role.cognito_terraform["${environment}-apply"].arn
+    }
+  }
+}
+
+output "cognito_pre_sign_up_role_arns" {
+  description = "Cognito pre sign-up Lambda execution role ARNs, keyed by environment. Verification evidence only; environment Terraform derives the deterministic ARN."
+  value       = { for environment, role in aws_iam_role.cognito_pre_sign_up : environment => role.arn }
+}
