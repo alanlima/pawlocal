@@ -227,7 +227,7 @@ Do not close an issue simply because code has been written. Verify its acceptanc
 - Use clear naming and explicit dependencies.
 - Avoid unnecessary abstraction and premature microservices.
 - Keep configuration externalised.
-- Every configuration addition, change, removal, or rename must update `ops/configuration/parameter-mapping.yaml` and `docs/configuration-inventory.md` in the same PR. Follow `docs/configuration-management.md`; remove obsolete mappings from active YAML and preserve their original inventory fields, obsolete date, and reason in documentation. Retirement does not claim confirmed AWS or GitHub deletion. The specification-only #204 establishes this contract; #205 creates the manifest before configuration implementation begins.
+- Configuration consumed by GitHub Actions that requires synchronization into Environment variables or secrets must update `ops/configuration/parameter-mapping.yaml` and `docs/configuration-inventory.md` in the same PR whenever added, changed, removed, or renamed. This rule does not apply to unrelated application/local configuration or operator inputs intentionally outside synchronization. Follow `docs/configuration-management.md`; remove obsolete mappings and preserve original inventory fields, obsolete date, reason and separate deletion status in history. The specification-only #204 establishes this contract; #205 creates the manifest before synchronized configuration implementation begins.
 - Never hardcode credentials or secrets.
 - Preserve separation between domain logic and infrastructure.
 

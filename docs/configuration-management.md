@@ -1,16 +1,56 @@
 # Configuration management
 
-This is the implementation contract for [#203](https://github.com/alanlima/pawlocal/issues/203), delivered sequentially through #204 (specification), #205 (callable foundation), and #206 (Terraform/pipeline integration). This document establishes the design, not live deployment or credential setup. Until each implementation is accepted, existing workflows and their manual handoffs remain authoritative.
+This guide covers Parameter Store values synchronized to GitHub Actions Environments. See the [inventory](configuration-inventory.md) for exact keys, destinations and owners, and [Terraform operations](terraform-greenfield-operations.md) for plan/apply approvals.
 
-## Naming and ownership
+## Set up access
 
-Use `/pawlocal/<scope>/<classification>/<component>/<setting>`: exactly five nonempty segments after the leading slash. Scope is `development`, `production`, or `shared` only for genuinely shared consumers. Classification is `config` for Parameter Store `String` and `secrets` for `SecureString`. Component and setting are lowercase kebab-case; do not embed account/resource IDs or release versions in names. No shared source is currently required.
+1. Apply the reader-role bootstrap changes only after independent review of the exact saved plan and owner authorization. Read `terraform -chdir=infra/terraform/iam-bootstrap output -json configuration_reader_role_arns` after apply. This output is introduced by #205; do not guess ARNs or use static AWS keys.
+2. Create a fine-grained token in GitHub **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Select owner `alanlima`, **Only select repositories → pawlocal**, a bounded expiration and **Environments: Read and write**. Metadata read is automatic. Record the expiry in your credential manager. See [GitHub's instructions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+3. Add `PAWLOCAL_CONFIG_GITHUB_TOKEN` under repository **Settings → Environments → development-apply → Environment secrets**; repeat for `production-apply`. **Secrets and variables → Agents** is a separate credential domain. Alternatively use hidden prompts:
 
-The [inventory](configuration-inventory.md) records destinations, validations, consumer and lifecycle ownership. Bootstrap owns generated IAM/account/plan-bucket Strings; each application state owns its generated application Strings. Read-only inventory of existing parameters and Terraform ownership precedes rollout. An unknown existing key or duplicate owner blocks that environment; do not overwrite, import or adopt it. No runtime secret enters Terraform resources, data sources, state or outputs.
+   ```powershell
+   gh secret set PAWLOCAL_CONFIG_GITHUB_TOKEN --repo alanlima/pawlocal --env development-apply
+   gh secret set PAWLOCAL_CONFIG_GITHUB_TOKEN --repo alanlima/pawlocal --env production-apply
+   ```
 
-## Mapping contract
+   Never put the token in chat, files or command arguments. Verify names only with `gh api repos/alanlima/pawlocal/environments/development-apply/secrets --jq '.secrets[].name'`, then repeat for production. Ordinary `GITHUB_TOKEN` is insufficient.
+4. Set `PAWLOCAL_CONFIG_READER_ROLE_ARN` in **Environment variables** for both `development` and `development-apply`, using their actual matching bootstrap output; repeat for production. Set `AWS_REGION` to the owning root's region. Read each variable back, for example `gh api repos/alanlima/pawlocal/environments/development-apply/variables/PAWLOCAL_CONFIG_READER_ROLE_ARN --jq '.value'`. Compare privately with the output; stop on mismatch or denied access. Automatic reader-ARN handoff remains #191.
+5. Preserve required reviewers and branch policies. Before synchronization, explicitly create `production-destroy-prepare` and `production-destroy` with the owner reviewer and main-only branch policy; set their operator inputs `AWS_REGION` and `PAWLOCAL_TF_STATE_BUCKET`. Never create targets implicitly through writes. These targets need no token/reader ARN; setup does not authorize destroy.
 
-`ops/configuration/parameter-mapping.yaml` is introduced by #205, with one destination per entry:
+One reconciliation job uses the matching protected `<environment>-apply` Environment for approval, token and exact repository-ID-qualified OIDC reader trust. Readers access only approved matching-environment keys, without writes, state access or cross-environment access. No current source requires decryption. See the inventory/issue for actual setup and runtime status.
+
+## Run and verify
+
+The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default and the only mode in #205; #206 adds enforce and pipeline integration. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
+
+For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge. #205 leaves existing deployment workflows unchanged.
+
+| Invocation after #206 | Mode | Required-value behavior |
+|---|---|---|
+| On demand | Audit default; enforce selectable | Warn/skip or fail according to mode |
+| After Foundation apply | Audit | Missing runtime values may be expected; publication blocked |
+| Before Converge/Release planning | Enforce | Check only required inputs consumed by that phase before planning |
+| After Converge/Release apply | Enforce | Validate required publication values before writes/publication |
+
+Enforce reads/validates all selected sources before writes. Optional absence warns/skips. Invalid mappings/types/formats, access denial, API errors and read-back mismatch fail in both modes. Run one reconciliation at a time per environment. Caller and called workflow must use different lock groups. Failed/cancelled apply or failed reconciliation blocks publication. Preserve saved-plan review/integrity, the separate bootstrap runtime-trust handoff and production eligibility/promotion controls.
+
+## Naming
+
+Use `/pawlocal/<scope>/<classification>/<component>/<setting>`: five nonempty segments after the leading slash.
+
+| Segment | Meaning | Common values |
+|---|---|---|
+| `pawlocal` | Fixed application namespace | Always `pawlocal` |
+| `scope` | Owner/consumer environment | `development`, `production`; `shared` only for values used by both environments (none currently) |
+| `classification` | Parameter type/handling | `config` = non-secret String; `secrets` = SecureString |
+| `component` | Functional area | `iam` roles; `aws` account; `terraform` plan storage; `frontend` website/CDN; `api` endpoints; `auth` Cognito |
+| `setting` | Stable descriptive name | `client-id`, `base-url`, `runtime-role-arn`; lowercase kebab-case, no resource/account IDs or release versions |
+
+Bootstrap owns generated IAM/account/plan-bucket Strings; each application state owns its generated application Strings. Inventory existing keys/ownership before rollout. Unknown keys or duplicate ownership block the affected environment; never overwrite, import or adopt them. No unmanaged parameters are currently needed.
+
+## Mapping
+
+#205 introduces `ops/configuration/parameter-mapping.yaml`:
 
 ```yaml
 mappings:
@@ -22,91 +62,20 @@ mappings:
     validations: [required]
 ```
 
-Only these six fields are allowed. `secret` defaults to false and `validations` to an empty list. `environment` selects supported development/production values; substitution accepts only the literal `{environment}` token after validating that input. Targets are exactly the matching release, plan or apply Environment (`{environment}`, `{environment}-plan`, `{environment}-apply`), plus the existing production-only recovery consumers `production-destroy-prepare` and `production-destroy`. Those two recovery targets receive only the production apply-role ARN, account ID and plan bucket; no development destroy target is supported. Expand repeated targets into separate entries. Reject arbitrary target names, cross-environment sources, unknown fields/placeholders, duplicate target/name pairs, inconsistent classification/type/secret flags, and unknown validation rules. Never discover arbitrary keys to synchronize. Required is the initial declared validation; canonical format checks below also apply to their identified values. Lifecycle selection and ownership belong in orchestration/inventory, not extra YAML fields.
+Only these six fields are allowed. `secret` defaults false; `validations` defaults empty. Only `{environment}` may be substituted, after validating development/production input. Each destination has its own entry. Targets are matching release/plan/apply Environments, plus exactly `production-destroy-prepare`/`production-destroy` for the production apply-role ARN, account ID and plan bucket. No development-destroy/seed target is allowed.
 
-## Initial access and GitHub authentication
+Reject unknown fields/placeholders/rules, duplicate destinations, cross-environment sources and inconsistent classification/type/secret flags. Never discover arbitrary keys. Ownership and lifecycle selection belong in inventory/orchestration, not extra YAML metadata. Actions configuration requiring synchronization updates mapping and inventory together; unrelated local/application configuration does not. Remove obsolete executable mappings; preserve original fields, obsolete date/reason and separate deletion status in history, including the old entry after a rename.
 
-Before AWS access, configure `AWS_REGION` and `PAWLOCAL_CONFIG_READER_ROLE_ARN` in each matching protected apply Environment from the independently reviewed bootstrap role output. Also establish/read back the initial reader ARN in each matching release Environment (`development` or `production`) as required by #205. The reader role trusts only the exact repository-ID-qualified matching apply Environment OIDC subject, and has bounded reads of selected matching-environment parameters, no writes, no state access, and no cross-environment access. No current mapping uses SecureString, so no decryption grant is needed. Add decryption only for a reviewed real secret consumer and its exact required key/context.
+## Values and recovery
 
-Use one reconciliation mutation job bound to the matching protected apply Environment (`development-apply` or `production-apply`), so its approval, GitHub credential and OIDC reader trust share one job boundary. Approval is required even for audit: audit synchronizes available values. Do not pass secrets through job outputs or assume the development release Environment is protected. Preserve production release/promotion protection as well. For the #205 open-PR feature-branch test, use an opt-in development-only call from the already registered CI-only `ci.yml` manual entry point to the local reusable workflow on that exact branch. Temporarily allowlist only the reviewed branch in `development-apply`, retain its reviewer protection, and remove the allowance after merge. Existing deployment workflows remain unchanged. After merge, verify the new workflow's direct dispatch as well; never broadly permit untrusted PRs.
+Variables use compare-before-write and read-back, including no-ops. Secrets use encrypted API writes; GitHub cannot return plaintext for equality checks. Keep payloads out of Terraform resources/data/state/outputs, command arguments, workflow outputs/artifacts/logs, public reports and frontend snapshots. Reports contain names/statuses only; do not persist temporary tokens. No active secret mapping is required today.
 
-Ordinary `GITHUB_TOKEN` is not the configuration-write credential. The required setup is an owner-provided, repository-selected fine-grained token stored as `PAWLOCAL_CONFIG_GITHUB_TOKEN` in the matching protected apply Environment, read internally by that job. Limit it to `alanlima/pawlocal` with Environments write and implicit Metadata read; #205 verifies the actual variable and environment-secret API permission requirements. Do not print tokens, expose them as command arguments or outputs, persist temporary tokens, or copy a broad operator OAuth credential into Actions. On 2026-10-22 the owner provisioned this scoped credential in both protected apply Environments and a read-only Environment-variable API check succeeded. Reconciliation writes, reader roles and release readiness remain unverified until #205/#206. No GitHub App identity or speculative App credential parameter is required by this contract.
+Use actual managed attributes: API HTTPS origin plus `/api/v1`, health `/health`; Cognito full HTTPS origin `https://<managed-domain>.auth.<region>.amazoncognito.com`; managed public client ID; managed callback `/auth/callback`, logout `/`, and space-joined scopes (currently `openid email profile`). Validate account/environment bindings and matching frontend/API origins; never copy across environments.
 
-Initial reader-role publication is a deliberate operator handoff: independently review and apply the bootstrap plan, read actual output ARNs privately, update/read back each matching GitHub variable, then test OIDC. It does not depend on successful reconciliation. Automatic future publication of reader-role ARNs after bootstrap belongs to #191. Region, protected reader-role access, and the GitHub credential must already exist before reconciliation; the reconciler cannot establish its own entry credentials.
+In #206 pass the same reconciliation's verified public values directly to the build, rebuild/publish, then observe the served OAuth host/client/callback. Variable read-back or a healthy homepage alone is insufficient. Do not introduce reconciliation-specific commit/hash binding, fingerprints or state-generation machinery.
 
-### Fresh-operator setup
+Writes are not atomic. Correct partial failures and rerun; completed writes should be checked and skipped. Failed Terraform applies require a fresh reviewed normal-refresh plan. Missing source/state/mapping never deletes targets. Only confirmed reviewed destroy clears exact affected generated targets/dependent runtime variables; reapply must republish/reconcile before publication. Legacy cleanup needs consumer proof and exact environment/name deletion from the inventory; preserve same-named plan/apply inputs, unrelated static/certificate settings and `development-seed`.
 
-1. Complete the repository's [Terraform setup and approval procedure](terraform-greenfield-operations.md), including reviewed bootstrap configuration and existing backend/region inputs. #205 must first implement and independently review the reader roles and their non-secret `configuration_reader_role_arns` bootstrap output. Do not attempt reconciliation before those roles are applied.
-2. In GitHub, open **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**. Choose resource owner `alanlima`, repository access **Only select repositories → pawlocal**, a bounded expiration, and repository permission **Environments: Read and write**; Metadata read is automatic. No organization, contents-write or unrelated repository permission is needed. Record the expiration in the operator's credential manager so rotation precedes expiry. Follow GitHub's [fine-grained token instructions](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
-3. In repository **Settings → Environments → development-apply → Environment secrets**, add `PAWLOCAL_CONFIG_GITHUB_TOKEN`. Repeat in `production-apply` with the approved scoped credential. The **Settings → Secrets and variables → Agents** page configures a separate agent credential domain and does not supply these GitHub Actions Environment secrets. Alternatively use the interactive commands below, entering the token only into the hidden prompt/stdin, never a command argument, chat, checked-in file or shell transcript:
+Test both environments: partial writes and safe reruns, missing optional/required values, replacement Cognito settings, a stale served bundle, and confirmed destroy/reapply recovery.
 
-   ```powershell
-   gh secret set PAWLOCAL_CONFIG_GITHUB_TOKEN --repo alanlima/pawlocal --env development-apply
-   gh secret set PAWLOCAL_CONFIG_GITHUB_TOKEN --repo alanlima/pawlocal --env production-apply
-   gh api repos/alanlima/pawlocal/environments/development-apply/secrets --jq '.secrets[].name'
-   gh api repos/alanlima/pawlocal/environments/production-apply/secrets --jq '.secrets[].name'
-   ```
-
-   Verify names only; GitHub never returns the credential plaintext. Preserve each Environment's required reviewer and branch policies. The supplied credential must be tested against actual variable/secret endpoints in #205; successful secret storage alone is not runtime verification.
-4. After independent exact-plan review and authorized bootstrap apply, read the actual role output from the initialized bootstrap root. The commands below describe the #205 output contract; it is not present in the #204 documentation-only baseline. Run from repository root in PowerShell using an independently authorized operator GitHub session for setup. This writes only non-secret entry variables and reads each back, without copying role names from guesses:
-
-   ```powershell
-   $readerRoles = terraform -chdir=infra/terraform/iam-bootstrap output -json configuration_reader_role_arns | ConvertFrom-Json
-   foreach ($targetEnvironment in @('development', 'production')) {
-     $readerArn = $readerRoles.$targetEnvironment
-     if (-not $readerArn) { throw 'Missing reviewed reader-role output; stop setup.' }
-     foreach ($githubEnvironment in @($targetEnvironment, "$targetEnvironment-apply")) {
-       $variableEndpoint = "repos/alanlima/pawlocal/environments/$githubEnvironment/variables"
-       $existingVariable = gh api "$variableEndpoint/PAWLOCAL_CONFIG_READER_ROLE_ARN" 2>$null
-       if ($LASTEXITCODE -eq 0) {
-         gh api --method PATCH "$variableEndpoint/PAWLOCAL_CONFIG_READER_ROLE_ARN" -f name=PAWLOCAL_CONFIG_READER_ROLE_ARN -f "value=$readerArn"
-       } else {
-         # A missing variable must be confirmed as HTTP 404; denied access is not absence.
-         # Inspect the API response before using POST; stop on any other failure.
-         throw 'Confirm HTTP 404 privately, create the exact variable via UI, then rerun.'
-       }
-       $readbackArn = gh api "$variableEndpoint/PAWLOCAL_CONFIG_READER_ROLE_ARN" --jq '.value'
-       if ($LASTEXITCODE -ne 0 -or $readbackArn -ne $readerArn) { throw 'Reader-role variable verification failed.' }
-     }
-   }
-   ```
-
-   For first setup create each missing variable in its exact Environment through **Environment variables → Add variable**, using that matching bootstrap output, then rerun the read-back loop. Set `AWS_REGION` in the matching apply/release Environments to the region used by the owning Terraform roots. Do not set static AWS access keys.
-5. After #205 merges, run the direct on-demand audit for the selected environment; while its PR is open use the reviewed exact-branch CI-only test route above. Approve the matching protected job only after reviewing its source/ref. Verify names/statuses and variable read-back; missing generated parameters are expected before #206 and do not prove release readiness. After #206, complete Foundation audit, the separately reviewed runtime-trust bootstrap handoff, Converge enforce and release publication/served OAuth verification in order.
-
-For credential rotation repeat token creation with the same repository/permission restriction, replace both protected Environment secrets through the hidden input, run an authorized audit to verify API access, then revoke the predecessor. Keep rotation records free of credential values.
-
-### Production recovery Environment setup
-
-The existing `.github/workflows/terraform-environment-destroy.yml` uses `production-destroy-prepare` and `production-destroy` for separate protected saved-plan applies. Both Environments were absent in the 2026-10-22 read-only inventory. Before any synchronization targets either one, explicitly create it under **Settings → Environments**, configure its required owner reviewer and main-only deployment branch policy, and verify those controls. The reconciler must reject an absent target Environment instead of implicitly creating an unprotected one through an API write. Neither creating the Environments nor configuring variables authorizes a destroy run.
-
-Set operator-owned `AWS_REGION` and `PAWLOCAL_TF_STATE_BUCKET` in both to the approved production region/backend bucket. Reconcile only `PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN`, `PAWLOCAL_AWS_ACCOUNT_ID`, and `PAWLOCAL_TERRAFORM_PLAN_BUCKET` from their existing production bootstrap-owned parameters. This is six destinations from three existing sources, with no new parameter, credential, reader-role trust or `development-seed` change. The reconciler still executes in `production-apply`; it needs no credential or reader ARN in the destroy Environments. Preserve their independent review/approval gates and the workflow's confirmed production-destroy checks.
-
-## Invocation and validation
-
-The planned `.github/workflows/reconcile-environment.yml` supports `workflow_dispatch` and `workflow_call`, selecting exactly development or production. Dispatch defaults to audit. #205 only warns/skips missing sources and explicitly reports that success does not establish release readiness; enforce becomes available in #206.
-
-| Invocation after #206 | Mode | Required-value behavior |
-|---|---|---|
-| On demand | audit default, enforce selectable | Warn/skip in audit; fail in enforce |
-| After successful Foundation apply | audit | Synchronize available values; missing runtime values warn; publication blocked |
-| Before Converge/Release planning | enforce | Validate only required inputs consumed by that phase before planning |
-| After successful Converge/Release apply | enforce | Validate all required publication values before writes and frontend publication |
-
-In enforce, read and validate every selected source before any write. Missing optional values warn/skip. Invalid mapping/type/format, access denial, API error or read-back mismatch fails in both modes. Do not treat denied reads as absence. Compare ordinary variables before writing, create/update differences, and read back all available mapped destinations including no-ops. For mapped secrets, retrieve internally, encrypt for the destination and verify API success; GitHub cannot return secret plaintext, so never claim equality/read-back. Keep secret payloads out of workflow outputs, artifacts, logs, public reports and frontend snapshots. Reports contain names/statuses only. Multiple writes are not atomic; report partial progress without values and recover by idempotent rerun.
-
-Serialize reconciliation per environment, without a caller holding the same concurrency group as its reusable child. Coordinate apply, reconciliation and publication ordering; cancellation, failed apply, failed enforced validation or failed writes blocks dependent publication. Keep Terraform saved-plan integrity/review, protected apply, development eligibility and production promotion unchanged. Do not add reconciliation-specific commit/hash binding, configuration fingerprints or state-generation evidence machinery.
-
-## Canonical public values
-
-Use actual managed-resource attributes, not guessed identifiers or log parsing. API base is the matching HTTPS API origin plus `/api/v1`; health URL is its `/health` endpoint. Cognito domain is the full HTTPS origin `https://<managed-domain>.auth.<region>.amazoncognito.com`, with no OAuth path. Browser client ID comes from the managed public client (`generate_secret=false`). Redirect is its matching callback URL (`https://<frontend>/auth/callback`), logout is its matching logout URL (`https://<frontend>/`), and scopes are the managed allowed OAuth scopes joined by spaces (`openid email profile` currently). Validate account/environment bindings for IAM ARNs and matching frontend/API origins; never copy between environments. The app uses the client ID and OAuth origin, not the issuer, for hosted login.
-
-In #206 pass verified non-secret frontend values directly from that same successful reconciliation to the build. Updating GitHub vars alone does not refresh a running job's vars context or an old served Vite bundle. Rebuild, publish through the existing approved path, and observe the served sign-in redirect's OAuth host, client ID and callback. A healthy homepage is insufficient evidence.
-
-## Recovery, rotation and cleanup
-
-Rotate the scoped GitHub credential in the protected Environment before expiry, revoke its predecessor after a successful authorized rerun, and verify API access without logging values. A denied token, expired AWS session or partial write requires corrected setup and a fresh idempotent run. If a Terraform apply fails, preserve existing saved-plan rules: inspect partial state, generate/review a fresh normal-refresh plan; never reuse a stale plan.
-
-Missing source, missing state or removed mapping never deletes a destination. Only a confirmed, independently reviewed destroy may clear the exact affected generated targets and dependent runtime variables. Document the exact environment/name cleanup list and successful API responses; reapply recreates owned Strings, then audit/enforce reconciliation repopulates targets before publication. Recovery tests in #206 must cover both environments, partial writes, retry, stale Cognito variables and a stale served bundle.
-
-Every configuration addition/change/removal/rename updates the mapping and inventory in the same PR. Remove obsolete executable YAML entries and retain all original inventory fields plus obsolete date/reason. A rename keeps the old history. Distinguish retirement from confirmed deletion. The legacy cleanup allowlist is recorded in the inventory; prove no current release/recovery consumer remains before exact-name deletion. Never alter same-named plan/apply inputs, unrelated static settings or `development-seed`.
+Before token expiry, create its scoped replacement, replace both protected secrets through hidden input, run an authorized audit, then revoke the predecessor. Keep rotation records free of values.
