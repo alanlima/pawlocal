@@ -106,4 +106,6 @@ On suspected exposure revoke immediately, inspect IAM last-used/CloudTrail priva
 
 Before merge run backend-free helper/workflow/policy/setup tests and independent review. Cover action/drift/output/state changes, unknown/deferred/check results, wrong identity/backend/state, stale/superseded plans, digest/input mismatches, safe missing-config/partial-failure summaries, secret sentinels, policy escapes, key recovery and idempotent four-target publication.
 
+The bootstrap requirement file `.github/scripts/requirements-iam-bootstrap.txt` includes the existing private-transfer dependencies and pinned `python-hcl2==8.1.4`. Root resource/lifecycle admission uses parsed HCL blocks, so quoted strings, heredocs, nested blocks and comments cannot impersonate resource declarations. Install that requirement file plus the CI YAML parser before running the offline suite. This changes no application workflow dependencies.
+
 Live acceptance requires an error-free merged trusted-main run. A no-op proves the authenticated plan and no-approval path. A changed-plan run additionally requires owner approval and exact apply evidence; tests or a passing PR never substitute for live execution.

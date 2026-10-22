@@ -9,6 +9,7 @@ on:
       - .github/scripts/bootstrap*.py
       - .github/scripts/terraform-plan-transfer.py
       - .github/scripts/requirements-terraform-plan-transfer.txt
+      - .github/scripts/requirements-iam-bootstrap.txt
   workflow_dispatch:
 
 permissions:
@@ -90,8 +91,8 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-      - name: Install private-transfer dependencies
-        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-terraform-plan-transfer.txt
+      - name: Install pinned HCL parser and private-transfer dependencies
+        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-iam-bootstrap.txt
       - name: Plan, classify and publish exact private plan
         id: plan
         env:
@@ -170,8 +171,8 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-      - name: Install private-transfer dependencies
-        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-terraform-plan-transfer.txt
+      - name: Install pinned HCL parser and private-transfer dependencies
+        run: python -m pip install --disable-pip-version-check -r .github/scripts/requirements-iam-bootstrap.txt
       - name: Revalidate and apply only the exact saved plan
         env:
           GH_TOKEN: ${{ github.token }}

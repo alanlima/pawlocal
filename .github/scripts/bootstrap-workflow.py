@@ -6,6 +6,7 @@ pure manifest/classification checks exercised by offline CI.
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -176,39 +177,67 @@ def trusted_run():
     require(bool(runs) and max(item["id"] for item in runs) == run_id, "NEWER_RUN_FRESH_PLAN_REQUIRED")
 
 
+@lru_cache(maxsize=64)
+def parsed_source(text):
+    # Use the pinned parser's root block structure, never tokens found in strings,
+    # heredocs, comments or nested blocks. Cache by content, not file path/mtime.
+    import hcl2
+    from lark import Tree
+    try:
+        parsed = hcl2.parses_to_tree(text)
+        result = {category: [] for category in ("resource", "removed", "moved")}
+        for block in parsed.children[0].children:
+            if not isinstance(block, Tree) or block.data != "block":
+                continue
+            category = str(block.children[0].children[0])
+            if category in result:
+                # Serialize only actual root block nodes, so even a root
+                # attribute shaped like the parser's output cannot spoof one.
+                root = Tree("start", [Tree("body", [block])])
+                section = hcl2.serialize(hcl2.transform(root))
+                result[category].extend(section[category])
+        return result
+    except Exception:
+        raise Stop("INVALID_BOOTSTRAP_HCL") from None
+
+
+def literal_refactor_reference(block, key):
+    value = block.get(key)
+    # python-hcl2 v8 preserves literal strings with their quotes and serializes
+    # actual traversal expressions as ${...}. Accept only fixed root traversals.
+    require(isinstance(value, str) and value.startswith("${") and value.endswith("}"), "UNSUPPORTED_REFACTOR_" + key.upper())
+    address = value[2:-1]
+    require(re.fullmatch(ADDRESS, address), "UNSUPPORTED_REFACTOR_" + key.upper())
+    require(address.split(".", 1)[0] in RESOURCE_TYPES, "REFACTOR_OUTSIDE_BOOTSTRAP")
+    return address
+
+
 def source_declarations():
     current, removed, moved = set(), set(), {}
     for path in ROOT.glob("*.tf"):
-        # Preserve quoted strings while discarding HCL comments. Block matching
-        # tracks root depth so nested text cannot authorize a historical address.
-        text = re.sub(r'"(?:\\.|[^"\\])*"|/\*[\s\S]*?\*/|//[^\n]*|#[^\n]*',
-                      lambda match: match[0] if match[0].startswith('"') else "\n" * match[0].count("\n"),
-                      path.read_text(encoding="utf-8"))
-        current.update(f"{kind}.{name}" for kind, name in re.findall(
-            r'resource\s+"([a-z0-9_]+)"\s+"([a-z0-9_]+)"', text))
-        depth, previous, kind, begin = 0, "", "", 0
-        for token in re.finditer(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_-]*|[{}]', text):
-            value = token[0]
-            if value == "{":
-                if depth == 0:
-                    kind, begin = previous, token.end()
-                depth += 1
-            elif value == "}":
-                depth -= 1
-                if depth == 0 and kind in {"removed", "moved"}:
-                    body = text[begin:token.start()]
-                    sources = re.findall(r'(?m)^\s*from\s*=\s*(' + ADDRESS + r')\s*$', body)
-                    require(len(sources) == 1, "UNSUPPORTED_REFACTOR_SOURCE")
-                    source = sources[0]
-                    require(source.split(".", 1)[0] in RESOURCE_TYPES, "REFACTOR_OUTSIDE_BOOTSTRAP")
-                    if kind == "removed":
-                        removed.add(source)
-                    else:
-                        targets = re.findall(r'(?m)^\s*to\s*=\s*(' + ADDRESS + r')\s*$', body)
-                        require(len(targets) == 1 and targets[0].split(".", 1)[0] in RESOURCE_TYPES, "UNSUPPORTED_REFACTOR_TARGET")
-                        require(source not in moved, "DUPLICATE_REFACTOR_SOURCE")
-                        moved[source] = targets[0]
-            previous = value
+        source = parsed_source(path.read_text(encoding="utf-8"))
+        for declaration in source.get("resource", []):
+            require(isinstance(declaration, dict) and len(declaration) == 1, "UNSUPPORTED_RESOURCE_DECLARATION")
+            for raw_type, resources in declaration.items():
+                require(isinstance(resources, dict) and len(resources) == 1, "UNSUPPORTED_RESOURCE_DECLARATION")
+                for raw_name, block in resources.items():
+                    require(isinstance(block, dict) and block.get("__is_block__") is True, "UNSUPPORTED_RESOURCE_DECLARATION")
+                    try:
+                        kind, name = json.loads(raw_type), json.loads(raw_name)
+                    except (TypeError, ValueError):
+                        raise Stop("NONLITERAL_RESOURCE_LABEL") from None
+                    require(isinstance(kind, str) and isinstance(name, str)
+                            and re.fullmatch(r"[a-z0-9_]+", kind) and re.fullmatch(r"[a-z0-9_]+", name), "NONLITERAL_RESOURCE_LABEL")
+                    current.add(f"{kind}.{name}")
+        for category in ("removed", "moved"):
+            for block in source.get(category, []):
+                require(isinstance(block, dict) and block.get("__is_block__") is True, "UNSUPPORTED_REFACTOR_DECLARATION")
+                previous = literal_refactor_reference(block, "from")
+                if category == "removed":
+                    removed.add(previous)
+                else:
+                    require(previous not in moved, "DUPLICATE_REFACTOR_SOURCE")
+                    moved[previous] = literal_refactor_reference(block, "to")
     return current, removed, moved
 
 

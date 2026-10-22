@@ -229,6 +229,76 @@ class ClassificationTests(unittest.TestCase):
 
 
 class ReviewedLifecycleTests(unittest.TestCase):
+    def opaque_hcl_corpus(self):
+        fake = '''}
+resource "aws_iam_role" "ghost" {}
+removed {
+  from = aws_iam_role.ghost_removed
+  lifecycle { destroy = true }
+}
+moved {
+  from = aws_iam_role.ghost_moved
+  to = aws_iam_role.real
+}
+'''
+        actual = '\nresource "aws_iam_role" "real" {}\n'
+        return {
+            "heredoc": 'locals {\n text = <<EOF\n' + fake + 'EOF\n}\n' + actual,
+            "indented-heredoc": 'locals {\n text = <<-EOF\n' + fake + '    EOF\n}\n' + actual,
+            "quoted-strings": r'''locals {
+  text = "resource \"aws_iam_role\" \"ghost\" {}"
+  template = "${jsonencode({ text = "}" })}"
+}
+''' + actual,
+            "nested-blocks": '''container {
+  resource "aws_iam_role" "ghost" {}
+  removed { from = aws_iam_role.ghost_removed }
+  moved {
+    from = aws_iam_role.ghost_moved
+    to = aws_iam_role.real
+  }
+}
+''' + actual,
+            "comments": '''# resource "aws_iam_role" "ghost" {}
+// removed { from = aws_iam_role.ghost_removed }
+/* moved {
+ from = aws_iam_role.ghost_moved
+ to = aws_iam_role.real
+} */
+''' + actual,
+            "root-attribute-spoof": '''resource = [{ "\\"aws_iam_role\\"" = { "\\"ghost\\"" = { __is_block__ = true } } }]
+removed = [{ from = "${aws_iam_role.ghost_removed}", __is_block__ = true }]
+''' + actual,
+        }
+
+    def test_only_actual_literal_root_blocks_authorize_inventory(self):
+        for name, text in self.opaque_hcl_corpus().items():
+            with tempfile.TemporaryDirectory() as directory, self.subTest(name=name):
+                root = Path(directory)
+                (root / "main.tf").write_text(text, encoding="utf-8")
+                with patch.object(bootstrap, "ROOT", root):
+                    self.assertEqual(bootstrap.source_declarations(), ({"aws_iam_role.real"}, set(), {}))
+
+    def test_opaque_fake_declarations_cannot_admit_foreign_state(self):
+        for corpus_name, text in self.opaque_hcl_corpus().items():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "main.tf").write_text(text, encoding="utf-8")
+                for resource in ("ghost", "ghost_removed", "ghost_moved", "real"):
+                    state = {"version": 4, "lineage": "existing", "serial": 8,
+                        "resources": [{"mode": "managed", "type": "aws_iam_role", "name": resource,
+                                       "instances": [{"attributes": {}}]}]}
+                    client = Mock()
+                    client.head_object.return_value = {"VersionId": "v1"}
+                    client.get_object.return_value = {"Body": io.BytesIO(json.dumps(state).encode())}
+                    with patch.object(bootstrap, "ROOT", root), patch.object(bootstrap.os, "environ", configuration_fixture()), \
+                         patch.object(bootstrap, "aws", return_value=client), self.subTest(corpus=corpus_name, resource=resource):
+                        if resource == "real":
+                            self.assertEqual(bootstrap.generation()[0]["serial"], 8)
+                        else:
+                            with self.assertRaisesRegex(bootstrap.Stop, "STATE_OUTSIDE_BOOTSTRAP"):
+                                bootstrap.generation()
+
     def test_actual_removed_policy_address_is_admitted_for_approved_delete(self):
         address = "aws_iam_policy.identity_development_frontend"
         self.assertIn(address, bootstrap.source_inventory())
@@ -285,7 +355,7 @@ moved {
   lifecycle { destroy = true }
 }
 ''', encoding="utf-8")
-            with patch.object(bootstrap, "ROOT", root), self.assertRaisesRegex(bootstrap.Stop, "UNSUPPORTED_REFACTOR_SOURCE"):
+            with patch.object(bootstrap, "ROOT", root), self.assertRaisesRegex(bootstrap.Stop, "UNSUPPORTED_REFACTOR_FROM"):
                 bootstrap.source_inventory()
 
     def test_commented_refactors_do_not_authorize_unrelated_state(self):
