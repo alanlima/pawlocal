@@ -56,8 +56,8 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
 
   assert {
     condition = (
-      length(data.aws_iam_policy_document.cognito_apply_permissions["development"].minified_json) == 6096 &&
-      length(data.aws_iam_policy_document.cognito_apply_permissions["production"].minified_json) == 6069
+      length(data.aws_iam_policy_document.cognito_apply_permissions["development"].minified_json) == 6015 &&
+      length(data.aws_iam_policy_document.cognito_apply_permissions["production"].minified_json) == 5989
     )
     error_message = "Default-project delegated Cognito apply policies must retain the reviewed size-safe shape."
   }

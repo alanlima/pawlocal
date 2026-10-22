@@ -122,7 +122,7 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn('project_name               = "pawlocalx"', semantic_test)
         self.assertIn("expect_failures = [var.project_name]", semantic_test)
 
-    def test_create_time_tagging_cannot_adopt_unowned_exact_name_resources(self) -> None:
+    def test_create_time_tagging_uses_service_specific_ownership_context(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
         semantic_test = (
             BOOTSTRAP / "tests" / "cognito_delegated_roles.tftest.hcl"
@@ -135,6 +135,14 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn('variable = "aws:ResourceTag/environment"', body)
         self.assertIn('statement.Sid == "CreateLambda"', semantic_test)
         self.assertIn('statement.Sid == "TagNewLogGroup"', semantic_test)
+        logs_body = source.split('sid       = "TagNewLogGroup"', 1)[1].split(
+            'sid       = "ReadLogGroupTags"', 1
+        )[0]
+        self.assertNotIn('variable = "aws:ResourceTag/', logs_body)
+        self.assertIn('variable = "aws:RequestTag/${condition.key}"', logs_body)
+        self.assertIn('variable = "aws:TagKeys"', logs_body)
+        self.assertIn('local.cognito_resource_arns[each.key].log_group_tags', logs_body)
+        self.assertIn('Create-with-tags must pass identity and boundary without ResourceTags', semantic_test)
 
     def test_add_permission_is_limited_to_cognito_principal(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")

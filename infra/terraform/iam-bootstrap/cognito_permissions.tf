@@ -276,20 +276,10 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     effect    = "Allow"
     actions   = ["logs:TagResource"]
     resources = [local.cognito_resource_arns[each.key].log_group_tags]
-    # CreateLogGroup sends tags inline and evaluates TagResource as a
-    # dependent authorization after surfacing those requested tags as current
-    # resource tags. Requiring both views denies standalone adoption of an
-    # unowned exact-name log group.
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/environment"
-      values   = [each.key]
-    }
+    # CreateLogGroup authorizes inline tags before resource ownership tags
+    # exist. Require the full request contract, not pre-existing ResourceTags.
+    # The inventory/plan gate must reject an exact-name survivor: IAM cannot
+    # distinguish this context from a standalone complete-tag request.
 
     dynamic "condition" {
       for_each = local.cognito_application_tags[each.key]

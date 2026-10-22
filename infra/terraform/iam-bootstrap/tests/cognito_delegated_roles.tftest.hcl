@@ -142,7 +142,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
             if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
           ]
         ]
-        ])) == 14 && toset(flatten([
+        ])) == 13 && toset(flatten([
         for statement in jsondecode(policy.minified_json).Statement : [
           for operator, conditions in try(statement.Condition, {}) : [
             for variable, values in conditions : flatten([values])
@@ -181,17 +181,57 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
         toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].log_group_tags]) &&
         statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
         statement.Condition.StringEquals["aws:RequestTag/environment"] == environment &&
-        statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
-        statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
+        !can(statement.Condition.StringEquals["aws:ResourceTag/project"]) &&
+        !can(statement.Condition.StringEquals["aws:ResourceTag/environment"])
         ]) == 1 && alltrue([
         for statement in jsondecode(policy.minified_json).Statement :
         statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
         statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
-        if contains(flatten([statement.Action]), "lambda:TagResource") ||
-        contains(flatten([statement.Action]), "logs:TagResource")
+        if statement.Sid != "TagNewLogGroup" && (
+          contains(flatten([statement.Action]), "lambda:TagResource") ||
+          contains(flatten([statement.Action]), "logs:TagResource")
+        )
       ])
     ])
-    error_message = "Every Lambda or Logs TagResource grant must require existing or surfaced matching ownership tags and deny adoption of an unowned exact-name resource."
+    error_message = "Logs creation must admit absent ownership tags; other tag grants must retain matching ownership tags."
+  }
+
+  # Evaluate the rendered create + dependent-tag statements with no existing
+  # ResourceTags. Each request must pass BOTH identity and boundary checks.
+  assert {
+    condition = alltrue(flatten([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions : [
+        for document in [
+          jsondecode(aws_iam_role_policy.cognito_terraform["${environment}-apply"].policy),
+          jsondecode(aws_iam_policy.cognito_apply_boundary[environment].policy)
+          ] : [for request in [
+            { tags = local.cognito_application_tags[environment], target = environment, allowed = true },
+            { tags = {}, target = environment, allowed = false },
+            { tags = { for key, value in local.cognito_application_tags[environment] : key => value if key != "managedby" }, target = environment, allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { environment = "wrong" }), target = environment, allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { project = "wrong" }), target = environment, allowed = false },
+            { tags = merge(local.cognito_application_tags[environment], { unexpected = "tag" }), target = environment, allowed = false },
+            { tags = local.cognito_application_tags[environment], target = environment == "development" ? "production" : "development", allowed = false }
+            ] : alltrue([
+              for operation in [
+                { action = "logs:CreateLogGroup", resource = local.cognito_resource_arns[request.target].log_group },
+                { action = "logs:TagResource", resource = local.cognito_resource_arns[request.target].log_group_tags }
+                ] : anytrue([
+                  for statement in document.Statement : try(
+                    statement.Effect == "Allow" &&
+                    contains(flatten([statement.Action]), operation.action) &&
+                    contains(flatten([statement.Resource]), operation.resource) &&
+                    alltrue([for key, value in statement.Condition.StringEquals :
+                      lookup({ for tag, tag_value in request.tags : "aws:RequestTag/${tag}" => tag_value }, key, "") == value
+                    ]) &&
+                    alltrue([for key in keys(request.tags) : contains(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"], key)]),
+                    false
+                  )
+              ])
+        ]) == request.allowed]
+      ]
+    ]))
+    error_message = "Create-with-tags must pass identity and boundary without ResourceTags; missing, wrong, extra, or cross-environment requests must fail."
   }
 
   assert {
