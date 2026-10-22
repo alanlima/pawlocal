@@ -2,8 +2,7 @@
 
 The active mapping is `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. All generated entries are `String`, `secret: false`, `validations: [required]`; no secret payload, unmanaged parameter or shared source is needed.
 
-Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key policy are listed below. Runtime evidence and current rollout status belong in #206 and its PRs.
-
+Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key policy are listed below. Initial publication, all 36 owned values and populated audits are [verified](https://github.com/alanlima/pawlocal/issues/206#issuecomment-6344710835); integrated release and cleanup acceptance remain pending.
 
 ## Generated parameter entries
 
@@ -44,7 +43,7 @@ These six destinations use three existing source keys above, with the same Strin
 
 `terraform-environment-destroy.yml` is the actual consumer. Both target Environments were absent in the 2026-10-22 read-only GitHub inventory; create/review their required reviewer and main-only branch policies explicitly before reconciliation. Never let synchronization create an unprotected Environment. No plan-role ARN is consumed by these apply jobs, so do not map one there. No development destroy target or reader-role OIDC trust is added.
 
-During #205 setup on 2026-10-22, the orchestrator established both existing production recovery target Environments with the required owner reviewer and main-only branch policy, then verified only operator `AWS_REGION` and `PAWLOCAL_TF_STATE_BUCKET` settings/read-back. Their generated variables remain pending actual #206 sources and reconciliation. No destroy was invoked and no new credential or reader-role trust was added for those targets.
+During #205 setup on 2026-10-22, the orchestrator established both existing production recovery target Environments with the required owner reviewer and main-only branch policy, then verified only operator `AWS_REGION` and `PAWLOCAL_TF_STATE_BUCKET` settings/read-back. Their six generated destinations are now verified by the populated production audit linked above. No destroy was invoked and no new credential or reader-role trust was added for those targets.
 
 ## Entry settings and operator inputs (outside synchronization)
 
@@ -54,7 +53,7 @@ These are not automatically added as Parameter Store mappings. Their lifecycle o
 |---|---|---|---|
 | AWS_REGION | Matching release and plan/apply Environments, plus production-destroy-prepare and production-destroy; AWS session setup | Variable; supported AWS region, must match owned resources | Required before AWS reads; retain existing operator configuration; explicitly initialize protected production recovery targets |
 | PAWLOCAL_CONFIG_READER_ROLE_ARN | Matching protected apply Environment for reconciliation OIDC; matching release Environment for required initial setup/read-back | Variable; exact reviewed bootstrap output, matching account/environment | #205 setup/read-back and reader OIDC audit verified in both environments; bootstrap owns role |
-| PAWLOCAL_CONFIG_GITHUB_TOKEN | Matching protected apply Environment, callable workflow secret | Secret; fine-grained PAT selected only for `alanlima/pawlocal`, Environments write and implicit Metadata read | #205 scoped credential/API access verified in both apply Environments; populated-source writes remain #206 acceptance; no token payload recorded |
+| PAWLOCAL_CONFIG_GITHUB_TOKEN | Matching protected apply Environment, callable workflow secret | Secret; fine-grained PAT selected only for `alanlima/pawlocal`, Environments write and implicit Metadata read | Scoped credential/API access and populated writes verified in both apply Environments; see initial-publication evidence above; no token payload recorded |
 | PAWLOCAL_TF_STATE_BUCKET | P, A, production-destroy-prepare, production-destroy; Terraform backend | Variable; approved existing state bucket | Existing entry setting, not automatically synchronized; explicitly initialize protected production recovery targets |
 | PAWLOCAL_DOMAIN_NAME, PAWLOCAL_ROUTE53_ZONE_ID | P; environment root domain/DNS inputs | Variables; approved matching domain and hosted zone | Existing operator inputs; naming is not DNS authorization |
 | PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN | P; Terraform certificate input | Existing secret setting; approved matching certificate ARN | Preserve current storage/configuration; no copying into Parameter Store |
