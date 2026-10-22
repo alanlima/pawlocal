@@ -454,7 +454,9 @@ module "cognito_pre_sign_up" {
   artifacts_dir                = "${path.root}/.terraform/lambda-builds"
   recreate_missing_package     = true
   trigger_on_package_timestamp = false
-  hash_extra                   = var.cognito_package_build_id
+  # The content-derived filename owns code changes. Rebuilding local packaging
+  # sidecars must not make source_code_hash unknown and update unchanged code.
+  ignore_source_code_hash = true
 
   cloudwatch_logs_retention_in_days = 30
   create_sam_metadata               = false

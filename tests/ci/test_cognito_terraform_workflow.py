@@ -306,7 +306,8 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         self.assertIn('artifacts_dir                = "${path.root}/.terraform/lambda-builds"', module)
         self.assertIn("recreate_missing_package     = true", module)
         self.assertIn("trigger_on_package_timestamp = false", module)
-        self.assertIn("hash_extra                   = var.cognito_package_build_id", module)
+        self.assertIn("ignore_source_code_hash = true", module)
+        self.assertNotIn("hash_extra", module)
         self.assertIn("cloudwatch_logs_retention_in_days = 30", module)
         self.assertIn("allowed_triggers                  = {}", module)
 
@@ -369,26 +370,18 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
             source.count('".github/scripts/verify-terraform-source-checkout.py"'), 2
         )
 
-    def test_normal_plans_use_fresh_build_ids_and_teardown_reuses_state(self) -> None:
+    def test_normal_plans_rebuild_only_local_sidecars_without_run_identity(self) -> None:
         environment = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
-        destroy = self._load(DESTROY_WORKFLOW)
-        self.assertIn(
-            "TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.environment }}-${{ inputs.phase }}",
-            environment,
-        )
-
         destroy_source = DESTROY_WORKFLOW.read_text(encoding="utf-8")
         self.assertNotIn("production-teardown", destroy_source)
-        preparation_steps = {
-            step.get("name"): step for step in destroy["jobs"]["prepare-plan"]["steps"]
-        }
-        reuse = preparation_steps["Reuse the applied configuration build identifier"]["run"]
-        self.assertIn("terraform -chdir=\"$TF_ROOT\" output -raw cognito_package_build_id", reuse)
-        self.assertIn("TF_VAR_cognito_package_build_id=$build_id", reuse)
-        for job_name in ("prepare-apply", "destroy-plan", "destroy-apply"):
-            job = destroy["jobs"][job_name]
-            self.assertNotIn("TF_VAR_cognito_package_build_id", job.get("env", {}))
-            self.assertNotIn("cognito_package_build_id", str(job))
+        self.assertNotIn("cognito_package_build_id", environment + destroy_source)
+        for resource in ("local_file.archive_plan[0]", "null_resource.archive[0]"):
+            self.assertIn(
+                f"-replace='module.pawlocal.module.cognito_pre_sign_up.{resource}'",
+                environment,
+            )
+        self.assertNotIn("-replace", destroy_source)
+        self.assertIn("verify-terraform-source-checkout.py", environment)
 
     def test_all_environment_inits_enforce_readonly_lockfiles(self) -> None:
         environment = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")

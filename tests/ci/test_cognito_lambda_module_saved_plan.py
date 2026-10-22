@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import json
+import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
 import os
 from pathlib import Path
 import shutil
@@ -19,7 +21,68 @@ STS_ENDPOINT = ""
 
 
 class StubStsHandler(BaseHTTPRequestHandler):
+    function: dict = {}
+    code_updates = 0
+
+    def respond(self, payload: dict, status: int = 200) -> None:
+        response = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        if status == 404:
+            self.send_header("x-amzn-errortype", "ResourceNotFoundException")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    def do_GET(self) -> None:
+        if not self.function:
+            self.respond({"Type": "User", "message": "Not found"}, 404)
+        elif "/versions" in self.path:
+            self.respond({"Versions": [self.function]})
+        elif self.path.endswith("/code-signing-config"):
+            self.respond({})
+        elif "/tags/" in self.path:
+            self.respond({"Tags": {}})
+        elif self.path.endswith("/configuration"):
+            self.respond(self.function)
+        else:
+            self.respond({"Configuration": self.function, "Code": {}, "Tags": {}})
+
+    def do_PUT(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+        if self.path.endswith("/code"):
+            type(self).code_updates += 1
+            code = base64.b64decode(body["ZipFile"])
+            self.function["CodeSha256"] = base64.b64encode(hashlib.sha256(code).digest()).decode()
+        else:
+            self.function.update(body)
+        self.respond(self.function)
+
+    def do_DELETE(self) -> None:
+        type(self).function = {}
+        self.respond({})
+
     def do_POST(self) -> None:
+        if "Logs_" in self.headers.get("X-Amz-Target", ""):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.respond({"logGroups": [{
+                "logGroupName": "/aws/lambda/package-test",
+                "arn": "arn:aws:logs:ap-southeast-2:111111111111:log-group:/aws/lambda/package-test:*",
+            }]})
+            return
+        if self.path.startswith("/2015-03-31/functions"):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            code = base64.b64decode(body.pop("Code")["ZipFile"])
+            type(self).function = {
+                **body,
+                "FunctionArn": "arn:aws:lambda:ap-southeast-2:111111111111:function:package-test",
+                "CodeSha256": base64.b64encode(hashlib.sha256(code).digest()).decode(),
+                "CodeSize": len(code), "Version": "$LATEST", "State": "Active",
+                "LastUpdateStatus": "Successful", "LastModified": "2026-01-01T00:00:00.000+0000",
+                "RevisionId": "00000000-0000-0000-0000-000000000000",
+            }
+            self.respond(self.function, 201)
+            return
         response = b"""<?xml version="1.0" encoding="UTF-8"?>
 <GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
   <GetCallerIdentityResult>
@@ -59,26 +122,33 @@ variable "create_consumer" {{
   default = false
 }}
 
-variable "package_build_id" {{
-  type = string
-}}
-
 variable "teardown_enabled" {{
   type    = bool
   default = false
+}}
+
+variable "function_timeout" {{
+  type    = number
+  default = 3
 }}
 
 module "lambda_package" {{
   source  = "terraform-aws-modules/lambda/aws"
   version = "= {MODULE_VERSION}"
 
-  create_function          = false
+  create_function          = true
   create_role              = false
+  use_existing_cloudwatch_log_group = true
+  function_name            = "package-test"
+  lambda_role              = "arn:aws:iam::111111111111:role/package-test"
+  runtime                  = "nodejs22.x"
+  handler                  = "index.handler"
+  timeout                  = var.function_timeout
   source_path              = "${{path.root}}/index.mjs"
   artifacts_dir            = "${{path.root}}/.terraform/lambda-builds"
   recreate_missing_package = true
   trigger_on_package_timestamp = false
-  hash_extra               = var.package_build_id
+  ignore_source_code_hash  = true
 }}
 
 resource "terraform_data" "lambda_consumer" {{
@@ -114,8 +184,18 @@ def run_terraform(
         "AWS_REGION": "ap-southeast-2",
         "AWS_EC2_METADATA_DISABLED": "true",
         "AWS_ENDPOINT_URL_STS": STS_ENDPOINT,
+        "AWS_ENDPOINT_URL_LAMBDA": STS_ENDPOINT,
+        "AWS_ENDPOINT_URL_CLOUDWATCH_LOGS": STS_ENDPOINT,
         "TF_IN_AUTOMATION": "true",
     }
+    # Rebuild only module-local sidecars for normal saved plans, not teardown.
+    if arguments and arguments[0] == "plan" and "-destroy" not in arguments and not any(
+        "teardown_enabled=true" in argument for argument in arguments
+    ):
+        arguments = (*arguments,
+            "-replace=module.lambda_package.local_file.archive_plan[0]",
+            "-replace=module.lambda_package.null_resource.archive[0]",
+        )
     result = subprocess.run(
         ["terraform", *arguments],
         cwd=directory,
@@ -123,6 +203,7 @@ def run_terraform(
         capture_output=True,
         text=True,
         env=terraform_environment,
+        timeout=300,
     )
     if check and result.returncode != 0:
         raise AssertionError(
@@ -173,6 +254,14 @@ def assert_package(test: unittest.TestCase, path: Path, expected_source: str) ->
         test.assertEqual(package.read("index.mjs").decode(), expected_source)
 
 
+def lambda_action(workspace: Path, plan_name: str) -> list[str]:
+    plan = json.loads(run_terraform(workspace, "show", "-json", plan_name).stdout)
+    return next(
+        change["change"]["actions"] for change in plan["resource_changes"]
+        if change["address"] == "module.lambda_package.aws_lambda_function.this[0]"
+    )
+
+
 @unittest.skipUnless(
     os.environ.get("PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION") == "1",
     "set PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION=1 to run Terraform integration",
@@ -194,6 +283,8 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
         cls.sts_thread.join()
 
     def setUp(self) -> None:
+        StubStsHandler.function = {}
+        StubStsHandler.code_updates = 0
         if shutil.which("terraform") is None:
             self.skipTest("terraform is required for the saved-plan integration test")
 
@@ -216,7 +307,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "plan",
                 "-input=false",
                 "-var=create_consumer=true",
-                "-var=package_build_id=initial-plan",
                 "-out=tfplan",
             )
 
@@ -244,7 +334,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "apply",
                 "-input=false",
                 "-auto-approve",
-                "-var=package_build_id=initial-state",
             )
             shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
 
@@ -253,7 +342,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "plan",
                 "-input=false",
                 "-var=create_consumer=true",
-                "-var=package_build_id=retry-plan",
                 "-out=retry.tfplan",
             )
             copy_saved_plan_workspace(
@@ -273,6 +361,35 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
             )
             assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
 
+    def test_unchanged_lambda_is_noop_on_fresh_runners_but_configuration_updates(self) -> None:
+        with self.temporary_directory("pawlocal-lambda-module-noop-") as temporary:
+            root = Path(temporary)
+            original = root / "original"
+            original.mkdir()
+            write_configuration(original)
+            initialize(original)
+            run_terraform(original, "apply", "-input=false", "-auto-approve")
+            plan_workspace = root / "fresh-plan"
+            plan_workspace.mkdir()
+            write_configuration(plan_workspace)
+            shutil.copy2(original / ".terraform.lock.hcl", plan_workspace)
+            shutil.copy2(original / "terraform.tfstate", plan_workspace)
+            initialize(plan_workspace, readonly=True)
+            run_terraform(plan_workspace, "plan", "-input=false", "-out=unchanged.tfplan")
+            self.assertEqual(lambda_action(plan_workspace, "unchanged.tfplan"), ["no-op"])
+            apply_workspace = root / "fresh-apply"
+            copy_saved_plan_workspace(plan_workspace, apply_workspace, "unchanged.tfplan",
+                source=PLANNED_SOURCE, include_state=True)
+            run_terraform(apply_workspace, "apply", "-input=false", "-auto-approve", "unchanged.tfplan")
+            self.assertEqual(StubStsHandler.code_updates, 0)
+            assert_package(self, package_path(apply_workspace), PLANNED_SOURCE)
+            run_terraform(apply_workspace, "plan", "-input=false",
+                "-var=function_timeout=4", "-out=config.tfplan")
+            self.assertEqual(lambda_action(apply_workspace, "config.tfplan"), ["update"])
+            run_terraform(apply_workspace, "apply", "-input=false", "-auto-approve", "config.tfplan")
+            self.assertEqual(StubStsHandler.function["Timeout"], 4)
+            self.assertEqual(StubStsHandler.code_updates, 0)
+
     def test_source_change_gets_a_new_package_identity_and_scoped_cleanup(self) -> None:
         with self.temporary_directory("pawlocal-lambda-module-source-") as temporary:
             root = Path(temporary)
@@ -286,7 +403,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "apply",
                 "-input=false",
                 "-auto-approve",
-                "-var=package_build_id=source-one",
             )
             original_package = package_path(plan_workspace)
             assert_package(self, original_package, PLANNED_SOURCE)
@@ -298,9 +414,9 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 plan_workspace,
                 "plan",
                 "-input=false",
-                "-var=package_build_id=source-two",
                 "-out=source.tfplan",
             )
+            self.assertEqual(lambda_action(plan_workspace, "source.tfplan"), ["update"])
             copy_saved_plan_workspace(
                 plan_workspace,
                 apply_workspace,
@@ -318,6 +434,7 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
             changed_package = package_path(apply_workspace)
             self.assertNotEqual(original_package.name, changed_package.name)
             assert_package(self, changed_package, CHANGED_SOURCE)
+            self.assertEqual(StubStsHandler.code_updates, 1)
 
             build_directory = apply_workspace / ".terraform/lambda-builds"
             shutil.rmtree(build_directory)
@@ -327,7 +444,7 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 CHANGED_SOURCE,
             )
 
-    def test_teardown_preparation_reuses_state_build_id_without_package_work(self) -> None:
+    def test_teardown_preparation_needs_no_package_work(self) -> None:
         with self.temporary_directory("pawlocal-lambda-module-prepare-") as temporary:
             root = Path(temporary)
             plan_workspace = root / "plan"
@@ -340,7 +457,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "apply",
                 "-input=false",
                 "-auto-approve",
-                "-var=package_build_id=applied-build",
             )
             shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
 
@@ -348,7 +464,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 plan_workspace,
                 "plan",
                 "-input=false",
-                "-var=package_build_id=applied-build",
                 "-var=teardown_enabled=true",
                 "-out=prepare.tfplan",
             )
@@ -396,7 +511,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "-input=false",
                 "-auto-approve",
                 "-var=create_consumer=true",
-                "-var=package_build_id=destroy-state",
             )
             shutil.rmtree(plan_workspace / ".terraform/lambda-builds")
             run_terraform(
@@ -404,7 +518,6 @@ class CognitoLambdaModuleSavedPlanTests(unittest.TestCase):
                 "plan",
                 "-destroy",
                 "-input=false",
-                "-var=package_build_id=destroy-plan",
                 "-out=destroy.tfplan",
             )
 

@@ -27,15 +27,6 @@ variable "cognito_pre_sign_up_role_arn" {
     error_message = "cognito_pre_sign_up_role_arn must be null or name the development pre sign-up role."
   }
 }
-variable "cognito_package_build_id" {
-  description = "Plan-bound Cognito Lambda package build identifier. CI supplies a unique value per workflow run attempt."
-  type        = string
-  default     = "local"
-  validation {
-    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", var.cognito_package_build_id))
-    error_message = "cognito_package_build_id must contain 1 through 128 safe ASCII characters and start with a letter or digit."
-  }
-}
 variable "runtime_role_arn" {
   type    = string
   default = ""
