@@ -4,7 +4,7 @@ For the purpose, triggers, inputs, and relationships of every workflow, start wi
 
 ## Configuration and rollout
 
-Use the [configuration guide](configuration-management.md) for reader/token setup and the [inventory](configuration-inventory.md) for exact sources/destinations. Bootstrap owns six generated Strings per environment; each application state owns twelve. Runtime trust remains a separate reviewed bootstrap handoff; automatic reader-ARN publication remains #191.
+Use the [configuration guide](configuration-management.md) for reader/token setup and the [inventory](configuration-inventory.md) for exact sources/destinations. Bootstrap owns six generated Strings per environment; each application state owns twelve. Runtime trust remains a separate reviewed bootstrap handoff. [Issue #191 bootstrap Actions](iam-bootstrap-actions.md) plan the existing bootstrap state and require owner approval for changes. The owner-operated setup script explicitly publishes actual reader-role entry settings during setup or identity changes; existing reconciliation retains ongoing configuration sync.
 
 For an existing converged environment:
 
@@ -22,7 +22,7 @@ Production recovery targets `production-destroy-prepare` and `production-destroy
 
 Check #206 and its PRs for current inventory, exact plans and live verification. The earlier empty greenfield inventory is historical; it is not evidence of current application state. Unrelated account resources remain outside PawLocal scope.
 
-Only Terraform may change AWS infrastructure or Terraform state. Do not use manual `terraform import`, `terraform state` commands, AWS CLI/SDK mutation, or the AWS console. Local Terraform execution is authorized only for the bootstrap root, after independent review of the exact saved plan. Development and production plans/applies run only through the matching protected GitHub Environments. Billable application resources still require fresh owner cost/provisioning approval.
+Only Terraform may change ordinary AWS infrastructure or Terraform state. Do not use manual `terraform import`, `terraform state` commands, AWS CLI/SDK mutation, or the AWS console for those resources. DEC-008's Issue #191 exception permits only the separately operated dedicated bootstrap user's documented setup/credential lifecycle. Local Terraform execution is authorized only for the bootstrap root, after independent review of the exact saved plan; its trusted-main workflow uses the same existing root/backend with owner approval in `iam-bootstrap-apply`. Development and production plans/applies run only through the matching protected GitHub Environments. Billable application resources still require fresh owner cost/provisioning approval.
 
 ## Roots and ownership
 
@@ -61,6 +61,8 @@ python -m unittest tests.ci.test_terraform_greenfield -v
 These checks parse configuration only. They are not a state-backed plan, apply, deployment, DSQL compatibility result, or public health check.
 
 ## Prepare and review the bootstrap plan
+
+For normal ongoing changes, use [bootstrap Actions](iam-bootstrap-actions.md) with all import switches fixed false. The manual commands and initial-adoption review below remain historical/exceptional guidance for the separately authorized original migration; do not copy its import switches into routine automation or reimport resources already owned by the populated bootstrap state.
 
 Keep all values in the operator credential provider and process environment. Do not write a populated tfvars file to the repository. The bootstrap state already exists; use its existing backend key and normal refresh.
 

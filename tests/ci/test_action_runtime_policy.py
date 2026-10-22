@@ -23,6 +23,8 @@ EXPECTED_HOSTED_JOBS = {
     ("reconcile-environment.yml", "validate"),
     ("reconcile-environment.yml", "reconcile"),
     ("terraform-ci.yml", "terraform"),
+    ("terraform-iam-bootstrap.yml", "plan"),
+    ("terraform-iam-bootstrap.yml", "apply"),
     ("terraform-current-stack-operations.yml", "disabled"),
     ("terraform-environment.yml", "apply"),
     ("terraform-environment.yml", "plan"),

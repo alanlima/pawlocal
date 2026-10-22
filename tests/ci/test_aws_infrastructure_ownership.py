@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import os
 import re
 from pathlib import Path
@@ -835,6 +836,101 @@ def python_aws_cli_commands(source: str) -> list[tuple[str, str]]:
 
 
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
+    def assert_external_bootstrap_setup_is_scoped(self, source: str) -> None:
+        """The owner-approved external-user exception is one reviewed CLI wrapper.
+
+        It may not become a general AWS/command escape hatch. All ordinary
+        deployment scripts continue through the original state/SDK scanners.
+        """
+        self.assertIsNone(AWS_SDK_USAGE.search(source))
+        for pattern in (TERRAFORM_STATE_MUTATION, TERRAFORM_WORKSPACE_STATE_MUTATION,
+                        TERRAFORM_TOP_LEVEL_STATE_MUTATION, TERRAFORM_INIT_STATE_MIGRATION):
+            self.assertIsNone(pattern.search(source))
+        tree = ast.parse(source)
+        expected = {
+            "sts": {"get-caller-identity"},
+            "iam": {
+                "get-user", "get-role", "get-login-profile", "list-groups-for-user", "list-user-policies",
+                "list-attached-user-policies", "create-user", "get-policy", "create-policy",
+                "list-policy-tags", "get-policy-version", "create-policy-version",
+                "put-user-permissions-boundary", "attach-user-policy", "list-access-keys",
+                "create-access-key", "update-access-key", "delete-access-key",
+            },
+        }
+        declaration = next(node for node in tree.body if isinstance(node, ast.Assign)
+                           and any(isinstance(t, ast.Name) and t.id == "AWS_OPERATIONS" for t in node.targets))
+        actual = {}
+        for key, value in zip(declaration.value.keys, declaration.value.values):
+            self.assertIsInstance(value, ast.Call)
+            self.assertEqual(value.func.id, "frozenset")
+            actual[ast.literal_eval(key)] = ast.literal_eval(value.args[0])
+        self.assertEqual(actual, expected)
+        cli = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "CLI")
+        methods = {node.name: node for node in cli.body if isinstance(node, ast.FunctionDef)}
+        self.assertIn("if operation not in AWS_OPERATIONS.get(service, ()):", ast.get_source_segment(source, methods["aws"]))
+        self.assertIn('os.environ.get("GITHUB_ACTIONS")', source)
+        # S3 publication reads only the fixed bootstrap key to captured stdout.
+        read_method = methods["read_bootstrap_state"]
+        read_assign = next(n for n in read_method.body if isinstance(n, ast.Assign)
+                           and any(isinstance(t, ast.Name) and t.id == "source" for t in n.targets))
+        expected_source = ast.parse('source = f"s3://{config[\'state_bucket\']}/{STATE_KEY}"').body[0]
+        self.assertEqual(ast.dump(read_assign.value), ast.dump(expected_source.value))
+        read_return = next(n for n in read_method.body if isinstance(n, ast.Return))
+        expected_read = ast.parse('self.run(["aws", "s3", "cp", source, "-", "--only-show-errors", "--no-cli-pager"])').body[0].value
+        self.assertEqual(ast.dump(read_return.value), ast.dump(expected_read))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or node.func.attr != "run":
+                continue
+            owner = node.func.value
+            self.assertIsInstance(owner, ast.Name)
+            if owner.id == "self":
+                ancestor = parents.get(node)
+                while ancestor is not None and not isinstance(ancestor, ast.FunctionDef):
+                    ancestor = parents.get(ancestor)
+                self.assertIsNotNone(ancestor)
+                self.assertIn(ancestor.name, {"aws", "api", "secret", "read_bootstrap_state"})
+                self.assertIs(parents[ancestor], cli)
+            else:
+                self.assertEqual(owner.id, "subprocess")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "aws":
+                self.assertGreaterEqual(len(node.args), 2)
+                service, operation = (ast.literal_eval(arg) for arg in node.args[:2])
+                self.assertIn(operation, expected.get(service, set()))
+        subprocess_calls = []
+        for function in (node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)):
+            for node in ast.walk(function):
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
+                    subprocess_calls.append((function.name, node.func.attr))
+                    self.assertFalse(any(k.arg == "shell" and not (isinstance(k.value, ast.Constant) and k.value.value is False) for k in node.keywords))
+                if node.func.attr == "run" and isinstance(node.func.value, ast.Name) and node.func.value.id == "self":
+                    self.assertIn(function.name, {"aws", "api", "secret", "read_bootstrap_state"})
+        self.assertEqual(subprocess_calls, [("run", "run")])
+        # Keep the existing scanner for everything except the one validated
+        # generic subprocess wrapper. This catches os/asyncio/launcher aliases.
+        scanned_tree = copy.deepcopy(tree)
+        scanned_cli = next(n for n in scanned_tree.body if isinstance(n, ast.ClassDef) and n.name == "CLI")
+        scanned_cli.body = [n for n in scanned_cli.body if not (isinstance(n, ast.FunctionDef) and n.name == "run")]
+        scanned_source = ast.unparse(scanned_tree)
+        self.assertFalse(contains_forbidden_terraform_state_change(scanned_source))
+        for service, operation in python_aws_cli_commands(scanned_source):
+            self.assertIn((service, operation), ALLOWED_AWS_COMMANDS)
+
+    def test_external_bootstrap_exception_rejects_unapproved_service(self) -> None:
+        source = (ROOT / "ops/iam-bootstrap/setup-bootstrap-identity.py").read_text(encoding="utf-8")
+        self.assert_external_bootstrap_setup_is_scoped(source)
+        for attack in (
+            '\ncli.aws("s3", "delete-bucket")\n',
+            '\nos.system("aws s3 delete-bucket --bucket other")\n',
+            '\ncli.run(["aws", "s3", "delete-bucket", "--bucket", "other"])\n',
+            '\nfrom subprocess import run as execute\nexecute(["aws", "s3", "delete-bucket"])\n',
+        ):
+            with self.subTest(attack=attack), self.assertRaises(AssertionError):
+                self.assert_external_bootstrap_setup_is_scoped(source + attack)
+
     def assert_configuration_helper_is_parameter_read_only(self, source: str) -> None:
         tree = ast.parse(source)
         clients = []
@@ -877,6 +973,9 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
         for path in EXECUTION_FILES:
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
+                if path == ROOT / "ops/iam-bootstrap/setup-bootstrap-identity.py":
+                    self.assert_external_bootstrap_setup_is_scoped(source)
+                    continue
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 if path == ROOT / ".github/scripts/terraform-plan-transfer.py":
                     self.assert_plan_transfer_helper_is_s3_object_only(source)

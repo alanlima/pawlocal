@@ -13,6 +13,8 @@ on:
       - '!**/*.mdx'
       - "docs/github-actions.md"
       - "docs/terraform-greenfield-operations.md"
+      - "docs/iam-bootstrap-actions.md"
+      - "ops/iam-bootstrap/README.md"
   push:
     branches:
       - main
@@ -27,6 +29,8 @@ on:
       - '!**/*.mdx'
       - "docs/github-actions.md"
       - "docs/terraform-greenfield-operations.md"
+      - "docs/iam-bootstrap-actions.md"
+      - "ops/iam-bootstrap/README.md"
   workflow_call:
 
 permissions:
