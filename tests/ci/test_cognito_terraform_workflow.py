@@ -383,7 +383,7 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         self.assertNotIn("-replace", destroy_source)
         self.assertIn("verify-terraform-source-checkout.py", environment)
 
-    def test_all_environment_inits_enforce_readonly_lockfiles(self) -> None:
+    def test_bootstrap_and_environment_inits_enforce_readonly_lockfiles(self) -> None:
         environment = ENVIRONMENT_WORKFLOW.read_text(encoding="utf-8")
         destroy = DESTROY_WORKFLOW.read_text(encoding="utf-8")
         self.assertEqual(environment.count("terraform -chdir=\"$TF_ROOT\" init"), 2)
@@ -394,10 +394,13 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         workflow = self._load(TERRAFORM_CI_WORKFLOW)
         steps = workflow["jobs"]["terraform"]["steps"]
         locked = next(
-            step for step in steps if step.get("name") == "Initialize locked environment providers without configuring the backend"
+            step for step in steps if step.get("name") == "Initialize locked bootstrap and environment providers without configuring the backend"
         )
-        self.assertEqual(locked["if"], "startsWith(matrix.root, 'environments/')")
+        self.assertEqual(locked["if"], "matrix.root == 'iam-bootstrap' || startsWith(matrix.root, 'environments/')")
         self.assertIn("-lockfile=readonly", locked["run"])
+        writable = next(step for step in steps if step.get("name") == "Initialize reusable-module providers without configuring the backend")
+        self.assertIn("matrix.root != 'iam-bootstrap'", writable["if"])
+
 
     def test_exact_commit_and_tracked_tree_are_checked_immediately_before_plan_and_apply(self) -> None:
         for workflow_path, expected in (

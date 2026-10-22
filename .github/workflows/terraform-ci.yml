@@ -99,12 +99,12 @@ jobs:
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive .
 
-      - name: Initialize locked environment providers without configuring the backend
-        if: startsWith(matrix.root, 'environments/')
+      - name: Initialize locked bootstrap and environment providers without configuring the backend
+        if: matrix.root == 'iam-bootstrap' || startsWith(matrix.root, 'environments/')
         run: terraform init -backend=false -input=false -lockfile=readonly
 
       - name: Initialize reusable-module providers without configuring the backend
-        if: ${{ !startsWith(matrix.root, 'environments/') }}
+        if: ${{ matrix.root != 'iam-bootstrap' && !startsWith(matrix.root, 'environments/') }}
         run: terraform init -backend=false -input=false
 
       - name: Validate Terraform configuration
