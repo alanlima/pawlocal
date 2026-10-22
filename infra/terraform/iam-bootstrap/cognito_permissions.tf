@@ -275,7 +275,10 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     sid       = "TagNewLogGroup"
     effect    = "Allow"
     actions   = ["logs:TagResource"]
-    resources = [local.cognito_resource_arns[each.key].log_group_tags]
+    resources = [local.cognito_resource_arns[each.key].log_group_tags, local.cognito_resource_arns[each.key].log_group]
+    # Direct tagging uses the bare ARN. Cover the same group's suffixed ARN
+    # for possible CreateLogGroup dependent authorization; the failed event
+    # does not expose that internal ARN or prove this is the remaining cause.
     # CreateLogGroup authorizes inline tags before resource ownership tags
     # exist. Require the full request contract, not pre-existing ResourceTags.
     # The inventory/plan gate must reject an exact-name survivor: IAM cannot
