@@ -14,6 +14,10 @@ on:
         type: choice
         options: [audit]
   workflow_call:
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN:
+        description: Scoped credential resolved in the matching protected apply Environment
+        required: true
     inputs:
       environment:
         required: true
@@ -59,7 +63,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate entry configuration
+        env:
+          PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
         run: |
+          test -n "$PAWLOCAL_CONFIG_GITHUB_TOKEN" || { echo "Missing protected reconciliation credential" >&2; exit 1; }
           test -n "$AWS_REGION"
           [[ "$PAWLOCAL_CONFIG_READER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/pawlocal-${SELECTED_ENVIRONMENT}-configuration-reader$ ]]
       - name: Set up Python

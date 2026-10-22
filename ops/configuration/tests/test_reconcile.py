@@ -428,6 +428,43 @@ class ReconcileTests(unittest.TestCase):
             any("upload-artifact" in s.get("uses", "") for s in job["steps"])
         )
 
+    def test_reusable_call_explicitly_passes_required_environment_secret(self):
+        # GitHub resolves environment-only secrets to empty in reusable jobs
+        # unless the caller explicitly passes the name (or inherits secrets).
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+        )
+        events = workflow.get("on", workflow.get(True))
+        name = "PAWLOCAL_CONFIG_GITHUB_TOKEN"
+        self.assertTrue(events["workflow_call"]["secrets"][name]["required"])
+        harness = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        self.assertEqual(
+            harness["jobs"]["reconciliation-smoke"]["secrets"],
+            {name: "${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}"},
+        )
+        steps = workflow["jobs"]["reconcile"]["steps"]
+        guard_index = next(
+            i
+            for i, step in enumerate(steps)
+            if step["name"] == "Validate entry configuration"
+        )
+        oidc_index = next(
+            i
+            for i, step in enumerate(steps)
+            if "configure-aws-credentials" in step.get("uses", "")
+        )
+        self.assertLess(guard_index, oidc_index)
+        self.assertEqual(
+            steps[guard_index]["env"][name],
+            "${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}",
+        )
+        self.assertIn(
+            'test -n "$PAWLOCAL_CONFIG_GITHUB_TOKEN"', steps[guard_index]["run"]
+        )
+        self.assertNotIn(
+            'echo "$PAWLOCAL_CONFIG_GITHUB_TOKEN"', steps[guard_index]["run"]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

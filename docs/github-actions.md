@@ -170,6 +170,8 @@ gh workflow run ci.yml --repo alanlima/pawlocal --ref codex/205-configuration-re
 
 Review the resulting matching protected job before approval. A failure leaves partial writes explicit; correct access/configuration and rerun idempotently. Missing values or removed mappings never delete targets. Deployment integration, required-value enforcement and actual generated publication remain #206 work.
 
+Reusable callers must pass the named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret explicitly; the called job then resolves the matching protected Environment's value. A job's Environment alone does not make an unpassed secret available. The workflow requires this named contract and checks it is nonempty before assuming AWS access. See [GitHub's reusable workflow secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows).
+
 ## Deployment and operations workflows
 
 ### Full-stack release to development
