@@ -35,15 +35,17 @@ locals {
     key => "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${definition.role_name}"
   }
 
+  cognito_common_tags = {
+    project    = "pawlocal"
+    managedby  = "terraform"
+    component  = "fullstack-mvp"
+    workload   = "application"
+    costcenter = "personal"
+  }
   cognito_application_tags = {
-    for environment in keys(local.environments) : environment => {
-      project     = "pawlocal"
+    for environment in keys(local.environments) : environment => merge(local.cognito_common_tags, {
       environment = environment
-      managedby   = "terraform"
-      component   = "fullstack-mvp"
-      workload    = "application"
-      costcenter  = "personal"
-    }
+    })
   }
 
   cognito_lambda_read_actions = [

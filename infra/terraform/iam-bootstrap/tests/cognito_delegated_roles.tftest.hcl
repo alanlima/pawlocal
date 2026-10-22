@@ -86,6 +86,25 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
   }
 
   assert {
+    condition = (
+      local.cognito_common_tags == {
+        project    = "pawlocal"
+        managedby  = "terraform"
+        component  = "fullstack-mvp"
+        workload   = "application"
+        costcenter = "personal"
+      } &&
+      alltrue([
+        for environment, tags in local.cognito_application_tags :
+        tags == merge(local.cognito_common_tags, { environment = environment }) &&
+        toset(keys(tags)) == toset(concat(keys(local.cognito_common_tags), ["environment"])) &&
+        tags.environment == environment
+      ])
+    )
+    error_message = "Each Cognito application tag map must contain only the common tags plus its matching environment."
+  }
+
+  assert {
     condition = toset(local.cognito_lambda_read_actions) == toset([
       "lambda:GetFunction",
       "lambda:GetFunctionCodeSigningConfig",
