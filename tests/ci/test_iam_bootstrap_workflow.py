@@ -521,6 +521,24 @@ class DiagnosticsTests(unittest.TestCase):
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_dependency_installation_finishes_before_aws_credentials_are_available(self):
+        import yaml
+        workflow = yaml.safe_load(Path(".github/workflows/terraform-iam-bootstrap.yml").read_text())
+        for name in ("plan", "apply"):
+            job = workflow["jobs"][name]
+            steps = job["steps"]
+            setup_python = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
+            dependencies = next(index for index, step in enumerate(steps) if "pip install" in step.get("run", ""))
+            terraform = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("hashicorp/setup-terraform@"))
+            credentials = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("aws-actions/configure-aws-credentials@"))
+            with self.subTest(job=name):
+                self.assertEqual(dependencies, setup_python + 1)
+                self.assertLess(dependencies, credentials)
+                self.assertLess(terraform, credentials)
+                self.assertNotIn("secrets.", json.dumps(job.get("env", {})))
+                self.assertNotIn("secrets.", json.dumps(steps[dependencies]))
+                self.assertNotIn("secrets.", json.dumps(steps[terraform]))
+
     def test_workflow_keeps_human_gate_and_noop_bypass(self):
         text = Path(".github/workflows/terraform-iam-bootstrap.yml").read_text()
         self.assertIn("environment: iam-bootstrap-apply", text)
