@@ -301,15 +301,73 @@ class BootstrapSetupTests(unittest.TestCase):
         self.assertEqual(cli.keys, [])
         self.assertIn("update-access-key", [op for op, _ in cli.calls])
 
-    def test_ambiguous_create_timeout_revokes_new_key_only(self):
+    def test_ambiguous_create_timeout_preserves_unknown_key_for_owner_recovery(self):
         cli = FakeCLI()
         cli.keys = [{"AccessKeyId": "OLD", "Status": "Active"}]
         cli.fail_creation_after_commit = True
+        with self.assertRaises(setup.SetupError) as error:
+            setup.upload_new_key(cli, CONFIG, rotate=True)
+        self.assertEqual({key["AccessKeyId"] for key in cli.keys}, {"OLD", "NEW-KEY-SENTINEL"})
+        self.assertIn("no keys revoked", str(error.exception))
+        self.assertFalse(any(op in ("update-access-key", "delete-access-key", "secret") for op, _ in cli.calls))
+
+    def test_key_limit_race_preserves_the_other_invocations_replacement(self):
+        class QuotaRaceCLI(FakeCLI):
+            def aws(self, service, operation, **kwargs):
+                if operation == "create-access-key":
+                    self.calls.append((operation, kwargs))
+                    self.keys.append({"AccessKeyId": "OTHER-OWNER-KEY", "Status": "Active"})
+                    raise setup.SetupError("Definitive two-key limit failure")
+                return super().aws(service, operation, **kwargs)
+        cli = QuotaRaceCLI()
+        cli.keys = [{"AccessKeyId": "OLD", "Status": "Active"}]
         with self.assertRaises(setup.SetupError):
             setup.upload_new_key(cli, CONFIG, rotate=True)
-        self.assertEqual(cli.keys, [{"AccessKeyId": "OLD", "Status": "Active"}])
-        deletes = [kwargs["AccessKeyId"] for op, kwargs in cli.calls if op == "delete-access-key"]
-        self.assertEqual(deletes, ["NEW-KEY-SENTINEL"])
+        self.assertEqual({key["AccessKeyId"] for key in cli.keys}, {"OLD", "OTHER-OWNER-KEY"})
+        self.assertFalse(any(op in ("update-access-key", "delete-access-key", "secret") for op, _ in cli.calls))
+
+    def test_two_ambiguous_additions_are_never_bulk_revoked(self):
+        class AmbiguousRaceCLI(FakeCLI):
+            def aws(self, service, operation, **kwargs):
+                if operation == "create-access-key":
+                    self.calls.append((operation, kwargs))
+                    self.keys.extend([{"AccessKeyId": name, "Status": "Active"}
+                                      for name in ("UNKNOWN-ONE", "UNKNOWN-TWO")])
+                    raise setup.SetupError("Ambiguous create timeout")
+                return super().aws(service, operation, **kwargs)
+        cli = AmbiguousRaceCLI()
+        with self.assertRaises(setup.SetupError):
+            setup.upload_new_key(cli, CONFIG)
+        self.assertEqual({key["AccessKeyId"] for key in cli.keys}, {"UNKNOWN-ONE", "UNKNOWN-TWO"})
+        self.assertFalse(any(op in ("update-access-key", "delete-access-key", "secret") for op, _ in cli.calls))
+
+    def test_own_upload_failure_revokes_only_returned_key_despite_concurrent_addition(self):
+        class UploadRaceCLI(FakeCLI):
+            def secret(self, environment, name, value):
+                self.keys.append({"AccessKeyId": "OTHER-OWNER-KEY", "Status": "Active"})
+                raise RuntimeError("SECRET-SENTINEL")
+        cli = UploadRaceCLI()
+        with self.assertRaises(setup.SetupError):
+            setup.upload_new_key(cli, CONFIG)
+        self.assertEqual(cli.keys, [{"AccessKeyId": "OTHER-OWNER-KEY", "Status": "Active"}])
+        mutations = [kwargs["AccessKeyId"] for op, kwargs in cli.calls
+                     if op in ("update-access-key", "delete-access-key")]
+        self.assertEqual(mutations, ["NEW-KEY-SENTINEL", "NEW-KEY-SENTINEL"])
+
+    def test_missing_secret_in_success_response_revokes_confirmed_owned_key_only(self):
+        class MissingSecretCLI(FakeCLI):
+            def aws(self, service, operation, **kwargs):
+                result = super().aws(service, operation, **kwargs)
+                if operation == "create-access-key":
+                    result["AccessKey"].pop("SecretAccessKey")
+                return result
+        cli = MissingSecretCLI()
+        with self.assertRaises(setup.SetupError):
+            setup.upload_new_key(cli, CONFIG)
+        self.assertEqual(cli.keys, [])
+        mutations = [kwargs["AccessKeyId"] for op, kwargs in cli.calls
+                     if op in ("update-access-key", "delete-access-key")]
+        self.assertEqual(mutations, ["NEW-KEY-SENTINEL", "NEW-KEY-SENTINEL"])
 
     def test_cli_errors_never_expose_raw_diagnostics(self):
         failed = subprocess.CompletedProcess([], 1, "SECRET-SENTINEL", "SECRET-SENTINEL")

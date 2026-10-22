@@ -244,9 +244,16 @@ def upload_new_key(cli, config, rotate=False):
     if (not rotate and before) or (rotate and (len(before) != 1 or before[0]["Status"] != "Active")):
         raise SetupError("Existing keys require inspection; no duplicate key issued")
     previous = {item["AccessKeyId"] for item in before}
+    issued_key_id = None
     try:
         key = cli.aws("iam", "create-access-key", UserName=USER)["AccessKey"]
-        if key.get("AccessKeyId") in previous or not key.get("SecretAccessKey"):
+        returned_id = key.get("AccessKeyId")
+        if not isinstance(returned_id, str) or not returned_id or returned_id in previous:
+            raise SetupError("Invalid new key response")
+        # Only a successful CreateAccessKey response establishes ownership.
+        # An inventory difference alone may belong to another owner invocation.
+        issued_key_id = returned_id
+        if not key.get("SecretAccessKey"):
             raise SetupError("Invalid new key response")
         # Recheck after issuance, before making the new credential available.
         # A changed boundary/grant triggers the same new-key cleanup as upload failure.
@@ -262,14 +269,15 @@ def upload_new_key(cli, config, rotate=False):
         if {item["AccessKeyId"] for item in after} != previous | {key["AccessKeyId"]}:
             raise SetupError("Access-key inventory changed concurrently")
     except Exception:
-        # Also handles an ambiguous timeout after AWS created the key: discover
-        # and revoke only newly issued keys, never a pre-existing rotation key.
+        if issued_key_id is None:
+            # A timeout may have committed, or a definitive quota failure may
+            # mean another invocation won. Neither proves ownership of any
+            # observed new key. Fail closed for owner recovery, never bulk-delete.
+            raise SetupError("Key creation outcome is unconfirmed; no keys revoked; inspect owner key inventory before retry") from None
         try:
-            for item in access_keys(cli):
-                if item["AccessKeyId"] not in previous:
-                    cli.aws("iam", "update-access-key", UserName=USER,
-                            AccessKeyId=item["AccessKeyId"], Status="Inactive")
-                    cli.aws("iam", "delete-access-key", UserName=USER, AccessKeyId=item["AccessKeyId"])
+            cli.aws("iam", "update-access-key", UserName=USER,
+                    AccessKeyId=issued_key_id, Status="Inactive", missing_ok=True)
+            cli.aws("iam", "delete-access-key", UserName=USER, AccessKeyId=issued_key_id, missing_ok=True)
         except Exception:
             raise SetupError("Upload incomplete; emergency operator key revocation required") from None
         raise SetupError("Upload incomplete; new key revoked; inspect both Environments before explicit retry") from None
