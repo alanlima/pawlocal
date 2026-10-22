@@ -63,6 +63,7 @@ env:
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
+  TF_VAR_project_name: pawlocal
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
 
 jobs:
@@ -156,7 +157,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: plan
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
@@ -400,7 +400,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: apply
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}

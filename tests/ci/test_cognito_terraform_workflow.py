@@ -35,6 +35,7 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         partition: str = "aws",
         caller_account: str | None = None,
         caller_role_name: str | None = None,
+        project_name: str = "pawlocal",
         extra_env: dict[str, str] | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
         temporary = Path(tempfile.mkdtemp(prefix="pawlocal-cognito-profile-"))
@@ -44,14 +45,14 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         fake_aws.write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "[[ \"$*\" == \"sts get-caller-identity --profile pawlocal-cognito-deployment --query [Account,Arn] --output text\" ]]\n"
+            "[[ \"$*\" == \"sts get-caller-identity --profile ${TF_VAR_project_name}-cognito-deployment --query [Account,Arn] --output text\" ]]\n"
             "printf '%s\\t%s\\n' \"$FAKE_CALLER_ACCOUNT\" \"$FAKE_CALLER_ARN\"\n",
             encoding="utf-8",
         )
         fake_aws.chmod(fake_aws.stat().st_mode | stat.S_IXUSR)
 
         job = f"{purpose}-{environment}"
-        config_file = temporary / f"pawlocal-cognito-deployment-{job}.config"
+        config_file = temporary / f"{project_name}-cognito-deployment-{job}.config"
         github_env = temporary / "github-env"
         role_name = caller_role_name or f"pawlocal-{environment}-cognito-terraform-{purpose}"
         session_name = f"pawlocal-{environment}-cognito-{purpose}"
@@ -65,7 +66,6 @@ class CognitoTerraformProfileTests(unittest.TestCase):
             "AWS_CONFIG_FILE": str(config_file),
             "AWS_PARTITION": partition,
             "AWS_REGION": "ap-southeast-2",
-            "COGNITO_DEPLOYMENT_PROFILE": "pawlocal-cognito-deployment",
             "COGNITO_TERRAFORM_PURPOSE": purpose,
             "FAKE_CALLER_ACCOUNT": caller_account or account_id,
             "FAKE_CALLER_ARN": caller_arn,
@@ -74,6 +74,7 @@ class CognitoTerraformProfileTests(unittest.TestCase):
             "PAWLOCAL_AWS_ACCOUNT_ID": account_id,
             "PAWLOCAL_ENVIRONMENT": environment,
             "RUNNER_TEMP": str(temporary),
+            "TF_VAR_project_name": project_name,
         }
         env.pop("AWS_PROFILE", None)
         if extra_env:
@@ -109,6 +110,10 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         )
         github_environment = github_env.read_text(encoding="utf-8")
         self.assertIn(f"AWS_CONFIG_FILE={config_file}\n", github_environment)
+        self.assertIn(
+            "COGNITO_DEPLOYMENT_PROFILE=pawlocal-cognito-deployment\n",
+            github_environment,
+        )
         self.assertIn("COGNITO_DELEGATED_ROLE_ARN=arn:aws:iam::111111111111:role/", github_environment)
         self.assertEqual(stat.S_IMODE(config_file.stat().st_mode), 0o600)
 
@@ -119,12 +124,28 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         self.assertIn("role/pawlocal-production-cognito-terraform-apply", config)
         self.assertIn("role_session_name = pawlocal-production-cognito-apply", config)
 
+    def test_non_default_project_name_changes_only_the_profile(self) -> None:
+        result, config_file, github_env = self._run_profile(
+            "development", "plan", project_name="dogapp"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        config = config_file.read_text(encoding="utf-8")
+        self.assertIn("[profile dogapp-cognito-deployment]", config)
+        self.assertIn(
+            "role/pawlocal-development-cognito-terraform-plan", config
+        )
+        self.assertIn(
+            "COGNITO_DEPLOYMENT_PROFILE=dogapp-cognito-deployment\n",
+            github_env.read_text(encoding="utf-8"),
+        )
+
     def test_invalid_inputs_and_global_profile_fail_closed(self) -> None:
         cases = (
             {"environment": "staging", "purpose": "plan"},
             {"environment": "development", "purpose": "destroy"},
             {"environment": "development", "purpose": "plan", "account_id": "123"},
             {"environment": "development", "purpose": "plan", "partition": "aws-us-gov"},
+            {"environment": "development", "purpose": "plan", "project_name": "too-long-name"},
             {
                 "environment": "development",
                 "purpose": "plan",
@@ -147,12 +168,15 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         self.assertIn("unexpected caller identity", result.stderr)
 
     def test_cleanup_removes_only_the_workflow_owned_config(self) -> None:
-        result, config_file, _ = self._run_profile("production", "apply")
+        result, config_file, _ = self._run_profile(
+            "production", "apply", project_name="dogapp"
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         env = {
             **os.environ,
             "AWS_CONFIG_FILE": str(config_file),
             "RUNNER_TEMP": str(config_file.parent),
+            "TF_VAR_project_name": "dogapp",
         }
         cleanup = subprocess.run(
             ["bash", str(CLEANUP_SCRIPT)],
@@ -164,6 +188,19 @@ class CognitoTerraformProfileTests(unittest.TestCase):
         )
         self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
         self.assertFalse(config_file.exists())
+
+        mismatched = config_file.parent / "pawlocal-cognito-deployment-other.config"
+        mismatched.write_text("preserve", encoding="utf-8")
+        rejected = subprocess.run(
+            ["bash", str(CLEANUP_SCRIPT)],
+            cwd=ROOT,
+            env={**env, "AWS_CONFIG_FILE": str(mismatched)},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertTrue(mismatched.exists())
 
 
 class CognitoTerraformWorkflowTests(unittest.TestCase):
@@ -188,7 +225,7 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
                     job = workflow["jobs"][job_name]
                     self.assertEqual(job["timeout-minutes"], 60)
                     self.assertEqual(job["env"]["AWS_PARTITION"], "aws")
-                    self.assertEqual(job["env"]["COGNITO_DEPLOYMENT_PROFILE"], "pawlocal-cognito-deployment")
+                    self.assertNotIn("COGNITO_DEPLOYMENT_PROFILE", job["env"])
                     self.assertEqual(job["env"]["COGNITO_TERRAFORM_PURPOSE"], purpose)
                     self.assertNotIn("AWS_CONFIG_FILE", job["env"])
                     self.assertNotIn("AWS_PROFILE", job["env"])
@@ -226,6 +263,7 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         self.assertNotIn("PAWLOCAL_COGNITO_", source)
         self.assertNotIn("TF_VAR_cognito_pre_sign_up_role_arn", source)
         self.assertNotIn("AWS_PROFILE:", source)
+        self.assertEqual(source.count("TF_VAR_project_name: pawlocal"), 2)
         self.assertEqual(source.count("COGNITO_TERRAFORM_PURPOSE: plan"), 3)
         self.assertEqual(source.count("COGNITO_TERRAFORM_PURPOSE: apply"), 3)
 
@@ -406,7 +444,7 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
             ):
                 self.assertEqual(step["env"].get(name), "")
 
-    def test_provider_alias_is_stable_and_default_provider_has_no_profile(self) -> None:
+    def test_provider_alias_uses_project_profile_and_default_provider_has_no_profile(self) -> None:
         for environment in ("development", "production"):
             versions = (
                 ROOT / f"infra/terraform/environments/{environment}/versions.tf"
@@ -415,7 +453,10 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
             aliased_provider = versions.split('provider "aws" {', 2)[2]
             self.assertNotIn("profile", default_provider)
             self.assertIn('alias   = "cognito_deployment"', aliased_provider)
-            self.assertIn('profile = "pawlocal-cognito-deployment"', aliased_provider)
+            self.assertIn(
+                'profile = "${var.project_name}-cognito-deployment"',
+                aliased_provider,
+            )
             self.assertIn("project     = var.project_name", aliased_provider)
 
 

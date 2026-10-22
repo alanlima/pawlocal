@@ -31,6 +31,7 @@ env:
   TF_ROOT: infra/terraform/environments/production
   TF_STATE_KEY: pawlocal/production/terraform.tfstate
   TF_VAR_backend_image: ${{ inputs.backend_image }}
+  TF_VAR_project_name: pawlocal
   TF_VAR_teardown_enabled: "true"
 
 jobs:
@@ -48,7 +49,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: plan
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
@@ -195,7 +195,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: apply
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
@@ -287,7 +286,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: plan
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
@@ -383,7 +381,6 @@ jobs:
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
-      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
       COGNITO_TERRAFORM_PURPOSE: apply
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}

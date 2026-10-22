@@ -4,11 +4,11 @@ set -euo pipefail
 required_names=(
   AWS_PARTITION
   AWS_REGION
-  COGNITO_DEPLOYMENT_PROFILE
   COGNITO_TERRAFORM_PURPOSE
   PAWLOCAL_AWS_ACCOUNT_ID
   PAWLOCAL_ENVIRONMENT
   RUNNER_TEMP
+  TF_VAR_project_name
 )
 
 for name in "${required_names[@]}"; do
@@ -34,8 +34,8 @@ done
   echo 'COGNITO_TERRAFORM_PURPOSE must be plan or apply.' >&2
   exit 1
 }
-[[ "$COGNITO_DEPLOYMENT_PROFILE" == "pawlocal-cognito-deployment" ]] || {
-  echo 'The delegated Cognito profile name must remain stable.' >&2
+[[ "$TF_VAR_project_name" =~ ^[A-Za-z0-9._-]{1,8}$ ]] || {
+  echo 'TF_VAR_project_name must match the Terraform project_name contract.' >&2
   exit 1
 }
 [[ -z "${AWS_PROFILE:-}" ]] || {
@@ -43,7 +43,9 @@ done
   exit 1
 }
 
-expected_config_file="${RUNNER_TEMP}/pawlocal-cognito-deployment-${GITHUB_JOB:-terraform}.config"
+COGNITO_DEPLOYMENT_PROFILE="${TF_VAR_project_name}-cognito-deployment"
+export COGNITO_DEPLOYMENT_PROFILE
+expected_config_file="${RUNNER_TEMP}/${COGNITO_DEPLOYMENT_PROFILE}-${GITHUB_JOB:-terraform}.config"
 [[ -z "${AWS_CONFIG_FILE:-}" || "$AWS_CONFIG_FILE" == "$expected_config_file" ]] || {
   echo 'AWS_CONFIG_FILE must use the workflow-owned temporary path.' >&2
   exit 1
@@ -72,6 +74,7 @@ umask 077
 
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   printf 'AWS_CONFIG_FILE=%s\n' "$AWS_CONFIG_FILE" >> "$GITHUB_ENV"
+  printf 'COGNITO_DEPLOYMENT_PROFILE=%s\n' "$COGNITO_DEPLOYMENT_PROFILE" >> "$GITHUB_ENV"
   printf 'COGNITO_DELEGATED_ROLE_ARN=%s\n' "$role_arn" >> "$GITHUB_ENV"
 fi
 

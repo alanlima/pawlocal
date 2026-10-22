@@ -31,7 +31,7 @@ provider "aws" {
 provider "aws" {
   alias   = "cognito_deployment"
   region  = var.aws_region
-  profile = "pawlocal-cognito-deployment"
+  profile = "${var.project_name}-cognito-deployment"
 
   default_tags {
     tags = {
