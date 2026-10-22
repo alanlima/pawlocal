@@ -3,9 +3,9 @@
 ## Current work
 
 - **Task (#206, Terraform publication):** Platform engineer added state-owned generated Strings and exact-key permissions. Senior escalation resolved provider metadata authorization and boundary-size constraints; native tests enumerate the reviewed permission-pair delta.
-- **Verification boundary:** Backend-free validation, policy/publication fixtures and CI tests are recorded in the PR. Independent source/plan review, live publication and pipeline integration remain separate gates.
+- **Verification:** Independent source/plan review, live publication and integrated development/production releases passed; links are in the [configuration inventory](configuration-inventory.md).
 - **Task (#206):** Integrate enforced reconciliation, same-run public build values, collision checks and exact cleanup/recovery. Terraform publication rolls out first through a separate reviewed PR so missing sources never require an enforce bypass.
-- **Verification:** Behavior/integration tests exercise both environments, missing/invalid sources, partial writes/reruns, snapshot secret exclusion, exact cleanup and destroy/reapply fixtures. A real Vite/headless-browser fixture verifies stale served bundles and replacement OAuth redirects after rebuild. Fixture results are separate from protected live apply/publication acceptance recorded in the issue.
+- **Verification:** Both environments passed protected release and legacy cleanup. Tests cover missing/invalid sources, partial writes/reruns, secret exclusion and cleanup recovery. Real Vite/browser fixtures verify stale identity/scopes rejection and rebuilt OAuth redirects. Cognito replacement and destroy/reapply remain fixture evidence, separate from live acceptance.
 
 
 
