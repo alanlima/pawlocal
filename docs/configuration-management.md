@@ -23,6 +23,8 @@ One reconciliation job uses the matching protected `<environment>-apply` Environ
 
 The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default and the only mode in #205; #206 adds enforce and pipeline integration. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
 
+The script is `ops/configuration/reconcile.py`; install its pinned `requirements.txt` first. It validates the manifest and existing destination Environments, then reports names/statuses only. The workflow exposes the scoped token only to the reconciliation step and creates no payload artifacts. Test locally with `uv run --with-requirements ops/configuration/requirements.txt python -m unittest discover -s ops/configuration/tests -v`. Prefer the protected workflow for operations so approval and ordering are enforced.
+
 For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge. #205 leaves existing deployment workflows unchanged.
 
 | Invocation after #206 | Mode | Required-value behavior |

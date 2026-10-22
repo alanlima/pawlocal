@@ -2,6 +2,8 @@
 
 Specification baseline for #204 under #203. Entries below are approved sources/destinations for implementation in #205/#206, not a claim that parameters or mappings are deployed. Read-only AWS inventory during this task found no existing `/pawlocal/` parameters. All generated entries are `String`, `secret: false`, `validations: [required]`, apply to both `development` and `production`, and have no secret payload. No genuinely shared parameter is currently needed.
 
+#205 implements this inventory in `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. It adds the strict audit reconciler and protected callable workflow; generated Parameter Store publication remains #206. No active secret mappings or unmanaged parameters are added. Initial reader-role apply/OIDC and both workflow entry points require separately recorded runtime evidence before #205 completion.
+
 ## Generated parameter entries
 
 Prefix every key suffix with `/pawlocal/{environment}/config/`. R = `{environment}` (release), P = `{environment}-plan`, A = `{environment}-apply`; each listed target expands to its own YAML entry. B = `iam-bootstrap` lifecycle owner; E = matching application state lifecycle owner. These aliases are documentation only, never extra YAML fields. Each row inherits the type, secret flag, validations and supported environments above.
@@ -40,6 +42,8 @@ These six destinations use three existing source keys above, with the same Strin
 | /pawlocal/production/config/terraform/plan-bucket | PAWLOCAL_TERRAFORM_PLAN_BUCKET | production-destroy-prepare, production-destroy | Existing production recovery private saved-plan download |
 
 `terraform-environment-destroy.yml` is the actual consumer. Both target Environments were absent in the 2026-10-22 read-only GitHub inventory; create/review their required reviewer and main-only branch policies explicitly before reconciliation. Never let synchronization create an unprotected Environment. No plan-role ARN is consumed by these apply jobs, so do not map one there. No development destroy target or reader-role OIDC trust is added.
+
+During #205 setup on 2026-10-22, the orchestrator established both existing production recovery target Environments with the required owner reviewer and main-only branch policy, then verified only operator `AWS_REGION` and `PAWLOCAL_TF_STATE_BUCKET` settings/read-back. Their generated variables remain pending actual #206 sources and reconciliation. No destroy was invoked and no new credential or reader-role trust was added for those targets.
 
 ## Entry settings and operator inputs (outside synchronization)
 

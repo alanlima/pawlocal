@@ -20,6 +20,8 @@ EXPECTED_HOSTED_JOBS = {
     ("fullstack-release.yml", "publish"),
     ("fullstack-release.yml", "verify-development"),
     ("rollback-development.yml", "disabled"),
+    ("reconcile-environment.yml", "validate"),
+    ("reconcile-environment.yml", "reconcile"),
     ("terraform-ci.yml", "terraform"),
     ("terraform-current-stack-operations.yml", "disabled"),
     ("terraform-environment.yml", "apply"),

@@ -1,0 +1,81 @@
+name: Reconcile Environment configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Matching environment to reconcile
+        required: true
+        type: choice
+        options: [development, production]
+      mode:
+        description: Audit synchronizes available values without release readiness
+        default: audit
+        type: choice
+        options: [audit]
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      mode:
+        default: audit
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate request
+        env:
+          SELECTED_ENVIRONMENT: ${{ inputs.environment }}
+          SELECTED_MODE: ${{ inputs.mode }}
+        run: |
+          [[ "$SELECTED_ENVIRONMENT" =~ ^(development|production)$ ]]
+          [[ "$SELECTED_MODE" == audit ]]
+
+  reconcile:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ format('{0}-apply', inputs.environment) }}
+    concurrency:
+      group: pawlocal-configuration-${{ inputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      PAWLOCAL_CONFIG_READER_ROLE_ARN: ${{ vars.PAWLOCAL_CONFIG_READER_ROLE_ARN }}
+      SELECTED_ENVIRONMENT: ${{ inputs.environment }}
+      SELECTED_MODE: ${{ inputs.mode }}
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate entry configuration
+        run: |
+          test -n "$AWS_REGION"
+          [[ "$PAWLOCAL_CONFIG_READER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/pawlocal-${SELECTED_ENVIRONMENT}-configuration-reader$ ]]
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install reconciler dependencies
+        run: python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
+      - name: Assume exact configuration-reader role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PAWLOCAL_CONFIG_READER_ROLE_ARN }}
+          role-session-name: configuration-${{ github.run_id }}
+          mask-aws-account-id: true
+      - name: Reconcile available configuration
+        env:
+          PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+        run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE"

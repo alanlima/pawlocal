@@ -835,6 +835,25 @@ def python_aws_cli_commands(source: str) -> list[tuple[str, str]]:
 
 
 class AwsInfrastructureOwnershipTests(unittest.TestCase):
+    def assert_configuration_helper_is_parameter_read_only(self, source: str) -> None:
+        tree = ast.parse(source)
+        clients = []
+        operations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            owner = node.func.value
+            if isinstance(owner, ast.Name) and owner.id == "boto3":
+                self.assertEqual(node.func.attr, "client")
+                self.assertEqual(len(node.args), 1)
+                self.assertIsInstance(node.args[0], ast.Constant)
+                self.assertEqual(node.args[0].value, "ssm")
+                clients.append(node)
+            if isinstance(owner, ast.Attribute) and isinstance(owner.value, ast.Name) and owner.value.id == "self" and owner.attr == "client":
+                operations.append(node.func.attr)
+        self.assertEqual(len(clients), 1)
+        self.assertEqual(operations, ["get_parameter"])
+
     def assert_plan_transfer_helper_is_s3_object_only(self, source: str) -> None:
         tree = ast.parse(source)
         s3_client_calls = []
@@ -861,6 +880,8 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 if path == ROOT / ".github/scripts/terraform-plan-transfer.py":
                     self.assert_plan_transfer_helper_is_s3_object_only(source)
+                elif path == ROOT / "ops/configuration/reconcile.py":
+                    self.assert_configuration_helper_is_parameter_read_only(source)
                 else:
                     self.assertIsNone(AWS_SDK_USAGE.search(source), "AWS SDK infrastructure mutation is not permitted in deployment scripts")
                 js_commands = javascript_process_launch_commands(source) if path.suffix in {".js", ".cjs", ".mjs"} else []

@@ -55,7 +55,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | Workflow | Trigger | Purpose | Manual or reusable inputs |
 |---|---|---|---|
 | [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
-| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all reusable CI suites together. | None |
+| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all reusable CI suites, or the opt-in protected development reconciliation smoke call. | `reconciliation_smoke` |
 | [`compose-ci.yml`](../.github/workflows/compose-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate, build, start, smoke-test, and tear down the local Compose stack. | None |
 | [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | Manual | Promote one development-verified commit and immutable image to production, publish the frontend, and verify the release. | `release_commit`, `backend_image` |
 | [`development-dsql-seed.yml`](../.github/workflows/development-dsql-seed.yml) | Manual from `main` | Seed the fixed development-only DSQL catalog and verify it through the development API. | None; uses protected secrets |
@@ -63,6 +63,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | [`frontend-production-deploy.yml`](../.github/workflows/frontend-production-deploy.yml) | Relevant pushes to `main`, manual | Retained no-op for historical links; never deploys. | None |
 | [`fullstack-release.yml`](../.github/workflows/fullstack-release.yml) | Relevant pull requests, relevant pushes to `main`, manual | Run frontend/backend checks; on `main`, publish an immutable backend image, deploy development, publish the frontend, verify it, and record deployment evidence. | None |
 | [`rollback-development.yml`](../.github/workflows/rollback-development.yml) | Manual | Retained no-op for the retired combined-state rollback path. | None |
+| [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) | Manual, reusable call | Synchronize the exact Parameter Store mapping through matching protected approval; audit does not establish release readiness. | `environment`, `mode` |
 | [`terraform-ci.yml`](../.github/workflows/terraform-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Format, initialize without a backend, validate, and test every active Terraform root/module. | None |
 | [`terraform-current-stack-operations.yml`](../.github/workflows/terraform-current-stack-operations.yml) | Manual | Retained no-op for the retired combined-state Terraform path. | None |
 | [`terraform-environment-destroy.yml`](../.github/workflows/terraform-environment-destroy.yml) | Manual | Prepare, approve, plan, approve again, and destroy the complete production application state. | `environment`, `backend_image`, `confirmation` |
@@ -145,9 +146,29 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ### CI manual full suite
 
-<!-- actions-reference: ci.yml; dispatch-inputs: -; call-inputs: - -->
+<!-- actions-reference: ci.yml; dispatch-inputs: reconciliation_smoke; call-inputs: - -->
 
-`ci.yml` is the manual umbrella workflow. It calls the frontend, backend, Compose, Terraform, and workflow-validation reusable workflows with no parameters. Use it when a full check is wanted even though path filtering would not select every suite.
+`ci.yml` is the manual umbrella workflow. With `reconciliation_smoke=false` (default) it calls the frontend, backend, Compose, Terraform, and workflow-validation reusable workflows. Set the boolean `reconciliation_smoke=true` to run only the protected development audit reconciliation call from the selected reviewed ref. This CI-only harness permits an open-PR feature-branch test before the new workflow is registered on main; temporarily allowlist only that exact ref in `development-apply`, preserve reviewer approval, and remove it after merge. It calls no deployment pipeline and its caller holds no reconciliation concurrency lock.
+
+### Reconcile Environment configuration
+
+<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,mode; call-inputs: environment,mode -->
+
+[`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) accepts required `environment` (`development` or `production`) and optional `mode` (`audit`, default). #205 deliberately has no enforce mode. It validates selection before binding one mutation job to `<environment>-apply`, obtaining OIDC reader access and `PAWLOCAL_CONFIG_GITHUB_TOKEN` there. The job serializes by environment with cancellation disabled; callers must not hold that same group. It validates all destination Environments already exist before reading/writing values, uses exact manifest keys, warns/skips missing sources, compares variables before writes and reads all available variables back. Generic SecureString/secret support encrypts with the Environment public key and verifies API acceptance, never plaintext equality. No active secret mapping is currently required. Names/statuses only are reported; no artifacts or secret outputs are created. A successful audit does not establish release readiness.
+
+Complete [initial reader/credential and target setup](configuration-management.md#fresh-operator-setup), including protected production recovery target creation, before dispatch. From `main` after #205 merge:
+
+```powershell
+gh workflow run reconcile-environment.yml --repo alanlima/pawlocal --ref main -f environment=development -f mode=audit
+```
+
+For the reviewed feature branch while its PR remains open:
+
+```powershell
+gh workflow run ci.yml --repo alanlima/pawlocal --ref codex/205-configuration-reconciliation -f reconciliation_smoke=true
+```
+
+Review the resulting matching protected job before approval. A failure leaves partial writes explicit; correct access/configuration and rerun idempotently. Missing values or removed mappings never delete targets. Deployment integration, required-value enforcement and actual generated publication remain #206 work.
 
 ## Deployment and operations workflows
 
@@ -255,6 +276,7 @@ Destroy is not a rollback and does not select a previous release.
 secrets.PAWLOCAL_API_HEALTH_URL
 secrets.PAWLOCAL_AWS_ACCOUNT_ID
 secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN
+secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN
 secrets.PAWLOCAL_DSQL_ENDPOINT
 secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN
 vars.AWS_REGION
@@ -263,6 +285,7 @@ vars.PAWLOCAL_AWS_ACCOUNT_ID
 vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
 vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
 vars.PAWLOCAL_CLOUDFRONT_OAC_ARN
+vars.PAWLOCAL_CONFIG_READER_ROLE_ARN
 vars.PAWLOCAL_DEPLOY_ADAPTER_PATH
 vars.PAWLOCAL_DEPLOY_ROLE_ARN
 vars.PAWLOCAL_DOMAIN_NAME
@@ -284,6 +307,8 @@ vars.VITE_COGNITO_SCOPES
 -->
 
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
+
+Reconciliation consumes `AWS_REGION`, `PAWLOCAL_CONFIG_READER_ROLE_ARN` and the scoped `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret in the matching protected apply Environment. The role ARN is additionally initialized in the matching release Environment as documented; it is not the bootstrap automatically published handoff deferred to #191. Existing deployment workflow configuration is unchanged by #205.
 
 ### Environment plan/apply and destroy
 
