@@ -255,20 +255,19 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         pool_end = module.index('resource "aws_lambda_permission"', pool_start)
         self.assertNotIn("provider", module[pool_start:pool_end])
 
-        self.assertIn('resource "archive_file" "cognito_pre_sign_up"', module)
-        self.assertNotIn('data "archive_file" "cognito_pre_sign_up"', module)
+        self.assertIn('data "archive_file" "cognito_pre_sign_up"', module)
+        self.assertNotIn('resource "archive_file" "cognito_pre_sign_up"', module)
         self.assertIn(
-            'source_content          = file("${path.module}/lambda/cognito-pre-signup/index.mjs")',
+            'source_file      = "${path.module}/lambda/cognito-pre-signup/index.mjs"',
             module,
         )
-        self.assertIn('source_content_filename = "index.mjs"', module)
-        self.assertIn('output_file_mode        = "0666"', module)
+        self.assertIn('output_file_mode = "0666"', module)
         self.assertIn(
-            'output_path             = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"',
+            'output_path      = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"',
             module,
         )
-        self.assertIn("filename         = archive_file.cognito_pre_sign_up.output_path", module)
-        self.assertIn("source_code_hash = archive_file.cognito_pre_sign_up.output_base64sha256", module)
+        self.assertIn("filename         = data.archive_file.cognito_pre_sign_up.output_path", module)
+        self.assertIn("source_code_hash = data.archive_file.cognito_pre_sign_up.output_base64sha256", module)
 
         versions = (
             ROOT / "infra/terraform/modules/pawlocal-environment/versions.tf"
@@ -312,6 +311,64 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
             ),
             2,
         )
+        self.assertEqual(
+            source.count('".github/scripts/terraform-cognito-archive.py"'), 2
+        )
+        self.assertEqual(
+            source.count('".github/scripts/terraform-plan-transfer.py"'), 2
+        )
+
+    def test_archive_is_bound_transferred_restored_and_cleaned_for_apply_paths(
+        self,
+    ) -> None:
+        workflow = self._load(ENVIRONMENT_WORKFLOW)
+        plan_steps = {step.get("name"): step for step in workflow["jobs"]["plan"]["steps"]}
+        apply_steps = {
+            step.get("name"): step for step in workflow["jobs"]["apply"]["steps"]
+        }
+        self.assertIn("--archive", plan_steps["Bind exact plan metadata"]["run"])
+        self.assertIn("--archive", plan_steps["Upload opaque plan to the private transfer bucket"]["run"])
+        self.assertEqual(plan_steps["Remove plan-runner Cognito package"]["if"], "always()")
+        self.assertIn("--archive", apply_steps["Download the exact saved plan"]["run"])
+        self.assertIn("--archive", apply_steps["Verify exact saved plan metadata and digest"]["run"])
+        self.assertIn(
+            "terraform-cognito-archive.py restore",
+            apply_steps["Initialize matching state and apply only the reviewed plan"]["run"],
+        )
+        self.assertEqual(apply_steps["Remove transferred Cognito package"]["if"], "always()")
+
+        destroy_workflow = self._load(DESTROY_WORKFLOW)
+        preparation_plan = {
+            step.get("name"): step
+            for step in destroy_workflow["jobs"]["prepare-plan"]["steps"]
+        }
+        preparation_apply = {
+            step.get("name"): step
+            for step in destroy_workflow["jobs"]["prepare-apply"]["steps"]
+        }
+        self.assertIn("--archive", preparation_plan["Bind preparation plan to state and workflow identity"]["run"])
+        self.assertIn("--archive", preparation_plan["Upload opaque preparation plan to private transfer storage"]["run"])
+        self.assertEqual(preparation_plan["Remove preparation-plan Cognito package"]["if"], "always()")
+        self.assertIn("--archive", preparation_apply["Download exact preparation plan"]["run"])
+        self.assertIn("--archive", preparation_apply["Initialize and verify preparation plan against current state"]["run"])
+        self.assertIn("terraform-cognito-archive.py restore", preparation_apply["Initialize and verify preparation plan against current state"]["run"])
+        self.assertEqual(preparation_apply["Remove transferred preparation Cognito package"]["if"], "always()")
+
+    def test_final_destroy_does_not_transfer_or_restore_the_unused_archive(self) -> None:
+        workflow = self._load(DESTROY_WORKFLOW)
+        destroy_plan = {
+            step.get("name"): step
+            for step in workflow["jobs"]["destroy-plan"]["steps"]
+        }
+        destroy_apply = {
+            step.get("name"): step
+            for step in workflow["jobs"]["destroy-apply"]["steps"]
+        }
+        self.assertNotIn("--archive", destroy_plan["Bind destroy plan to state and workflow identity"]["run"])
+        self.assertNotIn("--archive", destroy_plan["Upload opaque destroy plan to private transfer storage"]["run"])
+        self.assertEqual(destroy_plan["Remove destroy-plan Cognito package"]["if"], "always()")
+        self.assertNotIn("--archive", destroy_apply["Download, initialize, and verify exact destroy plan"]["run"])
+        self.assertNotIn("terraform-cognito-archive.py restore", destroy_apply["Download, initialize, and verify exact destroy plan"]["run"])
 
     def test_environment_roots_pass_only_the_four_approved_policy_values(self) -> None:
         expected = {

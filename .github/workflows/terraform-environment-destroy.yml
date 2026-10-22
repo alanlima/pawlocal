@@ -155,7 +155,8 @@ jobs:
             --environment production --state-key "$TF_STATE_KEY" --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
             --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
             --commit "$GITHUB_SHA" --repository-id "$GITHUB_REPOSITORY_ID" \
-            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --archive "$TF_ROOT/.terraform/pawlocal-production-cognito-pre-signup.zip")"
           echo "plan_sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "Exact preparation-plan digest: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"
 
@@ -165,7 +166,16 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
-            "$TF_ROOT/destroy-prepare.tfplan" "$TF_ROOT/plan-metadata.json"
+            "$TF_ROOT/destroy-prepare.tfplan" "$TF_ROOT/plan-metadata.json" \
+            --archive "$TF_ROOT/.terraform/pawlocal-production-cognito-pre-signup.zip"
+
+      - name: Remove preparation-plan Cognito package
+        if: always()
+        shell: bash
+        run: |
+          python .github/scripts/terraform-cognito-archive.py cleanup \
+            --environment production --terraform-root "$TF_ROOT" \
+            --download-directory "$RUNNER_TEMP/preparation"
 
       - name: Remove delegated Cognito profile
         if: always()
@@ -222,7 +232,8 @@ jobs:
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
-          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$RUNNER_TEMP/preparation" plan-metadata.json
+          python .github/scripts/terraform-plan-transfer.py download "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
+            "$RUNNER_TEMP/preparation" plan-metadata.json --archive
       - name: Initialize and verify preparation plan against current state
         shell: bash
         env:
@@ -236,12 +247,25 @@ jobs:
             --environment production --state-key "$TF_STATE_KEY" --account-id "$PAWLOCAL_AWS_ACCOUNT_ID" \
             --backend-bucket "$PAWLOCAL_TF_STATE_BUCKET" --backend-region "$AWS_REGION" \
             --commit "$GITHUB_SHA" --repository-id "$GITHUB_REPOSITORY_ID" \
-            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT")"
+            --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --archive "$RUNNER_TEMP/preparation/cognito-pre-sign-up.zip")"
           test "$actual" = "$EXPECTED_SHA256"
+          python .github/scripts/terraform-cognito-archive.py restore \
+            --environment production --terraform-root "$TF_ROOT" \
+            --download-directory "$RUNNER_TEMP/preparation" \
+            --metadata "$RUNNER_TEMP/preparation/plan-metadata.json"
       - name: Apply only the reviewed preparation plan
         shell: bash
         run: |
           terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/preparation/tfplan"
+
+      - name: Remove transferred preparation Cognito package
+        if: always()
+        shell: bash
+        run: |
+          python .github/scripts/terraform-cognito-archive.py cleanup \
+            --environment production --terraform-root "$TF_ROOT" \
+            --download-directory "$RUNNER_TEMP/preparation"
 
       - name: Remove delegated Cognito profile
         if: always()
@@ -332,6 +356,14 @@ jobs:
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
             "$TF_ROOT/destroy.tfplan" "$TF_ROOT/plan-metadata.json"
+
+      - name: Remove destroy-plan Cognito package
+        if: always()
+        shell: bash
+        run: |
+          python .github/scripts/terraform-cognito-archive.py cleanup \
+            --environment production --terraform-root "$TF_ROOT" \
+            --download-directory "$RUNNER_TEMP/destroy"
 
       - name: Remove delegated Cognito profile
         if: always()

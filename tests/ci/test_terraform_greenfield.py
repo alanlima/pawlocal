@@ -575,31 +575,71 @@ class GreenfieldTerraformTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             plan = Path(directory) / "tfplan"
             metadata = Path(directory) / "metadata.json"
+            archive = Path(directory) / "cognito-pre-sign-up.zip"
             plan.write_bytes(b"opaque plan")
+            archive.write_bytes(b"reviewed lambda archive")
             args = [
                 "--environment", "development", "--state-key", "pawlocal/development/terraform.tfstate",
                 "--account-id", "1" * 12, "--backend-bucket", "private-state", "--backend-region", "test-region-1",
                 "--commit", "a" * 40, "--repository-id", "1", "--run-id", "2", "--run-attempt", "1",
             ]
+            archive_args = [*args, "--archive", str(archive)]
             created = subprocess.run(
-                [sys.executable, str(METADATA), "create", str(plan), str(metadata), *args],
+                [sys.executable, str(METADATA), "create", str(plan), str(metadata), *archive_args],
                 check=True, capture_output=True, text=True,
             ).stdout.strip()
             self.assertEqual(created, hashlib.sha256(plan.read_bytes()).hexdigest())
+            payload = json.loads(metadata.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["cognito_archive"],
+                {
+                    "name": "cognito-pre-sign-up.zip",
+                    "terraform_path": ".terraform/pawlocal-development-cognito-pre-signup.zip",
+                    "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                },
+            )
             subprocess.run(
-                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *args],
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *archive_args],
                 check=True, capture_output=True, text=True,
             )
             mismatched_target = list(args)
             mismatched_target[mismatched_target.index("private-state")] = "other-state"
             result = subprocess.run(
-                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *mismatched_target],
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *mismatched_target, "--archive", str(archive)],
                 capture_output=True, text=True,
             )
             self.assertNotEqual(result.returncode, 0)
+            archive.write_bytes(b"changed archive")
+            result = subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *archive_args],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            archive.unlink()
+            result = subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *archive_args],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+
+            old_metadata = Path(directory) / "old-metadata.json"
+            subprocess.run(
+                [sys.executable, str(METADATA), "create", str(plan), str(old_metadata), *args],
+                check=True, capture_output=True, text=True,
+            )
+            archive.write_bytes(b"reviewed lambda archive")
+            result = subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(old_metadata), *archive_args],
+                capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            subprocess.run(
+                [sys.executable, str(METADATA), "verify", str(plan), str(old_metadata), *args],
+                check=True, capture_output=True, text=True,
+            )
             plan.write_bytes(b"changed")
             result = subprocess.run(
-                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *args],
+                [sys.executable, str(METADATA), "verify", str(plan), str(metadata), *archive_args],
                 capture_output=True, text=True,
             )
             self.assertNotEqual(result.returncode, 0)

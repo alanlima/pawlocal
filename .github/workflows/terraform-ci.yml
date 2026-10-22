@@ -6,7 +6,9 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
+      - ".github/scripts/terraform-plan-transfer.py"
       - ".github/scripts/terraform-production-lifecycle.py"
+      - ".github/scripts/terraform-cognito-archive.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
       - ".github/scripts/verify-cognito-provider-contract.py"
@@ -28,7 +30,9 @@ on:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
+      - ".github/scripts/terraform-plan-transfer.py"
       - ".github/scripts/terraform-production-lifecycle.py"
+      - ".github/scripts/terraform-cognito-archive.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
       - ".github/scripts/cleanup-cognito-terraform-profile.sh"
       - ".github/scripts/verify-cognito-provider-contract.py"
@@ -121,7 +125,7 @@ jobs:
         if: matrix.root == 'modules/pawlocal-environment'
         run: python ../../../../.github/scripts/verify-cognito-provider-contract.py
 
-      - name: Verify archive provider saved-plan contract
+      - name: Verify archive provider plan-time package contract
         if: matrix.root == 'modules/pawlocal-environment'
         run: python ../../../../.github/scripts/verify-cognito-archive-provider-contract.py
 
