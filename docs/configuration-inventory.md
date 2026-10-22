@@ -1,10 +1,9 @@
 # Configuration inventory
 
-Specification baseline for #204 under #203. Entries below are approved sources/destinations for implementation in #205/#206, not a claim that parameters or mappings are deployed. Read-only AWS inventory during this task found no existing `/pawlocal/` parameters. All generated entries are `String`, `secret: false`, `validations: [required]`, apply to both `development` and `production`, and have no secret payload. No genuinely shared parameter is currently needed.
+The active mapping is `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. All generated entries are `String`, `secret: false`, `validations: [required]`; no secret payload, unmanaged parameter or shared source is needed.
 
-`ops/configuration/parameter-mapping.yaml` maps 18 source keys per environment to 24 development and 30 production destinations. The audit reconciler supports protected callable and on-demand execution. There are no active secret mappings or unmanaged parameters.
+Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key policy are listed below. Runtime evidence and current rollout status belong in #206 and its PRs.
 
-Bootstrap publishes six Standard String keys per environment; its runtime-role key waits until that role exists. The matching application state publishes 12 keys; its two API keys wait for managed API DNS. The first #206 change adds these resources and their exact-key policy; live publication and pipeline integration need their separate checks.
 
 ## Generated parameter entries
 
@@ -68,29 +67,29 @@ Release constants (`VITE_RELEASE_ENV`, mock-backend false, telemetry false, sele
 
 **None.** All currently approved Parameter Store keys above are generated non-secret configuration assigned to one Terraform owner. The required GitHub token resides in the protected GitHub Environment, not Parameter Store. No static AWS keys, GitHub App-ID, installation-ID, private-key, application secret or other credential parameter has an actual need here. Do not pre-create Terraform-owned keys with CLI setup. Adding a real unmanaged source requires an inventory/mapping update and the applicable authorization before initialization.
 
-## Obsolete history and pending cleanup
+## Obsolete history
 
-No active mapping has yet been retired, and this specification does not claim any AWS or GitHub deletion. Historical entries must retain full `store_key`, environment, GitHub target/name, type, secret flag, validations, purpose/consumer and lifecycle owner plus obsolete date (`YYYY-MM-DD`), reason and separate confirmed-deletion status. A rename preserves the original row here and creates the new active row. Legacy settings that never had a Parameter Store source use `store_key: none (legacy GitHub-only)` rather than inventing a historical AWS key.
+The legacy release records below have no active synchronization mapping. Their retirement date is 2026-10-23; reason: no current release/recovery consumer after the reviewed configuration integration. Actual GitHub deletion remains pending the protected exact-name cleanup run; retirement does not claim deletion. Historical entries must retain full `store_key`, environment, GitHub target/name, type, secret flag, validations, purpose/consumer and lifecycle owner plus obsolete date (`YYYY-MM-DD`), reason and separate confirmed-deletion status. A rename preserves the original row here and creates the new active row. Legacy settings that never had a Parameter Store source use `store_key: none (legacy GitHub-only)` rather than inventing a historical AWS key.
 
-The following is #206's exact pending cleanup inventory, not an instruction to delete during #204. Every entry applies only to R for development and production; lifecycle owner is the operator/legacy release configuration. Validation is current-consumer absence before retirement; source is none (legacy GitHub-only). No obsolete date is assigned until retirement is verified.
+The following is #206's exact legacy cleanup history/allowlist. Every entry applies only to R for development and production; lifecycle owner is the operator/legacy release configuration. Validation is current-consumer absence before retirement; source is none (legacy GitHub-only). Each row inherits obsolete date 2026-10-23, the reason above, and pending protected-deletion status. Runtime cleanup repeats the consumer check before deletion.
 
 | GitHub name | Type / secret flag | Historical purpose | Status |
 |---|---|---|---|
-| PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON | Variable / false | Legacy VM SSH baseline | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_CERTIFICATE_ARN | Variable / false | Legacy certificate handoff | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_COGNITO_APP_CLIENT_ID | Variable / false | Superseded client variable | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_COGNITO_ISSUER | Variable / false | Legacy API auth handoff | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DEPLOY_HOST | Variable / false | Legacy SSH deployment | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DEPLOY_KNOWN_HOSTS | Variable / false | Legacy SSH host verification | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DEPLOY_MODE | Variable / false | Legacy adapter selection | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON | Variable / false | Legacy VM authorized keys | Pending consumer proof and exact-target cleanup |
+| PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON | Variable / false | Legacy VM SSH baseline | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_CERTIFICATE_ARN | Variable / false | Legacy certificate handoff | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_COGNITO_APP_CLIENT_ID | Variable / false | Superseded client variable | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_COGNITO_ISSUER | Variable / false | Legacy API auth handoff | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DEPLOY_HOST | Variable / false | Legacy SSH deployment | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DEPLOY_KNOWN_HOSTS | Variable / false | Legacy SSH host verification | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DEPLOY_MODE | Variable / false | Legacy adapter selection | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON | Variable / false | Legacy VM authorized keys | Pending protected deletion; runtime consumer check required |
 | PAWLOCAL_DOMAIN_NAME | Variable / false | Legacy release domain input | Pending cleanup in R only; P remains required |
 | PAWLOCAL_DSQL_DATABASE_ROLE | Variable / false | Legacy database handoff | Pending cleanup in R only; runtime/seed unaffected |
 | PAWLOCAL_DSQL_ENDPOINT | Variable / false | Legacy database handoff | Pending cleanup in R only; runtime/seed unaffected |
-| PAWLOCAL_TERRAFORM_ROLE_ARN | Variable / false | Legacy combined-state identity | Pending consumer proof and exact-target cleanup |
+| PAWLOCAL_TERRAFORM_ROLE_ARN | Variable / false | Legacy combined-state identity | Pending protected deletion; runtime consumer check required |
 | PAWLOCAL_TF_STATE_BUCKET | Variable / false | Legacy release backend setting | Pending cleanup in R only; P/A remain required |
-| PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY | Secret / true | Legacy SSH deployment credential | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DSQL_ACCESS_KEY_ID | Secret / true | Legacy static database identity | Pending consumer proof and exact-target cleanup |
-| PAWLOCAL_DSQL_SECRET_ACCESS_KEY | Secret / true | Legacy static database credential | Pending consumer proof and exact-target cleanup |
+| PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY | Secret / true | Legacy SSH deployment credential | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DSQL_ACCESS_KEY_ID | Secret / true | Legacy static database identity | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_DSQL_SECRET_ACCESS_KEY | Secret / true | Legacy static database credential | Pending protected deletion; runtime consumer check required |
 
-Do not copy these obsolete credentials into Parameter Store. After verified retirement move records into dated history with original fields and evidence of actual deletion or explicit remaining-resource status; obsolete mappings never remain executable.
+Do not copy these credentials into Parameter Store. Keep these dated records after deletion and record actual deletion evidence separately; obsolete synchronization entries never remain executable. The cleanup code contains only the approved exact deletion allowlist, not active mappings.

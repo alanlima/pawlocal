@@ -8,12 +8,25 @@ on:
         required: true
         type: choice
         options: [development, production]
+      operation:
+        description: Synchronize values or perform approved legacy release cleanup
+        type: choice
+        default: reconcile
+        options: [reconcile, legacy-cleanup]
+      confirmation:
+        description: Required only for exact named cleanup
+        type: string
       mode:
         description: Audit synchronizes available values without release readiness
         default: audit
         type: choice
-        options: [audit]
+        options: [audit, enforce]
   workflow_call:
+    outputs:
+      configuration:
+        value: ${{ jobs.reconcile.outputs.configuration }}
+      frontend_config:
+        value: ${{ jobs.reconcile.outputs.frontend_config }}
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN:
         description: Scoped credential resolved in the matching protected apply Environment
@@ -25,9 +38,25 @@ on:
       mode:
         default: audit
         type: string
+      selection:
+        default: all
+        type: string
+      operation:
+        default: reconcile
+        type: string
+      confirmation:
+        default: ''
+        type: string
+      destroy_confirmed:
+        default: false
+        type: boolean
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ contains(fromJSON('["Full-stack release to development","Promote verified release to production","Terraform environment plan and apply","Terraform production destroy"]'), github.workflow) && format('pawlocal-reconcile-call-{0}-{1}', github.run_id, inputs.selection || 'all') || format('pawlocal-lifecycle-{0}', inputs.environment) }}
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -37,9 +66,16 @@ jobs:
         env:
           SELECTED_ENVIRONMENT: ${{ inputs.environment }}
           SELECTED_MODE: ${{ inputs.mode }}
+          SELECTED_OPERATION: ${{ inputs.operation }}
+          DESTROY_CONFIRMED: ${{ inputs.destroy_confirmed }}
+          CALLER_WORKFLOW: ${{ github.workflow }}
         run: |
           [[ "$SELECTED_ENVIRONMENT" =~ ^(development|production)$ ]]
-          [[ "$SELECTED_MODE" == audit ]]
+          [[ "$SELECTED_MODE" =~ ^(audit|enforce)$ ]]
+          [[ "$SELECTED_OPERATION" =~ ^(reconcile|legacy-cleanup|destroy-cleanup)$ ]]
+          if [[ "$SELECTED_OPERATION" == destroy-cleanup ]]; then
+            [[ "$DESTROY_CONFIRMED" == true && "$CALLER_WORKFLOW" == 'Terraform production destroy' ]]
+          fi
 
   reconcile:
     needs: validate
@@ -49,6 +85,9 @@ jobs:
     concurrency:
       group: pawlocal-configuration-${{ inputs.environment }}
       cancel-in-progress: false
+    outputs:
+      configuration: ${{ steps.sync.outputs.configuration }}
+      frontend_config: ${{ steps.sync.outputs.frontend_config }}
     permissions:
       contents: read
       id-token: write
@@ -57,6 +96,9 @@ jobs:
       PAWLOCAL_CONFIG_READER_ROLE_ARN: ${{ vars.PAWLOCAL_CONFIG_READER_ROLE_ARN }}
       SELECTED_ENVIRONMENT: ${{ inputs.environment }}
       SELECTED_MODE: ${{ inputs.mode }}
+      SELECTED_SELECTION: ${{ inputs.selection || 'all' }}
+      SELECTED_OPERATION: ${{ inputs.operation }}
+      CLEANUP_CONFIRMATION: ${{ inputs.confirmation }}
     steps:
       - name: Check out reviewed source
         uses: actions/checkout@v7
@@ -67,8 +109,10 @@ jobs:
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
         run: |
           test -n "$PAWLOCAL_CONFIG_GITHUB_TOKEN" || { echo "Missing protected reconciliation credential" >&2; exit 1; }
-          test -n "$AWS_REGION"
-          [[ "$PAWLOCAL_CONFIG_READER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/pawlocal-${SELECTED_ENVIRONMENT}-configuration-reader$ ]]
+          if [[ "$SELECTED_OPERATION" == reconcile ]]; then
+            test -n "$AWS_REGION"
+            [[ "$PAWLOCAL_CONFIG_READER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/pawlocal-${SELECTED_ENVIRONMENT}-configuration-reader$ ]]
+          fi
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -76,13 +120,26 @@ jobs:
       - name: Install reconciler dependencies
         run: python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Assume exact configuration-reader role
+        if: inputs.operation == 'reconcile'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ env.PAWLOCAL_CONFIG_READER_ROLE_ARN }}
           role-session-name: configuration-${{ github.run_id }}
-          mask-aws-account-id: true
+          # Account IDs in the verified public outputs are configuration, not secrets.
+          mask-aws-account-id: false
       - name: Reconcile available configuration
+        if: inputs.operation == 'reconcile'
+        id: sync
         env:
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
-        run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE"
+        run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE" --selection "$SELECTED_SELECTION"
+      - name: Perform exact approved configuration cleanup
+        if: inputs.operation != 'reconcile'
+        env:
+          PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+          DESTROY_CONFIRMED: ${{ inputs.destroy_confirmed }}
+        run: |
+          flags=()
+          if [[ "$DESTROY_CONFIRMED" == true ]]; then flags+=(--destroy-confirmed); fi
+          python ops/configuration/cleanup.py --environment "$SELECTED_ENVIRONMENT" --operation "$SELECTED_OPERATION" --confirmation "$CLEANUP_CONFIRMATION" "${flags[@]}"

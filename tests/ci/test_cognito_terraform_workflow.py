@@ -276,7 +276,7 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
             "PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}",
             environment_source,
         )
-        self.assertIn("needs: plan", environment_source)
+        self.assertIn("needs: [plan, reconcile-preflight]", environment_source)
         self.assertEqual(destroy_source.count("${{ github.run_attempt }}"), 4)
 
         helper_source = CONFIGURE_SCRIPT.read_text(encoding="utf-8")

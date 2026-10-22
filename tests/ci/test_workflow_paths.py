@@ -266,7 +266,7 @@ class WorkflowPathTests(unittest.TestCase):
         plan = workflow.index("  plan:")
         self.assertLess(eligibility, ancestry_gate)
         self.assertLess(ancestry_gate, plan)
-        self.assertIn("needs: production-eligibility", workflow[plan:])
+        self.assertIn("needs: [production-eligibility, reconcile-preflight]", workflow[plan:])
         self.assertIn("basehead: `${commit}...main`", workflow)
 
         promotion = (WORKFLOWS / "deploy-production.yml").read_text()

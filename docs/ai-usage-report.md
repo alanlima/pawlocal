@@ -4,6 +4,10 @@
 
 - **Task (#206, Terraform publication):** Platform engineer added state-owned generated Strings and exact-key permissions. Senior escalation resolved provider metadata authorization and boundary-size constraints; native tests enumerate the reviewed permission-pair delta.
 - **Verification boundary:** Backend-free validation, policy/publication fixtures and CI tests are recorded in the PR. Independent source/plan review, live publication and pipeline integration remain separate gates.
+- **Task (#206):** Integrate enforced reconciliation, same-run public build values, collision checks and exact cleanup/recovery. Terraform publication rolls out first through a separate reviewed PR so missing sources never require an enforce bypass.
+- **Verification:** Behavior/integration tests exercise both environments, missing/invalid sources, partial writes/reruns, snapshot secret exclusion, exact cleanup and destroy/reapply fixtures. A real Vite/headless-browser fixture verifies stale served bundles and replacement OAuth redirects after rebuild. Fixture results are separate from protected live apply/publication acceptance recorded in the issue.
+
+
 
 - **Task (#205):** Implement the reviewed Parameter Store mapping, audit reconciler, protected dispatch/reusable workflow and scoped bootstrap reader identities. Platform specialists split script/workflow and IAM ownership, then integrated one PR for independent review.
 - **Verification boundary:** Synthetic tests cover variable create/update/no-op/read-back, encrypted secret writes, access/API failures, partial retry, strict source/target rejection and absence of payloads in reports. IAM policy tests enforce exact read-only keys/OIDC trust. Live role apply and workflow evidence are recorded separately in the PR; no generated publication or required-value enforcement is claimed here.

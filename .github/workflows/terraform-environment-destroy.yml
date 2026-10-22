@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pawlocal-terraform-${{ inputs.environment }}
+  group: pawlocal-lifecycle-production
   cancel-in-progress: false
 
 env:
@@ -439,3 +439,18 @@ jobs:
         if: always()
         shell: bash
         run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
+  cleanup-generated-targets:
+    needs: destroy-apply
+    if: ${{ !cancelled() && needs.destroy-apply.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reconcile-environment.yml
+    with:
+      environment: production
+      operation: destroy-cleanup
+      confirmation: ${{ inputs.confirmation }}
+      destroy_confirmed: true
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}

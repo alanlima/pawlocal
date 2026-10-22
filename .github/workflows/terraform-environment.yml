@@ -28,6 +28,14 @@ on:
         default: false
         type: boolean
   workflow_call:
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN:
+        required: true
+      PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN:
+        required: false
+    outputs:
+      frontend_config:
+        value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
     inputs:
       environment:
         required: true
@@ -55,7 +63,7 @@ permissions:
   deployments: read
 
 concurrency:
-  group: pawlocal-terraform-${{ inputs.environment }}
+  group: ${{ github.workflow == 'Terraform environment plan and apply' && format('pawlocal-lifecycle-{0}', inputs.environment) || format('pawlocal-terraform-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 env:
@@ -142,10 +150,24 @@ jobs:
             }
             throw new Error('No successful development deployment has matching validated full-stack release evidence')
 
+  reconcile-preflight:
+    needs: production-eligibility
+    if: ${{ !cancelled() && inputs.phase != 'foundation' && (inputs.environment == 'development' || needs.production-eligibility.result == 'success') }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reconcile-environment.yml
+    with:
+      environment: ${{ inputs.environment }}
+      mode: enforce
+      selection: preflight
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+
   plan:
     name: Plan ${{ inputs.environment }}
-    if: always() && (inputs.environment == 'development' || inputs.phase == 'foundation' || needs.production-eligibility.result == 'success')
-    needs: production-eligibility
+    if: ${{ !cancelled() && (inputs.phase == 'foundation' || needs.reconcile-preflight.result == 'success') && (inputs.environment == 'development' || inputs.phase == 'foundation' || needs.production-eligibility.result == 'success') }}
+    needs: [production-eligibility, reconcile-preflight]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: ${{ inputs.environment }}-plan
@@ -160,16 +182,16 @@ jobs:
       COGNITO_TERRAFORM_PURPOSE: plan
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
-      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
-      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_AWS_ACCOUNT_ID || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_root_domain: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_route53_zone_id: ${{ vars.PAWLOCAL_ROUTE53_ZONE_ID }}
       TF_VAR_cloudfront_certificate_arn: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
-      TF_VAR_runtime_role_arn: ${{ vars.PAWLOCAL_RUNTIME_ROLE_ARN }}
-      TF_VAR_cloudfront_distribution_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
-      TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
+      TF_VAR_runtime_role_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_RUNTIME_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_RUNTIME_ROLE_ARN }}
+      TF_VAR_cloudfront_distribution_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
+      TF_VAR_cloudfront_oac_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_CLOUDFRONT_OAC_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       TF_VAR_backend_image: ${{ inputs.backend_image }}
     steps:
       - name: Check out the exact requested commit
@@ -283,6 +305,11 @@ jobs:
               exit 1
             }
 
+      - name: Reject existing keys before new parameter ownership
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
+          python ops/configuration/check-collisions.py "$RUNNER_TEMP/terraform-plan.json" --environment '${{ inputs.environment }}'
+
       - name: Print sanitized saved-plan diagnostics
         shell: bash
         env:
@@ -387,7 +414,7 @@ jobs:
 
   apply:
     name: Apply reviewed exact ${{ inputs.environment }} plan
-    needs: plan
+    needs: [plan, reconcile-preflight]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -401,9 +428,9 @@ jobs:
       COGNITO_TERRAFORM_PURPOSE: apply
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
-      TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
-      PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_AWS_ACCOUNT_ID || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID }}
     steps:
       - name: Check out the exact planned commit
         uses: actions/checkout@v7
@@ -486,6 +513,9 @@ jobs:
             exit "$status"
           fi
 
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
+          terraform -chdir="$TF_ROOT" show -json "$RUNNER_TEMP/saved-plan/tfplan" > "$RUNNER_TEMP/parameter-create-check.json"
+          python ops/configuration/check-collisions.py "$RUNNER_TEMP/parameter-create-check.json" --environment '${{ inputs.environment }}'
           python .github/scripts/verify-terraform-source-checkout.py
           apply_command=(terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m)
           if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
@@ -507,3 +537,16 @@ jobs:
         if: always()
         shell: bash
         run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
+  reconcile-after-apply:
+    needs: apply
+    if: ${{ !cancelled() && needs.apply.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/reconcile-environment.yml
+    with:
+      environment: ${{ inputs.environment }}
+      mode: ${{ inputs.phase == 'foundation' && 'audit' || 'enforce' }}
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
