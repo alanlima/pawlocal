@@ -8,15 +8,16 @@ from pathlib import Path
 WORKFLOWS = Path(".github/workflows")
 
 
-def workflow_paths(workflow: str) -> list[str]:
+def workflow_paths(workflow: str, event: str | None = None) -> list[str]:
     """Collect path patterns from automatic pull_request and push triggers."""
     lines = (WORKFLOWS / workflow).read_text(encoding="utf-8-sig").splitlines()
     patterns: list[str] = []
     in_event = False
     in_paths = False
     for line in lines:
-        if re.match(r"^  (pull_request|push):\s*$", line):
-            in_event = True
+        event_match = re.match(r"^  (pull_request|push):\s*$", line)
+        if event_match:
+            in_event = event is None or event_match.group(1) == event
             in_paths = False
             continue
         if in_event and re.match(r"^  [A-Za-z_][A-Za-z0-9_-]*:\s*$", line):
@@ -34,9 +35,9 @@ def workflow_paths(workflow: str) -> list[str]:
     return patterns
 
 
-def matches(workflow: str, path: str) -> bool:
+def matches(workflow: str, path: str, event: str | None = None) -> bool:
     included = False
-    for pattern in workflow_paths(workflow):
+    for pattern in workflow_paths(workflow, event):
         if pattern.startswith("!"):
             if fnmatch.fnmatchcase(path, pattern[1:]):
                 included = False
@@ -46,6 +47,24 @@ def matches(workflow: str, path: str) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
+    def test_reconciliation_outputs_trigger_development_release_in_both_events(self) -> None:
+        workflow = "fullstack-release.yml"
+        for event in ("pull_request", "push"):
+            with self.subTest(event=event):
+                self.assertTrue(
+                    matches(workflow, "infra/terraform/modules/pawlocal-environment/outputs.tf", event)
+                )
+                for path in (
+                    "infra/terraform/modules/pawlocal-environment/main.tf",
+                    "infra/terraform/modules/pawlocal-environment/iam.tf",
+                    "infra/terraform/iam-bootstrap/outputs.tf",
+                    "infra/terraform/iam-bootstrap/main.tf",
+                    "infra/terraform/environments/production/outputs.tf",
+                    "infra/terraform/environments/production/main.tf",
+                ):
+                    with self.subTest(path=path):
+                        self.assertFalse(matches(workflow, path, event))
+
     def test_development_seed_dispatch_relies_on_environment_approval(self) -> None:
         workflow = (WORKFLOWS / "development-dsql-seed.yml").read_text(
             encoding="utf-8-sig"
