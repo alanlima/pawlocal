@@ -407,11 +407,16 @@ class ReconcileTests(unittest.TestCase):
                     "GITHUB_REPOSITORY": "alanlima/pawlocal",
                     "PAWLOCAL_CONFIG_GITHUB_TOKEN": SENTINEL,
                 },
+                clear=True,
             ),
+            patch.object(module, "parameter_store", return_value=object()) as store,
+            patch.object(module, "GitHub", return_value=object()) as github,
             patch.object(module, "reconcile", side_effect=RuntimeError("SSM endpoint connection refused")),
             contextlib.redirect_stderr(captured),
         ):
             self.assertEqual(module.main(["--environment", "development"]), 1)
+        store.assert_called_once_with()
+        github.assert_called_once_with("alanlima/pawlocal", SENTINEL)
         self.assertNotIn(SENTINEL, captured.getvalue())
         self.assertIn("RuntimeError: SSM endpoint connection refused", captured.getvalue())
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
