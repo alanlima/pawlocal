@@ -508,3 +508,45 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
     error_message = "Cognito role outputs must retain the approved environment and plan/apply key structure."
   }
 }
+
+run "project_name_over_policy_budget_is_rejected" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    terraform_state_bucket_name = "fixture-state-bucket-x"
+    github_repository           = "example/pawlocal"
+    github_owner_id             = "1"
+    github_repository_id        = "2"
+    manage_github_oidc_provider = true
+    project_name                = "pawlocalx"
+    route53_zone_id             = "ZFIXTURE000000"
+    domain_name                 = "fixture.example"
+  }
+
+  expect_failures = [var.project_name]
+}
+
+run "project_name_with_policy_escaping_is_rejected" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    terraform_state_bucket_name = "fixture-state-bucket-x"
+    github_repository           = "example/pawlocal"
+    github_owner_id             = "1"
+    github_repository_id        = "2"
+    manage_github_oidc_provider = true
+    project_name                = "paw/loc"
+    route53_zone_id             = "ZFIXTURE000000"
+    domain_name                 = "fixture.example"
+  }
+
+  expect_failures = [var.project_name]
+}

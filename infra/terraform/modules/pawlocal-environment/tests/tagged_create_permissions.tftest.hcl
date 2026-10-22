@@ -261,3 +261,25 @@ run "production_resource_names_use_normalized_suffixes" {
     error_message = "The default project tag must remain pawlocal while production resource names use the normalized suffixes."
   }
 }
+
+run "project_name_over_policy_budget_is_rejected" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    environment                = "development"
+    aws_region                 = "ap-southeast-2"
+    project_name               = "pawlocalx"
+    root_domain                = "example.test"
+    route53_zone_id            = "ZTEST"
+    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name = "pawlocal-development-github-deploy"
+    container_power            = "micro"
+  }
+
+  expect_failures = [var.project_name]
+}

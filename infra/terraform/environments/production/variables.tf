@@ -4,8 +4,8 @@ variable "project_name" {
   type        = string
   default     = "pawlocal"
   validation {
-    condition     = var.project_name == trimspace(var.project_name) && length(var.project_name) >= 1 && length(var.project_name) <= 128
-    error_message = "project_name must contain 1 through 128 characters without leading or trailing whitespace."
+    condition     = var.project_name == trimspace(var.project_name) && length(var.project_name) >= 1 && length(var.project_name) <= 8 && can(regex("^[A-Za-z0-9._-]+$", var.project_name))
+    error_message = "project_name must contain 1 through 8 ASCII letters, digits, periods, underscores, or hyphens so rendered IAM policies remain within their enforced size budgets."
   }
 }
 variable "root_domain" { type = string }

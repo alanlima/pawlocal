@@ -60,6 +60,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
             variables,
             r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
         )
+        self.assertIn("length(var.project_name) <= 8", variables)
+        self.assertIn('regex("^[A-Za-z0-9._-]+$", var.project_name)', variables)
         self.assertRegex(
             provider,
             r'default_tags\s*\{\s*tags\s*=\s*\{\s*project\s*=\s*var\.project_name\s*managedby\s*=\s*"terraform"',
@@ -85,6 +87,14 @@ class CognitoDelegatedIamTests(unittest.TestCase):
             (module / "variables.tf").read_text(encoding="utf-8"),
             r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
         )
+        self.assertIn(
+            "length(var.project_name) <= 8",
+            (module / "variables.tf").read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            'regex("^[A-Za-z0-9._-]+$", var.project_name)',
+            (module / "variables.tf").read_text(encoding="utf-8"),
+        )
         self.assertIn("project     = var.project_name", module_sources)
         self.assertNotRegex(module_sources, r'values\s*=\s*\["pawlocal"\]')
 
@@ -98,6 +108,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
                 variables,
                 r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
             )
+            self.assertIn("length(var.project_name) <= 8", variables)
+            self.assertIn('regex("^[A-Za-z0-9._-]+$", var.project_name)', variables)
             self.assertIn("project     = var.project_name", versions)
             self.assertIn("project_name                = var.project_name", main)
 
@@ -107,6 +119,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn('project_name               = "pawhub"', semantic_test)
         self.assertIn('local.common_tags.project == "pawhub"', semantic_test)
         self.assertIn('local.common_tags.project == "pawlocal"', semantic_test)
+        self.assertIn('project_name               = "pawlocalx"', semantic_test)
+        self.assertIn("expect_failures = [var.project_name]", semantic_test)
 
     def test_create_time_tagging_cannot_adopt_unowned_exact_name_resources(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
