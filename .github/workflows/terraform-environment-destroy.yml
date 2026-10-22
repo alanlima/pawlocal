@@ -452,5 +452,6 @@ jobs:
       operation: destroy-cleanup
       confirmation: ${{ inputs.confirmation }}
       destroy_confirmed: true
+      caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}

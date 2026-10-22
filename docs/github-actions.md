@@ -154,9 +154,11 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ### Reconcile Environment configuration
 
-<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,operation,confirmation,mode; call-inputs: environment,mode,selection,operation,confirmation,destroy_confirmed -->
+<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,operation,confirmation,mode; call-inputs: environment,mode,selection,operation,confirmation,destroy_confirmed,caller_holds_lifecycle_lock -->
 
 `reconcile-environment.yml` accepts `environment` (development/production), `mode` (audit default or enforce), and `operation` (reconcile default or explicit legacy-cleanup). Cleanup also requires exact `confirmation` (`CLEAN legacy development` or `CLEAN legacy production`). Reusable calls additionally accept `selection` (all/default or preflight), internal destroy-cleanup and `destroy_confirmed`; confirmed destroy cleanup is callable only after the existing protected destroy succeeds and verifies the same state empty.
+
+Reusable callers that already hold the environment lifecycle lock pass `caller_holds_lifecycle_lock: true`. Other callers, including manual and CI runs, take that lock themselves.
 
 One mutation job uses `<environment>-apply` for approval and the named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret. Callers pass that secret explicitly; see [GitHub's reusable secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows). Audit warns/skips missing sources and does not establish release readiness. Enforce validates all selected values before writes. Existing-target checks, variable compare/write/read-back and encrypted secret API writes remain mandatory. Reports contain names/statuses only; secret payloads never enter outputs or artifacts.
 

@@ -50,12 +50,16 @@ on:
       destroy_confirmed:
         default: false
         type: boolean
+      caller_holds_lifecycle_lock:
+        description: Caller already serializes the full environment lifecycle
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ contains(fromJSON('["Full-stack release to development","Promote verified release to production","Terraform environment plan and apply","Terraform production destroy"]'), github.workflow) && format('pawlocal-reconcile-call-{0}-{1}', github.run_id, inputs.selection || 'all') || format('pawlocal-lifecycle-{0}', inputs.environment) }}
+  group: ${{ inputs.caller_holds_lifecycle_lock && format('pawlocal-reconcile-call-{0}-{1}', github.run_id, inputs.selection || 'all') || format('pawlocal-lifecycle-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 jobs:

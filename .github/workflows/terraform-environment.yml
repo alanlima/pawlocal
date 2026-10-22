@@ -63,7 +63,7 @@ permissions:
   deployments: read
 
 concurrency:
-  group: ${{ github.workflow == 'Terraform environment plan and apply' && format('pawlocal-lifecycle-{0}', inputs.environment) || format('pawlocal-terraform-{0}', inputs.environment) }}
+  group: ${{ contains(fromJSON('["Full-stack release to development","Promote verified release to production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 env:
@@ -161,6 +161,7 @@ jobs:
       environment: ${{ inputs.environment }}
       mode: enforce
       selection: preflight
+      caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
 
@@ -548,5 +549,6 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       mode: ${{ inputs.phase == 'foundation' && 'audit' || 'enforce' }}
+      caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}

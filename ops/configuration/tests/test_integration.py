@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -373,6 +374,85 @@ class IntegrationTests(unittest.TestCase):
                 path.write_text("PAWLOCAL_DEPLOY_HOST")
             with self.assertRaises(module.ReconciliationError):
                 cleanup.prove_legacy_unused(root, self.github(api), "development")
+
+    def test_nested_lifecycle_lock_contract(self):
+        def load(name):
+            return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+
+        terraform = load("terraform-environment.yml")
+        reconcile = load("reconcile-environment.yml")
+        destroy = load("terraform-environment-destroy.yml")
+        group = terraform["concurrency"]["group"]
+        parents = json.loads(re.search(r"fromJSON\('([^']+)'\)", group)[1])
+        self.assertEqual(
+            parents,
+            [
+                "Full-stack release to development",
+                "Promote verified release to production",
+            ],
+        )
+        self.assertEqual(
+            group,
+            "${{ contains(fromJSON('"
+            + json.dumps(parents, separators=(",", ":"))
+            + "'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment)"
+            + " || format('pawlocal-lifecycle-{0}', inputs.environment) }}",
+        )
+        self.assertEqual(
+            reconcile["concurrency"]["group"],
+            "${{ inputs.caller_holds_lifecycle_lock && format('pawlocal-reconcile-call-{0}-{1}', github.run_id, inputs.selection || 'all') || format('pawlocal-lifecycle-{0}', inputs.environment) }}",
+        )
+        contract = reconcile[True]
+        self.assertEqual(
+            contract["workflow_call"]["inputs"]["caller_holds_lifecycle_lock"][
+                "default"
+            ],
+            False,
+        )
+        self.assertNotIn(
+            "caller_holds_lifecycle_lock", contract["workflow_dispatch"]["inputs"]
+        )
+        for name in ("reconcile-preflight", "reconcile-after-apply"):
+            self.assertIs(
+                terraform["jobs"][name]["with"]["caller_holds_lifecycle_lock"], True
+            )
+        self.assertIs(
+            destroy["jobs"]["cleanup-generated-targets"]["with"][
+                "caller_holds_lifecycle_lock"
+            ],
+            True,
+        )
+        self.assertNotIn(
+            "caller_holds_lifecycle_lock",
+            load("ci.yml")["jobs"]["reconciliation-smoke"]["with"],
+        )
+        # Pin the expression above, then exercise its caller cases. GitHub keeps
+        # the original caller name in nested calls, including generic callers.
+        for caller in (
+            "Terraform environment plan and apply",
+            *parents,
+            "Other automation",
+        ):
+            with self.subTest(caller=caller):
+                tf_lock = (
+                    "pawlocal-terraform-development"
+                    if caller in parents
+                    else "pawlocal-lifecycle-development"
+                )
+                child_lock = "pawlocal-reconcile-call-123-all"
+                if caller in parents:
+                    parent = load(
+                        "fullstack-release.yml"
+                        if caller == parents[0]
+                        else "deploy-production.yml"
+                    )
+                    self.assertIn("pawlocal-lifecycle-", parent["concurrency"]["group"])
+                    self.assertNotEqual(tf_lock, "pawlocal-lifecycle-development")
+                else:
+                    self.assertEqual(tf_lock, "pawlocal-lifecycle-development")
+                self.assertNotEqual(tf_lock, child_lock)
+        for workflow in (terraform, reconcile, destroy):
+            self.assertIs(workflow["concurrency"]["cancel-in-progress"], False)
 
     def test_collision_inventory_rejects_existing_unknown_denied_and_adoption(self):
         key = "/pawlocal/development/config/auth/client-id"
