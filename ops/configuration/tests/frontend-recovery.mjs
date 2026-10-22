@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { matchesOAuthSnapshot } from '../oauth-snapshot.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const frontend = join(root, 'frontend')
@@ -49,45 +50,63 @@ try {
       ['scripts/validate-release-config.mjs'],
       ['node_modules/vite/bin/vite.js', 'build'],
     ]) {
-      const result = spawnSync(process.execPath, script, { cwd: frontend, env, encoding: 'utf8' })
+      const result = spawnSync(process.execPath, script, {
+        cwd: frontend,
+        env,
+        encoding: 'utf8',
+      })
       assert.equal(result.status, 0, 'Fixture frontend build must succeed')
     }
-    await cp(join(frontend, 'dist'), join(temporary, target), { recursive: true })
+    await cp(join(frontend, 'dist'), join(temporary, target), {
+      recursive: true,
+    })
     return join(temporary, target)
   }
   async function observedRedirect() {
     const page = await browser.newPage()
     await page.route(`${new URL(oldConfig.VITE_API_BASE_URL).origin}/**`, (route) =>
-      route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 20 } }),
+      route.fulfill({
+        json: { items: [], total: 0, page: 1, page_size: 20 },
+      }),
     )
     await page.route('https://*.amazoncognito.com/**', (route) =>
-      route.fulfill({ contentType: 'text/html', body: '<html>OAuth fixture</html>' }),
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<html>OAuth fixture</html>',
+      }),
     )
     await page.goto(`http://127.0.0.1:${server.address().port}/`)
     const request = page.waitForRequest((request) => request.url().includes('/oauth2/authorize'))
     await page.getByRole('button', { name: /^Sign in/ }).click()
     const url = new URL((await request).url())
-    const result = {
-      origin: url.origin,
-      client: url.searchParams.get('client_id'),
-      callback: url.searchParams.get('redirect_uri'),
-    }
     await page.close()
-    return result
+    return url
   }
-  const expected = (config) => ({
-    origin: config.VITE_COGNITO_DOMAIN,
-    client: config.VITE_COGNITO_CLIENT_ID,
-    callback: config.VITE_COGNITO_REDIRECT_URI,
-  })
   published = await build(oldConfig, 'old')
-  assert.deepEqual(await observedRedirect(), expected(oldConfig))
+  assert.equal(matchesOAuthSnapshot(await observedRedirect(), oldConfig), true)
   // GitHub values have reconciled to newConfig, but the published old bytes remain stale.
-  assert.notDeepEqual(await observedRedirect(), expected(newConfig))
+  assert.equal(matchesOAuthSnapshot(await observedRedirect(), newConfig), false)
   published = await build(newConfig, 'replacement')
-  assert.deepEqual(await observedRedirect(), expected(newConfig))
+  assert.equal(matchesOAuthSnapshot(await observedRedirect(), newConfig), true)
+  const scopesOnly = { ...newConfig, VITE_COGNITO_SCOPES: 'openid' }
+  assert.notEqual(newConfig.VITE_COGNITO_SCOPES, scopesOnly.VITE_COGNITO_SCOPES)
+  // Host/client/callback now match, but the served scopes alone are stale.
+  assert.equal(matchesOAuthSnapshot(await observedRedirect(), scopesOnly), false)
+  published = await build(scopesOnly, 'replacement-scopes')
+  assert.equal(matchesOAuthSnapshot(await observedRedirect(), scopesOnly), true)
+  const actual = await observedRedirect()
+  actual.searchParams.set('scope', 'profile openid email')
+  assert.equal(
+    matchesOAuthSnapshot(actual, {
+      ...scopesOnly,
+      VITE_COGNITO_SCOPES: 'email profile openid',
+    }),
+    true,
+  )
+  actual.searchParams.delete('scope')
+  assert.equal(matchesOAuthSnapshot(actual, scopesOnly), false)
   console.log(
-    'Fixture PASS: stale served bundle fails replacement readiness; rebuilt publication uses the reconciled OAuth host/client/callback.',
+    'Fixture PASS: stale served identity or scopes fail readiness; rebuilt publication matches the reconciled OAuth snapshot.',
   )
 } finally {
   await browser.close()

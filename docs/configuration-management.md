@@ -75,7 +75,7 @@ Variables use compare-before-write and read-back, including no-ops. Secrets use 
 
 Use actual managed attributes: API HTTPS origin plus `/api/v1`, health `/health`; Cognito full HTTPS origin `https://<managed-domain>.auth.<region>.amazoncognito.com`; managed public client ID; managed callback `/auth/callback`, logout `/`, and space-joined scopes (currently `openid email profile`). Validate account/environment bindings and matching frontend/API origins; never copy across environments.
 
-Pass the same reconciliation's verified public values directly to the build, rebuild/publish, then observe the served OAuth host/client/callback. Variable read-back or a healthy homepage alone is insufficient. Do not introduce reconciliation-specific commit/hash binding, fingerprints or state-generation machinery.
+Pass the same reconciliation's verified public values directly to the build, rebuild/publish, then observe the served OAuth host/client/callback/scopes. Variable read-back or a healthy homepage alone is insufficient. Do not introduce reconciliation-specific commit/hash binding, fingerprints or state-generation machinery.
 
 Writes are not atomic. Correct partial failures and rerun; completed writes should be checked and skipped. Failed Terraform applies require a fresh reviewed normal-refresh plan. Missing source/state/mapping never deletes targets. Only confirmed reviewed destroy clears exact affected generated targets/dependent runtime variables; reapply must republish/reconcile before publication. Legacy cleanup needs consumer proof and exact environment/name deletion from the inventory; preserve same-named plan/apply inputs, unrelated static/certificate settings and `development-seed`.
 

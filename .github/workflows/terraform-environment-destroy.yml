@@ -441,8 +441,8 @@ jobs:
         run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
 
   cleanup-generated-targets:
-    needs: destroy-apply
-    if: ${{ !cancelled() && needs.destroy-apply.result == 'success' }}
+    needs: [prepare-plan, destroy-apply]
+    if: ${{ !cancelled() && needs.prepare-plan.result == 'success' && (needs.destroy-apply.result == 'success' || needs.prepare-plan.outputs.already_empty == 'true') }}
     permissions:
       contents: read
       id-token: write

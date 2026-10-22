@@ -375,6 +375,48 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(module.ReconciliationError):
                 cleanup.prove_legacy_unused(root, self.github(api), "development")
 
+    def test_destroy_cleanup_retries_only_after_verified_present_empty_state(self):
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/terraform-environment-destroy.yml").read_text()
+        )
+        cleanup_job = workflow["jobs"]["cleanup-generated-targets"]
+        self.assertEqual(cleanup_job["needs"], ["prepare-plan", "destroy-apply"])
+        self.assertEqual(
+            cleanup_job["if"],
+            "${{ !cancelled() && needs.prepare-plan.result == 'success' && (needs.destroy-apply.result == 'success' || needs.prepare-plan.outputs.already_empty == 'true') }}",
+        )
+        preparation = workflow["jobs"]["prepare-plan"]
+        proof = next(
+            step for step in preparation["steps"] if step.get("id") == "state-status"
+        )
+        self.assertIn('terraform -chdir="$TF_ROOT" state pull', proof["run"])
+        self.assertIn("state-status", proof["run"])
+        self.assertIn("if [[ \"$status\" == 'empty' ]]", proof["run"])
+        self.assertEqual(
+            preparation["outputs"]["already_empty"],
+            "${{ steps.state-status.outputs.already_empty }}",
+        )
+        self.assertEqual(
+            cleanup_job["with"]["confirmation"], "${{ inputs.confirmation }}"
+        )
+        self.assertIs(cleanup_job["with"]["destroy_confirmed"], True)
+        # Missing/malformed state fails preparation; nonempty failed/cancelled
+        # destroy cannot authorize cleanup. Successful empty-state retry can.
+        for preparation_result, destroy_result, empty, cancelled, expected in (
+            ("success", "skipped", True, False, True),
+            ("success", "success", False, False, True),
+            ("failure", "skipped", False, False, False),
+            ("success", "failure", False, False, False),
+            ("success", "cancelled", False, True, False),
+            ("success", "skipped", True, True, False),
+        ):
+            self.assertEqual(
+                not cancelled
+                and preparation_result == "success"
+                and (destroy_result == "success" or empty),
+                expected,
+            )
+
     def test_nested_lifecycle_lock_contract(self):
         def load(name):
             return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
