@@ -37,6 +37,7 @@ RESOURCE_TYPES = {"aws_iam_role", "aws_iam_role_policy", "aws_iam_policy", "aws_
                   "aws_s3_bucket_public_access_block", "aws_s3_bucket_ownership_controls", "aws_s3_bucket_policy",
                   "aws_s3_bucket_server_side_encryption_configuration", "aws_s3_bucket_versioning",
                   "aws_s3_bucket_lifecycle_configuration"}
+ADDRESS = r'[a-z0-9_]+\.[a-z0-9_]+(?:\[(?:[0-9]+|"[A-Za-z0-9_/.-]+")\])?'
 
 
 class Stop(RuntimeError):
@@ -175,9 +176,63 @@ def trusted_run():
     require(bool(runs) and max(item["id"] for item in runs) == run_id, "NEWER_RUN_FRESH_PLAN_REQUIRED")
 
 
+def source_declarations():
+    current, removed, moved = set(), set(), {}
+    for path in ROOT.glob("*.tf"):
+        # Preserve quoted strings while discarding HCL comments. Block matching
+        # tracks root depth so nested text cannot authorize a historical address.
+        text = re.sub(r'"(?:\\.|[^"\\])*"|/\*[\s\S]*?\*/|//[^\n]*|#[^\n]*',
+                      lambda match: match[0] if match[0].startswith('"') else "\n" * match[0].count("\n"),
+                      path.read_text(encoding="utf-8"))
+        current.update(f"{kind}.{name}" for kind, name in re.findall(
+            r'resource\s+"([a-z0-9_]+)"\s+"([a-z0-9_]+)"', text))
+        depth, previous, kind, begin = 0, "", "", 0
+        for token in re.finditer(r'"(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_-]*|[{}]', text):
+            value = token[0]
+            if value == "{":
+                if depth == 0:
+                    kind, begin = previous, token.end()
+                depth += 1
+            elif value == "}":
+                depth -= 1
+                if depth == 0 and kind in {"removed", "moved"}:
+                    body = text[begin:token.start()]
+                    sources = re.findall(r'(?m)^\s*from\s*=\s*(' + ADDRESS + r')\s*$', body)
+                    require(len(sources) == 1, "UNSUPPORTED_REFACTOR_SOURCE")
+                    source = sources[0]
+                    require(source.split(".", 1)[0] in RESOURCE_TYPES, "REFACTOR_OUTSIDE_BOOTSTRAP")
+                    if kind == "removed":
+                        removed.add(source)
+                    else:
+                        targets = re.findall(r'(?m)^\s*to\s*=\s*(' + ADDRESS + r')\s*$', body)
+                        require(len(targets) == 1 and targets[0].split(".", 1)[0] in RESOURCE_TYPES, "UNSUPPORTED_REFACTOR_TARGET")
+                        require(source not in moved, "DUPLICATE_REFACTOR_SOURCE")
+                        moved[source] = targets[0]
+            previous = value
+    return current, removed, moved
+
+
 def source_inventory():
-    return {(kind, name) for path in ROOT.glob("*.tf")
-            for kind, name in re.findall(r'resource\s+"([a-z0-9_]+)"\s+"([a-z0-9_]+)"', path.read_text())}
+    current, removed, moved = source_declarations()
+    return current | removed | set(moved)
+
+
+def address_matches(address, declaration):
+    return address == declaration or ("[" not in declaration and address.startswith(declaration + "["))
+
+
+def owned_address(address):
+    return bool(re.fullmatch(ADDRESS, address)) and any(address_matches(address, item) for item in source_inventory())
+
+
+def reviewed_move(previous, address):
+    require(isinstance(previous, str) and re.fullmatch(ADDRESS, previous), "INVALID_PREVIOUS_ADDRESS")
+    for source, target in source_declarations()[2].items():
+        if address_matches(previous, source):
+            suffix = previous[len(source):] if "[" not in source else ""
+            if address == target + suffix:
+                return True
+    return False
 
 
 def check_address(item):
@@ -185,7 +240,7 @@ def check_address(item):
     mode = item.get("mode")
     require(mode in {"managed", "data"}, "UNKNOWN_RESOURCE_MODE")
     if mode == "managed":
-        require(kind in RESOURCE_TYPES and (kind, name) in source_inventory(), "RESOURCE_OUTSIDE_BOOTSTRAP")
+        require(kind in RESOURCE_TYPES and owned_address(item.get("address", "")), "RESOURCE_OUTSIDE_BOOTSTRAP")
     else:
         require(kind in {"aws_iam_policy_document", "aws_iam_openid_connect_provider", "aws_caller_identity", "aws_partition"}, "DATA_OUTSIDE_BOOTSTRAP")
     prefix = "data." if mode == "data" else ""
@@ -204,12 +259,19 @@ def generation():
     require(state.get("version") == 4 and isinstance(state.get("lineage"), str) and bool(state["lineage"])
             and type(state.get("serial")) is int and state["serial"] >= 0
             and isinstance(state.get("resources"), list) and bool(state["resources"]), "EXISTING_STATE_REQUIRED")
-    inventory = source_inventory()
     for item in state["resources"]:
         require(not item.get("module"), "STATE_OUTSIDE_BOOTSTRAP")
         require(item.get("mode") in {"managed", "data"}, "UNKNOWN_STATE_MODE")
         if item.get("mode") == "managed":
-            require(item.get("type") in RESOURCE_TYPES and (item.get("type"), item.get("name")) in inventory, "STATE_OUTSIDE_BOOTSTRAP")
+            base = f"{item.get('type')}.{item.get('name')}"
+            require(item.get("type") in RESOURCE_TYPES, "STATE_OUTSIDE_BOOTSTRAP")
+            instances = item.get("instances", [])
+            require(isinstance(instances, list), "INVALID_STATE_INSTANCES")
+            for instance in instances or [{}]:
+                index = instance.get("index_key")
+                require(index is None or type(index) in {str, int}, "INVALID_STATE_INDEX")
+                address = base if index is None else base + "[" + json.dumps(index) + "]"
+                require(owned_address(address), "STATE_OUTSIDE_BOOTSTRAP")
     require(client.head_object(Bucket=bucket, Key=STATE_KEY).get("VersionId") == version, "STATE_CHANGED_RETRY")
     return {"lineage": state["lineage"], "serial": state["serial"], "version": version}, state
 
@@ -275,6 +337,7 @@ def classify(plan):
         if change.get("importing") is not None:
             raise Stop("IMPORT_NOT_AUTHORIZED")
         if item.get("previous_address"):
+            require(reviewed_move(item["previous_address"], address), "MOVE_NOT_DECLARED")
             counts["moves"] += 1
         is_drift = offset >= len(changes)
         if not is_drift and actions != ["no-op"]:

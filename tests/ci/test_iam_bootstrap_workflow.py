@@ -166,7 +166,8 @@ class ClassificationTests(unittest.TestCase):
             elif kind == "output":
                 plan["output_changes"] = {"configuration_reader_role_arns": {"actions": ["update"]}}
             else:
-                plan["resource_changes"][0]["previous_address"] = 'aws_iam_role.old["development"]'
+                plan["resource_changes"][0].update(address='aws_iam_policy.identity_app_role_boundary["development"]',
+                    type="aws_iam_policy", name="identity_app_role_boundary", previous_address="aws_iam_policy.identity_app_role_boundary")
             self.assertTrue(bootstrap.classify(plan)[0], kind)
 
     def test_unsupported_actions_and_imports_fail_closed(self):
@@ -225,6 +226,82 @@ class ClassificationTests(unittest.TestCase):
             plan["checks"] = [{"status": status}]
             with self.subTest(status=status), self.assertRaisesRegex(bootstrap.Stop, "PLAN_CHECK_NOT_PASSED"):
                 bootstrap.classify(plan)
+
+
+class ReviewedLifecycleTests(unittest.TestCase):
+    def test_actual_removed_policy_address_is_admitted_for_approved_delete(self):
+        address = "aws_iam_policy.identity_development_frontend"
+        self.assertIn(address, bootstrap.source_inventory())
+        plan = plan_fixture(["delete"])
+        item = plan["resource_changes"][0]
+        item.update(address=address, type="aws_iam_policy", name="identity_development_frontend")
+        plan["prior_state"]["values"]["root_module"]["resources"] = [{
+            key: item[key] for key in ("address", "type", "name", "mode")}]
+        changes, counts, _ = bootstrap.classify(plan)
+        self.assertTrue(changes)
+        self.assertEqual(counts["delete"], 1)
+
+    def test_actual_removed_policy_in_existing_state_passes_structural_ownership(self):
+        state = {"version": 4, "lineage": "fixture-existing-lineage", "serial": 8,
+                 "resources": [{"mode": "managed", "type": "aws_iam_policy", "name": "identity_development_frontend",
+                                "instances": [{"attributes": {}}]}]}
+        client = Mock()
+        client.head_object.return_value = {"VersionId": "immutable-state-version"}
+        client.get_object.return_value = {"Body": io.BytesIO(json.dumps(state).encode())}
+        with patch.object(bootstrap.os, "environ", configuration_fixture()), patch.object(bootstrap, "aws", return_value=client):
+            self.assertEqual(bootstrap.generation()[0]["serial"], 8)
+
+    def test_literal_moved_old_instance_is_narrowly_admitted_and_requires_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.tf").write_text('''resource "aws_iam_role" "renamed" {}
+moved {
+  from = aws_iam_role.previous["development"]
+  to = aws_iam_role.renamed["development"]
+}
+''', encoding="utf-8")
+            with patch.object(bootstrap, "ROOT", root):
+                self.assertTrue(bootstrap.owned_address('aws_iam_role.previous["development"]'))
+                self.assertFalse(bootstrap.owned_address('aws_iam_role.previous["production"]'))
+                self.assertFalse(bootstrap.owned_address("aws_iam_role.previous"))
+                self.assertFalse(bootstrap.owned_address("aws_iam_role.unrelated"))
+                plan = plan_fixture(["no-op"])
+                plan["resource_changes"][0].update(address='aws_iam_role.renamed["development"]', name="renamed",
+                    previous_address='aws_iam_role.previous["development"]')
+                self.assertEqual(bootstrap.classify(plan)[1]["moves"], 1)
+                plan["resource_changes"][0]["previous_address"] = 'aws_iam_role.previous["production"]'
+                with self.assertRaisesRegex(bootstrap.Stop, "MOVE_NOT_DECLARED"):
+                    bootstrap.classify(plan)
+
+    def test_undeclared_previous_address_and_module_refactor_are_rejected(self):
+        plan = plan_fixture(["no-op"])
+        plan["resource_changes"][0]["previous_address"] = "aws_iam_role.unrelated"
+        with self.assertRaisesRegex(bootstrap.Stop, "MOVE_NOT_DECLARED"):
+            bootstrap.classify(plan)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.tf").write_text('''removed {
+  from = module.unrelated.aws_iam_role.old
+  lifecycle { destroy = true }
+}
+''', encoding="utf-8")
+            with patch.object(bootstrap, "ROOT", root), self.assertRaisesRegex(bootstrap.Stop, "UNSUPPORTED_REFACTOR_SOURCE"):
+                bootstrap.source_inventory()
+
+    def test_commented_refactors_do_not_authorize_unrelated_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "main.tf").write_text('''# removed {
+# from = aws_iam_role.unrelated
+# }
+/* moved {
+  from = aws_iam_role.also_unrelated
+  to = aws_iam_role.new
+} */
+resource "aws_iam_role" "reviewed" {}
+''', encoding="utf-8")
+            with patch.object(bootstrap, "ROOT", root):
+                self.assertEqual(bootstrap.source_inventory(), {"aws_iam_role.reviewed"})
 
 
 class PlanExecutionTests(unittest.TestCase):
