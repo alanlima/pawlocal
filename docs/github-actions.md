@@ -308,6 +308,8 @@ After the existing environment role receives fresh credentials, the workflow wri
 
 The delegated hop is role chaining and cannot exceed one hour. Every Terraform plan or apply job has the same one-hour ceiling and starts with fresh base credentials. An expired, interrupted, or failed operation must generate a new saved plan and repeat review; never retry or apply stale plan material. Bootstrap outputs `cognito_terraform_role_arns` and `cognito_pre_sign_up_role_arns` are post-apply verification evidence only and are not copied into workflow configuration.
 
+The Cognito Lambda ZIP is not created by the plan runner or transferred beside the saved plan. Terraform records the function's `source_content` in the reviewed plan for the pinned archive provider's apply-time resource. The fresh apply runner checks the same-commit source against those planned bytes, then creates the exact ZIP under its own `.terraform` directory before the Lambda resource consumes it. CI exercises this boundary with different plan and apply workspaces, verifies the produced archive content and checksum, and separately proves that changed apply-workspace source is rejected as inconsistent with the saved plan. An absent or mismatched archive also fails explicit verification.
+
 ### Development and production release environments
 
 The matching release Environment provides:

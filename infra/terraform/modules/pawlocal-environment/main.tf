@@ -432,10 +432,12 @@ resource "aws_route53_record" "api" {
   depends_on = [aws_lightsail_container_service_deployment_version.api]
 }
 
-data "archive_file" "cognito_pre_sign_up" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/cognito-pre-signup/index.mjs"
-  output_path = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"
+resource "archive_file" "cognito_pre_sign_up" {
+  type                    = "zip"
+  source_content          = file("${path.module}/lambda/cognito-pre-signup/index.mjs")
+  source_content_filename = "index.mjs"
+  output_file_mode        = "0666"
+  output_path             = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"
 }
 
 resource "aws_cloudwatch_log_group" "cognito_pre_sign_up" {
@@ -450,8 +452,8 @@ resource "aws_lambda_function" "cognito_pre_sign_up" {
   function_name    = local.cognito_pre_sign_up_name
   description      = "Confirm PawLocal ${var.environment} self-service Cognito sign-ups."
   role             = local.cognito_pre_sign_up_role_arn
-  filename         = data.archive_file.cognito_pre_sign_up.output_path
-  source_code_hash = data.archive_file.cognito_pre_sign_up.output_base64sha256
+  filename         = archive_file.cognito_pre_sign_up.output_path
+  source_code_hash = archive_file.cognito_pre_sign_up.output_base64sha256
   handler          = "index.handler"
   runtime          = "nodejs22.x"
   timeout          = 3

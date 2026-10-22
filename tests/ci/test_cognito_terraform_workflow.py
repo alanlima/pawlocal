@@ -16,6 +16,7 @@ CONFIGURE_SCRIPT = ROOT / ".github/scripts/configure-cognito-terraform-profile.s
 CLEANUP_SCRIPT = ROOT / ".github/scripts/cleanup-cognito-terraform-profile.sh"
 ENVIRONMENT_WORKFLOW = ROOT / ".github/workflows/terraform-environment.yml"
 DESTROY_WORKFLOW = ROOT / ".github/workflows/terraform-environment-destroy.yml"
+TERRAFORM_CI_WORKFLOW = ROOT / ".github/workflows/terraform-ci.yml"
 
 
 class CognitoTerraformProfileTests(unittest.TestCase):
@@ -254,9 +255,63 @@ class CognitoTerraformWorkflowTests(unittest.TestCase):
         pool_end = module.index('resource "aws_lambda_permission"', pool_start)
         self.assertNotIn("provider", module[pool_start:pool_end])
 
-        self.assertIn('source_file = "${path.module}/lambda/cognito-pre-signup/index.mjs"', module)
-        self.assertIn('output_path = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"', module)
-        self.assertIn("source_code_hash = data.archive_file.cognito_pre_sign_up.output_base64sha256", module)
+        self.assertIn('resource "archive_file" "cognito_pre_sign_up"', module)
+        self.assertNotIn('data "archive_file" "cognito_pre_sign_up"', module)
+        self.assertIn(
+            'source_content          = file("${path.module}/lambda/cognito-pre-signup/index.mjs")',
+            module,
+        )
+        self.assertIn('source_content_filename = "index.mjs"', module)
+        self.assertIn('output_file_mode        = "0666"', module)
+        self.assertIn(
+            'output_path             = "${path.root}/.terraform/${local.cognito_pre_sign_up_name}.zip"',
+            module,
+        )
+        self.assertIn("filename         = archive_file.cognito_pre_sign_up.output_path", module)
+        self.assertIn("source_code_hash = archive_file.cognito_pre_sign_up.output_base64sha256", module)
+
+        versions = (
+            ROOT / "infra/terraform/modules/pawlocal-environment/versions.tf"
+        ).read_text(encoding="utf-8")
+        self.assertIn('version = "= 2.8.1"', versions)
+        for environment in ("development", "production"):
+            lock = (
+                ROOT
+                / f"infra/terraform/environments/{environment}/.terraform.lock.hcl"
+            ).read_text(encoding="utf-8")
+            archive_lock = lock.split(
+                'provider "registry.terraform.io/hashicorp/archive"', 1
+            )[1].split("}", 1)[0]
+            self.assertIn('version     = "2.8.1"', archive_lock)
+
+    def test_ci_runs_the_cross_workspace_saved_plan_archive_contract(self) -> None:
+        workflow = self._load(TERRAFORM_CI_WORKFLOW)
+        steps = workflow["jobs"]["terraform"]["steps"]
+        archive_step = next(
+            step
+            for step in steps
+            if step.get("name") == "Test Cognito archive across saved-plan runners"
+        )
+        self.assertEqual(
+            archive_step["if"], "matrix.root == 'modules/pawlocal-environment'"
+        )
+        self.assertEqual(
+            archive_step["env"]["PAWLOCAL_RUN_TERRAFORM_ARCHIVE_INTEGRATION"],
+            "1",
+        )
+        self.assertEqual(
+            archive_step["run"],
+            "python ../../../../tests/ci/test_cognito_archive_saved_plan.py -v",
+        )
+
+        source = TERRAFORM_CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(source.count('"tests/ci/test_cognito_archive_saved_plan.py"'), 2)
+        self.assertEqual(
+            source.count(
+                '".github/scripts/verify-cognito-archive-provider-contract.py"'
+            ),
+            2,
+        )
 
     def test_environment_roots_pass_only_the_four_approved_policy_values(self) -> None:
         expected = {

@@ -113,6 +113,10 @@ run "development_uses_relaxed_password_policy_and_default_role" {
     condition = (
       local.default_cognito_pre_sign_up_role_arn == "arn:aws:iam::111111111111:role/pawlocal-development-cognito-pre-signup" &&
       local.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn &&
+      archive_file.cognito_pre_sign_up.source_content == file("${path.module}/lambda/cognito-pre-signup/index.mjs") &&
+      archive_file.cognito_pre_sign_up.source_content_filename == "index.mjs" &&
+      archive_file.cognito_pre_sign_up.output_file_mode == "0666" &&
+      archive_file.cognito_pre_sign_up.output_path == "${path.root}/.terraform/pawlocal-development-cognito-pre-signup.zip" &&
       aws_lambda_function.cognito_pre_sign_up.role == local.default_cognito_pre_sign_up_role_arn &&
       aws_cloudwatch_log_group.cognito_pre_sign_up.name == "/aws/lambda/pawlocal-development-cognito-pre-signup" &&
       aws_cloudwatch_log_group.cognito_pre_sign_up.retention_in_days == 30 &&
