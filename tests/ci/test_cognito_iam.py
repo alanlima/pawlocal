@@ -29,9 +29,21 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn("LogGroup API ARN guidance", design)
         self.assertIn("`ListVersionsByFunction`", design)
         self.assertIn("awslambda-ListVersionsByFunction", design)
+        self.assertIn("Where a state-backed plan is available before merge", design)
+        self.assertIn("backend-disabled plan was not run", design)
+        self.assertIn(
+            "no bootstrap apply may occur until a fresh state-backed saved plan",
+            design,
+        )
 
     def test_bootstrap_scope_contains_no_application_resources_or_action_wildcards(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
+        variables = (BOOTSTRAP / "variables.tf").read_text(encoding="utf-8")
+        provider = (BOOTSTRAP / "versions.tf").read_text(encoding="utf-8")
+        terraform_sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in BOOTSTRAP.glob("*.tf")
+        )
 
         self.assertNotRegex(source, r'resource\s+"aws_(?:lambda|cloudwatch_log_group|cognito)')
         self.assertNotIn('"lambda:*"', source)
@@ -40,6 +52,26 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertNotIn('"cognito-idp:', source)
         self.assertNotIn('"s3:', source)
         self.assertEqual(1, source.count('"lambda:ListVersionsByFunction"'))
+        self.assertNotRegex(source, r'project\s*=\s*"pawlocal"')
+        self.assertNotRegex(source, r'values\s*=\s*\["pawlocal"\]')
+        self.assertRegex(
+            variables,
+            r'variable\s+"project_name"\s*\{[\s\S]*?default\s*=\s*"pawlocal"',
+        )
+        self.assertRegex(
+            provider,
+            r'default_tags\s*\{\s*tags\s*=\s*\{\s*project\s*=\s*var\.project_name\s*managedby\s*=\s*"terraform"',
+        )
+        self.assertNotRegex(terraform_sources, r'values\s*=\s*\["pawlocal"\]')
+        for path in BOOTSTRAP.glob("*.tf"):
+            if path.name == "versions.tf":
+                continue
+            module_source = path.read_text(encoding="utf-8")
+            self.assertNotRegex(
+                module_source,
+                r'(?m)^\s+tags\s*=\s*\{[^}]*\b(?:project|managedby)\s*=',
+                msg=f"{path.name} must inherit shared resource tags from provider default_tags",
+            )
 
     def test_describe_log_groups_exception_is_dedicated_and_region_limited(self) -> None:
         source = (BOOTSTRAP / "cognito_permissions.tf").read_text(encoding="utf-8")
@@ -66,6 +98,8 @@ class CognitoDelegatedIamTests(unittest.TestCase):
         self.assertIn('"logs:StartLiveTail"', test_source)
         self.assertIn('action == "iam:PassRole"', test_source)
         self.assertIn('contains(flatten([statement.Action]), "lambda:ListVersionsByFunction")', test_source)
+        self.assertIn('project_name                = "pawhub"', test_source)
+        self.assertIn('["aws:RequestTag/project", "aws:ResourceTag/project"]', test_source)
         self.assertIn("length(policy.minified_json) < local.iam_managed_policy_max_bytes", test_source)
 
 

@@ -46,9 +46,7 @@ resource "aws_iam_role" "legacy_terraform" {
   description          = "Retired PawLocal combined-state ${each.key} role; retained read-only during Issue #135."
   max_session_duration = 3600
   tags = {
-    project   = "pawlocal"
-    managedby = "terraform"
-    purpose   = "retired-${each.key}"
+    purpose = "retired-${each.key}"
   }
 }
 

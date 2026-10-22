@@ -1,7 +1,7 @@
 locals {
   environment_dsql_tags = {
     for environment in keys(local.environments) : environment => {
-      project     = "pawlocal"
+      project     = var.project_name
       environment = environment
       managedby   = "terraform"
       component   = "fullstack-mvp"
@@ -121,7 +121,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -182,7 +182,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -202,7 +202,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -212,7 +212,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -228,7 +228,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -265,7 +265,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -289,7 +289,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -305,7 +305,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -315,7 +315,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -337,7 +337,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -382,9 +382,7 @@ resource "aws_iam_policy" "environment_apply_boundary" {
   description = "Maximum permissions for the PawLocal ${each.key} Terraform apply role."
   policy      = data.aws_iam_policy_document.environment_apply_boundary[each.key].json
   tags = {
-    project     = "pawlocal"
     environment = each.key
-    managedby   = "terraform"
     purpose     = "permissions-boundary"
   }
 

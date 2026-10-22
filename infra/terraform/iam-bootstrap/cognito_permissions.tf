@@ -36,7 +36,7 @@ locals {
   }
 
   cognito_common_tags = {
-    project    = "pawlocal"
+    project    = var.project_name
     managedby  = "terraform"
     component  = "fullstack-mvp"
     workload   = "application"
@@ -152,7 +152,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -169,7 +169,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -199,7 +199,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -273,7 +273,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -290,7 +290,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -320,7 +320,7 @@ data "aws_iam_policy_document" "cognito_apply_permissions" {
     condition {
       test     = "StringEquals"
       variable = "aws:ResourceTag/project"
-      values   = ["pawlocal"]
+      values   = [var.project_name]
     }
     condition {
       test     = "StringEquals"
@@ -366,9 +366,7 @@ resource "aws_iam_policy" "cognito_apply_boundary" {
   description = "Maximum permissions for delegated PawLocal ${each.key} Cognito Terraform apply."
   policy      = data.aws_iam_policy_document.cognito_apply_permissions[each.key].json
   tags = {
-    project     = "pawlocal"
     environment = each.key
-    managedby   = "terraform"
     purpose     = "cognito-terraform-apply-boundary"
   }
 
@@ -389,9 +387,7 @@ resource "aws_iam_role" "cognito_terraform" {
   permissions_boundary = each.value.purpose == "apply" ? aws_iam_policy.cognito_apply_boundary[each.value.environment].arn : null
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = each.value.environment
-    managedby   = "terraform"
     purpose     = "cognito-terraform-${each.value.purpose}"
   }
 
@@ -442,9 +438,7 @@ resource "aws_iam_role" "cognito_pre_sign_up" {
   assume_role_policy = data.aws_iam_policy_document.cognito_pre_sign_up_trust[each.key].json
   description        = "PawLocal ${each.key} Cognito pre sign-up Lambda execution role."
   tags = {
-    project     = "pawlocal"
     environment = each.key
-    managedby   = "terraform"
     purpose     = "cognito-pre-signup"
   }
 }

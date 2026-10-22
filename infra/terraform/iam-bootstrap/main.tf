@@ -15,9 +15,7 @@ resource "aws_s3_bucket" "plan_transfer" {
   bucket        = local.plan_transfer_bucket_name
   force_destroy = false
   tags = {
-    project   = "pawlocal"
-    managedby = "terraform"
-    purpose   = "short-lived-terraform-plan-transfer"
+    purpose = "short-lived-terraform-plan-transfer"
   }
 }
 
@@ -139,10 +137,10 @@ locals {
     "route53:GetHostedZone", "route53:ListResourceRecordSets"
   ]
   app_resource_tags = {
-    "aws:ResourceTag/project" = "pawlocal"
+    "aws:ResourceTag/project" = var.project_name
   }
   env_tag = {
-    "aws:ResourceTag/project" = "pawlocal"
+    "aws:ResourceTag/project" = var.project_name
   }
 }
 
@@ -182,9 +180,7 @@ resource "aws_iam_role" "github_terraform" {
   permissions_boundary = each.value.purpose == "apply" ? aws_iam_policy.environment_apply_boundary[each.value.environment].arn : null
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = each.value.environment
-    managedby   = "terraform"
     purpose     = each.value.purpose
   }
 }

@@ -19,6 +19,13 @@ provider "aws" {
   skip_metadata_api_check     = true
   skip_region_validation      = true
   skip_requesting_account_id  = true
+
+  default_tags {
+    tags = {
+      project   = "pawhub"
+      managedby = "terraform"
+    }
+  }
 }
 
 run "delegated_cognito_roles_are_exact_and_environment_isolated" {
@@ -36,6 +43,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
     github_owner_id             = "1"
     github_repository_id        = "2"
     manage_github_oidc_provider = true
+    project_name                = "pawhub"
     route53_zone_id             = "ZFIXTURE000000"
     domain_name                 = "fixture.example"
   }
@@ -56,7 +64,10 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       aws_iam_role.cognito_terraform[key].name == "pawlocal-${definition.environment}-cognito-terraform-${definition.purpose}" &&
       aws_iam_role.cognito_terraform[key].max_session_duration == 3600 &&
       aws_iam_role.cognito_terraform[key].tags.environment == definition.environment &&
-      aws_iam_role.cognito_terraform[key].tags.project == "pawlocal"
+      aws_iam_role.cognito_terraform[key].tags.purpose == "cognito-terraform-${definition.purpose}" &&
+      toset(keys(aws_iam_role.cognito_terraform[key].tags)) == toset(["environment", "purpose"]) &&
+      aws_iam_role.cognito_terraform[key].tags_all.project == "pawhub" &&
+      aws_iam_role.cognito_terraform[key].tags_all.managedby == "terraform"
     ])
     error_message = "Delegated role names, one-hour sessions, and environment tags must stay deterministic."
   }
@@ -88,7 +99,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
   assert {
     condition = (
       local.cognito_common_tags == {
-        project    = "pawlocal"
+        project    = "pawhub"
         managedby  = "terraform"
         component  = "fullstack-mvp"
         workload   = "application"
@@ -102,6 +113,92 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
       ])
     )
     error_message = "Each Cognito application tag map must contain only the common tags plus its matching environment."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment in keys(local.environments) :
+      aws_iam_policy.cognito_apply_boundary[environment].tags.environment == environment &&
+      aws_iam_policy.cognito_apply_boundary[environment].tags.purpose == "cognito-terraform-apply-boundary" &&
+      toset(keys(aws_iam_policy.cognito_apply_boundary[environment].tags)) == toset(["environment", "purpose"]) &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags.environment == environment &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags.purpose == "cognito-pre-signup" &&
+      toset(keys(aws_iam_role.cognito_pre_sign_up[environment].tags)) == toset(["environment", "purpose"]) &&
+      aws_iam_policy.cognito_apply_boundary[environment].tags_all.project == "pawhub" &&
+      aws_iam_policy.cognito_apply_boundary[environment].tags_all.managedby == "terraform" &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags_all.project == "pawhub" &&
+      aws_iam_role.cognito_pre_sign_up[environment].tags_all.managedby == "terraform"
+    ])
+    error_message = "Provider defaults must supply shared tags while Cognito IAM resources declare only environment and purpose additions."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      length(flatten([
+        for statement in jsondecode(policy.minified_json).Statement : [
+          for operator, conditions in try(statement.Condition, {}) : [
+            for variable, values in conditions : flatten([values])
+            if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+          ]
+        ]
+        ])) == 11 && toset(flatten([
+        for statement in jsondecode(policy.minified_json).Statement : [
+          for operator, conditions in try(statement.Condition, {}) : [
+            for variable, values in conditions : flatten([values])
+            if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+          ]
+        ]
+      ])) == toset(["pawhub"])
+    ])
+    error_message = "A non-default project_name must propagate to every request-tag and resource-tag project condition."
+  }
+
+  assert {
+    condition = (
+      local.app_resource_tags["aws:ResourceTag/project"] == "pawhub" &&
+      local.env_tag["aws:ResourceTag/project"] == "pawhub" &&
+      alltrue([
+        for tags in local.environment_dsql_tags : tags.project == "pawhub"
+      ]) &&
+      alltrue([
+        for policy in data.aws_iam_policy_document.environment_apply_boundary :
+        length(flatten([
+          for statement in jsondecode(policy.minified_json).Statement : [
+            for operator, conditions in try(statement.Condition, {}) : [
+              for variable, values in conditions : flatten([values])
+              if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+            ]
+          ]
+          ])) == 11 && toset(flatten([
+          for statement in jsondecode(policy.minified_json).Statement : [
+            for operator, conditions in try(statement.Condition, {}) : [
+              for variable, values in conditions : flatten([values])
+              if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+            ]
+          ]
+        ])) == toset(["pawhub"])
+      ]) &&
+      alltrue([
+        for policy in data.aws_iam_policy_document.identity_app_role_boundary :
+        length(flatten([
+          for statement in jsondecode(policy.minified_json).Statement : [
+            for operator, conditions in try(statement.Condition, {}) : [
+              for variable, values in conditions : flatten([values])
+              if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+            ]
+          ]
+          ])) == 2 && toset(flatten([
+          for statement in jsondecode(policy.minified_json).Statement : [
+            for operator, conditions in try(statement.Condition, {}) : [
+              for variable, values in conditions : flatten([values])
+              if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+            ]
+          ]
+        ])) == toset(["pawhub"])
+      ])
+    )
+    error_message = "A non-default project_name must propagate through every bootstrap application project-tag local and policy condition."
   }
 
   assert {
