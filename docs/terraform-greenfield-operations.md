@@ -2,6 +2,14 @@
 
 For the purpose, triggers, inputs, and relationships of every workflow, start with the [GitHub Actions workflow reference](github-actions.md). This guide provides the deeper Terraform state, permission, and operator procedures behind those workflows.
 
+## Parameter Store delivery amendment (#203)
+
+The [configuration management contract](configuration-management.md) and [inventory](configuration-inventory.md) define the approved permanent replacement for the manual generated-variable handoff below. #204 establishes specifications only; #205 supplies callable reconciliation/IAM foundations, and #206 integrates Terraform publication and lifecycle calls. Until those tasks are verified, the existing manual instructions still describe executable behavior.
+
+Bootstrap owns generated IAM/account/plan-transfer configuration Strings; matching application states own generated application Strings. Inventory existing keys and ownership read-only before rollout; an unknown/colliding key blocks that environment rather than being overwritten/imported. Keep secret payloads out of Terraform resources/data/state/outputs. Foundation's post-apply audit may legitimately lack runtime values and cannot authorize publication. Before Converge/Release plans, enforce only required inputs consumed at that phase; after successful apply enforce all required publication values. Bootstrap runtime trust remains a separate reviewed handoff. Reader ARN initial setup is explicit; future automatic publication is #191. Nothing here waives exact saved-plan integrity/review, protected apply, development-first production eligibility or billable provisioning approvals.
+
+Reconciliation changes GitHub configuration only after matching protected approval. Missing state/source/mapping does not authorize deletion. A confirmed reviewed destroy may clear only exact affected generated targets/dependent runtime variables; reapply must republish/reconcile them before publication. Legacy release-only cleanup is limited to the inventory after consumer proof, never same-named plan/apply settings or `development-seed`. See the contract for rotation, partial-write retry and served Cognito rebuild/redirect verification.
+
 ## Status and safety boundary
 
 The configuration, workflows, and validation described here do not prove that bootstrap or application infrastructure was applied. The latest read-only inventory found an empty former application state, no PawLocal application resources, a populated bootstrap state that remains authoritative, and one verified development publisher role eligible for adoption. An unrelated account-level personal workload was verified out of scope and must never be imported, changed, or used as PawLocal evidence.

@@ -2,6 +2,10 @@
 
 ## Current work
 
+- **Task (#204):** Establish the Parameter Store naming/mapping, source/destination inventory, authentication setup, audit/enforce, recovery and cleanup specification before #205/#206 implementation.
+- **AI assistance:** Platform engineer inspected actual workflow/frontend/Terraform consumers and credential-name metadata; orchestration and independent review resolve permission and job-boundary details. No token values were retrieved or copied.
+- **Verification boundary:** Documentation checks and independent review are recorded in the PR. This specification changes no workflow, mapping, Terraform resource or live configuration and makes no deployment/readiness claim.
+
 - **Task:** Establish the documentation-first baseline for Issue #135 before Terraform or workflow implementation.
 - **AI assistance:** Reconciled project instructions, architecture, decisions, implementation plan, testing guidance, and historical runbooks with the approved greenfield bootstrap/development/production ownership model. A separate planning reviewer identified evidence and isolation conflicts that were incorporated into the documentation.
 - **Human review required:** The documentation records approved boundaries only. It does not define final Terraform paths, state keys, workflows, GitHub configuration, or operator commands, and it does not verify the partial teardown's live AWS/state result. The Issue #135 implementation and every apply/deployment gate still require review.

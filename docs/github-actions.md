@@ -4,6 +4,10 @@ This is the central operator and contributor reference for PawLocal's GitHub Act
 
 The workflow files remain authoritative. The synchronization test in `tests/ci/test_github_actions_reference.py` fails when a workflow, manual-dispatch input, reusable-call input, or protected configuration reference is added, removed, or renamed without updating this document. Reviewers must still verify that the purpose, sequence, accepted values, and parameter instructions remain accurate when workflow behavior changes.
 
+## Configuration reconciliation delivery contract
+
+[#203](https://github.com/alanlima/pawlocal/issues/203) introduces the [configuration management specification](configuration-management.md) and [source/destination inventory](configuration-inventory.md). #204 is documentation only: it does not add a workflow or change the current manual handoff. #205 then adds on-demand/reusable reconciliation and reader roles, with a protected apply-Environment mutation job and repository-scoped GitHub credential. #206 adds Terraform publication and pipeline calls: Foundation audit, Converge/Release selected-input preflight enforce, then successful post-apply enforce before dependent frontend publication. Enforce prevalidates all selected sources before writes; failed apply/reconciliation/cancellation blocks publication. Verified public build values must come directly from the same reconciliation execution, avoiding stale job vars and old served bundles. Preserve saved-plan/review and production promotion controls. Detailed setup, feature-branch CI-only testing, concurrency, secret boundaries, recovery and cleanup are defined by the linked specification; no reconciliation-specific fingerprints or state-evidence protocol is required.
+
 ## Workflow map
 
 ```mermaid
