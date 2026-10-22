@@ -198,16 +198,16 @@ def main(argv=None):
             summary=summary,
         )
         summary.succeeded()
-    except Exception:  # noqa: BLE001 - no credential/response payloads
+    except Exception as error:  # noqa: BLE001 - keep standard operational errors
         print(
-            "Explicit configuration cleanup failed; inspect targets and permissions privately",
+            f"Explicit configuration cleanup failed: {type(error).__name__}: {error}",
             file=sys.stderr,
         )
         status = 1
     try:
         summary.write()
-    except Exception:  # noqa: BLE001 - fixed report failure, preserve execution failure
-        print("Cannot write configuration summary.", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001 - preserve execution failure
+        print(f"Cannot write configuration summary: {error}", file=sys.stderr)
         status = 1
     return status
 

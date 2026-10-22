@@ -280,11 +280,7 @@ jobs:
             :
           else
             status=$?
-            if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" == 'true' ]]; then
-              echo 'Terraform initialization failed after live raw diagnostics were printed above.' >&2
-            else
-              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
-            fi
+            echo 'Terraform initialization failed; see the operation output above.' >&2
             exit "$status"
           fi
 
@@ -292,17 +288,18 @@ jobs:
         shell: bash
         run: |
           python .github/scripts/verify-terraform-source-checkout.py
-          terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
-            -replace='module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]' \
-            -replace='module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]' \
-            > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
-              python .github/scripts/terraform-plan-diagnostic.py \
-                --phase plan "$RUNNER_TEMP/terraform-plan.log" >&2
-              exit 1
-            }
-          terraform -chdir="$TF_ROOT" show -json tfplan > "$RUNNER_TEMP/terraform-plan.json" \
-            2> "$RUNNER_TEMP/terraform-show.log" || {
-              echo 'Saved plan could not be safely rendered; raw output was withheld.' >&2
+          if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-plan.log" -- \
+            terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
+              -replace='module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]' \
+              -replace='module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]'; then
+            :
+          else
+            status=$?
+            echo 'Terraform planning failed; see the operation output above.' >&2
+            exit "$status"
+          fi
+          terraform -chdir="$TF_ROOT" show -json tfplan > "$RUNNER_TEMP/terraform-plan.json" || {
+              echo 'Saved plan JSON could not be rendered; see the Terraform error above.' >&2
               exit 1
             }
 
@@ -506,11 +503,7 @@ jobs:
             :
           else
             status=$?
-            if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" == 'true' ]]; then
-              echo 'Terraform initialization failed after live raw diagnostics were printed above.' >&2
-            else
-              echo 'Terraform initialization failed; raw provider output was withheld.' >&2
-            fi
+            echo 'Terraform initialization failed; see the operation output above.' >&2
             exit "$status"
           fi
 
@@ -528,8 +521,7 @@ jobs:
             :
           else
             status=$?
-            python .github/scripts/terraform-plan-diagnostic.py \
-              --phase apply "$RUNNER_TEMP/terraform-apply.log" >&2
+            echo 'Terraform apply failed; see the operation output above.' >&2
             exit "$status"
           fi
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"

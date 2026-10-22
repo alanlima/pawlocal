@@ -511,6 +511,8 @@ class IntegrationTests(unittest.TestCase):
         ):
             with self.assertRaises(module.ReconciliationError):
                 collision.check(plan, client, allowed)
+        with self.assertRaisesRegex(module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"):
+            collision.check(plan, FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}), {key})
         create["change"]["importing"] = {"id": key}
         with self.assertRaises(module.ReconciliationError):
             collision.check(plan, FakeSSM(), {key})

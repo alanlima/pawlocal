@@ -169,11 +169,7 @@ def main() -> int:
         TypeError,
         ValueError,
     ) as exc:
-        message = (
-            str(exc)
-            if isinstance(exc, (TypeError, ValueError))
-            else f"HTTP request failed ({type(exc).__name__})"
-        )
+        message = f"{type(exc).__name__}: {exc}"
         print(f"Seeded place smoke check failed: {message}", file=sys.stderr)
         return 1
 

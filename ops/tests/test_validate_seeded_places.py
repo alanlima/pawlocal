@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -164,3 +165,22 @@ def test_main_refuses_non_development_health_response(monkeypatch, tmp_path):
     )
 
     assert validator.main() == 1
+
+
+@pytest.mark.parametrize("failure,expected", [
+    (HTTPError("https://api.example.test/health", 503, "Service Unavailable", {}, None),
+     "HTTPError: HTTP Error 503: Service Unavailable"),
+    (URLError("connection refused"), "URLError: <urlopen error connection refused>"),
+])
+def test_main_retains_http_status_and_transport_reason(monkeypatch, tmp_path, capsys, failure, expected):
+    catalog = tmp_path / "places.json"
+    catalog.write_text(json.dumps([{"id": "place-1", "name": "Orleigh Park"}]), encoding="utf-8")
+
+    def fail(_url):
+        raise failure
+
+    monkeypatch.setattr(validator, "get_json", fail)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "https://api.example.test/health", str(catalog), str(tmp_path / "evidence.json")])
+    assert validator.main() == 1
+    assert expected in capsys.readouterr().err
+    assert not (tmp_path / "evidence.json").exists()

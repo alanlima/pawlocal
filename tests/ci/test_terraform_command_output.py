@@ -24,9 +24,9 @@ def load_helper():
 
 
 class TerraformCommandOutputTests(unittest.TestCase):
-    def test_disabled_or_absent_control_captures_output_and_preserves_exit_status(self) -> None:
+    def test_default_or_disabled_control_still_streams_output_and_preserves_exit_status(self) -> None:
         helper = load_helper()
-        for value in (None, "false", "TRUE"):
+        for value in (None, "false", "TRUE", "true"):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
                 log = Path(directory) / "terraform.log"
                 environment = os.environ.copy()
@@ -40,9 +40,11 @@ class TerraformCommandOutputTests(unittest.TestCase):
                 ) as run:
                     self.assertEqual(helper.run_command(log, ["terraform", "init"]), 17)
                 arguments, keywords = run.call_args
-                self.assertEqual(arguments[0], ["terraform", "init"])
-                self.assertIs(keywords["stderr"], subprocess.STDOUT)
-                self.assertIn("stdout", keywords)
+                self.assertEqual(arguments[0][:3], ["script", "--quiet", "--return"])
+                self.assertEqual(arguments[0][3], "--command=terraform init")
+                self.assertEqual(arguments[0][4], str(log))
+                self.assertNotIn("stderr", keywords)
+                self.assertNotIn("stdout", keywords)
                 self.assertEqual(keywords["check"], False)
 
     def test_enabled_control_streams_through_color_preserving_pseudo_terminal(self) -> None:
@@ -69,7 +71,7 @@ class TerraformCommandOutputTests(unittest.TestCase):
     def test_workflow_routes_both_inits_and_exact_plan_apply_through_helper(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         helper_call = "python .github/scripts/terraform-command-output.py --log"
-        self.assertEqual(workflow.count(helper_call), 3)
+        self.assertEqual(workflow.count(helper_call), 4)
 
         plan_init = workflow[workflow.index("      - name: Initialize the matching clean state") : workflow.index("      - name: Create saved plan")]
         apply = workflow[workflow.index("      - name: Initialize matching state and apply only the reviewed plan") :]
@@ -87,6 +89,24 @@ class TerraformCommandOutputTests(unittest.TestCase):
         self.assertIn('"${apply_command[@]}"', apply)
         self.assertIn('exit "$status"', plan_init)
         self.assertGreaterEqual(apply.count('exit "$status"'), 2)
+        plan = workflow[workflow.index("      - name: Create saved plan") : workflow.index("      - name: Reject existing keys")]
+        self.assertIn(helper_call, plan)
+        self.assertIn('--log "$RUNNER_TEMP/terraform-plan.log"', plan)
+        self.assertNotIn('> "$RUNNER_TEMP/terraform-plan.log" 2>&1', plan)
+        self.assertIn('exit "$status"', plan)
+        self.assertIn('show -json tfplan > "$RUNNER_TEMP/terraform-plan.json"', plan)
+        self.assertNotIn('2> "$RUNNER_TEMP/terraform-show.log"', plan)
+
+    def test_destroy_plans_stream_operational_output_but_keep_json_private(self) -> None:
+        workflow = (ROOT / ".github/workflows/terraform-environment-destroy.yml").read_text(encoding="utf-8")
+        helper = "python .github/scripts/terraform-command-output.py --log"
+        self.assertEqual(workflow.count(helper), 2)
+        for stem in ("terraform-destroy-prepare", "terraform-destroy"):
+            self.assertIn(f'--log "$RUNNER_TEMP/{stem}.log" --', workflow)
+            self.assertNotIn(f'> "$RUNNER_TEMP/{stem}.log" 2>&1', workflow)
+        self.assertIn('show -json destroy-prepare.tfplan > "$RUNNER_TEMP/destroy-prepare.json"', workflow)
+        self.assertIn('show -json destroy.tfplan > "$RUNNER_TEMP/destroy.json"', workflow)
+
 
 
 if __name__ == "__main__":
