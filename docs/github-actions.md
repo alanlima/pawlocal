@@ -6,7 +6,7 @@ The workflow files remain authoritative. The synchronization test in `tests/ci/t
 
 ## Configuration reconciliation delivery contract
 
-[#203](https://github.com/alanlima/pawlocal/issues/203) introduces the [configuration management specification](configuration-management.md) and [source/destination inventory](configuration-inventory.md). #204 is documentation only: it does not add a workflow or change the current manual handoff. #205 then adds on-demand/reusable reconciliation and reader roles, with a protected apply-Environment mutation job and repository-scoped GitHub credential. #206 adds Terraform publication and pipeline calls: Foundation audit, Converge/Release selected-input preflight enforce, then successful post-apply enforce before dependent frontend publication. Enforce prevalidates all selected sources before writes; failed apply/reconciliation/cancellation blocks publication. Verified public build values must come directly from the same reconciliation execution, avoiding stale job vars and old served bundles. Preserve saved-plan/review and production promotion controls. Detailed setup, feature-branch CI-only testing, concurrency, secret boundaries, recovery and cleanup are defined by the linked specification; no reconciliation-specific fingerprints or state-evidence protocol is required.
+[#203](https://github.com/alanlima/pawlocal/issues/203) delivers the [mapping contract](configuration-management.md) and [inventory](configuration-inventory.md). Foundation uses post-apply audit. Converge/Release use preflight enforce, then post-apply enforce before building/publishing from the same verified public snapshot. Failures block publication. Existing saved-plan review and production promotion gates remain unchanged. See the guide for setup, cleanup and recovery.
 
 ## Workflow map
 
@@ -55,7 +55,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | Workflow | Trigger | Purpose | Manual or reusable inputs |
 |---|---|---|---|
 | [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
-| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all reusable CI suites, or the opt-in protected development reconciliation smoke call. | `reconciliation_smoke` |
+| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all CI suites, or the protected development reconciliation smoke call. | `reconciliation_smoke` |
 | [`compose-ci.yml`](../.github/workflows/compose-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate, build, start, smoke-test, and tear down the local Compose stack. | None |
 | [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | Manual | Promote one development-verified commit and immutable image to production, publish the frontend, and verify the release. | `release_commit`, `backend_image` |
 | [`development-dsql-seed.yml`](../.github/workflows/development-dsql-seed.yml) | Manual from `main` | Seed the fixed development-only DSQL catalog and verify it through the development API. | None; uses protected secrets |
