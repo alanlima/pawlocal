@@ -72,9 +72,7 @@ resource "aws_iam_role" "identity_app" {
   permissions_boundary = aws_iam_policy.identity_app_role_boundary[each.key == "development_frontend" ? "development" : "production"].arn
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = each.key == "development_frontend" ? "development" : "production"
-    managedby   = "terraform"
     purpose     = "frontend-publish"
   }
 }
@@ -142,9 +140,7 @@ resource "aws_iam_role" "development_runtime" {
   permissions_boundary = aws_iam_policy.identity_app_role_boundary["development"].arn
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = "development"
-    managedby   = "terraform"
     purpose     = "dsql-runtime"
   }
 }
@@ -184,9 +180,7 @@ resource "aws_iam_role" "production_runtime" {
   permissions_boundary = aws_iam_policy.identity_app_role_boundary["production"].arn
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = "production"
-    managedby   = "terraform"
     purpose     = "dsql-runtime"
   }
 }
@@ -223,9 +217,7 @@ resource "aws_iam_role" "identity_terraform" {
   description          = "PawLocal Terraform ${each.value.purpose} role for the separate identity state."
   max_session_duration = 3600
   tags = {
-    project     = "pawlocal"
     environment = "shared"
-    managedby   = "terraform"
     purpose     = each.value.purpose
   }
 }

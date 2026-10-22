@@ -4,6 +4,17 @@ variable "aws_region" {
   default     = "ap-southeast-2"
 }
 
+variable "project_name" {
+  description = "Project tag value for bootstrap-owned resources and their tag-based permission conditions. Deterministic pawlocal-* resource names remain fixed by DEC-009."
+  type        = string
+  default     = "pawlocal"
+
+  validation {
+    condition     = var.project_name == trimspace(var.project_name) && length(var.project_name) >= 1 && length(var.project_name) <= 8 && can(regex("^[A-Za-z0-9._-]+$", var.project_name))
+    error_message = "project_name must contain 1 through 8 ASCII letters, digits, periods, underscores, or hyphens so rendered IAM policies remain within their enforced size budgets."
+  }
+}
+
 variable "terraform_state_bucket_name" {
   description = "Existing versioned, encrypted S3 bucket used by all PawLocal Terraform states."
   type        = string

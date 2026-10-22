@@ -21,7 +21,7 @@ provider "aws" {
   region = var.aws_region
   default_tags {
     tags = {
-      project     = "pawlocal"
+      project     = var.project_name
       environment = "production"
       managedby   = "terraform"
     }

@@ -19,7 +19,7 @@ locals {
   frontend_hostname = "${local.frontend_label}.${trimsuffix(var.root_domain, ".")}"
   api_hostname      = "${local.api_label}.${trimsuffix(var.root_domain, ".")}"
   common_tags = {
-    project     = "pawlocal"
+    project     = var.project_name
     environment = var.environment
     managedby   = "terraform"
     component   = "fullstack-mvp"

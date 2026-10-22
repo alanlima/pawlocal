@@ -3,6 +3,7 @@ module "pawlocal" {
 
   environment                 = "production"
   aws_region                  = var.aws_region
+  project_name                = var.project_name
   root_domain                 = var.root_domain
   route53_zone_id             = var.route53_zone_id
   cloudfront_certificate_arn  = var.cloudfront_certificate_arn

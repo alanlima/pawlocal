@@ -34,6 +34,7 @@ run "tagged_create_permissions_are_size_safe" {
   variables {
     environment                = "development"
     aws_region                 = "ap-southeast-2"
+    project_name               = "pawhub"
     root_domain                = "example.test"
     route53_zone_id            = "ZTEST"
     cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
@@ -100,7 +101,7 @@ run "tagged_create_permissions_are_size_safe" {
     condition = alltrue([
       for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
       !contains(keys(statement.Condition), "Null") &&
-      statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
+      statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
       statement.Condition.StringEquals["aws:ResourceTag/environment"] == "development"
       if contains(["TagOnlyNewEnvironmentResources", "CreateAndTagOnlyNewEnvironmentDSQLCluster"], statement.Sid)
     ])
@@ -108,12 +109,19 @@ run "tagged_create_permissions_are_size_safe" {
   }
 
   assert {
-    condition = alltrue([
+    condition = local.common_tags.project == "pawhub" && alltrue([
       for key, value in local.common_tags :
       strcontains(data.aws_iam_policy_document.application.minified_json, "aws:RequestTag/${key}") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, value)
-    ])
-    error_message = "Tagged creation must require every expected application tag value."
+      ]) && alltrue(flatten([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement : [
+          for operator, conditions in try(statement.Condition, {}) : [
+            for variable, values in conditions : toset(flatten([values])) == toset(["pawhub"])
+            if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
+          ]
+        ]
+    ]))
+    error_message = "A non-default project_name must propagate through common tags and every application policy project-tag condition."
   }
 
   assert {
@@ -244,11 +252,34 @@ run "production_resource_names_use_normalized_suffixes" {
 
   assert {
     condition = (
+      local.common_tags.project == "pawlocal" &&
       local.resource_names.cert == "pawlocal-production-api-cert" &&
       local.resource_names.container_service == "pawlocal-production-api" &&
       aws_lightsail_certificate.api.name == "pawlocal-production-api-cert" &&
       aws_lightsail_container_service.api.name == "pawlocal-production-api"
     )
-    error_message = "Production Lightsail names must use the same normalized cert and container-service suffixes."
+    error_message = "The default project tag must remain pawlocal while production resource names use the normalized suffixes."
   }
+}
+
+run "project_name_over_policy_budget_is_rejected" {
+  command = plan
+
+  providers = {
+    aws = aws.test
+  }
+
+  variables {
+    environment                = "development"
+    aws_region                 = "ap-southeast-2"
+    project_name               = "pawlocalx"
+    root_domain                = "example.test"
+    route53_zone_id            = "ZTEST"
+    cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name = "pawlocal-development-github-deploy"
+    container_power            = "micro"
+  }
+
+  expect_failures = [var.project_name]
 }
