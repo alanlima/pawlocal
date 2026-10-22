@@ -19,10 +19,13 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 import yaml
+from job_summary import Report
 
 
 class ReconciliationError(Exception):
     """A fixed, value-free error safe for public reports."""
+
+    mutation_rejected = False
 
 
 PREFLIGHT_FIELDS = frozenset(
@@ -349,6 +352,12 @@ class ParameterStore:
         return parameter["Value"]
 
 
+def parameter_store():
+    import boto3
+
+    return ParameterStore(boto3.client("ssm"))
+
+
 class GitHub:
     def __init__(self, repository: str, token: str, transport=urlopen):
         if repository != "alanlima/pawlocal" or not token:
@@ -377,13 +386,27 @@ class GitHub:
         except HTTPError as error:
             if missing and error.code == 404:
                 return None
-            raise ReconciliationError("GitHub API request failed") from None
+            failure = ReconciliationError("GitHub API request failed")
+            failure.mutation_rejected = 400 <= error.code < 500 and error.code != 408
+            raise failure from None
         except (URLError, OSError, ValueError):
             raise ReconciliationError(
                 "GitHub API transport or response failed"
             ) from None
 
-    def variable(self, mapping: Mapping, value: str) -> str:
+    def mutate(self, method, path, payload=None, progress=None):
+        if progress:
+            progress("possible")
+        try:
+            self.request(method, path, payload)
+        except ReconciliationError as error:
+            if progress and error.mutation_rejected:
+                progress("none")
+            raise
+        if progress:
+            progress("accepted")
+
+    def variable(self, mapping: Mapping, value: str, progress=None) -> str:
         root = f"environments/{quote(mapping.github_environment, safe='')}/variables"
         path = f"{root}/{quote(mapping.env_name, safe='')}"
         current = self.request("GET", path, missing=True)
@@ -395,10 +418,14 @@ class GitHub:
             raise ReconciliationError("GitHub variable response is invalid")
         status = "unchanged"
         if current is None:
-            self.request("POST", root, {"name": mapping.env_name, "value": value})
+            self.mutate(
+                "POST", root, {"name": mapping.env_name, "value": value}, progress
+            )
             status = "created"
         elif current.get("value") != value:
-            self.request("PATCH", path, {"name": mapping.env_name, "value": value})
+            self.mutate(
+                "PATCH", path, {"name": mapping.env_name, "value": value}, progress
+            )
             status = "updated"
         readback = self.request("GET", path)
         if (
@@ -409,7 +436,7 @@ class GitHub:
             raise ReconciliationError("GitHub variable read-back failed")
         return status
 
-    def secret(self, mapping: Mapping, value: str) -> str:
+    def secret(self, mapping: Mapping, value: str, progress=None) -> str:
         from nacl.public import PublicKey, SealedBox
 
         root = f"environments/{quote(mapping.github_environment, safe='')}/secrets"
@@ -424,7 +451,9 @@ class GitHub:
             }
         except (KeyError, ValueError, TypeError):
             raise ReconciliationError("GitHub secret encryption failed") from None
-        self.request("PUT", f"{root}/{quote(mapping.env_name, safe='')}", payload)
+        self.mutate(
+            "PUT", f"{root}/{quote(mapping.env_name, safe='')}", payload, progress
+        )
         return "secret-write-accepted"
 
 
@@ -436,25 +465,47 @@ def reconcile(
     mode="audit",
     environment="development",
     selection=None,
+    summary=None,
 ):
     if mode not in ("audit", "enforce"):
         raise ReconciliationError("Unsupported reconciliation mode")
     completed = 0
+    if summary:
+        summary.reason = (
+            "Target Environment validation failed; no destination writes started."
+        )
     # Never let a variable/secret write implicitly establish an unprotected target.
     # Validate all exact targets first, even when their sources will be absent.
     for target in sorted({mapping.github_environment for mapping in mappings}):
         github.request("GET", f"environments/{quote(target, safe='')}")
     loaded = []
     values = {}
+    if summary:
+        summary.reason = "Source validation failed; no destination writes started."
     for mapping in mappings:
         try:
             value = store.read(mapping)
         except ReconciliationError:
+            if summary:
+                summary.row(mapping).diagnostic = "Source read failed"
+                summary.row(
+                    mapping
+                ).reason = "Source read failed; no destination writes started."
             report(
                 f"FAILED source {mapping.github_environment}/{mapping.env_name}; no writes started"
             )
             raise
         if value is None:
+            if summary:
+                row = summary.row(mapping)
+                row.diagnostic = (
+                    "Missing required source"
+                    if "required" in mapping.validations
+                    else "Missing optional source"
+                )
+                row.reason = row.diagnostic + "; no destination write."
+                if mode == "audit":
+                    row.status = row.diagnostic
             report(
                 f"WARNING missing-source {mapping.github_environment}/{mapping.env_name}"
             )
@@ -476,17 +527,52 @@ def reconcile(
     )
     if mode == "enforce" and selection is not None:
         configuration_outputs(values, selection)
+    if summary:
+        summary.reason = "Destination operation failed; completed actions remain; remaining writes were not attempted."
+        for row in summary.rows.values():
+            if row.diagnostic == "Missing optional source":
+                row.status = row.diagnostic
     for mapping, value in loaded:
         name = f"{mapping.github_environment}/{mapping.env_name}"
         try:
-            status = (
-                github.secret(mapping, value)
-                if mapping.secret
-                else github.variable(mapping, value)
+            progress = (
+                (lambda stage, current=mapping: summary.progress(current, stage))
+                if summary
+                else None
             )
+            status = (
+                github.secret(mapping, value, progress=progress)
+                if mapping.secret
+                else github.variable(mapping, value, progress=progress)
+            )
+            if summary:
+                row = summary.row(mapping)
+                row.status = {
+                    "created": "Created",
+                    "updated": "Updated",
+                    "unchanged": "Unchanged",
+                    "secret-write-accepted": "Secret write accepted",
+                }[status]
+                row.reason = (
+                    "Encrypted write accepted; content cannot be compared or read back."
+                    if mapping.secret
+                    else "Variable comparison and readback matched."
+                )
+                row.mutation = (
+                    "secret-accepted"
+                    if mapping.secret
+                    else "verified"
+                    if status in {"created", "updated"}
+                    else "none"
+                )
             completed += 1
             report(f"{status} {name}")
-        except ReconciliationError:
+        except Exception:
+            if summary:
+                summary.failure(
+                    mapping,
+                    "Destination operation failed; remaining writes not attempted.",
+                )
             report(
                 f"FAILED {name}; completed-targets={completed}; rerun after correcting the failure"
             )
@@ -514,42 +600,55 @@ def main(argv=None):
         default=Path(__file__).with_name("parameter-mapping.yaml"),
     )
     arguments = parser.parse_args(argv)
+    summary = Report(arguments.environment, arguments.mode, arguments.selection)
+    status = 0
     try:
+        summary.clear()
+        inventory = load_mappings(arguments.mapping, "development") + load_mappings(
+            arguments.mapping, "production"
+        )
         mappings = select_mappings(
             load_mappings(arguments.mapping, arguments.environment), arguments.selection
         )
+        summary.inventory_for(inventory, mappings)
         github = GitHub(
             os.environ.get("GITHUB_REPOSITORY", ""),
             os.environ.get("PAWLOCAL_CONFIG_GITHUB_TOKEN", ""),
         )
-        import boto3
-
         values = reconcile(
             mappings,
-            ParameterStore(boto3.client("ssm")),
+            parameter_store(),
             github,
             mode=arguments.mode,
             environment=arguments.environment,
             selection=arguments.selection if arguments.mode == "enforce" else None,
+            summary=summary,
         )
         if arguments.mode == "enforce" and os.environ.get("GITHUB_OUTPUT"):
+            summary.reason = "Workflow output writing failed; completed destination actions remain. Publication is blocked."
             outputs = configuration_outputs(values, arguments.selection)
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                 output.writelines(
                     f"{name}={json.dumps(value, separators=(',', ':'))}\n"
                     for name, value in outputs.items()
                 )
+        summary.succeeded()
     except ReconciliationError as error:
         print(str(error), file=sys.stderr)
-        return 1
+        status = 1
     except Exception:  # noqa: BLE001 - final non-disclosure boundary
         # SDK/library exceptions can contain response payloads. Never render them.
         print(
             "Reconciliation failed; inspect configuration and permissions privately",
             file=sys.stderr,
         )
-        return 1
-    return 0
+        status = 1
+    try:
+        summary.write()
+    except Exception:  # noqa: BLE001 - summary failure never authorizes publication
+        print("Cannot write configuration summary.", file=sys.stderr)
+        status = 1
+    return status
 
 
 if __name__ == "__main__":

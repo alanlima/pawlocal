@@ -2,6 +2,8 @@
 
 ## Current work
 
+- **Task (#214):** After owner review of a synthetic summary draft, the platform engineer added value-free reconciliation and cleanup job summaries. Tests cover full mapping/selection, verified variables versus accepted secrets, partial failures/retries, uncertain writes, escaping and setup/cancellation fallback. Existing permissions, approvals, locks and publication gates are unchanged; live verification is recorded separately in the issue/PR.
+
 - **Task (#206, Terraform publication):** Platform engineer added state-owned generated Strings and exact-key permissions. Senior escalation resolved provider metadata authorization and boundary-size constraints; native tests enumerate the reviewed permission-pair delta.
 - **Verification:** Independent source/plan review, live publication and integrated development/production releases passed; links are in the [configuration inventory](configuration-inventory.md).
 - **Task (#206):** Integrate enforced reconciliation, same-run public build values, collision checks and exact cleanup/recovery. Terraform publication rolls out first through a separate reviewed PR so missing sources never require an enforce bypass.

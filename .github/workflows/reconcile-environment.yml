@@ -80,6 +80,10 @@ jobs:
           if [[ "$SELECTED_OPERATION" == destroy-cleanup ]]; then
             [[ "$DESTROY_CONFIRMED" == true && "$CALLER_WORKFLOW" == 'Terraform production destroy' ]]
           fi
+      - name: Report incomplete request validation
+        if: failure() || cancelled()
+        run: |
+          printf '%s\n' '# Configuration reconciliation' '' '**INCOMPLETE: request validation did not complete.**' 'Reconciliation did not start; mapping inventory and destination outcomes are unavailable.' 'No readiness or successful mutation is claimed.' '' '> **Secrets:** GitHub does not return secret values. A successful secret API write confirms acceptance, not a readback or content comparison. Secret values cannot be verified as unchanged.' >> "$GITHUB_STEP_SUMMARY"
 
   reconcile:
     needs: validate
@@ -136,14 +140,31 @@ jobs:
         if: inputs.operation == 'reconcile'
         id: sync
         env:
+          CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
         run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE" --selection "$SELECTED_SELECTION"
       - name: Perform exact approved configuration cleanup
+        id: cleanup
         if: inputs.operation != 'reconcile'
         env:
+          CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
           DESTROY_CONFIRMED: ${{ inputs.destroy_confirmed }}
         run: |
           flags=()
           if [[ "$DESTROY_CONFIRMED" == true ]]; then flags+=(--destroy-confirmed); fi
           python ops/configuration/cleanup.py --environment "$SELECTED_ENVIRONMENT" --operation "$SELECTED_OPERATION" --confirmation "$CLEANUP_CONFIRMATION" "${flags[@]}"
+      - name: Publish configuration job summary
+        if: always()
+        env:
+          CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
+          SYNC_OUTCOME: ${{ steps.sync.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          REPORT_WRITTEN: ${{ steps.sync.outputs.summary_written || steps.cleanup.outputs.summary_written }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [[ -f ops/configuration/job_summary.py ]] && python ops/configuration/job_summary.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE" --selection "$SELECTED_SELECTION" --operation "$SELECTED_OPERATION"; then
+            exit 0
+          fi
+          printf '%s\n' '# Configuration reconciliation' '' '**INCOMPLETE: summary helper unavailable or publication failed.**' 'Destination outcomes are unavailable; writes may have occurred. No readiness is claimed.' '' '> **Secrets:** GitHub does not return secret values. A successful secret API write confirms acceptance, not a readback or content comparison. Secret values cannot be verified as unchanged.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
