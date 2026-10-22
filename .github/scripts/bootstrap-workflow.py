@@ -407,9 +407,24 @@ def classify(plan):
     if not any(counts.values()) and semantic_values(plan["planned_values"]) != semantic_values(plan["prior_state"]["values"]):
         counts["state"] = 1
     has_changes = any(counts.values())
-    require(not drift or plan["applyable"] is True, "DRIFT_REQUIRES_REVIEW")
-    require(not has_changes or plan["applyable"] is True, "NON_APPLYABLE_CHANGES")
+    require(not has_changes or plan["applyable"] is True or state_only_drift(plan, counts), "NON_APPLYABLE_CHANGES")
     return has_changes, counts, rows
+
+
+def state_only_drift(plan, counts):
+    # A normal no-action saved plan still contains refreshed PriorState. Terraform
+    # 1.14.3 can persist it through exact saved-plan apply after owner approval.
+    return (plan["applyable"] is False and counts["drift"] > 0
+            and not any(value for name, value in counts.items() if name != "drift")
+            and all(not contains_true(item["change"].get("after_unknown")) for item in plan.get("resource_drift", []))
+            and semantic_values(plan["planned_values"]) == semantic_values(plan["prior_state"]["values"]))
+
+
+def verify_plan_exit(plan, has_changes, counts, returncode):
+    require(returncode in {0, 2} and (returncode == 2) == plan["applyable"], "EXIT_CODE_PLAN_DISAGREEMENT")
+    require((returncode == 2 and has_changes) or
+            (returncode == 0 and (not has_changes or state_only_drift(plan, counts))),
+            "EXIT_CODE_PLAN_DISAGREEMENT")
 
 
 def semantic_values(values):
@@ -484,7 +499,7 @@ def make_plan():
     plan = json.loads(tf("show", "-json", str(path)).stdout)
     verify_plan_inputs(plan)
     has_changes, counts, rows = classify(plan)
-    require((result.returncode == 2) == has_changes, "EXIT_CODE_PLAN_DISAGREEMENT")
+    verify_plan_exit(plan, has_changes, counts, result.returncode)
     collision_check(plan)
     table = "| Action | Count |\n|---|---:|\n" + "\n".join(f"| {key} | {value} |" for key, value in counts.items())
     if not has_changes:
@@ -505,7 +520,9 @@ def make_plan():
     output("plan_sha256", digest(binary))
     output("manifest_version", published["VersionId"])
     details = "\n\n| Resource | Action | Unknown attributes | Sensitive attributes |\n|---|---|---|---|\n" + "\n".join(f"| `{address}` | {action} | {'yes' if unknown else 'no'} | {'yes' if sensitive else 'no'} |" for address, action, unknown, sensitive in rows)
-    summary("Approval required", "The private saved plan is ready for independent review. Approve **iam-bootstrap-apply** within six hours to apply this exact plan. Counts do not establish least privilege: inspect private policy/trust changes before approval.\n\n" + table + details + f"\n\nPrivate transfer keys in the configured plan bucket: `{prefix()}/tfplan` and `{prefix()}/manifest.json`. Plans are never uploaded as GitHub artifacts.\n\nPlan SHA-256: `{digest(binary)}`. A changed main commit, configuration, state, or newer run requires a fresh dispatch.")
+    drift_notice = ("**State-only drift acceptance; no AWS resource changes.** Approval accepts the observed state; it does not restore policies. Inspect the drift rows and private plan before accepting these observations.\n\n"
+                    if state_only_drift(plan, counts) else "")
+    summary("Approval required", drift_notice + "The private saved plan is ready for independent review. Approve **iam-bootstrap-apply** within six hours to apply this exact plan. Counts do not establish least privilege: inspect private policy/trust changes before approval.\n\n" + table + details + f"\n\nPrivate transfer keys in the configured plan bucket: `{prefix()}/tfplan` and `{prefix()}/manifest.json`. Plans are never uploaded as GitHub artifacts.\n\nPlan SHA-256: `{digest(binary)}`. A changed main commit, configuration, state, or newer run requires a fresh dispatch.")
 
 
 def apply_plan():
@@ -522,7 +539,8 @@ def apply_plan():
     path.write_bytes(binary)
     plan = json.loads(tf("show", "-json", str(path)).stdout)
     verify_plan_inputs(plan)
-    require(classify(plan)[0], "CHANGING_PLAN_REQUIRED")
+    has_changes, counts, _ = classify(plan)
+    require(has_changes, "CHANGING_PLAN_REQUIRED")
     collision_check(plan)
     trusted_run()
     check_manifest(manifest, binding(), generation()[0], binary)
@@ -530,6 +548,9 @@ def apply_plan():
     save("apply-status.json", {"started": True, "applied": False})
     tf("apply", "-input=false", "-lock-timeout=5m", str(path))
     save("apply-status.json", {"started": True, "applied": True})
+    if state_only_drift(plan, counts):
+        summary("State-only drift accepted", "The exact owner-approved normal saved plan persisted refreshed observations. No AWS resource changes were proposed; accepting these observations does not restore policies. Continue with a fresh normal plan to verify the baseline.")
+        return
     summary("AWS apply complete", "The exact approved saved plan applied successfully. If a reader-role identity changed, run the owner setup script with **publish-reader-roles**, then continue the existing configuration reconciliation workflow. This workflow does not publish GitHub variables.")
 
 
@@ -541,7 +562,6 @@ def failure_summary(command, code):
         applied, started = applied or status.get("applied", False), status.get("started", False)
     status = "AWS apply succeeded." if applied else ("Apply started and may have partially changed AWS. Do not replay the saved plan." if started else "No successful AWS apply is claimed by this job.")
     explanation = {
-        "DRIFT_REQUIRES_REVIEW": "Terraform observed remote drift but produced no applyable reconciliation plan. Inspect the role/policy changes privately and obtain owner review of a Terraform-only baseline or configuration correction. This run cannot bypass approval or publish a no-op. Do not edit state or replay this saved plan.",
         "TERRAFORM_INIT_FAILED": "Terraform could not initialize the existing bootstrap backend and locked providers. Read the Terraform init output in the failed step for the actual cause.",
         "TERRAFORM_PLAN_FAILED": "The refreshed Terraform plan failed. Read the Terraform plan output in the failed step for the actual cause, then create a fresh plan.",
         "TERRAFORM_SHOW_FAILED": "Terraform could not decode the private saved plan. Verify the locked Terraform version and dispatch a fresh plan.",
