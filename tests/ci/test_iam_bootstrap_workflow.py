@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -22,7 +24,7 @@ def plan_fixture(actions=None):
             "errored": False, "applyable": actions is not None,
             "planned_values": {"root_module": {}},
             "prior_state": {"values": {"root_module": {}}}, "configuration": {"root_module": {}},
-            "resource_changes": [], "resource_drift": [], "output_changes": {}}
+            "resource_changes": [], "resource_drift": [], "output_changes": {}, "variables": {}}
     if actions is not None:
         plan["resource_changes"] = [{"address": 'aws_iam_role.configuration_reader["development"]',
             "type": "aws_iam_role", "name": "configuration_reader", "mode": "managed",
@@ -125,6 +127,68 @@ class ConfigurationAndStateTests(unittest.TestCase):
             self.assertEqual(bootstrap.preflight(), {"serial": 1})
 
 
+class PlanInputTests(unittest.TestCase):
+    def variable_fixture(self):
+        environment = configuration_fixture()
+        return {name: {"value": environment["TF_VAR_" + name]} for name in bootstrap.INPUTS}
+
+    def test_all_original_environment_strings_match_including_bool_inputs(self):
+        variables = self.variable_fixture()
+        with patch.object(bootstrap.os, "environ", configuration_fixture()):
+            bootstrap.verify_plan_inputs({"variables": variables})
+            canonical = bootstrap.effective_inputs()
+        self.assertEqual(len(variables), 14)
+        self.assertTrue(all(type(variables[name]["value"]) is str for name in bootstrap.BOOLEAN_INPUTS))
+        self.assertTrue(all(type(canonical[name]) is bool for name in bootstrap.BOOLEAN_INPUTS))
+
+    def test_missing_extra_malformed_and_nonstring_plan_inputs_fail_closed(self):
+        cases = []
+        missing = self.variable_fixture(); del missing["domain_name"]; cases.append(missing)
+        extra = self.variable_fixture(); extra["unbound"] = {"value": "extra"}; cases.append(extra)
+        for value in (None, {}, {"value": None}, {"value": False}, {"value": 0}, {"value": []}):
+            malformed = self.variable_fixture(); malformed["import_existing_github_oidc_provider"] = value
+            cases.append(malformed)
+        for variables in cases:
+            with patch.object(bootstrap.os, "environ", configuration_fixture()), self.subTest(variables=variables), \
+                 self.assertRaisesRegex(bootstrap.Stop, "EFFECTIVE_PLAN_INPUT_MISMATCH"):
+                bootstrap.verify_plan_inputs({"variables": variables})
+
+    def test_every_changed_input_string_is_rejected(self):
+        for name in bootstrap.INPUTS:
+            changed = self.variable_fixture()
+            changed[name]["value"] += "changed"
+            with patch.object(bootstrap.os, "environ", configuration_fixture()), self.subTest(name=name), \
+                 self.assertRaisesRegex(bootstrap.Stop, "EFFECTIVE_PLAN_INPUT_MISMATCH"):
+                bootstrap.verify_plan_inputs({"variables": changed})
+
+    @unittest.skipUnless(shutil.which("terraform"), "Terraform executable required for provider-free serialization fixture")
+    def test_real_terraform_saved_plan_retains_raw_tf_var_strings(self):
+        terraform = shutil.which("terraform")
+        version = subprocess.run([terraform, "version", "-json"], capture_output=True, check=True)
+        if json.loads(version.stdout)["terraform_version"] != "1.14.3":
+            self.skipTest("Serialization fixture uses the workflow-pinned Terraform 1.14.3")
+        fixture = configuration_fixture()
+        environment = {name: value for name, value in os.environ.items()
+                       if not name.startswith(("TF_", "CHECKPOINT_"))}
+        environment.update({name: value for name, value in fixture.items() if name.startswith("TF_VAR_")})
+        environment.update(TF_IN_AUTOMATION="true", TF_INPUT="false", CHECKPOINT_DISABLE="true")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment["TF_DATA_DIR"] = str(root / ".terraform")
+            declarations = "\n".join('variable "' + name + '" { type = ' +
+                ("bool" if name in bootstrap.BOOLEAN_INPUTS else "string") + " }" for name in bootstrap.INPUTS)
+            output = 'output "inputs" { value = {' + ", ".join(name + " = var." + name for name in bootstrap.INPUTS) + "} }"
+            (root / "main.tf").write_text(declarations + "\n" + output, encoding="utf-8")
+            for command in (("init", "-backend=false", "-input=false"),
+                            ("plan", "-input=false", "-out=tfplan"), ("show", "-json", "tfplan")):
+                result = subprocess.run([terraform, *command], cwd=root, env=environment, capture_output=True)
+                self.assertEqual(result.returncode, 0, "Provider-free Terraform " + command[0] + " failed")
+            plan = json.loads(result.stdout)
+        self.assertEqual(plan["variables"], self.variable_fixture())
+        with patch.object(bootstrap.os, "environ", fixture):
+            bootstrap.verify_plan_inputs(plan)
+
+
 class ClassificationTests(unittest.TestCase):
     def test_only_complete_genuine_noop_bypasses_gate(self):
         changes, counts, rows = bootstrap.classify(plan_fixture())
@@ -144,6 +208,21 @@ class ClassificationTests(unittest.TestCase):
         prior["depends_on"] = ["aws_iam_openid_connect_provider.github"]
         plan["prior_state"]["values"]["root_module"]["resources"] = [prior]
         self.assertFalse(bootstrap.classify(plan)[0])
+
+    def test_prior_only_cached_data_resources_do_not_imply_managed_state_change(self):
+        plan = plan_fixture()
+        plan["applyable"] = False
+        plan["prior_state"]["values"]["root_module"]["resources"] = [{
+            "address": "data.aws_caller_identity.current", "mode": "data",
+            "type": "aws_caller_identity", "name": "current", "values": {"account_id": "PRIVATE_DATA"}}]
+        self.assertFalse(bootstrap.classify(plan)[0])
+
+    def test_genuine_remote_drift_with_nonapplyable_noop_requires_owner_review(self):
+        plan = plan_fixture(["no-op"])
+        plan["applyable"] = False
+        plan["resource_drift"] = copy.deepcopy(plan_fixture(["update"])["resource_changes"])
+        with self.assertRaisesRegex(bootstrap.Stop, "DRIFT_REQUIRES_REVIEW"):
+            bootstrap.classify(plan)
 
     def test_each_supported_change_requires_approval(self):
         for actions in (["create"], ["update"], ["delete"], ["delete", "create"], ["create", "delete"], ["read"]):

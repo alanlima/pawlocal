@@ -154,6 +154,19 @@ def effective_inputs():
     return result
 
 
+def verify_plan_inputs(plan):
+    # Terraform 1.14.3 records the original TF_VAR environment strings in plan
+    # JSON, including strings for bool declarations. Validate the effective
+    # configuration first, then compare every original input without coercion.
+    expected = {name: os.environ["TF_VAR_" + name] for name in effective_inputs()}
+    variables = plan.get("variables")
+    require(isinstance(variables, dict) and set(variables) == set(expected), "EFFECTIVE_PLAN_INPUT_MISMATCH")
+    require(all(isinstance(entry, dict) and type(entry.get("value")) is str for entry in variables.values()),
+            "EFFECTIVE_PLAN_INPUT_MISMATCH")
+    require({name: entry["value"] for name, entry in variables.items()} == expected,
+            "EFFECTIVE_PLAN_INPUT_MISMATCH")
+
+
 def validate(mode):
     require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY and os.environ.get("GITHUB_REF") == "refs/heads/main", "TRUSTED_MAIN_REQUIRED")
     require(os.environ.get("GITHUB_EVENT_NAME") in {"push", "workflow_dispatch"}, "TRUSTED_EVENT_REQUIRED")
@@ -394,17 +407,21 @@ def classify(plan):
     if not any(counts.values()) and semantic_values(plan["planned_values"]) != semantic_values(plan["prior_state"]["values"]):
         counts["state"] = 1
     has_changes = any(counts.values())
+    require(not drift or plan["applyable"] is True, "DRIFT_REQUIRES_REVIEW")
     require(not has_changes or plan["applyable"] is True, "NON_APPLYABLE_CHANGES")
     return has_changes, counts, rows
 
 
 def semantic_values(values):
     # jsonstate includes depends_on metadata which jsonplan deliberately omits.
-    # Compare value-bearing fields only; metadata differences cannot imply drift.
+    # jsonplan also omits data reads without a resource change. These cached
+    # data values are not managed state; explicit read/drift actions above still gate.
+    # Compare managed value-bearing fields; metadata cannot imply drift.
     fields = ("address", "mode", "type", "name", "index", "provider_name", "schema_version",
               "values", "sensitive_values", "identity", "identity_schema_version")
     resources = [{key: resource[key] for key in fields if key in resource}
-                 for resource in values.get("root_module", {}).get("resources", [])]
+                 for resource in values.get("root_module", {}).get("resources", [])
+                 if resource.get("mode") != "data"]
     return {"outputs": values.get("outputs", {}), "resources": sorted(resources, key=lambda item: item["address"])}
 
 
@@ -465,7 +482,7 @@ def make_plan():
     result = tf("plan", "-input=false", "-lock-timeout=5m", "-detailed-exitcode", f"-out={path}", allowed=(0, 2))
     require(generation()[0] == initial, "STATE_CHANGED_DURING_PLAN")
     plan = json.loads(tf("show", "-json", str(path)).stdout)
-    require({name: value.get("value") for name, value in plan.get("variables", {}).items()} == effective_inputs(), "EFFECTIVE_PLAN_INPUT_MISMATCH")
+    verify_plan_inputs(plan)
     has_changes, counts, rows = classify(plan)
     require((result.returncode == 2) == has_changes, "EXIT_CODE_PLAN_DISAGREEMENT")
     collision_check(plan)
@@ -504,7 +521,7 @@ def apply_plan():
     path = private_path("approved.tfplan").resolve()
     path.write_bytes(binary)
     plan = json.loads(tf("show", "-json", str(path)).stdout)
-    require({name: value.get("value") for name, value in plan.get("variables", {}).items()} == effective_inputs(), "EFFECTIVE_PLAN_INPUT_MISMATCH")
+    verify_plan_inputs(plan)
     require(classify(plan)[0], "CHANGING_PLAN_REQUIRED")
     collision_check(plan)
     trusted_run()
@@ -524,6 +541,7 @@ def failure_summary(command, code):
         applied, started = applied or status.get("applied", False), status.get("started", False)
     status = "AWS apply succeeded." if applied else ("Apply started and may have partially changed AWS. Do not replay the saved plan." if started else "No successful AWS apply is claimed by this job.")
     explanation = {
+        "DRIFT_REQUIRES_REVIEW": "Terraform observed remote drift but produced no applyable reconciliation plan. Inspect the role/policy changes privately and obtain owner review of a Terraform-only baseline or configuration correction. This run cannot bypass approval or publish a no-op. Do not edit state or replay this saved plan.",
         "TERRAFORM_INIT_FAILED": "Terraform could not initialize the existing bootstrap backend and locked providers. Read the Terraform init output in the failed step for the actual cause.",
         "TERRAFORM_PLAN_FAILED": "The refreshed Terraform plan failed. Read the Terraform plan output in the failed step for the actual cause, then create a fresh plan.",
         "TERRAFORM_SHOW_FAILED": "Terraform could not decode the private saved plan. Verify the locked Terraform version and dispatch a fresh plan.",

@@ -138,6 +138,12 @@ jobs:
       - name: Lint workflow syntax and security
         run: actionlint
 
+      - name: Set up pinned Terraform for provider-free saved-plan fixture
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.3
+          terraform_wrapper: false
+
       - name: Verify workflow trigger path cases
         # Bootstrap inventory admission uses the pinned HCL parser, not a
         # handwritten lexer that can mistake embedded templates for resources.
