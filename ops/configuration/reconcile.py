@@ -1,7 +1,7 @@
 """Allowlisted Parameter Store -> GitHub Environment reconciliation.
 
-Only names/statuses are reported. #205 deliberately provides audit only;
-successful synchronization never establishes release readiness.
+Reports contain names/statuses only. Audit warns about missing values;
+enforce validates all selected values before writing. Existing release gates remain.
 """
 
 from __future__ import annotations
@@ -496,7 +496,7 @@ def reconcile(
         if mode == "audit"
         else "Enforced preflight completed; publication remains blocked until successful apply and full reconciliation"
         if selection == "preflight"
-        else "Enforced reconciliation completed; dependent publication may proceed"
+        else "Publication configuration values verified; existing apply and promotion gates still apply"
     )
     return values
 
