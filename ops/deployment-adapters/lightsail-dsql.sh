@@ -50,6 +50,11 @@ publish_frontend() {
     trap 'rm -rf -- "$app_dir"' EXIT
     tar -xzf "$archive" -C "$app_dir"
     aws s3 sync "$app_dir" "s3://${bucket}/" --delete --no-progress
+    # Deterministic archives use epoch mtimes. Sync can skip a changed index
+    # with the same size as the newer destination, leaving deleted asset URLs.
+    aws s3 cp "$app_dir/index.html" "s3://${bucket}/index.html" --no-progress \
+      --content-type 'text/html; charset=utf-8' \
+      --cache-control 'no-cache, max-age=0, must-revalidate'
     aws s3 cp "$archive" "s3://${bucket}/releases/${commit}/${digest#sha256:}.tar.gz" --no-progress
     aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' >/dev/null
   )
