@@ -37,3 +37,8 @@ output "cognito_pre_sign_up_role_arns" {
   description = "Cognito pre sign-up Lambda execution role ARNs, keyed by environment. Verification evidence only; environment Terraform derives the deterministic ARN."
   value       = { for environment, role in aws_iam_role.cognito_pre_sign_up : environment => role.arn }
 }
+
+output "configuration_reader_role_arns" {
+  description = "Dedicated configuration-reader role ARNs for initial matching protected apply and release Environment setup."
+  value       = { for environment, role in aws_iam_role.configuration_reader : environment => role.arn }
+}

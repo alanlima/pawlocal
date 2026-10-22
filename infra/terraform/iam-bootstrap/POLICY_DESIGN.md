@@ -2,6 +2,12 @@
 
 This root owns the shared GitHub OIDC provider, GitHub role identity/trust, baseline permissions, permissions boundaries, runtime identities, and the private saved-plan transfer bucket. Development and production roots own application resources and only their matching managed policies and attachments. Configuration is not evidence of an apply.
 
+## Configuration reader roles
+
+The bootstrap state owns one `pawlocal-<environment>-configuration-reader` role per environment and the non-secret `configuration_reader_role_arns` output. Each role trusts only its exact immutable-repository-ID-qualified `<environment>-apply` GitHub OIDC subject with audience `sts.amazonaws.com`; the reconciliation job obtains both this identity and its scoped GitHub credential behind the existing protected apply approval. Initial setup also records the actual role ARN in the matching release Environment. This does not authorize bypassing an Environment reviewer or branch policy.
+
+Each reader grants only `ssm:GetParameter` on the 18 exact matching-account, region and environment String parameter ARNs in the active configuration inventory. There is no wildcard path, parameter discovery, recursive read, state access, mutation or decryption grant. There are no active SecureString consumers; a future real secret requires an independently reviewed key/context-scoped decryption change and inventory/mapping update. `ParameterNotFound` remains an audit warning in the reconciler; an IAM denial remains an error. This reader foundation creates no parameters and changes no application resources.
+
 ## Environment plan roles
 
 Each plan role trusts only its exact `<environment>-plan` GitHub Environment subject; those Environments are restricted to `main`. It can read the matching state, manage only that state's lock object, perform provider refresh reads, and upload only to `plans/<environment>/`. It has no application-service mutation actions and no IAM write actions.

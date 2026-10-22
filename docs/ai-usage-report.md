@@ -2,6 +2,9 @@
 
 ## Current work
 
+- **Task (#205):** Implement the reviewed Parameter Store mapping, audit reconciler, protected dispatch/reusable workflow and scoped bootstrap reader identities. Platform specialists split script/workflow and IAM ownership, then integrated one PR for independent review.
+- **Verification boundary:** Synthetic tests cover variable create/update/no-op/read-back, encrypted secret writes, access/API failures, partial retry, strict source/target rejection and absence of payloads in reports. IAM policy tests enforce exact read-only keys/OIDC trust. Live role apply and workflow evidence are recorded separately in the PR; no generated publication or required-value enforcement is claimed here.
+
 - **Task (#204):** Establish the Parameter Store naming/mapping, source/destination inventory, authentication setup, audit/enforce, recovery and cleanup specification before #205/#206 implementation.
 - **AI assistance:** Platform engineer inspected actual workflow/frontend/Terraform consumers and credential-name metadata; orchestration and independent review resolve permission and job-boundary details. No token values were retrieved or copied.
 - **Verification boundary:** Documentation checks and independent review are recorded in the PR. This specification changes no workflow, mapping, Terraform resource or live configuration and makes no deployment/readiness claim.
