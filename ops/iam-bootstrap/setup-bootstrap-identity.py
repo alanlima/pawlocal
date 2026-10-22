@@ -214,9 +214,32 @@ def access_keys(cli):
     return cli.aws("iam", "list-access-keys", UserName=USER).get("AccessKeyMetadata", [])
 
 
+def verify_key_permissions(cli, config):
+    """Keys require the complete reviewed ceiling, unlike partial setup inspection."""
+    user = inspect_user(cli, config)
+    boundary_arn = f"arn:aws:iam::{config['account_id']}:policy/{BOUNDARY}"
+    if user.get("PermissionsBoundary", {}).get("PermissionsBoundaryArn") != boundary_arn:
+        raise SetupError("Key operation requires the installed reviewed permissions boundary")
+    expected_grants = {f"arn:aws:iam::{config['account_id']}:policy/{name}" for name in POLICIES}
+    attached = cli.aws("iam", "list-attached-user-policies", UserName=USER).get("AttachedPolicies", [])
+    if len(attached) != len(expected_grants) or {item.get("PolicyArn") for item in attached} != expected_grants:
+        raise SetupError("Key operation requires both reviewed policy attachments")
+    documents = render(config)
+    for filename, name in (("boundary.json", BOUNDARY), ("permissions-iam.json", POLICIES[0]),
+                           ("permissions-storage.json", POLICIES[1])):
+        arn = f"arn:aws:iam::{config['account_id']}:policy/{name}"
+        metadata = cli.aws("iam", "get-policy", PolicyArn=arn).get("Policy", {})
+        if metadata.get("Arn") != arn or not isinstance(metadata.get("DefaultVersionId"), str):
+            raise SetupError("Key operation could not verify current reviewed policy metadata")
+        version = cli.aws("iam", "get-policy-version", PolicyArn=arn,
+                          VersionId=metadata["DefaultVersionId"]).get("PolicyVersion", {})
+        if version.get("Document") != documents[filename] or version.get("IsDefaultVersion") is not True:
+            raise SetupError("Key operation requires unchanged reviewed policy documents")
+
+
 def upload_new_key(cli, config, rotate=False):
     verify_environments(cli)
-    inspect_user(cli, config)
+    verify_key_permissions(cli, config)
     before = access_keys(cli)
     if (not rotate and before) or (rotate and (len(before) != 1 or before[0]["Status"] != "Active")):
         raise SetupError("Existing keys require inspection; no duplicate key issued")
@@ -225,6 +248,9 @@ def upload_new_key(cli, config, rotate=False):
         key = cli.aws("iam", "create-access-key", UserName=USER)["AccessKey"]
         if key.get("AccessKeyId") in previous or not key.get("SecretAccessKey"):
             raise SetupError("Invalid new key response")
+        # Recheck after issuance, before making the new credential available.
+        # A changed boundary/grant triggers the same new-key cleanup as upload failure.
+        verify_key_permissions(cli, config)
         for environment in ENVIRONMENTS:
             verify_environments(cli)
             cli.secret(environment, SECRETS[0], key["AccessKeyId"])

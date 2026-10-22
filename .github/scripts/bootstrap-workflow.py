@@ -367,7 +367,7 @@ def make_plan():
     plan = json.loads(tf("show", "-json", str(path)).stdout)
     require({name: value.get("value") for name, value in plan.get("variables", {}).items()} == effective_inputs(), "EFFECTIVE_PLAN_INPUT_MISMATCH")
     has_changes, counts, rows = classify(plan)
-    require(result.returncode != 0 or not has_changes, "EXIT_CODE_PLAN_DISAGREEMENT")
+    require((result.returncode == 2) == has_changes, "EXIT_CODE_PLAN_DISAGREEMENT")
     collision_check(plan)
     table = "| Action | Count |\n|---|---:|\n" + "\n".join(f"| {key} | {value} |" for key, value in counts.items())
     if not has_changes:

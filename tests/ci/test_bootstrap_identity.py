@@ -68,14 +68,33 @@ class FakeCLI:
         self.break_gate = False
         self.user_exists = True
         self.tags = setup.TAGS.copy()
+        self.missing_boundary = False
+        self.missing_grant = False
+        self.changed_policy = None
 
     def aws(self, service, operation, **kwargs):
         self.calls.append((operation, kwargs))
         if operation == "get-user":
             if not self.user_exists:
                 return None
-            return {"User": {"Arn": f"arn:aws:iam::{CONFIG['account_id']}:user/{policy.USER}",
-                             "Path": "/", "Tags": [{"Key": k, "Value": v} for k, v in self.tags.items()]}}
+            user = {"Arn": f"arn:aws:iam::{CONFIG['account_id']}:user/{policy.USER}",
+                    "Path": "/", "Tags": [{"Key": k, "Value": v} for k, v in self.tags.items()]}
+            if not self.missing_boundary:
+                user["PermissionsBoundary"] = {"PermissionsBoundaryArn": f"arn:aws:iam::{CONFIG['account_id']}:policy/{policy.BOUNDARY}"}
+            return {"User": user}
+        if operation == "list-attached-user-policies":
+            names = policy.POLICIES[:1] if self.missing_grant else policy.POLICIES
+            return {"AttachedPolicies": [{"PolicyArn": f"arn:aws:iam::{CONFIG['account_id']}:policy/{name}"} for name in names]}
+        if operation == "get-policy":
+            return {"Policy": {"Arn": kwargs["PolicyArn"], "DefaultVersionId": "v1"}}
+        if operation == "get-policy-version":
+            name = kwargs["PolicyArn"].split("/")[-1]
+            filename = {policy.BOUNDARY: "boundary.json", policy.POLICIES[0]: "permissions-iam.json",
+                        policy.POLICIES[1]: "permissions-storage.json"}[name]
+            document = policy.render(CONFIG)[filename]
+            if name == self.changed_policy:
+                document = {"Version": "2012-10-17", "Statement": []}
+            return {"PolicyVersion": {"IsDefaultVersion": True, "Document": document}}
         if operation == "create-user":
             self.user_exists = True
             return {}
@@ -204,6 +223,51 @@ class BootstrapPolicyTests(unittest.TestCase):
 
 
 class BootstrapSetupTests(unittest.TestCase):
+    def test_key_operations_require_complete_boundary_and_grants_before_creation_or_upload(self):
+        for rotate in (False, True):
+            for failure in ("boundary", "grant", "boundary-document", "grant-document"):
+                cli = FakeCLI()
+                if rotate:
+                    cli.keys = [{"AccessKeyId": "OLD", "Status": "Active"}]
+                cli.missing_boundary = failure == "boundary"
+                cli.missing_grant = failure == "grant"
+                cli.changed_policy = policy.BOUNDARY if failure == "boundary-document" else policy.POLICIES[0] if failure == "grant-document" else None
+                with self.assertRaises(setup.SetupError):
+                    setup.upload_new_key(cli, CONFIG, rotate=rotate)
+                self.assertNotIn("create-access-key", [op for op, _ in cli.calls])
+                self.assertNotIn("secret", [op for op, _ in cli.calls])
+                self.assertNotIn("delete-access-key", [op for op, _ in cli.calls])
+
+    def test_inspection_allows_incomplete_setup_without_issuing_credentials(self):
+        cli = FakeCLI()
+        cli.missing_boundary = True
+        cli.missing_grant = True
+        setup.inspect_user(cli, CONFIG)
+        self.assertNotIn("create-access-key", [op for op, _ in cli.calls])
+
+    def test_reviewed_complete_policy_allows_rotation_without_revoking_old_key(self):
+        cli = FakeCLI()
+        cli.keys = [{"AccessKeyId": "OLD", "Status": "Active"}]
+        with redirect_stdout(io.StringIO()):
+            setup.upload_new_key(cli, CONFIG, rotate=True)
+        self.assertEqual(len(cli.keys), 2)
+        self.assertEqual(len([op for op, _ in cli.calls if op == "secret"]), 4)
+        self.assertNotIn("delete-access-key", [op for op, _ in cli.calls])
+
+    def test_permissions_changed_after_issuance_revoke_new_key_before_upload(self):
+        class DriftingCLI(FakeCLI):
+            def aws(self, service, operation, **kwargs):
+                result = super().aws(service, operation, **kwargs)
+                if operation == "create-access-key":
+                    self.missing_boundary = True
+                return result
+        cli = DriftingCLI()
+        cli.keys = [{"AccessKeyId": "OLD", "Status": "Active"}]
+        with self.assertRaises(setup.SetupError):
+            setup.upload_new_key(cli, CONFIG, rotate=True)
+        self.assertEqual(cli.keys, [{"AccessKeyId": "OLD", "Status": "Active"}])
+        self.assertNotIn("secret", [op for op, _ in cli.calls])
+
     def test_protected_environment_checked_before_key_issue(self):
         cli = FakeCLI()
         cli.break_gate = True

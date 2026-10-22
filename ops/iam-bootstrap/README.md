@@ -38,7 +38,9 @@ python ops/iam-bootstrap/setup-bootstrap-identity.py --config C:\private\bootstr
 
 Installation compares the reviewed files with the deterministic generator, creates/compares only its three named policies, installs the boundary **before** attaching grants, and never changes Terraform state. Existing policies must have the exact ownership tags. A different existing version requires a fresh review and the explicit `--replace-policy-version` option. Old versions are preserved; if the five-version quota is reached, an owner must review version retirement separately. The workflow user has no permission to modify these external policies or its own boundary.
 
-Only for initial setup when **no key exists**:
+Key issuance and rotation require the exact reviewed boundary plus both expected managed-policy attachments. The tool reads each current default policy version and compares its document with the deterministic generator, then rechecks after issuance before uploading any credential. A missing boundary, missing grant or changed policy fails closed; a change detected after issuance revokes only the new key. Read-only inspection and policy installation still allow an incomplete setup so it can be diagnosed and completed.
+
+Only for initial setup when **no key exists** and the reviewed policies are installed:
 
 ```powershell
 python ops/iam-bootstrap/setup-bootstrap-identity.py --config C:\private\bootstrap-config.json issue-key

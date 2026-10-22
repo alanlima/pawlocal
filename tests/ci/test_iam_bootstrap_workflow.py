@@ -228,6 +228,22 @@ class ClassificationTests(unittest.TestCase):
 
 
 class PlanExecutionTests(unittest.TestCase):
+    def test_exit_code_disagreement_in_either_direction_never_reports_noop_or_uploads(self):
+        for exit_code, actions in ((2, None), (0, ["update"])):
+            plan = plan_fixture(actions)
+            with patch.object(bootstrap, "preflight", return_value={"serial": 1}), \
+                 patch.object(bootstrap, "init"), patch.object(bootstrap, "generation", return_value=({"serial": 1}, {})), \
+                 patch.object(bootstrap, "effective_inputs", return_value={}), \
+                 patch.object(bootstrap, "tf", side_effect=[Mock(returncode=exit_code), Mock(stdout=json.dumps(plan).encode())]), \
+                 patch.object(bootstrap, "aws") as aws, patch.object(bootstrap, "output") as output, \
+                 patch.object(bootstrap, "summary") as summary, tempfile.TemporaryDirectory() as directory, \
+                 patch.object(bootstrap, "PRIVATE", Path(directory)), self.subTest(exit_code=exit_code, actions=actions):
+                with self.assertRaisesRegex(bootstrap.Stop, "EXIT_CODE_PLAN_DISAGREEMENT"):
+                    bootstrap.make_plan()
+            aws.assert_not_called()
+            output.assert_not_called()
+            summary.assert_not_called()
+
     def test_noop_never_uploads_or_requests_approval(self):
         plan = plan_fixture()
         with patch.object(bootstrap, "preflight", return_value={"serial": 1}), \
