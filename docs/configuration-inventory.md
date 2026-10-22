@@ -2,7 +2,11 @@
 
 The active mapping is `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. All generated entries are `String`, `secret: false`, `validations: [required]`; no secret payload, unmanaged parameter or shared source is needed.
 
-Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key policy are listed below. Initial publication, all 36 owned values and populated audits are [verified](https://github.com/alanlima/pawlocal/issues/206#issuecomment-6344710835); integrated release and cleanup acceptance remain pending.
+Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key policy are listed below. Initial publication, all 36 owned values and populated audits are [verified](https://github.com/alanlima/pawlocal/issues/206#issuecomment-6344710835).
+
+Integrated [development](https://github.com/alanlima/pawlocal/actions/runs/39809521175) and [production](https://github.com/alanlima/pawlocal/actions/runs/39812132462) releases verified enforced reconciliation, same-run frontend publication and served OAuth host/client/callback/scopes. Legacy deletion and preservation evidence is recorded below. Cognito replacement, stale-bundle rejection and destroy/reapply recovery were tested in isolated fixtures; production was not destroyed or replaced for testing.
+
+Post-cleanup enforce succeeded with all 24 targets unchanged in [development](https://github.com/alanlima/pawlocal/actions/runs/39840788620) and all 30 unchanged in [production](https://github.com/alanlima/pawlocal/actions/runs/39840792514).
 
 ## Generated parameter entries
 
@@ -68,27 +72,27 @@ Release constants (`VITE_RELEASE_ENV`, mock-backend false, telemetry false, sele
 
 ## Obsolete history
 
-The legacy release records below have no active synchronization mapping. Their retirement date is 2026-10-23; reason: no current release/recovery consumer after the reviewed configuration integration. Actual GitHub deletion remains pending the protected exact-name cleanup run; retirement does not claim deletion. Historical entries must retain full `store_key`, environment, GitHub target/name, type, secret flag, validations, purpose/consumer and lifecycle owner plus obsolete date (`YYYY-MM-DD`), reason and separate confirmed-deletion status. A rename preserves the original row here and creates the new active row. Legacy settings that never had a Parameter Store source use `store_key: none (legacy GitHub-only)` rather than inventing a historical AWS key.
+The legacy release records below were retired and deleted on 2026-10-23 because they have no current release/recovery consumer. Protected cleanup succeeded in [development](https://github.com/alanlima/pawlocal/actions/runs/39840236693) and [production](https://github.com/alanlima/pawlocal/actions/runs/39840241046): exactly 13 variables and 3 secrets removed from each release Environment. A direct comparison across nine Environments verified every other variable, secret metadata record and Environment setting unchanged, including plan/apply, recovery and `development-seed`.
 
-The following is #206's exact legacy cleanup history/allowlist. Every entry applies only to R for development and production; lifecycle owner is the operator/legacy release configuration. Validation is current-consumer absence before retirement; source is none (legacy GitHub-only). Each row inherits obsolete date 2026-10-23, the reason above, and pending protected-deletion status. Runtime cleanup repeats the consumer check before deletion.
+Each history entry applies only to R for development and production; lifecycle owner is the operator/legacy release configuration. Validation is confirmed consumer absence; `store_key: none (legacy GitHub-only)`. Each row inherits the retirement/deletion date and evidence above. Keep historical source, target, type, validation, consumer and owner details after retirement; a rename adds a new active row without removing the old record.
 
 | GitHub name | Type / secret flag | Historical purpose | Status |
 |---|---|---|---|
-| PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON | Variable / false | Legacy VM SSH baseline | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_CERTIFICATE_ARN | Variable / false | Legacy certificate handoff | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_COGNITO_APP_CLIENT_ID | Variable / false | Superseded client variable | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_COGNITO_ISSUER | Variable / false | Legacy API auth handoff | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DEPLOY_HOST | Variable / false | Legacy SSH deployment | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DEPLOY_KNOWN_HOSTS | Variable / false | Legacy SSH host verification | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DEPLOY_MODE | Variable / false | Legacy adapter selection | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON | Variable / false | Legacy VM authorized keys | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DOMAIN_NAME | Variable / false | Legacy release domain input | Pending cleanup in R only; P remains required |
-| PAWLOCAL_DSQL_DATABASE_ROLE | Variable / false | Legacy database handoff | Pending cleanup in R only; runtime/seed unaffected |
-| PAWLOCAL_DSQL_ENDPOINT | Variable / false | Legacy database handoff | Pending cleanup in R only; runtime/seed unaffected |
-| PAWLOCAL_TERRAFORM_ROLE_ARN | Variable / false | Legacy combined-state identity | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_TF_STATE_BUCKET | Variable / false | Legacy release backend setting | Pending cleanup in R only; P/A remain required |
-| PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY | Secret / true | Legacy SSH deployment credential | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DSQL_ACCESS_KEY_ID | Secret / true | Legacy static database identity | Pending protected deletion; runtime consumer check required |
-| PAWLOCAL_DSQL_SECRET_ACCESS_KEY | Secret / true | Legacy static database credential | Pending protected deletion; runtime consumer check required |
+| PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON | Variable / false | Legacy VM SSH baseline | Deleted in R |
+| PAWLOCAL_CERTIFICATE_ARN | Variable / false | Legacy certificate handoff | Deleted in R |
+| PAWLOCAL_COGNITO_APP_CLIENT_ID | Variable / false | Superseded client variable | Deleted in R |
+| PAWLOCAL_COGNITO_ISSUER | Variable / false | Legacy API auth handoff | Deleted in R |
+| PAWLOCAL_DEPLOY_HOST | Variable / false | Legacy SSH deployment | Deleted in R |
+| PAWLOCAL_DEPLOY_KNOWN_HOSTS | Variable / false | Legacy SSH host verification | Deleted in R |
+| PAWLOCAL_DEPLOY_MODE | Variable / false | Legacy adapter selection | Deleted in R |
+| PAWLOCAL_DEPLOY_SSH_PUBLIC_KEYS_JSON | Variable / false | Legacy VM authorized keys | Deleted in R |
+| PAWLOCAL_DOMAIN_NAME | Variable / false | Legacy release domain input | Deleted in R; P remains required |
+| PAWLOCAL_DSQL_DATABASE_ROLE | Variable / false | Legacy database handoff | Deleted in R; runtime/seed unchanged |
+| PAWLOCAL_DSQL_ENDPOINT | Variable / false | Legacy database handoff | Deleted in R; runtime/seed unchanged |
+| PAWLOCAL_TERRAFORM_ROLE_ARN | Variable / false | Legacy combined-state identity | Deleted in R |
+| PAWLOCAL_TF_STATE_BUCKET | Variable / false | Legacy release backend setting | Deleted in R; P/A remain required |
+| PAWLOCAL_DEPLOY_SSH_PRIVATE_KEY | Secret / true | Legacy SSH deployment credential | Deleted in R |
+| PAWLOCAL_DSQL_ACCESS_KEY_ID | Secret / true | Legacy static database identity | Deleted in R |
+| PAWLOCAL_DSQL_SECRET_ACCESS_KEY | Secret / true | Legacy static database credential | Deleted in R |
 
 Do not copy these credentials into Parameter Store. Keep these dated records after deletion and record actual deletion evidence separately; obsolete synchronization entries never remain executable. The cleanup code contains only the approved exact deletion allowlist, not active mappings.
