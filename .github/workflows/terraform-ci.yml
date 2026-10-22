@@ -7,12 +7,18 @@ on:
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/scripts/terraform-production-lifecycle.py"
+      - ".github/scripts/configure-cognito-terraform-profile.sh"
+      - ".github/scripts/cleanup-cognito-terraform-profile.sh"
+      - ".github/scripts/verify-terraform-source-checkout.py"
+      - ".github/scripts/verify-cognito-provider-contract.py"
+      - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
       - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
       - "tests/ci/test_terraform_production_lifecycle.py"
+      - "tests/ci/test_cognito_terraform_workflow.py"
       - '!**/*.md'
       - '!**/*.mdx'
   push:
@@ -23,12 +29,18 @@ on:
       - ".github/scripts/terraform-environment-plan.py"
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/scripts/terraform-production-lifecycle.py"
+      - ".github/scripts/configure-cognito-terraform-profile.sh"
+      - ".github/scripts/cleanup-cognito-terraform-profile.sh"
+      - ".github/scripts/verify-terraform-source-checkout.py"
+      - ".github/scripts/verify-cognito-provider-contract.py"
+      - "tests/ci/test_cognito_lambda_module_saved_plan.py"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-environment.yml"
       - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
       - "tests/ci/test_terraform_production_lifecycle.py"
+      - "tests/ci/test_cognito_terraform_workflow.py"
       - '!**/*.md'
       - '!**/*.mdx'
   workflow_call:
@@ -66,14 +78,30 @@ jobs:
           terraform_version: 1.14.3
           terraform_wrapper: false
 
+      - name: Set up Node.js for Cognito trigger tests
+        if: matrix.root == 'modules/pawlocal-environment'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive .
 
-      - name: Initialize providers without configuring the backend
+      - name: Initialize locked environment providers without configuring the backend
+        if: startsWith(matrix.root, 'environments/')
+        run: terraform init -backend=false -input=false -lockfile=readonly
+
+      - name: Initialize reusable-module providers without configuring the backend
+        if: ${{ !startsWith(matrix.root, 'environments/') }}
         run: terraform init -backend=false -input=false
 
       - name: Validate Terraform configuration
+        if: matrix.root != 'modules/pawlocal-environment'
         run: terraform validate -no-color
+
+      # The reusable environment module requires an aliased provider supplied by
+      # its caller. Both environment roots validate that provider wiring; the
+      # module's Terraform tests below exercise it with explicit test providers.
 
       - name: Test rendered IAM policies
         if: matrix.root == 'iam-bootstrap' || matrix.root == 'modules/pawlocal-environment'
@@ -83,6 +111,20 @@ jobs:
           AWS_SESSION_TOKEN: test
           AWS_EC2_METADATA_DISABLED: true
         run: terraform test -no-color
+
+      - name: Test Cognito pre sign-up trigger
+        if: matrix.root == 'modules/pawlocal-environment'
+        run: node --test lambda/cognito-pre-signup/index.test.mjs
+
+      - name: Test pinned Lambda module across saved-plan runners
+        if: matrix.root == 'modules/pawlocal-environment'
+        env:
+          PAWLOCAL_RUN_TERRAFORM_LAMBDA_MODULE_INTEGRATION: "1"
+        run: python ../../../../tests/ci/test_cognito_lambda_module_saved_plan.py -v
+
+      - name: Verify AWS provider Cognito log-group refresh contract
+        if: matrix.root == 'modules/pawlocal-environment'
+        run: python ../../../../.github/scripts/verify-cognito-provider-contract.py
 
       - name: Test DSQL setup lifecycle transitions
         if: matrix.root == 'modules/dsql-post-apply-setup'

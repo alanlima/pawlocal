@@ -10,6 +10,15 @@ provider "aws" {
   skip_requesting_account_id  = true
 }
 
+provider "aws" {
+  alias                       = "cognito_test"
+  region                      = "ap-southeast-2"
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
+  skip_region_validation      = true
+  skip_requesting_account_id  = true
+}
+
 override_data {
   target = data.aws_caller_identity.current
   values = {
@@ -28,7 +37,8 @@ run "tagged_create_permissions_are_size_safe" {
   command = plan
 
   providers = {
-    aws = aws.test
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
   }
 
   variables {
@@ -38,6 +48,12 @@ run "tagged_create_permissions_are_size_safe" {
     root_domain                = "example.test"
     route53_zone_id            = "ZTEST"
     cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
     terraform_apply_role_name  = "pawlocal-development-terraform-apply"
     frontend_publish_role_name = "pawlocal-development-github-deploy"
     container_power            = "micro"
@@ -54,6 +70,7 @@ run "tagged_create_permissions_are_size_safe" {
       local.resource_suffixes.cert == "cert" &&
       local.resource_suffixes.container_service == "api" &&
       local.resource_names.cert == "pawlocal-development-api-cert" &&
+      local.cognito_pre_sign_up_name == "pawlocal-development-cognito-pre-signup" &&
       local.resource_names.container_service == "pawlocal-development-api" &&
       aws_lightsail_container_service.api.name == "pawlocal-development-api" &&
       aws_lightsail_certificate.api.name == "pawlocal-development-api-cert" &&
@@ -187,7 +204,8 @@ run "runtime_identity_activates_protected_setup_and_deployment" {
   command = plan
 
   providers = {
-    aws = aws.test
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
   }
 
   variables {
@@ -196,6 +214,12 @@ run "runtime_identity_activates_protected_setup_and_deployment" {
     root_domain                = "example.test"
     route53_zone_id            = "ZTEST"
     cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
     terraform_apply_role_name  = "pawlocal-development-terraform-apply"
     frontend_publish_role_name = "pawlocal-development-github-deploy"
     runtime_role_arn           = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
@@ -236,7 +260,8 @@ run "production_resource_names_use_normalized_suffixes" {
   command = plan
 
   providers = {
-    aws = aws.test
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
   }
 
   variables {
@@ -245,6 +270,12 @@ run "production_resource_names_use_normalized_suffixes" {
     root_domain                = "example.test"
     route53_zone_id            = "ZTEST"
     cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_password_policy = {
+      minimum_length    = 12
+      require_lowercase = true
+      require_uppercase = true
+      require_numbers   = true
+    }
     terraform_apply_role_name  = "pawlocal-production-terraform-apply"
     frontend_publish_role_name = "pawlocal-production-github-deploy"
     container_power            = "medium"
@@ -266,7 +297,8 @@ run "project_name_over_policy_budget_is_rejected" {
   command = plan
 
   providers = {
-    aws = aws.test
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
   }
 
   variables {
@@ -276,6 +308,12 @@ run "project_name_over_policy_budget_is_rejected" {
     root_domain                = "example.test"
     route53_zone_id            = "ZTEST"
     cloudfront_certificate_arn = "arn:aws:acm:us-east-1:111111111111:certificate/test"
+    cognito_password_policy = {
+      minimum_length    = 8
+      require_lowercase = false
+      require_uppercase = false
+      require_numbers   = false
+    }
     terraform_apply_role_name  = "pawlocal-development-terraform-apply"
     frontend_publish_role_name = "pawlocal-development-github-deploy"
     container_power            = "micro"

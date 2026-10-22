@@ -16,6 +16,10 @@ locals {
     container_service = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}"
   }
 
+  cognito_pre_sign_up_name             = "${local.resource_name_prefix}-cognito-pre-signup"
+  default_cognito_pre_sign_up_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.cognito_pre_sign_up_name}"
+  cognito_pre_sign_up_role_arn         = coalesce(var.cognito_pre_sign_up_role_arn, local.default_cognito_pre_sign_up_role_arn)
+
   frontend_hostname = "${local.frontend_label}.${trimsuffix(var.root_domain, ".")}"
   api_hostname      = "${local.api_label}.${trimsuffix(var.root_domain, ".")}"
   common_tags = {
@@ -428,20 +432,90 @@ resource "aws_route53_record" "api" {
   depends_on = [aws_lightsail_container_service_deployment_version.api]
 }
 
+module "cognito_pre_sign_up" {
+  source  = "terraform-aws-modules/lambda/aws"
+  version = "= 8.12.0"
+
+  providers = {
+    aws = aws.cognito_deployment
+  }
+
+  function_name = local.cognito_pre_sign_up_name
+  description   = "Confirm PawLocal ${var.environment} self-service Cognito sign-ups."
+  handler       = "index.handler"
+  runtime       = "nodejs22.x"
+  timeout       = 3
+  memory_size   = 128
+
+  create_role = false
+  lambda_role = local.cognito_pre_sign_up_role_arn
+
+  source_path                  = "${path.module}/lambda/cognito-pre-signup/index.mjs"
+  artifacts_dir                = "${path.root}/.terraform/lambda-builds"
+  recreate_missing_package     = true
+  trigger_on_package_timestamp = false
+  hash_extra                   = var.cognito_package_build_id
+
+  cloudwatch_logs_retention_in_days = 30
+  create_sam_metadata               = false
+  allowed_triggers                  = {}
+  tags                              = local.common_tags
+
+  depends_on = [time_sleep.application_permissions_propagation]
+}
+
 resource "aws_cognito_user_pool" "application" {
-  name                     = "pawlocal-${var.environment}"
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
+  name = "${var.project_name}-${var.environment}"
+
+  admin_create_user_config {
+    allow_admin_create_user_only = false
+  }
+
+  lambda_config {
+    pre_sign_up = module.cognito_pre_sign_up.lambda_function_arn
+  }
+
+  mfa_configuration = "OFF"
+
   password_policy {
-    minimum_length                   = 12
-    require_lowercase                = true
-    require_numbers                  = true
-    require_symbols                  = true
-    require_uppercase                = true
+    minimum_length                   = var.cognito_password_policy.minimum_length
+    require_lowercase                = var.cognito_password_policy.require_lowercase
+    require_numbers                  = var.cognito_password_policy.require_numbers
+    require_symbols                  = false
+    require_uppercase                = var.cognito_password_policy.require_uppercase
     temporary_password_validity_days = 7
   }
+
+  schema {
+    attribute_data_type = "String"
+    mutable             = true
+    name                = "name"
+    required            = true
+  }
+
+  username_configuration {
+    case_sensitive = false
+  }
+
   tags       = local.common_tags
   depends_on = [time_sleep.application_permissions_propagation]
+}
+
+resource "aws_lambda_permission" "allow_cognito_pre_sign_up" {
+  provider       = aws.cognito_deployment
+  statement_id   = "AllowCognitoPreSignUp"
+  action         = "lambda:InvokeFunction"
+  function_name  = module.cognito_pre_sign_up.lambda_function_name
+  principal      = "cognito-idp.amazonaws.com"
+  source_arn     = aws_cognito_user_pool.application.arn
+  source_account = data.aws_caller_identity.current.account_id
+
+  lifecycle {
+    precondition {
+      condition     = var.cognito_pre_sign_up_role_arn == null || var.cognito_pre_sign_up_role_arn == local.default_cognito_pre_sign_up_role_arn
+      error_message = "cognito_pre_sign_up_role_arn must match the current partition, account, environment, and exact pre sign-up role name."
+    }
+  }
 }
 
 resource "aws_cognito_user_pool_domain" "application" {

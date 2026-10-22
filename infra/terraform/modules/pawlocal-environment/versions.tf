@@ -5,6 +5,9 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = ">= 6.0, < 7.0"
+      configuration_aliases = [
+        aws.cognito_deployment,
+      ]
     }
     random = {
       source  = "hashicorp/random"

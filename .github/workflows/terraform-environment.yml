@@ -63,6 +63,8 @@ env:
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
+  TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.environment }}-${{ inputs.phase }}
+  TF_VAR_project_name: pawlocal
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
 
 jobs:
@@ -146,6 +148,7 @@ jobs:
     if: always() && (inputs.environment == 'development' || inputs.phase == 'foundation' || needs.production-eligibility.result == 'success')
     needs: production-eligibility
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: ${{ inputs.environment }}-plan
     permissions:
       contents: read
@@ -153,7 +156,10 @@ jobs:
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_TERRAFORM_PURPOSE: plan
+      PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
@@ -173,12 +179,19 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Validate selection and required configuration
         shell: bash
         run: |
           [[ '${{ inputs.environment }}' =~ ^(development|production)$ ]]
           [[ '${{ inputs.phase }}' =~ ^(foundation|converge|release)$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
           done
@@ -223,6 +236,10 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
 
+      - name: Configure and verify delegated Cognito plan profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -233,7 +250,7 @@ jobs:
         shell: bash
         run: |
           if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
-            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
               -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
               -backend-config="key=${TF_STATE_KEY}" \
               -backend-config="region=${AWS_REGION}" \
@@ -253,6 +270,7 @@ jobs:
       - name: Create saved plan
         shell: bash
         run: |
+          python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
             > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
               python .github/scripts/terraform-plan-diagnostic.py \
@@ -269,10 +287,14 @@ jobs:
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ""
+          AWS_CONFIG_FILE: ""
           AWS_DEFAULT_REGION: ""
           AWS_REGION: ""
           AWS_SECRET_ACCESS_KEY: ""
           AWS_SESSION_TOKEN: ""
+          COGNITO_DELEGATED_ROLE_ARN: ""
+          COGNITO_DEPLOYMENT_PROFILE: ""
+          COGNITO_TERRAFORM_PURPOSE: ""
           PAWLOCAL_AWS_ACCOUNT_ID: ""
           PAWLOCAL_TF_STATE_BUCKET: ""
           PLAN_PREFIX: ""
@@ -305,10 +327,14 @@ jobs:
         shell: bash
         env:
           AWS_ACCESS_KEY_ID: ""
+          AWS_CONFIG_FILE: ""
           AWS_DEFAULT_REGION: ""
           AWS_REGION: ""
           AWS_SECRET_ACCESS_KEY: ""
           AWS_SESSION_TOKEN: ""
+          COGNITO_DELEGATED_ROLE_ARN: ""
+          COGNITO_DEPLOYMENT_PROFILE: ""
+          COGNITO_TERRAFORM_PURPOSE: ""
           PAWLOCAL_AWS_ACCOUNT_ID: ""
           PAWLOCAL_TF_STATE_BUCKET: ""
           PLAN_PREFIX: ""
@@ -354,17 +380,26 @@ jobs:
           python -m pip install --disable-pip-version-check --no-warn-script-location -r .github/scripts/requirements-terraform-plan-transfer.txt
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" "$TF_ROOT/tfplan" "$TF_ROOT/plan-metadata.json"
 
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
   apply:
     name: Apply reviewed exact ${{ inputs.environment }} plan
     needs: plan
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: ${{ inputs.environment }}-apply
     permissions:
       contents: read
       id-token: write
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_TERRAFORM_PURPOSE: apply
+      PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
@@ -376,10 +411,17 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Verify exact clean source checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Validate the matching apply identity
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-apply" ]]
+          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           test -n "$PLAN_TRANSFER_BUCKET"
 
       - name: Configure bounded apply credentials
@@ -389,6 +431,10 @@ jobs:
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
+
+      - name: Configure and verify delegated Cognito apply profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
 
       - name: Install pinned Aurora DSQL setup dependencies
         shell: bash
@@ -424,7 +470,7 @@ jobs:
         shell: bash
         run: |
           if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-init.log" -- \
-            terraform -chdir="$TF_ROOT" init -input=false -reconfigure \
+            terraform -chdir="$TF_ROOT" init -input=false -reconfigure -lockfile=readonly \
               -backend-config="bucket=${PAWLOCAL_TF_STATE_BUCKET}" \
               -backend-config="key=${TF_STATE_KEY}" \
               -backend-config="region=${AWS_REGION}" \
@@ -441,6 +487,7 @@ jobs:
             exit "$status"
           fi
 
+          python .github/scripts/verify-terraform-source-checkout.py
           apply_command=(terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m)
           if [[ "${PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS:-}" != 'true' ]]; then
             apply_command+=(-no-color)
@@ -456,3 +503,8 @@ jobs:
             exit "$status"
           fi
           echo 'The exact reviewed Terraform plan applied successfully. Runtime verification remains a separate required gate.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
