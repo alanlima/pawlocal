@@ -6,6 +6,7 @@ output "targets" {
     aws_region                  = var.aws_region
     frontend_url                = "https://${local.frontend_hostname}"
     api_health_url              = "https://${local.api_hostname}/health"
+    api_base_url                = "https://${local.api_hostname}"
     frontend_bucket             = aws_s3_bucket.frontend.bucket
     cloudfront_distribution_id  = aws_cloudfront_distribution.frontend.id
     cloudfront_distribution_arn = aws_cloudfront_distribution.frontend.arn
@@ -18,6 +19,10 @@ output "targets" {
     runtime_role_arn            = var.runtime_role_arn == "" ? null : var.runtime_role_arn
     cognito_user_pool_id        = aws_cognito_user_pool.application.id
     cognito_client_id           = aws_cognito_user_pool_client.browser.id
+    cognito_domain              = "https://${aws_cognito_user_pool_domain.application.domain}.auth.${var.aws_region}.amazoncognito.com"
+    cognito_redirect_uri        = one(aws_cognito_user_pool_client.browser.callback_urls)
+    cognito_logout_uri          = one(aws_cognito_user_pool_client.browser.logout_urls)
+    cognito_scopes              = join(" ", sort(tolist(aws_cognito_user_pool_client.browser.allowed_oauth_scopes)))
     backend_image               = var.backend_image == "" ? null : var.backend_image
   }
 }
