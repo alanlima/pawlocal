@@ -9,10 +9,10 @@ Use the [configuration guide](configuration-management.md) for reader/token setu
 For an existing converged environment:
 
 1. Inventory `/pawlocal/` keys and Terraform ownership read-only. Unknown keys or duplicate owners stop rollout.
-2. Apply the reviewed Terraform-only publication change: bootstrap first, then existing protected Converge with its current image and trusted inputs. Do not use Foundation on a running environment just to populate keys.
+2. Apply the reviewed Terraform-only publication change: bootstrap first, then existing protected Converge with its current image and trusted inputs. Verify the first-stage collision inventory privately before apply; the pipeline helper arrives with integration. Do not use Foundation on a running environment just to populate keys.
 3. After sources exist, enable enforced pipeline integration. This avoids a source bootstrap loop without an enforce bypass.
 
-Plans and exact saved-plan applies run `ops/configuration/check-collisions.py` before new parameter ownership. Bootstrap operators use the helper with `--environment bootstrap` and their privately rendered reviewed plan. Existing keys, imports, replacements or denied checks stop safely; no secret enters Terraform.
+After integration, plans and exact saved-plan applies run `ops/configuration/check-collisions.py` before new parameter ownership. Bootstrap operators use the helper with `--environment bootstrap` and their privately rendered reviewed plan. Existing keys, imports, replacements or denied checks stop safely; no secret enters Terraform.
 
 Manual Terraform, on-demand reconciliation, destroy and release/publication share one outer lock per environment; child workflows use separate groups. Preserve main-only application gates, exact-plan review and production approval. Confirmed destroy must succeed and verify the same state empty before exact generated-target/runtime-variable cleanup. Bootstrap entry settings remain available for reapply.
 

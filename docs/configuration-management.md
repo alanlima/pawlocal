@@ -26,7 +26,7 @@ The callable/on-demand `reconcile-environment.yml` selects development or produc
 The script is `ops/configuration/reconcile.py`; install its pinned `requirements.txt` first. It validates the manifest and existing destination Environments, then reports names/statuses only. The workflow exposes the scoped token only to protected credential/mutation steps and creates no payload artifacts. Test locally with `uv run --with-requirements ops/configuration/requirements.txt python -m unittest discover -s ops/configuration/tests -v`. Prefer the protected workflow for operations so approval and ordering are enforced.
 Reusable callers pass only the required named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret; the matching protected Environment supplies its value. A nonempty check runs before AWS access. No repository-global credential copy is needed.
 
-For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge. #205 leaves existing deployment workflows unchanged.
+For an open-PR test, use the existing CI-only `ci.yml` opt-in development call from the exact reviewed feature branch. Temporarily allowlist only that branch in `development-apply`, retain reviewer approval, then remove the allowance after merge. Verify direct dispatch after merge.
 
 | Invocation | Mode | Required-value behavior |
 |---|---|---|
