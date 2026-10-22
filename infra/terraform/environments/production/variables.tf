@@ -14,6 +14,19 @@ variable "cloudfront_certificate_arn" {
   type      = string
   sensitive = true
 }
+variable "cognito_pre_sign_up_role_arn" {
+  description = "Optional separately approved override for the production Cognito pre sign-up execution role."
+  type        = string
+  default     = null
+  nullable    = true
+  validation {
+    condition = (
+      var.cognito_pre_sign_up_role_arn == null ||
+      can(regex("^arn:[^:]+:iam::[0-9]{12}:role/pawlocal-production-cognito-pre-signup$", var.cognito_pre_sign_up_role_arn))
+    )
+    error_message = "cognito_pre_sign_up_role_arn must be null or name the production pre sign-up role."
+  }
+}
 variable "runtime_role_arn" {
   type    = string
   default = ""

@@ -22,6 +22,40 @@ variable "project_name" {
   }
 }
 
+variable "cognito_password_policy" {
+  description = "Environment-specific Cognito password-policy values; every other pool setting remains common."
+  type = object({
+    minimum_length    = number
+    require_lowercase = bool
+    require_uppercase = bool
+    require_numbers   = bool
+  })
+
+  validation {
+    condition = (
+      var.cognito_password_policy.minimum_length >= 6 &&
+      var.cognito_password_policy.minimum_length <= 99 &&
+      floor(var.cognito_password_policy.minimum_length) == var.cognito_password_policy.minimum_length
+    )
+    error_message = "cognito_password_policy.minimum_length must be a whole number from 6 through 99."
+  }
+}
+
+variable "cognito_pre_sign_up_role_arn" {
+  description = "Optional separately approved override for the exact matching bootstrap-owned pre sign-up execution role."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.cognito_pre_sign_up_role_arn == null ||
+      can(regex("^arn:[^:]+:iam::[0-9]{12}:role/pawlocal-(development|production)-cognito-pre-signup$", var.cognito_pre_sign_up_role_arn))
+    )
+    error_message = "cognito_pre_sign_up_role_arn must be null or a structurally valid PawLocal pre sign-up role ARN."
+  }
+}
+
 variable "root_domain" {
   description = "Existing public Route 53 zone name without a trailing dot."
   type        = string

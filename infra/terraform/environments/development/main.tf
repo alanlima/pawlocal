@@ -1,6 +1,11 @@
 module "pawlocal" {
   source = "../../modules/pawlocal-environment"
 
+  providers = {
+    aws                    = aws
+    aws.cognito_deployment = aws.cognito_deployment
+  }
+
   environment                 = "development"
   aws_region                  = var.aws_region
   project_name                = var.project_name
@@ -15,4 +20,12 @@ module "pawlocal" {
   cloudfront_oac_arn          = var.cloudfront_oac_arn
   container_power             = "micro"
   container_scale             = 1
+
+  cognito_pre_sign_up_role_arn = var.cognito_pre_sign_up_role_arn
+  cognito_password_policy = {
+    minimum_length    = 8
+    require_lowercase = false
+    require_uppercase = false
+    require_numbers   = false
+  }
 }

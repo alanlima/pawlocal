@@ -302,6 +302,12 @@ The matching `<environment>-apply` Environment provides `AWS_REGION`, `PAWLOCAL_
 
 `PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS` is read through the GitHub `vars` context and controls only diagnostic visibility; it does not change the plan or permissions.
 
+Lambda and CloudWatch Logs operations for the Cognito pre sign-up trigger use the stable Terraform provider alias `aws.cognito_deployment`; Cognito itself and every unrelated resource continue to use the default provider. Each plan or destroy-plan job constructs the delegated role `pawlocal-<environment>-cognito-terraform-plan`. Each apply, teardown-preparation apply, or destroy-apply job constructs `pawlocal-<environment>-cognito-terraform-apply`. The ARN is derived from the workflow-local `AWS_PARTITION=aws`, the already required 12-digit `PAWLOCAL_AWS_ACCOUNT_ID`, the exact environment, and the normalized `plan` or `apply` purpose. No new GitHub role-ARN variable and no default `TF_VAR_cognito_pre_sign_up_role_arn` are used.
+
+After the existing environment role receives fresh credentials, the workflow writes a mode-`0600` shared config outside the checkout for profile `pawlocal-cognito-deployment`. That profile uses `credential_source = Environment`, the deterministic delegated role, a purpose-specific session name, and `duration_seconds = 3600`. The workflow does not set `AWS_PROFILE`, so the default provider keeps the environment credentials. It masks the delegated ARN, verifies the delegated STS caller, blanks the profile, ARN, and config path during plan diagnostics, and removes the file in an `if: always()` cleanup step.
+
+The delegated hop is role chaining and cannot exceed one hour. Every Terraform plan or apply job has the same one-hour ceiling and starts with fresh base credentials. An expired, interrupted, or failed operation must generate a new saved plan and repeat review; never retry or apply stale plan material. Bootstrap outputs `cognito_terraform_role_arns` and `cognito_pre_sign_up_role_arns` are post-apply verification evidence only and are not copied into workflow configuration.
+
 ### Development and production release environments
 
 The matching release Environment provides:

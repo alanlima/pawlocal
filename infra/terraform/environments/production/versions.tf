@@ -27,3 +27,17 @@ provider "aws" {
     }
   }
 }
+
+provider "aws" {
+  alias   = "cognito_deployment"
+  region  = var.aws_region
+  profile = "pawlocal-cognito-deployment"
+
+  default_tags {
+    tags = {
+      project     = var.project_name
+      environment = "production"
+      managedby   = "terraform"
+    }
+  }
+}

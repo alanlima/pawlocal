@@ -37,6 +37,7 @@ jobs:
   prepare-plan:
     name: Plan exact teardown preparation
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: production-plan
     permissions:
       contents: read
@@ -45,7 +46,11 @@ jobs:
       already_empty: ${{ steps.state-status.outputs.already_empty }}
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
+      COGNITO_TERRAFORM_PURPOSE: plan
+      PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
@@ -84,6 +89,10 @@ jobs:
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
+
+      - name: Configure and verify delegated Cognito plan profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
@@ -158,17 +167,27 @@ jobs:
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
             "$TF_ROOT/destroy-prepare.tfplan" "$TF_ROOT/plan-metadata.json"
 
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
   prepare-apply:
     name: Approve and apply exact teardown preparation
     needs: prepare-plan
     if: needs.prepare-plan.outputs.already_empty != 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: production-destroy-prepare
     permissions:
       contents: read
       id-token: write
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
+      COGNITO_TERRAFORM_PURPOSE: apply
+      PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
@@ -192,6 +211,9 @@ jobs:
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
+      - name: Configure and verify delegated Cognito apply profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -221,11 +243,17 @@ jobs:
         run: |
           terraform -chdir="$TF_ROOT" apply -input=false -lock-timeout=5m "$RUNNER_TEMP/preparation/tfplan"
 
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
   destroy-plan:
     name: Plan exact full production destroy
     needs: [prepare-plan, prepare-apply]
     if: needs.prepare-plan.outputs.already_empty != 'true' && needs.prepare-apply.result == 'success'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: production-plan
     permissions:
       contents: read
@@ -233,7 +261,11 @@ jobs:
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
+      COGNITO_TERRAFORM_PURPOSE: plan
+      PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
@@ -264,6 +296,9 @@ jobs:
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
+      - name: Configure and verify delegated Cognito plan profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -298,17 +333,27 @@ jobs:
           python .github/scripts/terraform-plan-transfer.py upload "$PLAN_TRANSFER_BUCKET" "$PLAN_PREFIX" \
             "$TF_ROOT/destroy.tfplan" "$TF_ROOT/plan-metadata.json"
 
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
+
   destroy-apply:
     name: Approve and apply exact full production destroy
     needs: [prepare-plan, destroy-plan]
     if: needs.prepare-plan.outputs.already_empty != 'true' && needs.destroy-plan.result == 'success'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     environment: production-destroy
     permissions:
       contents: read
       id-token: write
     env:
+      AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
+      COGNITO_DEPLOYMENT_PROFILE: pawlocal-cognito-deployment
+      COGNITO_TERRAFORM_PURPOSE: apply
+      PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
@@ -332,6 +377,9 @@ jobs:
           allowed-account-ids: ${{ env.PAWLOCAL_AWS_ACCOUNT_ID }}
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
+      - name: Configure and verify delegated Cognito apply profile
+        shell: bash
+        run: bash .github/scripts/configure-cognito-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -363,3 +411,8 @@ jobs:
           python .github/scripts/terraform-production-lifecycle.py verify-empty-state \
             "$RUNNER_TEMP/post-destroy-state.json"
           echo 'The production application state is present and contains no resources or outputs.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove delegated Cognito profile
+        if: always()
+        shell: bash
+        run: bash .github/scripts/cleanup-cognito-terraform-profile.sh
