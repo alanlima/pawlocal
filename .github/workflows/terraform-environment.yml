@@ -63,7 +63,6 @@ env:
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
   TF_STATE_KEY: pawlocal/${{ inputs.environment }}/terraform.tfstate
-  TF_VAR_cognito_package_build_id: ${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.environment }}-${{ inputs.phase }}
   TF_VAR_project_name: pawlocal
   PLAN_PREFIX: plans/${{ inputs.environment }}/${{ github.run_id }}/${{ github.run_attempt }}
 
@@ -191,7 +190,6 @@ jobs:
           [[ '${{ inputs.environment }}' =~ ^(development|production)$ ]]
           [[ '${{ inputs.phase }}' =~ ^(foundation|converge|release)$ ]]
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           for name in AWS_REGION PAWLOCAL_TF_STATE_BUCKET PLAN_TRANSFER_BUCKET TF_VAR_root_domain TF_VAR_route53_zone_id TF_VAR_cloudfront_certificate_arn TERRAFORM_ROLE_ARN PAWLOCAL_AWS_ACCOUNT_ID; do
             [[ -n "${!name}" ]] || { echo "Missing required protected configuration: $name" >&2; exit 1; }
           done
@@ -272,6 +270,8 @@ jobs:
         run: |
           python .github/scripts/verify-terraform-source-checkout.py
           terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
+            -replace='module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]' \
+            -replace='module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]' \
             > "$RUNNER_TEMP/terraform-plan.log" 2>&1 || {
               python .github/scripts/terraform-plan-diagnostic.py \
                 --phase plan "$RUNNER_TEMP/terraform-plan.log" >&2
@@ -421,7 +421,6 @@ jobs:
         shell: bash
         run: |
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-apply" ]]
-          test "$TF_VAR_cognito_package_build_id" = "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.environment }}-${{ inputs.phase }}"
           test -n "$PLAN_TRANSFER_BUCKET"
 
       - name: Configure bounded apply credentials
