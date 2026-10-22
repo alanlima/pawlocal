@@ -18,6 +18,7 @@ locals {
       runtime           = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-runtime"
       dsql_setup        = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-dsql-setup"
       frontend_teardown = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-frontend-teardown"
+      configuration     = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/pawlocal-${environment}-configuration"
     }
   }
   environment_application_policy_arns = {
@@ -26,14 +27,16 @@ locals {
       policies.frontend_publish,
       policies.runtime,
       policies.dsql_setup,
-      policies.frontend_teardown
+      policies.frontend_teardown,
+      policies.configuration
     ]
   }
   environment_apply_attachment_policy_arns = {
     for environment, policies in local.environment_policy_arns : environment => [
       policies.application,
       policies.dsql_setup,
-      policies.frontend_teardown
+      policies.frontend_teardown,
+      policies.configuration
     ]
   }
   # Boundaries cap mutation while the matching identity policy retains the
@@ -55,6 +58,29 @@ locals {
 # named policies and may attach them only to their matching roles.
 data "aws_iam_policy_document" "environment_apply_boundary" {
   for_each = local.environments
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "ssm:GetParameter", "ssm:ListTagsForResource", "ssm:PutParameter", "ssm:DeleteParameter",
+      "ssm:AddTagsToResource", "ssm:RemoveTagsFromResource"
+    ]
+    resources = [
+      for component in ["api", "auth", "frontend"] :
+      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/config/${component}/*"
+    ]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
 
   statement {
     effect  = "Allow"
@@ -93,7 +119,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = local.environment_boundary_read_actions
+    actions   = concat(local.environment_boundary_read_actions, ["cloudfront:CreateOriginAccessControl"])
     resources = ["*"]
   }
 
@@ -158,16 +184,9 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     effect = "Allow"
     actions = [
-      "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource", "s3:PutBucketTagging"
-    ]
-    resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"]
-  }
-
-  statement {
-    effect = "Allow"
-    actions = [
       "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
-      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration", "s3:DeleteObject"
+      "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration", "s3:DeleteObject",
+      "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource", "s3:PutBucketTagging"
     ]
     resources = [
       "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*",
@@ -177,7 +196,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"]
+    actions   = ["cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService", "cloudfront:CreateDistribution"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -193,11 +212,12 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect  = "Allow"
-    actions = ["cognito-idp:TagResource", "lightsail:TagResource"]
+    actions = ["cognito-idp:TagResource", "lightsail:TagResource", "cloudfront:TagResource"]
     resources = [
       "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*"
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*",
+      "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"
     ]
     condition {
       test     = "StringEquals"
@@ -255,12 +275,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     actions = [
       "dsql:DbConnectAdmin", "dsql:DeleteCluster", "dsql:UpdateCluster",
       "dsql:PutClusterPolicy",
-      "lightsail:*ContainerService*", "lightsail:DeleteCertificate"
+      "lightsail:*ContainerService*", "lightsail:DeleteCertificate",
+      "cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"
     ]
     resources = [
       "arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*"
+      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*",
+      "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"
     ]
     condition {
       test     = "StringEquals"
@@ -284,72 +306,8 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect    = "Allow"
-    actions   = ["cloudfront:CreateDistribution"]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/environment"
-      values   = [each.key]
-    }
-  }
-
-  statement {
-    effect    = "Allow"
-    actions   = ["cloudfront:TagResource"]
-    resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/environment"
-      values   = [each.key]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/environment"
-      values   = [each.key]
-    }
-  }
-
-  statement {
-    effect    = "Allow"
     actions   = ["cloudfront:*Function", "cloudfront:TagResource"]
     resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${each.key}-spa-routing"]
-  }
-
-  statement {
-    effect    = "Allow"
-    actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]
-    resources = ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/project"
-      values   = [var.project_name]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:ResourceTag/environment"
-      values   = [each.key]
-    }
-  }
-
-  statement {
-    effect    = "Allow"
-    actions   = ["cloudfront:CreateOriginAccessControl"]
-    resources = ["*"]
   }
 
   statement {

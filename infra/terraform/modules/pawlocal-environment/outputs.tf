@@ -18,6 +18,11 @@ output "targets" {
     runtime_role_arn            = var.runtime_role_arn == "" ? null : var.runtime_role_arn
     cognito_user_pool_id        = aws_cognito_user_pool.application.id
     cognito_client_id           = aws_cognito_user_pool_client.browser.id
+    api_base_url                = local.public_configuration.api_base_url
+    cognito_domain              = local.public_configuration.cognito_domain
+    cognito_redirect_uri        = local.public_configuration.cognito_redirect_uri
+    cognito_logout_uri          = local.public_configuration.cognito_logout_uri
+    cognito_scopes              = local.public_configuration.cognito_scopes
     backend_image               = var.backend_image == "" ? null : var.backend_image
   }
 }

@@ -27,6 +27,7 @@ ALLOWED_TYPES = {
     "aws_s3_bucket_policy",
     "aws_s3_bucket_public_access_block",
     "aws_s3_bucket_server_side_encryption_configuration",
+    "aws_ssm_parameter",
     "random_id",
     "time_sleep",
 }
@@ -36,6 +37,42 @@ FORBIDDEN_TYPES = {
     "aws_iam_role",
     "aws_iam_role_policy",
 }
+
+APPLICATION_PARAMETER_SUFFIXES = frozenset({
+    "frontend/base-url", "api/health-url", "frontend/bucket",
+    "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn",
+    "frontend/cloudfront-oac-arn", "auth/client-id", "api/base-url",
+    "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes",
+})
+
+
+def configuration_ownership_errors(change: dict, environment: str) -> list[str]:
+    """Admit only the selected application module's approved public Strings."""
+    details = change.get("change", {})
+    after = details.get("after")
+    suffix = change.get("index")
+    if (
+        environment not in {"development", "production"}
+        or not isinstance(suffix, str)
+        or suffix not in APPLICATION_PARAMETER_SUFFIXES
+        or change.get("address") != f"module.pawlocal.aws_ssm_parameter.configuration[{json.dumps(suffix)}]"
+    ):
+        return ["configuration parameter is outside the approved application ownership boundary"]
+    expected_name = f"/pawlocal/{environment}/config/{suffix}"
+    for values in (details.get("before"), after):
+        if values is not None and (
+            not isinstance(values, dict)
+            or values.get("name") != expected_name
+            or values.get("type") != "String"
+            or values.get("tier") != "Standard"
+            or values.get("overwrite") is True
+        ):
+            return ["configuration parameter must retain its exact environment name and Standard String ownership"]
+    if after is None:
+        return ["configuration parameter removal is not allowed by the normal environment workflow"]
+    if change.get("importing") is not None or details.get("importing") is not None:
+        return ["application-resource import is prohibited: aws_ssm_parameter"]
+    return []
 
 
 def action_label(actions: list[str]) -> str:
@@ -66,6 +103,8 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
             continue
         resource_type = change.get("type", "")
         actions = change.get("change", {}).get("actions", [])
+        if resource_type == "aws_ssm_parameter":
+            errors.extend(configuration_ownership_errors(change, environment))
         if actions == ["no-op"]:
             continue
         if resource_type in FORBIDDEN_TYPES or resource_type not in ALLOWED_TYPES:

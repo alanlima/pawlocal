@@ -77,11 +77,12 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
         contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*/*")
       ]) == 1 &&
       strcontains(data.aws_iam_policy_document.role_permissions["${environment}-apply"].minified_json, local.environment_policy_arns[environment].frontend_teardown) &&
-      length(local.environment_application_policy_arns[environment]) == 5 &&
+      length(local.environment_application_policy_arns[environment]) == 6 &&
       toset(local.environment_apply_attachment_policy_arns[environment]) == toset([
         local.environment_policy_arns[environment].application,
         local.environment_policy_arns[environment].dsql_setup,
-        local.environment_policy_arns[environment].frontend_teardown
+        local.environment_policy_arns[environment].frontend_teardown,
+        local.environment_policy_arns[environment].configuration
       ])
     ])
     error_message = "Each environment apply role must have the same matching-environment policy families and object-deletion boundary ceiling."
@@ -355,7 +356,7 @@ run "stable_boundaries_cover_pre_and_post_deploy" {
         contains(flatten([statement.Action]), "cloudfront:UpdateDistribution") &&
         !contains(flatten([statement.Action]), "cloudfront:DeleteOriginAccessControl") &&
         !contains(flatten([statement.Action]), "cloudfront:UpdateOriginAccessControl") &&
-        toset(flatten([statement.Resource])) == toset(["arn:aws:cloudfront::111111111111:distribution/*"]) &&
+        toset([for resource in flatten([statement.Resource]) : resource if startswith(resource, "arn:aws:cloudfront:")]) == toset(["arn:aws:cloudfront::111111111111:distribution/*"]) &&
         statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawlocal" &&
         statement.Condition.StringEquals["aws:ResourceTag/environment"] == environment
       ]) == 1

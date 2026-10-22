@@ -290,7 +290,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
               if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
             ]
           ]
-          ])) == 11 && toset(flatten([
+          ])) == 7 && toset(flatten([
           for statement in jsondecode(policy.minified_json).Statement : [
             for operator, conditions in try(statement.Condition, {}) : [
               for variable, values in conditions : flatten([values])

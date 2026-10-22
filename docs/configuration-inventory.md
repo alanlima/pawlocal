@@ -2,7 +2,9 @@
 
 Specification baseline for #204 under #203. Entries below are approved sources/destinations for implementation in #205/#206, not a claim that parameters or mappings are deployed. Read-only AWS inventory during this task found no existing `/pawlocal/` parameters. All generated entries are `String`, `secret: false`, `validations: [required]`, apply to both `development` and `production`, and have no secret payload. No genuinely shared parameter is currently needed.
 
-#205 implements this inventory in `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. It adds the strict audit reconciler and protected callable workflow; generated Parameter Store publication remains #206. No active secret mappings or unmanaged parameters are added. Initial reader-role apply/OIDC and both workflow entry points require separately recorded runtime evidence before #205 completion.
+`ops/configuration/parameter-mapping.yaml` maps 18 source keys per environment to 24 development and 30 production destinations. The audit reconciler supports protected callable and on-demand execution. There are no active secret mappings or unmanaged parameters.
+
+Bootstrap publishes six Standard String keys per environment; its runtime-role key waits until that role exists. The matching application state publishes 12 keys; its two API keys wait for managed API DNS. The first #206 change adds these resources and their exact-key policy; live publication and pipeline integration need their separate checks.
 
 ## Generated parameter entries
 
@@ -16,20 +18,20 @@ Prefix every key suffix with `/pawlocal/{environment}/config/`. R = `{environmen
 | terraform/plan-bucket | PAWLOCAL_TERRAFORM_PLAN_BUCKET | P, A | B | `local.plan_transfer_bucket_name`, backed by bootstrap plan-transfer resource; private saved-plan upload/download |
 | iam/frontend-publish-role-arn | PAWLOCAL_DEPLOY_ROLE_ARN | R | B | `aws_iam_role.identity_app["<environment>_frontend"].arn`; frontend publisher OIDC |
 | iam/runtime-role-arn | PAWLOCAL_RUNTIME_ROLE_ARN | P, A | B | Matching `aws_iam_role.development_runtime[0].arn` / `production_runtime[0].arn`, only when created; environment plan's runtime trust/DSQL/deployment input |
-| frontend/base-url | PAWLOCAL_PUBLIC_BASE_URL | R | E | Module `targets.frontend_url` from managed frontend configuration; publish/verify adapter and deployment URL |
-| api/health-url | PAWLOCAL_API_HEALTH_URL | R | E | Module `targets.api_health_url`; public health/database smoke verification |
+| frontend/base-url | PAWLOCAL_PUBLIC_BASE_URL | R | E | HTTPS origin from managed `aws_route53_record.frontend_a.fqdn`; publish/verify adapter and deployment URL |
+| api/health-url | PAWLOCAL_API_HEALTH_URL | R | E | HTTPS managed `aws_route53_record.api[0].fqdn` plus `/health`, only when deployed; public health/database smoke verification |
 | frontend/bucket | PAWLOCAL_FRONTEND_BUCKET | R | E | `aws_s3_bucket.frontend.bucket`; frontend artifact publication |
 | frontend/cloudfront-distribution-id | PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID | R | E | `aws_cloudfront_distribution.frontend.id`; CDN publication/invalidation |
 | frontend/cloudfront-distribution-arn | PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN | P, A | E | `aws_cloudfront_distribution.frontend.arn`; exact generated-resource environment policy input |
 | frontend/cloudfront-oac-arn | PAWLOCAL_CLOUDFRONT_OAC_ARN | P, A | E | `aws_cloudfront_origin_access_control.frontend.arn`; exact generated-resource environment policy input |
 | auth/client-id | VITE_COGNITO_CLIENT_ID | R | E | `aws_cognito_user_pool_client.browser.id`; frontend public OAuth browser client |
-| api/base-url | VITE_API_BASE_URL | R | E | Matching managed API hostname, HTTPS origin plus `/api/v1`; HTTP service adapter |
+| api/base-url | VITE_API_BASE_URL | R | E | HTTPS managed `aws_route53_record.api[0].fqdn` plus `/api/v1`, only when deployed; HTTP service adapter |
 | auth/domain | VITE_COGNITO_DOMAIN | R | E | `aws_cognito_user_pool_domain.application.domain` and owning region, full HTTPS Cognito origin; hosted sign-in/token/logout endpoints |
 | auth/redirect-uri | VITE_COGNITO_REDIRECT_URI | R | E | Managed browser client `callback_urls` matching frontend `/auth/callback`; OAuth callback |
 | auth/logout-uri | VITE_COGNITO_LOGOUT_URI | R | E | Managed browser client `logout_urls` matching frontend `/`; OAuth logout return |
 | auth/scopes | VITE_COGNITO_SCOPES | R | E | Managed browser client `allowed_oauth_scopes`, space joined; OAuth authorization scopes |
 
-Sources refer to `infra/terraform/iam-bootstrap/{main,identity_roles,outputs}.tf` and `infra/terraform/modules/pawlocal-environment/{main,outputs}.tf`. Missing canonical public outputs are added in #206 directly from the attributes above. Consumers are `.github/workflows/terraform-environment.yml`, `fullstack-release.yml`, `deploy-production.yml`, the frontend auth/service configuration and `ops/deployment-adapters/lightsail-dsql.sh`. P consumes the generated handoff values when planning; A applies the exact saved plan and consumes its AWS/account/plan-transfer settings. The agreed P/A destinations are retained even where A does not independently evaluate a value. Keep destroy/recovery consumption in the review before retiring any target.
+Sources refer to `infra/terraform/iam-bootstrap/{main,identity_roles,configuration_parameters,outputs}.tf` and `infra/terraform/modules/pawlocal-environment/{main,configuration,outputs}.tf`. The application output includes canonical API base, Cognito domain, callback, logout and space-separated scopes from those managed attributes. Consumers are `.github/workflows/terraform-environment.yml`, `fullstack-release.yml`, `deploy-production.yml`, the frontend auth/service configuration and `ops/deployment-adapters/lightsail-dsql.sh`. P consumes the generated handoff values when planning; A applies the exact saved plan and consumes its AWS/account/plan-transfer settings. The agreed P/A destinations are retained even where A does not independently evaluate a value. Keep destroy/recovery consumption in the review before retiring any target.
 
 ### Additional existing production recovery destinations
 
