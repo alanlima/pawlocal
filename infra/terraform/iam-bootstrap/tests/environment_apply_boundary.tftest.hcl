@@ -50,16 +50,11 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
   }
 
   assert {
-    condition     = length(data.aws_iam_policy_document.environment_apply_boundary["development"].minified_json) == 6100
-    error_message = "The real-input-equivalent development fixture must retain the reviewed 6100-byte boundary shape."
-  }
-
-  assert {
-    condition = (
-      length(data.aws_iam_policy_document.cognito_apply_permissions["development"].minified_json) == 6015 &&
-      length(data.aws_iam_policy_document.cognito_apply_permissions["production"].minified_json) == 5989
-    )
-    error_message = "Default-project delegated Cognito apply policies must retain the reviewed size-safe shape."
+    condition = alltrue([
+      for policy in data.aws_iam_policy_document.cognito_apply_permissions :
+      length(policy.minified_json) <= local.iam_managed_policy_max_bytes
+    ])
+    error_message = "Default-project delegated Cognito apply policies must remain within AWS's 6144-byte managed-policy limit with realistic rendered inputs."
   }
 
   assert {

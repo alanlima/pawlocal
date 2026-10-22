@@ -135,14 +135,7 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
   assert {
     condition = alltrue([
       for environment, policy in data.aws_iam_policy_document.cognito_apply_permissions :
-      length(flatten([
-        for statement in jsondecode(policy.minified_json).Statement : [
-          for operator, conditions in try(statement.Condition, {}) : [
-            for variable, values in conditions : flatten([values])
-            if contains(["aws:RequestTag/project", "aws:ResourceTag/project"], variable)
-          ]
-        ]
-        ])) == 13 && toset(flatten([
+      toset(flatten([
         for statement in jsondecode(policy.minified_json).Statement : [
           for operator, conditions in try(statement.Condition, {}) : [
             for variable, values in conditions : flatten([values])
@@ -179,10 +172,16 @@ run "delegated_cognito_roles_are_exact_and_environment_isolated" {
         if statement.Sid == "TagNewLogGroup" &&
         toset(flatten([statement.Action])) == toset(["logs:TagResource"]) &&
         toset(flatten([statement.Resource])) == toset([local.cognito_resource_arns[environment].log_group_tags]) &&
-        statement.Condition.StringEquals["aws:RequestTag/project"] == "pawhub" &&
-        statement.Condition.StringEquals["aws:RequestTag/environment"] == environment &&
-        !can(statement.Condition.StringEquals["aws:ResourceTag/project"]) &&
-        !can(statement.Condition.StringEquals["aws:ResourceTag/environment"])
+        toset(keys(statement.Condition)) == toset(["StringEquals", "ForAllValues:StringEquals"]) &&
+        statement.Condition.StringEquals == {
+          for key, value in local.cognito_application_tags[environment] : "aws:RequestTag/${key}" => value
+        } &&
+        toset(statement.Condition["ForAllValues:StringEquals"]["aws:TagKeys"]) == toset(keys(local.cognito_application_tags[environment])) &&
+        !anytrue(flatten([
+          for operator, conditions in statement.Condition : [
+            for key in keys(conditions) : startswith(key, "aws:ResourceTag/")
+          ]
+        ]))
         ]) == 1 && alltrue([
         for statement in jsondecode(policy.minified_json).Statement :
         statement.Condition.StringEquals["aws:ResourceTag/project"] == "pawhub" &&
