@@ -16,6 +16,7 @@ import yaml
 from nacl.public import PrivateKey, SealedBox
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "ops/configuration"))
 SPEC = importlib.util.spec_from_file_location(
     "reconcile", ROOT / "ops/configuration/reconcile.py"
 )

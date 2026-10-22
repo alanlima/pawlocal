@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
 import yaml
+from job_summary import Report
 from reconcile import GitHub, ReconciliationError, load_mappings
 
 LEGACY_VARIABLES = (
@@ -67,30 +69,14 @@ def prove_legacy_unused(root, github, environment):
         )
 
 
-def cleanup(
-    mappings,
-    github,
-    environment,
-    operation,
-    confirmation,
-    root,
-    report=print,
-    destroy_confirmed=False,
-):
+def cleanup_targets(mappings, environment, operation):
     if environment not in ("development", "production"):
         raise ReconciliationError("Unsupported cleanup environment")
     if operation == "legacy-cleanup":
-        if confirmation != f"CLEAN legacy {environment}":
-            raise ReconciliationError("Exact legacy cleanup confirmation required")
-        prove_legacy_unused(root, github, environment)
         targets = [(environment, "variables", name) for name in LEGACY_VARIABLES] + [
             (environment, "secrets", name) for name in LEGACY_SECRETS
         ]
     elif operation == "destroy-cleanup":
-        if confirmation != f"DESTROY {environment}" or not destroy_confirmed:
-            raise ReconciliationError(
-                "Confirmed reviewed destroy and empty-state verification required"
-            )
         targets = [
             (m.github_environment, "secrets" if m.secret else "variables", m.env_name)
             for m in mappings
@@ -102,21 +88,75 @@ def cleanup(
         ]
     else:
         raise ReconciliationError("Unsupported cleanup operation")
+    return sorted(set(targets))
+
+
+def cleanup(
+    mappings,
+    github,
+    environment,
+    operation,
+    confirmation,
+    root,
+    report=print,
+    destroy_confirmed=False,
+    summary=None,
+):
+    targets = cleanup_targets(mappings, environment, operation)
+    if operation == "legacy-cleanup":
+        if confirmation != f"CLEAN legacy {environment}":
+            raise ReconciliationError("Exact legacy cleanup confirmation required")
+        prove_legacy_unused(root, github, environment)
+    elif operation == "destroy-cleanup":
+        if confirmation != f"DESTROY {environment}" or not destroy_confirmed:
+            raise ReconciliationError(
+                "Confirmed reviewed destroy and empty-state verification required"
+            )
+    else:
+        raise ReconciliationError("Unsupported cleanup operation")
     for target in sorted({target for target, _, _ in targets}):
         github.request("GET", f"environments/{quote(target, safe='')}")
-    for target, kind, name in sorted(set(targets)):
+    for target, kind, name in targets:
         path = f"environments/{quote(target, safe='')}/{kind}/{quote(name, safe='')}"
-        current = github.request("GET", path, missing=True)
-        if current is None:
-            report(f"already-absent {target}/{name}")
-            continue
-        github.request("DELETE", path)
-        if github.request("GET", path, missing=True) is not None:
-            raise ReconciliationError("Cleanup read-back failed")
-        report(f"deleted {target}/{name}")
+        row = summary.rows[(target, name)] if summary else None
+        try:
+            current = github.request("GET", path, missing=True)
+            if current is None:
+                if row:
+                    row.status, row.reason = (
+                        "Already absent",
+                        "Exact target absent before deletion.",
+                    )
+                report(f"already-absent {target}/{name}")
+                continue
+            github.mutate(
+                "DELETE",
+                path,
+                progress=(
+                    lambda stage, current=row: setattr(current, "mutation", stage)
+                )
+                if row
+                else None,
+            )
+            if github.request("GET", path, missing=True) is not None:
+                raise ReconciliationError("Cleanup read-back failed")
+            if row:
+                row.status, row.reason, row.mutation = (
+                    "Deleted",
+                    "Delete succeeded; absence confirmed.",
+                    "verified",
+                )
+            report(f"deleted {target}/{name}")
+        except Exception:
+            if row:
+                row.status, row.reason = (
+                    "Failed",
+                    "Exact target cleanup failed; remaining deletes not attempted.",
+                )
+            raise
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--environment", required=True, choices=("development", "production")
@@ -126,11 +166,22 @@ def main():
     )
     parser.add_argument("--confirmation", required=True)
     parser.add_argument("--destroy-confirmed", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    summary = Report(
+        args.environment,
+        os.environ.get("SELECTED_MODE", "audit"),
+        os.environ.get("SELECTED_SELECTION", "all"),
+        args.operation,
+    )
+    status = 0
     try:
+        summary.clear()
         root = Path(__file__).resolve().parents[2]
         mappings = load_mappings(
             Path(__file__).with_name("parameter-mapping.yaml"), args.environment
+        )
+        summary.cleanup_inventory(
+            cleanup_targets(mappings, args.environment, args.operation)
         )
         github = GitHub(
             os.environ.get("GITHUB_REPOSITORY", ""),
@@ -144,12 +195,22 @@ def main():
             args.confirmation,
             root,
             destroy_confirmed=args.destroy_confirmed,
+            summary=summary,
         )
+        summary.succeeded()
     except Exception:  # noqa: BLE001 - no credential/response payloads
-        raise SystemExit(
-            "Explicit configuration cleanup failed; inspect targets and permissions privately"
-        ) from None
+        print(
+            "Explicit configuration cleanup failed; inspect targets and permissions privately",
+            file=sys.stderr,
+        )
+        status = 1
+    try:
+        summary.write()
+    except Exception:  # noqa: BLE001 - fixed report failure, preserve execution failure
+        print("Cannot write configuration summary.", file=sys.stderr)
+        status = 1
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

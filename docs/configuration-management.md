@@ -23,6 +23,10 @@ One reconciliation job uses the matching protected `<environment>-apply` Environ
 
 The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default; choose enforce to require all selected values before synchronization/publication. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
 
+Open the job's **Summary** for destination counts, changed GitHub Environments and the full mapping grouped by target. For example, a development no-op shows **24 unchanged, 30 not selected; changed Environments: None**. Preflight shows 13 selected destinations and 41 not selected. Cleanup has a separate exact-target table.
+
+Variable results require matching readback. Secret writes show **write accepted**; GitHub does not return secret values or verify unchanged content. Failed or incomplete reports distinguish confirmed changes from accepted-but-unverified or possible writes. Completed writes remain after a failure; rerun after fixing the cause. Cancellation or runner loss can prevent a final report, so missing rows never prove no writes occurred.
+
 The script is `ops/configuration/reconcile.py`; install its pinned `requirements.txt` first. It validates the manifest and existing destination Environments, then reports names/statuses only. The workflow exposes the scoped token only to protected credential/mutation steps and creates no payload artifacts. Test locally with `uv run --with-requirements ops/configuration/requirements.txt python -m unittest discover -s ops/configuration/tests -v`. Prefer the protected workflow for operations so approval and ordering are enforced.
 Reusable callers pass only the required named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret; the matching protected Environment supplies its value. A nonempty check runs before AWS access. No repository-global credential copy is needed.
 
