@@ -1,3 +1,5 @@
+# Generated sources are owned by the bootstrap/matching application Terraform
+# states listed in docs/configuration-inventory.md; this remains the exact allowlist.
 mappings:
   - store_key: /pawlocal/{environment}/config/iam/terraform-plan-role-arn
     environment: [development, production]

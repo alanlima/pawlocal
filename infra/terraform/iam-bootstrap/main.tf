@@ -189,6 +189,25 @@ data "aws_iam_policy_document" "role_permissions" {
   for_each = local.role_definitions
 
   statement {
+    sid       = "RefreshOnlyOwnedApplicationConfiguration"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter", "ssm:ListTagsForResource"]
+    resources = local.application_configuration_arns[each.value.environment]
+  }
+
+  statement {
+    sid       = "DescribeRegionalParameterMetadataForProviderRefresh"
+    effect    = "Allow"
+    actions   = ["ssm:DescribeParameters"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+
+  statement {
     sid    = "ReadStateAndLockOnlyTheAssignedKey"
     effect = "Allow"
     actions = each.value.purpose == "plan" ? [

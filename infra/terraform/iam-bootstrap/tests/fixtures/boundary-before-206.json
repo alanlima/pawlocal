@@ -1,0 +1,636 @@
+{
+  "source_commit": "23b50eb",
+  "purpose": "Pre-206 rendered policies with synthetic fixture inputs for exact finite compaction pair-delta regression",
+  "policies": {
+    "development": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:DeleteObject"
+          ],
+          "Resource": [
+            "arn:aws:s3:::fixture-state-bucket-x/pawlocal/development/terraform.tfstate.tflock",
+            "arn:aws:s3:::fixture-state-bucket-x/pawlocal/development/terraform.tfstate"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::pawlocal-terraform-plans-111111111111/plans/development/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": [
+            "arn:aws:s3:::pawlocal-terraform-plans-111111111111",
+            "arn:aws:s3:::fixture-state-bucket-x"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:ListBucket",
+          "Resource": "arn:aws:s3:::fixture-state-bucket-x",
+          "Condition": {
+            "StringLike": {
+              "s3:prefix": [
+                "pawlocal/development/terraform.tfstate",
+                "pawlocal/development/terraform.tfstate.tflock"
+              ]
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "sts:GetCallerIdentity",
+            "route53:List*",
+            "route53:Get*",
+            "lightsail:Get*",
+            "iam:List*",
+            "iam:Get*",
+            "dsql:List*",
+            "dsql:Get*",
+            "cognito-idp:List*",
+            "cognito-idp:Get*",
+            "cognito-idp:Describe*",
+            "cloudfront:List*",
+            "cloudfront:Get*"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "iam:*Policy*",
+          "Resource": "arn:aws:iam::111111111111:policy/pawlocal-development-*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "sts:AssumeRole",
+            "iam:DetachRolePolicy",
+            "iam:AttachRolePolicy"
+          ],
+          "Resource": "arn:aws:iam::111111111111:role/pawlocal-development-*",
+          "Condition": {
+            "ArnLikeIfExists": {
+              "iam:PolicyARN": "arn:aws:iam::111111111111:policy/pawlocal-development-*"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:TagResource",
+            "s3:CreateBucket"
+          ],
+          "Resource": "arn:aws:s3:::pawlocal-development-*",
+          "Condition": {
+            "ForAllValues:StringLike": {
+              "aws:TagKeys": [
+                "project",
+                "environment",
+                "managedby",
+                "component",
+                "workload",
+                "costcenter"
+              ]
+            },
+            "StringEquals": {
+              "aws:RequestTag/component": "fullstack-mvp",
+              "aws:RequestTag/costcenter": "personal",
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/managedby": "terraform",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:RequestTag/workload": "application"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutBucketTagging",
+            "s3:ListTagsForResource",
+            "s3:ListBucket",
+            "s3:GetBucket*",
+            "s3:Get*Configuration"
+          ],
+          "Resource": "arn:aws:s3:::pawlocal-development-*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutEncryptionConfiguration",
+            "s3:PutBucketPublicAccessBlock",
+            "s3:PutBucketPolicy",
+            "s3:PutBucketOwnershipControls",
+            "s3:DeleteObject",
+            "s3:DeleteBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::pawlocal-development-*/*",
+            "arn:aws:s3:::pawlocal-development-*"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:CreateContainerService",
+            "lightsail:CreateCertificate",
+            "cognito-idp:CreateUserPool"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:TagResource",
+            "cognito-idp:TagResource"
+          ],
+          "Resource": [
+            "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*",
+            "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*",
+            "arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:ResourceTag/environment": "development",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dsql:TagResource",
+            "dsql:CreateCluster"
+          ],
+          "Resource": "arn:aws:dsql:ap-southeast-2:111111111111:cluster/*",
+          "Condition": {
+            "ForAllValues:StringEquals": {
+              "aws:TagKeys": [
+                "Name",
+                "component",
+                "costcenter",
+                "environment",
+                "managedby",
+                "project",
+                "purpose",
+                "workload"
+              ]
+            },
+            "StringEquals": {
+              "aws:RequestTag/Name": "pawlocal-development",
+              "aws:RequestTag/component": "fullstack-mvp",
+              "aws:RequestTag/costcenter": "personal",
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/managedby": "terraform",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:RequestTag/purpose": "pawlocal-app-database",
+              "aws:RequestTag/workload": "application",
+              "aws:ResourceTag/environment": "development",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:DeleteCertificate",
+            "lightsail:*ContainerService*",
+            "dsql:UpdateCluster",
+            "dsql:PutClusterPolicy",
+            "dsql:DeleteCluster",
+            "dsql:DbConnectAdmin"
+          ],
+          "Resource": [
+            "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*",
+            "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*",
+            "arn:aws:dsql:ap-southeast-2:111111111111:cluster/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:ResourceTag/environment": "development",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cognito-idp:UpdateUserPool*",
+            "cognito-idp:DeleteUserPool*",
+            "cognito-idp:CreateUserPool*"
+          ],
+          "Resource": "arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:CreateDistribution",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:TagResource",
+          "Resource": "arn:aws:cloudfront::111111111111:distribution/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "development",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:ResourceTag/environment": "development",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:TagResource",
+            "cloudfront:*Function"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:function/pawlocal-development-spa-routing"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:UpdateDistribution",
+            "cloudfront:DeleteDistribution"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:distribution/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:ResourceTag/environment": "development",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:CreateOriginAccessControl",
+          "Resource": "*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:UpdateOriginAccessControl",
+            "cloudfront:DeleteOriginAccessControl"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:origin-access-control/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "route53:ChangeResourceRecordSets",
+          "Resource": "arn:aws:route53:::hostedzone/ZFIXTURE000000",
+          "Condition": {
+            "ForAllValues:StringEquals": {
+              "route53:ChangeResourceRecordSetsRecordTypes": [
+                "A",
+                "AAAA",
+                "CNAME"
+              ]
+            },
+            "ForAllValues:StringLike": {
+              "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+                "api-dev.fixture.example",
+                "pawlocal-dev.fixture.example",
+                "_*.api-dev.fixture.example"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "production": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:DeleteObject"
+          ],
+          "Resource": [
+            "arn:aws:s3:::fixture-state-bucket-x/pawlocal/production/terraform.tfstate.tflock",
+            "arn:aws:s3:::fixture-state-bucket-x/pawlocal/production/terraform.tfstate"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::pawlocal-terraform-plans-111111111111/plans/production/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:GetBucketLocation",
+          "Resource": [
+            "arn:aws:s3:::pawlocal-terraform-plans-111111111111",
+            "arn:aws:s3:::fixture-state-bucket-x"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": "s3:ListBucket",
+          "Resource": "arn:aws:s3:::fixture-state-bucket-x",
+          "Condition": {
+            "StringLike": {
+              "s3:prefix": [
+                "pawlocal/production/terraform.tfstate",
+                "pawlocal/production/terraform.tfstate.tflock"
+              ]
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "sts:GetCallerIdentity",
+            "route53:List*",
+            "route53:Get*",
+            "lightsail:Get*",
+            "iam:List*",
+            "iam:Get*",
+            "dsql:List*",
+            "dsql:Get*",
+            "cognito-idp:List*",
+            "cognito-idp:Get*",
+            "cognito-idp:Describe*",
+            "cloudfront:List*",
+            "cloudfront:Get*"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "iam:*Policy*",
+          "Resource": "arn:aws:iam::111111111111:policy/pawlocal-production-*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "sts:AssumeRole",
+            "iam:DetachRolePolicy",
+            "iam:AttachRolePolicy"
+          ],
+          "Resource": "arn:aws:iam::111111111111:role/pawlocal-production-*",
+          "Condition": {
+            "ArnLikeIfExists": {
+              "iam:PolicyARN": "arn:aws:iam::111111111111:policy/pawlocal-production-*"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:TagResource",
+            "s3:CreateBucket"
+          ],
+          "Resource": "arn:aws:s3:::pawlocal-production-*",
+          "Condition": {
+            "ForAllValues:StringLike": {
+              "aws:TagKeys": [
+                "project",
+                "environment",
+                "managedby",
+                "component",
+                "workload",
+                "costcenter"
+              ]
+            },
+            "StringEquals": {
+              "aws:RequestTag/component": "fullstack-mvp",
+              "aws:RequestTag/costcenter": "personal",
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/managedby": "terraform",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:RequestTag/workload": "application"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutBucketTagging",
+            "s3:ListTagsForResource",
+            "s3:ListBucket",
+            "s3:GetBucket*",
+            "s3:Get*Configuration"
+          ],
+          "Resource": "arn:aws:s3:::pawlocal-production-*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:PutEncryptionConfiguration",
+            "s3:PutBucketPublicAccessBlock",
+            "s3:PutBucketPolicy",
+            "s3:PutBucketOwnershipControls",
+            "s3:DeleteObject",
+            "s3:DeleteBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::pawlocal-production-*/*",
+            "arn:aws:s3:::pawlocal-production-*"
+          ]
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:CreateContainerService",
+            "lightsail:CreateCertificate",
+            "cognito-idp:CreateUserPool"
+          ],
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:TagResource",
+            "cognito-idp:TagResource"
+          ],
+          "Resource": [
+            "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*",
+            "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*",
+            "arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:ResourceTag/environment": "production",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "dsql:TagResource",
+            "dsql:CreateCluster"
+          ],
+          "Resource": "arn:aws:dsql:ap-southeast-2:111111111111:cluster/*",
+          "Condition": {
+            "ForAllValues:StringEquals": {
+              "aws:TagKeys": [
+                "Name",
+                "component",
+                "costcenter",
+                "environment",
+                "managedby",
+                "project",
+                "purpose",
+                "workload"
+              ]
+            },
+            "StringEquals": {
+              "aws:RequestTag/Name": "pawlocal-production",
+              "aws:RequestTag/component": "fullstack-mvp",
+              "aws:RequestTag/costcenter": "personal",
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/managedby": "terraform",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:RequestTag/purpose": "pawlocal-app-database",
+              "aws:RequestTag/workload": "application",
+              "aws:ResourceTag/environment": "production",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "lightsail:DeleteCertificate",
+            "lightsail:*ContainerService*",
+            "dsql:UpdateCluster",
+            "dsql:PutClusterPolicy",
+            "dsql:DeleteCluster",
+            "dsql:DbConnectAdmin"
+          ],
+          "Resource": [
+            "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*",
+            "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*",
+            "arn:aws:dsql:ap-southeast-2:111111111111:cluster/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:ResourceTag/environment": "production",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cognito-idp:UpdateUserPool*",
+            "cognito-idp:DeleteUserPool*",
+            "cognito-idp:CreateUserPool*"
+          ],
+          "Resource": "arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:CreateDistribution",
+          "Resource": "*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:TagResource",
+          "Resource": "arn:aws:cloudfront::111111111111:distribution/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:RequestTag/environment": "production",
+              "aws:RequestTag/project": "pawlocal",
+              "aws:ResourceTag/environment": "production",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:TagResource",
+            "cloudfront:*Function"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:function/pawlocal-production-spa-routing"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:UpdateDistribution",
+            "cloudfront:DeleteDistribution"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:distribution/*",
+          "Condition": {
+            "StringEquals": {
+              "aws:ResourceTag/environment": "production",
+              "aws:ResourceTag/project": "pawlocal"
+            }
+          }
+        },
+        {
+          "Effect": "Allow",
+          "Action": "cloudfront:CreateOriginAccessControl",
+          "Resource": "*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": [
+            "cloudfront:UpdateOriginAccessControl",
+            "cloudfront:DeleteOriginAccessControl"
+          ],
+          "Resource": "arn:aws:cloudfront::111111111111:origin-access-control/*"
+        },
+        {
+          "Effect": "Allow",
+          "Action": "route53:ChangeResourceRecordSets",
+          "Resource": "arn:aws:route53:::hostedzone/ZFIXTURE000000",
+          "Condition": {
+            "ForAllValues:StringEquals": {
+              "route53:ChangeResourceRecordSetsRecordTypes": [
+                "A",
+                "AAAA",
+                "CNAME"
+              ]
+            },
+            "ForAllValues:StringLike": {
+              "route53:ChangeResourceRecordSetsNormalizedRecordNames": [
+                "api.fixture.example",
+                "pawlocal.fixture.example",
+                "_*.api.fixture.example"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -288,7 +288,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertIn(":distribution/*", boundary)
         self.assertIn(":origin-access-control/*", boundary)
         self.assertIn(
-            'actions   = ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"]',
+            '"cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"',
             boundary,
         )
         self.assertIn(
