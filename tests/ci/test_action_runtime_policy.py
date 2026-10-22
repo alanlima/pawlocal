@@ -17,6 +17,7 @@ EXPECTED_HOSTED_JOBS = {
     ("development-dsql-seed.yml", "seed"),
     ("frontend-deploy.yml", "frontend"),
     ("frontend-production-deploy.yml", "disabled"),
+    ("fullstack-release.yml", "confirm-development-variable-handoff"),
     ("fullstack-release.yml", "publish"),
     ("fullstack-release.yml", "verify-development"),
     ("rollback-development.yml", "disabled"),

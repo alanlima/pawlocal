@@ -85,8 +85,8 @@ run "development_uses_relaxed_password_policy_and_default_role" {
 
   assert {
     condition = (
-      output.targets.api_base_url == "https://api-dev.example.test" &&
-      output.targets.api_health_url == "${output.targets.api_base_url}/health" &&
+      output.targets.api_base_url == "https://api-dev.example.test/api/v1" &&
+      output.targets.api_health_url == "https://api-dev.example.test/health" &&
       output.targets.cognito_domain == "https://${aws_cognito_user_pool_domain.application.domain}.auth.ap-southeast-2.amazoncognito.com" &&
       output.targets.cognito_domain == "https://pawlocal-development-c0ffee.auth.ap-southeast-2.amazoncognito.com" &&
       output.targets.cognito_redirect_uri == one(aws_cognito_user_pool_client.browser.callback_urls) &&
@@ -184,8 +184,8 @@ run "production_uses_strict_password_policy_and_exact_override" {
 
   assert {
     condition = (
-      output.targets.api_base_url == "https://api.example.test" &&
-      output.targets.api_health_url == "${output.targets.api_base_url}/health" &&
+      output.targets.api_base_url == "https://api.example.test/api/v1" &&
+      output.targets.api_health_url == "https://api.example.test/health" &&
       output.targets.cognito_domain == "https://${aws_cognito_user_pool_domain.application.domain}.auth.ap-southeast-2.amazoncognito.com" &&
       output.targets.cognito_domain == "https://pawlocal-production-c0ffee.auth.ap-southeast-2.amazoncognito.com" &&
       output.targets.cognito_redirect_uri == one(aws_cognito_user_pool_client.browser.callback_urls) &&

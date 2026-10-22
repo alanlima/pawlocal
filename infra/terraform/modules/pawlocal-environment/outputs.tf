@@ -6,7 +6,7 @@ output "targets" {
     aws_region                  = var.aws_region
     frontend_url                = "https://${local.frontend_hostname}"
     api_health_url              = "https://${local.api_hostname}/health"
-    api_base_url                = "https://${local.api_hostname}"
+    api_base_url                = "https://${local.api_hostname}/api/v1"
     frontend_bucket             = aws_s3_bucket.frontend.bucket
     cloudfront_distribution_id  = aws_cloudfront_distribution.frontend.id
     cloudfront_distribution_arn = aws_cloudfront_distribution.frontend.arn

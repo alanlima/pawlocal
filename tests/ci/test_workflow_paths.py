@@ -5,6 +5,8 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 WORKFLOWS = Path(".github/workflows")
 
 
@@ -47,6 +49,45 @@ def matches(workflow: str, path: str, event: str | None = None) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
+    def test_development_publication_waits_for_permissionless_protected_handoff(self) -> None:
+        jobs = yaml.safe_load((WORKFLOWS / "fullstack-release.yml").read_text())["jobs"]
+        handoff = jobs["confirm-development-variable-handoff"]
+        self.assertEqual(handoff["needs"], ["publish", "terraform-development"])
+        self.assertEqual(handoff["environment"], "development-apply")
+        self.assertEqual(handoff["runs-on"], "ubuntu-24.04")
+        self.assertEqual(handoff["permissions"], {})
+        self.assertEqual(set(handoff), {"name", "needs", "runs-on", "environment", "permissions", "steps"})
+        self.assertEqual(len(handoff["steps"]), 1)
+        step = handoff["steps"][0]
+        self.assertEqual(set(step), {"name", "shell", "run"})
+        self.assertEqual(step["shell"], "bash")
+        for line in step["run"].splitlines():
+            self.assertTrue(line.startswith('echo "'))
+            self.assertNotIn("${{", line)
+        self.assertIn("not automated reconciliation proof", step["run"])
+        self.assertEqual(
+            jobs["verify-development"]["needs"],
+            ["publish", "terraform-development", "confirm-development-variable-handoff"],
+        )
+
+    def test_handoff_and_publication_keep_default_success_only_dependencies(self) -> None:
+        jobs = yaml.safe_load((WORKFLOWS / "fullstack-release.yml").read_text())["jobs"]
+        # No always()/cancelled() override: failed, cancelled or skipped needs cannot run these jobs.
+        for name in ("confirm-development-variable-handoff", "verify-development"):
+            self.assertNotIn("if", jobs[name])
+        # Pull requests skip both upstream deployment jobs and therefore the dependent handoff/publication.
+        for name in ("publish", "terraform-development"):
+            self.assertEqual(
+                jobs[name]["if"],
+                "(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'",
+            )
+
+    def test_canonical_api_output_includes_the_frontend_contract_path(self) -> None:
+        outputs = Path("infra/terraform/modules/pawlocal-environment/outputs.tf").read_text()
+        frontend = Path("frontend/src/config/releaseConfig.ts").read_text()
+        self.assertRegex(outputs, r'api_base_url\s*=\s*"https://\$\{local\.api_hostname\}/api/v1"')
+        self.assertIn("apiUrl.pathname.replace(/\\/$/, '') !== '/api/v1'", frontend)
+
     def test_reconciliation_outputs_trigger_development_release_in_both_events(self) -> None:
         workflow = "fullstack-release.yml"
         for event in ("pull_request", "push"):

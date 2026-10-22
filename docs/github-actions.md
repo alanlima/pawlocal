@@ -26,7 +26,8 @@ flowchart TD
   DEV --> BE
   DEV --> IMAGE["Publish immutable backend image"]
   IMAGE --> TF_RELEASE_DEV["Terraform environment: development release"]
-  TF_RELEASE_DEV --> VERIFY_DEV["Publish and verify development"]
+  TF_RELEASE_DEV --> DEV_HANDOFF["Protected manual variable handoff"]
+  DEV_HANDOFF --> VERIFY_DEV["Publish and verify development"]
 
   OPERATOR["Operator"] --> TF_FOUNDATION["Terraform environment: foundation"]
   TF_FOUNDATION --> HANDOFF["Generated identity and protected-variable handoff"]
@@ -156,9 +157,14 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 1. builds and publishes the backend image to GHCR;
 2. binds it to its immutable registry digest;
 3. calls `terraform-environment.yml` with the development Release phase;
-4. builds and publishes the development frontend;
-5. verifies public health, running image identity, DSQL migration/baseline state, and a database-backed place query; and
-6. records a successful development deployment containing the commit/image pair and verification evidence.
+4. waits at `Confirm development variable handoff after apply` in the existing protected `development-apply` Environment;
+5. builds and publishes the development frontend after that separate handoff approval;
+6. verifies public health, running image identity, DSQL migration/baseline state, and a database-backed place query; and
+7. records a successful development deployment containing the commit/image pair and verification evidence.
+
+After the matching Terraform apply, the handoff job must wait with no steps executed. Before approving only that named job, the operator verifies the fixed #155 allowlist against current matching bootstrap/development outputs, reads back the variables, and records source/run plus unchanged before/after state identity evidence. Use `environment_targets.api_base_url` directly, including `/api/v1` as required by `frontend/src/config/releaseConfig.ts`; the health URL remains `/health` on the API origin. Do not bulk-approve pending jobs. A failed, cancelled or skipped apply prevents the dependent handoff and frontend publication.
+
+The handoff runs only shell attestation text with empty permissions; it has no checkout, credentials, API calls or automatic reconciliation. It is a temporary protected manual gate while #155 automation remains open. Every normal development release waits at this gate until it is replaced through reviewed #155 automation. The approved one-release manual exception requires operator evidence independently for development and production; it does not create a permanent production waiver or automated readiness proof.
 
 It accepts no manual inputs because the commit is the selected `main` revision and the image digest is produced by the same run.
 

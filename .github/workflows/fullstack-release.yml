@@ -109,9 +109,22 @@ jobs:
       release_only: true
     secrets: inherit
 
+  confirm-development-variable-handoff:
+    name: Confirm development variable handoff after apply
+    needs: [publish, terraform-development]
+    runs-on: ubuntu-24.04
+    environment: development-apply
+    permissions: {}
+    steps:
+      - name: Attest operator-verified manual reconciliation
+        shell: bash
+        run: |
+          echo "Protected approval attests that the operator verified the Issue #155 allowlisted development variables against matching applied bootstrap/environment outputs, read back the values, and bound evidence to this source/run and unchanged before/after state identities."
+          echo "This is a manual approval record for the approved one-release exception, not automated reconciliation proof."
+
   verify-development:
     name: Publish frontend and verify development
-    needs: [publish, terraform-development]
+    needs: [publish, terraform-development, confirm-development-variable-handoff]
     runs-on: ubuntu-24.04
     environment: development
     permissions:
