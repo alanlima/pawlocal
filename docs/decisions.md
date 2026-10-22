@@ -2,6 +2,15 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
+## DEC-010 — Parameter Store configuration and GitHub reconciliation
+
+- **Status:** Design approved through #155/#203; specification delivery #204 on 2026-10-22. Implementation and live acceptance remain sequential #205 then #206.
+- **Context:** Generated resource identities manually copied to GitHub can become stale, particularly after Cognito replacement; a served frontend must be rebuilt after configuration reconciliation.
+- **Decision:** Use the [configuration management contract](configuration-management.md) and [configuration inventory](configuration-inventory.md). Terraform owns generated non-secret Strings in the existing bootstrap/matching application states. A strict six-field YAML allowlist maps exact keys to matching GitHub Environments. Dedicated reader roles use exact matching protected apply-Environment OIDC trust; a repository-selected GitHub token is supplied directly as a protected apply-Environment secret. No unmanaged Parameter Store credential is currently required. Initial reader ARN setup is manual; automatic future handoff belongs to #191.
+- **Behavior:** Audit warns/skips missing sources; enforce prevalidates required selected values before writes. Invalid mappings/access/API/read-back failures always fail. Serialize by environment, preserve protected mutation approvals, and pass the same verified public values to the frontend build. Missing values/removal never imply deletion; confirmed reviewed destroy and exact allowlisted cleanup are explicit operations.
+- **Supersession and gates:** This permanent design replaces the older #155 reconciliation-specific commit/hash, fingerprint and state-generation evidence proposals; DEC-009's one-release source exception remains historical evidence, not a permanent reconciler requirement. Existing Terraform saved-plan integrity, independent exact-plan review, protected apply, production eligibility/promotion and infrastructure ownership are unchanged. No new billable apply is authorized by this decision.
+- **Consequences:** Every configuration change updates mapping and inventory together; retired entries live only in dated documentation history. Secret payloads never enter Terraform state/outputs, workflow outputs/artifacts/logs or public build snapshots. Specification approval does not claim live credentials, parameters, roles, synchronization or release readiness.
+
 ## DEC-001 — Stage delivery sequence and parallel workstreams
 
 - **Status:** Approved 2026-10-18.
