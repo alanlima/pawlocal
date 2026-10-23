@@ -12,6 +12,13 @@ WORKFLOWS = Path(".github/workflows")
 
 EXPECTED_HOSTED_JOBS = {
     ("grafana-access-check.yml", "validate-access"),
+    ("incident-responder.yml", "preflight"),
+    ("incident-responder.yml", "fixer"),
+    ("incident-responder.yml", "checks"),
+    ("incident-responder.yml", "reviewer"),
+    ("incident-responder.yml", "publisher"),
+    ("incident-responder.yml", "merge"),
+    ("incident-responder.yml", "promote"),
     ("backend-ci.yml", "backend"),
     ("compose-ci.yml", "compose"),
     ("deploy-production.yml", "verify-production"),
@@ -53,6 +60,8 @@ REQUIRED_ACTION_MAJORS = {
     "hashicorp/setup-terraform": "v4",
 }
 
+PINNED_ACTIONS = {"openai/codex-action": "c05cfd74ad95c626cdf05c6685e62becc3bf7813"}
+
 
 def workflow_files() -> list[Path]:
     return sorted((*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")))
@@ -84,6 +93,10 @@ def step_action_references(workflow: dict[str, Any]) -> Iterator[tuple[str, str]
 def validate_action_reference(uses: str, location: str) -> tuple[str, str]:
     """Validate one external action as an approved root action at an exact major."""
 
+    if uses == "openai/codex-action@" + PINNED_ACTIONS["openai/codex-action"]:
+        if "incident-responder.yml:" not in location:
+            raise AssertionError("Pinned Codex Action is reviewed only in incident-responder.yml")
+        return "openai/codex-action", PINNED_ACTIONS["openai/codex-action"]
     match = re.fullmatch(
         r"(?P<action>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@(?P<revision>v\d+)",
         uses,
@@ -127,7 +140,7 @@ class ActionRuntimePolicyTests(unittest.TestCase):
 
     def test_every_external_action_uses_its_node_24_compatible_major(self) -> None:
         references: dict[str, list[tuple[str, str]]] = {
-            action: [] for action in REQUIRED_ACTION_MAJORS
+            action: [] for action in (REQUIRED_ACTION_MAJORS | PINNED_ACTIONS)
         }
 
         for path in workflow_files():

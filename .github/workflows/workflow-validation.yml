@@ -136,7 +136,7 @@ jobs:
           echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
 
       - name: Lint workflow syntax and security
-        run: actionlint
+        run: python .github/scripts/lint-workflows.py
 
       - name: Set up pinned Terraform for provider-free saved-plan fixture
         uses: hashicorp/setup-terraform@v4

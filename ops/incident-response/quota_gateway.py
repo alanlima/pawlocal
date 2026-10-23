@@ -1,0 +1,388 @@
+"""Job-local trusted gateway; run as runner, Codex as a distinct non-sudo UID.
+
+The Action proxy receives only a random local bearer, never the upstream key.
+No inference retry, remote tool, stored response, or non-Responses endpoint.
+"""
+
+import argparse
+import hmac
+import json
+import os
+import signal
+import sys
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+from quota import Denied, Profile, RequestBudget, strict_json
+
+ORIGIN = "https://api.openai.com/v1/responses"
+MAX_BODY = 4 * 1024 * 1024
+MAX_RESPONSE = 16 * 1024 * 1024
+COUNT_FIELDS = {
+    "model",
+    "input",
+    "instructions",
+    "tools",
+    "text",
+    "reasoning",
+    "parallel_tool_calls",
+    "tool_choice",
+    "truncation",
+}
+BODY_FIELDS = COUNT_FIELDS | {
+    "stream",
+    "store",
+    "max_output_tokens",
+    "service_tier",
+    "include",
+    "metadata",
+    "client_metadata",
+    "prompt_cache_key",
+    "safety_identifier",
+}
+INPUT_TYPES = {
+    "message",
+    "function_call",
+    "function_call_output",
+    "custom_tool_call",
+    "custom_tool_call_output",
+    "reasoning",
+    "compaction",
+}
+
+
+def explicit_text(value):
+    if isinstance(value, str):
+        return
+    if not isinstance(value, list):
+        raise Denied("explicit text required")
+    for part in value:
+        if (
+            not isinstance(part, dict)
+            or set(part) - {"type", "text", "annotations", "logprobs"}
+            or part.get("type") not in {"input_text", "output_text"}
+            or not isinstance(part.get("text"), str)
+        ):
+            raise Denied("only explicit text content supported")
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def validate_request(body, profile):
+    if (
+        not isinstance(body, dict)
+        or set(body) - BODY_FIELDS
+        or body.get("model") != profile.model
+    ):
+        raise Denied("unapproved request schema/model")
+    if (
+        body.get("store") is not False
+        or body.get("service_tier", profile.service_tier) != profile.service_tier
+    ):
+        raise Denied("stored state or unapproved tier")
+    reasoning = body.get("reasoning")
+    if (
+        not isinstance(reasoning, dict)
+        or reasoning.get("effort") != profile.effort
+        or set(reasoning) - {"effort", "summary"}
+    ):
+        raise Denied("unapproved reasoning")
+    if body.get("truncation", "disabled") != "disabled":
+        raise Denied("automatic truncation changes token-count input")
+    if type(body.get("stream", False)) is not bool:
+        raise Denied("invalid streaming flag")
+    if "input" not in body or not isinstance(body["input"], (str, list)):
+        raise Denied("explicit full input required")
+    if isinstance(body["input"], list):
+        for item in body["input"]:
+            if (
+                not isinstance(item, dict)
+                or item.get("type", "message") not in INPUT_TYPES
+            ):
+                raise Denied("unsupported remote or stored input")
+            if item.get("type", "message") == "message":
+                if set(item) - {"type", "role", "content", "status", "phase", "id"}:
+                    raise Denied("unsupported message fields")
+                explicit_text(item.get("content"))
+            elif item["type"] in {"function_call_output", "custom_tool_call_output"}:
+                if set(item) - {"type", "call_id", "output", "status", "id"}:
+                    raise Denied("unsupported output fields")
+                explicit_text(item.get("output"))
+            elif item["type"] in {"function_call", "custom_tool_call"}:
+                if set(item) - {
+                    "type",
+                    "call_id",
+                    "name",
+                    "arguments",
+                    "input",
+                    "status",
+                    "id",
+                }:
+                    raise Denied("unsupported local call fields")
+                if not isinstance(item.get("arguments", item.get("input")), str):
+                    raise Denied("explicit local call text required")
+            elif item["type"] == "reasoning":
+                if set(item) - {
+                    "type",
+                    "id",
+                    "summary",
+                    "content",
+                    "encrypted_content",
+                    "status",
+                }:
+                    raise Denied("unsupported reasoning fields")
+                for field in ("summary", "content"):
+                    if field in item and (
+                        not isinstance(item[field], list)
+                        or any(
+                            not isinstance(part, dict)
+                            or set(part) != {"type", "text"}
+                            or part["type"] not in {"summary_text", "reasoning_text"}
+                            or not isinstance(part["text"], str)
+                            for part in item[field]
+                        )
+                    ):
+                        raise Denied("explicit reasoning text required")
+                if "encrypted_content" in item and not isinstance(
+                    item["encrypted_content"], str
+                ):
+                    raise Denied("invalid encrypted reasoning")
+            elif set(item) - {"type", "id", "encrypted_content"} or not isinstance(
+                item.get("encrypted_content"), str
+            ):
+                raise Denied("unsupported compaction fields")
+    tools = body.get("tools", [])
+    if (
+        not isinstance(tools, list)
+        or len(tools) > 64
+        or any(
+            not isinstance(tool, dict)
+            or tool.get("type") not in {"function", "custom", "namespace"}
+            for tool in tools
+        )
+    ):
+        raise Denied("remote/billable tools forbidden")
+    # Namespace tools must recursively contain only local function/custom tools.
+    for tool in tools:
+        if tool["type"] == "namespace":
+            nested = tool.get("tools")
+            if (
+                not isinstance(nested, list)
+                or len(nested) > 64
+                or any(
+                    not isinstance(value, dict)
+                    or value.get("type") not in {"function", "custom"}
+                    for value in nested
+                )
+            ):
+                raise Denied("remote namespace tools forbidden")
+    return {key: value for key, value in body.items() if key in COUNT_FIELDS}
+
+
+class Gateway:
+    def __init__(
+        self, profile, key, local_token, deadline, upstream=None, clock=time.time
+    ):
+        if not key or len(local_token) < 32 or not clock() < deadline <= clock() + 1200:
+            raise Denied("invalid gateway authorization/deadline")
+        self.profile = profile
+        self.key = key
+        self.local_token = local_token
+        self.deadline = deadline
+        self.clock = clock
+        self.budget = RequestBudget(profile)
+        self.received = 0
+        self.upstream = upstream or self.request
+
+    def remaining(self):
+        self.profile.valid_at(self.clock())
+        remaining = self.deadline - self.clock()
+        if remaining <= 0:
+            raise Denied("workflow deadline exhausted")
+        return min(remaining, 90)
+
+    def request(self, suffix, payload):
+        request = urllib.request.Request(
+            ORIGIN + suffix,
+            data=json.dumps(payload, separators=(",", ":")).encode(),
+            headers={
+                "Authorization": "Bearer " + self.key,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        return urllib.request.build_opener(NoRedirect).open(
+            request, timeout=self.remaining()
+        )
+
+    def admit(self, authorization, raw):
+        if not isinstance(authorization, str) or not hmac.compare_digest(
+            authorization, "Bearer " + self.local_token
+        ):
+            raise Denied("local authentication failed")
+        self.remaining()
+        self.received += 1
+        if self.received > self.profile.requests_per_role or len(raw) > MAX_BODY:
+            raise Denied("request quota/body bound exceeded")
+        body = strict_json(raw)
+        if isinstance(body, dict):
+            # CLI correlation identifiers are unnecessary for this adapter and
+            # never forwarded upstream. Tier is fixed even when CLI omits it.
+            for field in (
+                "client_metadata",
+                "metadata",
+                "prompt_cache_key",
+                "safety_identifier",
+            ):
+                body.pop(field, None)
+            body.setdefault("service_tier", self.profile.service_tier)
+        count_body = validate_request(body, self.profile)
+        # Token counting includes tool schemas, instructions and entire history.
+        # Failure, unknown schema, redirect, or missing count denies inference.
+        with self.upstream("/input_tokens", count_body) as response:
+            if response.status != 200:
+                raise Denied("token counting failed")
+            count_raw = response.read(65537)
+            if len(count_raw) > 65536:
+                raise Denied("token count response too large")
+            count = strict_json(count_raw)
+            if (
+                not isinstance(count, dict)
+                or type(count.get("input_tokens")) is not int
+            ):
+                raise Denied("token count missing")
+        cap = self.budget.admit(count["input_tokens"])
+        body["max_output_tokens"] = cap
+        self.remaining()
+        # Conservative charged allocation, not a claim of provider-billed
+        # usage. Never log prompts, tool arguments, responses or credentials.
+        numerator = (
+            self.budget.inputs * self.profile.input_rate
+            + self.budget.outputs * self.profile.output_rate
+        )
+        print(
+            json.dumps(
+                {
+                    "event": "oncall_quota_reserved",
+                    "profile": self.profile.digest,
+                    "model": self.profile.model,
+                    "requests": self.budget.requests,
+                    "input_tokens_reserved": self.budget.inputs,
+                    "output_tokens_reserved": self.budget.outputs,
+                    "upper_cost_microdollars": (numerator + 999999) // 1000000,
+                }
+            ),
+            flush=True,
+        )
+        return body
+
+
+def serve(gateway, port):
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.0"
+
+        def log_message(self, *_args):
+            # No bodies, query strings, bearer tokens or prompts in access logs.
+            pass
+
+        def do_POST(self):
+            try:
+                if (
+                    self.path != "/v1/responses"
+                    or self.headers.get("Transfer-Encoding")
+                    or self.headers.get("Content-Encoding")
+                ):
+                    raise Denied("fixed endpoint required")
+                if (
+                    len(self.headers.get_all("Authorization", [])) != 1
+                    or len(self.headers.get_all("Content-Length", [])) != 1
+                ):
+                    raise Denied("ambiguous request headers")
+                length = int(self.headers.get("Content-Length", "-1"))
+                if not 0 < length <= MAX_BODY:
+                    raise Denied("body length bound")
+                self.connection.settimeout(min(gateway.remaining(), 10))
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise Denied("incomplete body")
+                body = gateway.admit(self.headers.get("Authorization"), raw)
+                with gateway.upstream("", body) as response:
+                    if response.status != 200:
+                        raise Denied("upstream inference failed")
+                    content_type = response.headers.get("Content-Type", "")
+                    if not (
+                        content_type.startswith(
+                            ("text/event-stream", "application/json")
+                        )
+                    ):
+                        raise Denied("unexpected upstream content type")
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.end_headers()
+                    total = 0
+                    while True:
+                        gateway.remaining()
+                        chunk = response.read(16384)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > MAX_RESPONSE:
+                            raise Denied("upstream response bound")
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+            except (Denied, ValueError, OSError, urllib.error.URLError, TimeoutError):
+                # Reservation remains charged regardless of delivery/usage.
+                self.close_connection = True
+                if not self.wfile.closed:
+                    try:
+                        self.send_error(429, "Admission denied or upstream uncertain")
+                    except OSError:
+                        pass
+
+        def do_GET(self):
+            self.send_error(405)
+
+    server = HTTPServer(("127.0.0.1", port), Handler)
+    server.timeout = 1
+    # Absolute wall clock, including idle periods; no request can restart it.
+    while gateway.clock() < gateway.deadline:
+        server.handle_request()
+    server.server_close()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--profile", required=True)
+    parser.add_argument("--deadline", type=int, required=True)
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    if (
+        os.name != "posix"
+        or os.stat(args.profile).st_uid != os.getuid()
+        or os.stat(args.profile).st_mode & 0o022
+    ):
+        raise Denied("trusted owner-only profile required")
+    remaining = args.deadline - time.time()
+    if not 0 < remaining <= 1200:
+        raise Denied("invalid absolute deadline")
+    # Kernel-delivered main-thread alarm covers header parsing, socket reads,
+    # blocked upstream/client writes and idle time, not merely loop boundaries.
+    signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
+    signal.setitimer(signal.ITIMER_REAL, remaining)
+    profile = Profile.load(Path(args.profile).read_text())
+    # stdin avoids real API key in argv, candidate files or exported job env.
+    credentials = strict_json(sys.stdin.readline(MAX_BODY))
+    gateway = Gateway(
+        profile, credentials["api_key"], credentials["local_token"], args.deadline
+    )
+    serve(gateway, args.port)
+
+
+if __name__ == "__main__":
+    main()

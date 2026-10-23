@@ -1,0 +1,503 @@
+{
+  "client_metadata": {
+    "root_turn_id": "fixture",
+    "session_id": "fixture",
+    "thread_id": "fixture",
+    "turn_id": "fixture",
+    "x-codex-installation-id": "fixture",
+    "x-codex-turn-metadata": "fixture",
+    "x-codex-window-id": "fixture"
+  },
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "input": [
+    {
+      "content": [
+        {
+          "text": "fixture text",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "developer",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "fixture text",
+          "type": "input_text"
+        },
+        {
+          "text": "fixture text",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "developer",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "fixture text",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "user",
+      "type": "message"
+    },
+    {
+      "content": [
+        {
+          "text": "fixture text",
+          "type": "input_text"
+        }
+      ],
+      "id": "msg_fixture",
+      "role": "user",
+      "type": "message"
+    }
+  ],
+  "model": "fixture-model",
+  "parallel_tool_calls": true,
+  "prompt_cache_key": "fixture",
+  "reasoning": {
+    "effort": "medium",
+    "summary": "auto"
+  },
+  "store": false,
+  "stream": true,
+  "tool_choice": "auto",
+  "tools": [
+    {
+      "description": "fixture description",
+      "name": "exec_command",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cmd": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "justification": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "login": {
+            "description": "fixture description",
+            "type": "boolean"
+          },
+          "max_output_tokens": {
+            "description": "fixture description",
+            "type": "number"
+          },
+          "prefix_rule": {
+            "description": "fixture description",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sandbox_permissions": {
+            "description": "fixture description",
+            "enum": [
+              "use_default",
+              "require_escalated"
+            ],
+            "type": "string"
+          },
+          "shell": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "tty": {
+            "description": "fixture description",
+            "type": "boolean"
+          },
+          "workdir": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "yield_time_ms": {
+            "description": "fixture description",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cmd"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "write_stdin",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "description": "fixture description",
+            "type": "number"
+          },
+          "session_id": {
+            "description": "fixture description",
+            "type": "number"
+          },
+          "yield_time_ms": {
+            "description": "fixture description",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "request_user_input",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "questions": {
+            "description": "fixture description",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "header": {
+                  "description": "fixture description",
+                  "type": "string"
+                },
+                "id": {
+                  "description": "fixture description",
+                  "type": "string"
+                },
+                "options": {
+                  "description": "fixture description",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "description": "fixture description",
+                      "label": {
+                        "description": "fixture description",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "description"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "question": {
+                  "description": "fixture description",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "header",
+                "question",
+                "options"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "view_image",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "fixture description",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "multi_agent_v1",
+      "tools": [
+        {
+          "description": "fixture description",
+          "name": "close_agent",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "target": {
+                "description": "fixture description",
+                "type": "string"
+              }
+            },
+            "required": [
+              "target"
+            ],
+            "type": "object"
+          },
+          "strict": false,
+          "type": "function"
+        },
+        {
+          "description": "fixture description",
+          "name": "resume_agent",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "description": "fixture description",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "strict": false,
+          "type": "function"
+        },
+        {
+          "description": "fixture description",
+          "name": "send_input",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "interrupt": {
+                "description": "fixture description",
+                "type": "boolean"
+              },
+              "items": {
+                "description": "fixture description",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "audio_url": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "image_url": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "text": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "fixture description",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "message": {
+                "description": "fixture description",
+                "type": "string"
+              },
+              "target": {
+                "description": "fixture description",
+                "type": "string"
+              }
+            },
+            "required": [
+              "target"
+            ],
+            "type": "object"
+          },
+          "strict": false,
+          "type": "function"
+        },
+        {
+          "description": "fixture description",
+          "name": "spawn_agent",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "fork_context": {
+                "description": "fixture description",
+                "type": "boolean"
+              },
+              "items": {
+                "description": "fixture description",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "audio_url": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "image_url": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "name": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "path": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "text": {
+                      "description": "fixture description",
+                      "type": "string"
+                    },
+                    "type": {
+                      "description": "fixture description",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "message": {
+                "description": "fixture description",
+                "type": "string"
+              },
+              "model": {
+                "description": "fixture description",
+                "type": "string"
+              },
+              "reasoning_effort": {
+                "description": "fixture description",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "strict": false,
+          "type": "function"
+        },
+        {
+          "description": "fixture description",
+          "name": "wait_agent",
+          "parameters": {
+            "additionalProperties": false,
+            "properties": {
+              "targets": {
+                "description": "fixture description",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "timeout_ms": {
+                "description": "fixture description",
+                "type": "number"
+              }
+            },
+            "required": [
+              "targets"
+            ],
+            "type": "object"
+          },
+          "strict": false,
+          "type": "function"
+        }
+      ],
+      "type": "namespace"
+    },
+    {
+      "description": "fixture description",
+      "name": "get_goal",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "create_goal",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "objective": {
+            "description": "fixture description",
+            "type": "string"
+          },
+          "token_budget": {
+            "description": "fixture description",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "objective"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    },
+    {
+      "description": "fixture description",
+      "name": "update_goal",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "description": "fixture description",
+            "enum": [
+              "complete",
+              "blocked",
+              "paused"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "strict": false,
+      "type": "function"
+    }
+  ]
+}
