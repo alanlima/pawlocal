@@ -8,9 +8,11 @@ Implementation is present; **live Free-plan access, credentials, origins, quotas
 
 Grafana resources use one source-controlled **API** owner. Terraform could manage these public objects with provider credentials supplied through environment variables, but this implementation deliberately uses the documented APIs instead. Do not also declare the same folder/Faro app in Terraform. Existing bootstrap/development/production Terraform states exclusively retain AWS ownership: no fourth state, new provider or default AWS-plan authentication dependency is introduced. Public handoff values become reviewed input to matching Terraform-owned SSM String producers in #223/#225; never write SSM through this tool or a shell command.
 
-## Owner-selected account
+## Shared Free stack
 
-The owner selected **`https://alanlima.grafana.net/`** for **all environments**, with **Free** as the intended operating limit. Development and production use separate Faro applications in that same stack. Read-only Grafana UI inspection identified stack/OTLP username **`1880841`**, Grafana region **`prod-au-southeast-1`** (Australia), AWS region **`ap-southeast-2`**, and OTLP endpoint **`https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp`** ([stack details](https://grafana.com/orgs/alanlima/stacks/1880841/grafana), [OTLP connection](https://grafana.com/orgs/alanlima/stacks/1880841/otlp-info)). The account UI displayed **Trial: 10 days** at inspection; trial/paid allowances do not establish Free eligibility. Datasource bindings, exact origins, scopes, post-trial Free quotas and per-signal authorization still require verification. The checked-in bindings remain disabled/null until required inputs and activation reviews exist. No separate account is selected as a workaround: withhold signals/reads that cannot be safely authorized in the shared stack and return an explicit owner decision if a requirement cannot be met.
+Use one operator-configured Grafana Cloud stack for all environments, with separate development and production Faro applications. Keep account identifiers, stack URLs and regional connection values in deployment configuration. Discover the actual bindings through the read-only command below. Free is the intended operating limit: trial or paid allowances do not establish Free eligibility.
+
+Datasource bindings, exact origins, scopes, post-trial Free quotas and per-signal authorization require verification. Checked-in bindings remain disabled/null until required inputs and initial setup reviews exist. Withhold signals or reads that cannot satisfy the shared-stack privacy boundary and record the required setup decision.
 
 ## Operator setup and approval record
 
@@ -52,10 +54,10 @@ Enabled binding example structure (actual values required; not executable defaul
 
 ## Validate, plan, provision and verify
 
-Start with only the existing stack URL, expected region and protected API access. Discovery reads stack metadata, connections and datasources, and returns selected public candidate bindings with no mutations:
+Supply the approved existing stack URL and actual Grafana region as command inputs. The example uses placeholders; replace them with deployment configuration values. Discovery reads stack metadata, connections and datasources, and returns selected public candidate bindings with no mutations:
 
 ```powershell
-python observability/grafana/cloud/provision.py --environment development --mode discover --stack-url https://alanlima.grafana.net --region prod-au-southeast-1
+python observability/grafana/cloud/provision.py --environment development --mode discover --stack-url https://approved-stack.grafana.net --region actual-region-slug
 ```
 
 Discovery derives stack ID, OTLP endpoint/username, datasource UID/names and regional Faro management endpoint from actual metadata plus the pinned official regional rules (including creation-date exceptions). Multiple datasource candidates fail rather than guessing; select the reviewed UID explicitly in that case. The remaining review input is the exact frontend origin from existing release evidence, plus approval/privacy/isolation/quota references. Do not invent values or claim discovery verifies quota/authorization. The Faro collector URL comes from creating/reading the app, not from a user-entered key. Two credential domains suffice: Cloud policy (stack/Faro scopes) and Grafana service-account token; a separate narrow Faro token is optional when supplied as `GRAFANA_FARO_ACCESS_POLICY_TOKEN`.
