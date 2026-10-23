@@ -74,7 +74,7 @@ variables {
 
 run "disabled_hosted_mode_has_no_secret_read" {
   command   = plan
-  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test }
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   assert {
     condition     = local.application_configuration_values["observability/enabled"] == "false" && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && alltrue([for s in data.aws_iam_policy_document.runtime[0].statement : !contains(flatten([s.actions]), "ssm:GetParameter")]) && local.backend_runtime_environment["OTEL_SDK_DISABLED"] == "true"
     error_message = "Default disabled mode must publish false, deny ingestion secret reads and disable the deployed SDK."
@@ -83,7 +83,7 @@ run "disabled_hosted_mode_has_no_secret_read" {
 
 run "enabled_mode_exact_runtime_secret_and_public_bindings" {
   command   = plan
-  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test }
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
       enabled            = true
@@ -110,7 +110,7 @@ run "enabled_mode_exact_runtime_secret_and_public_bindings" {
 
 run "private_endpoint_input_denied" {
   command   = plan
-  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test }
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
       enabled            = true
