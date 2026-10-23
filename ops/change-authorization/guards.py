@@ -95,12 +95,6 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
         if actions == ["no-op"] or actions == ["read"]:
             continue
 
-        # Machine route strictly prohibits resource deletion
-        if "delete" in actions:
-            raise PlanViolation(
-                f"Machine incident plan cannot delete resources: {resource_type}.{resource_name}"
-            )
-
         # Check against forbidden patterns
         for pattern in FORBIDDEN_RESOURCE_PATTERNS:
             if re.search(pattern, resource_type):
@@ -108,14 +102,25 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
                     f"Machine incident plan cannot modify sensitive infrastructure: {resource_type}.{resource_name}"
                 )
 
-        # Allow only container service deployment version updates
+        # Allow only container service deployment version updates or replacements
         if resource_type not in ALLOWED_RELEASE_RESOURCES:
             raise PlanViolation(
                 f"Machine incident plan contains unapproved resource change: {resource_type}.{resource_name} (actions: {actions})"
             )
 
-        # For allowed resources, allow only update or create (for deployment version)
-        if actions not in (["update"], ["create"]):
+        # For allowed release resources, permit create, update, or immutable replacement ({'create', 'delete'})
+        expected_deployment_replacement = (
+            resource_type == "aws_lightsail_container_service_deployment_version"
+            and set(actions) == {"create", "delete"}
+        )
+
+        # Machine route strictly prohibits resource deletion unless it is the expected deployment-version replacement
+        if "delete" in actions and not expected_deployment_replacement:
+            raise PlanViolation(
+                f"Machine incident plan cannot delete resources: {resource_type}.{resource_name}"
+            )
+
+        if actions not in (["update"], ["create"]) and not expected_deployment_replacement:
             raise PlanViolation(
                 f"Disallowed action combination on release resource {resource_type}: {actions}"
             )

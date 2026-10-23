@@ -394,7 +394,7 @@ class EntrypointGuardTests(unittest.TestCase):
         plan = {
             "resource_changes": [
                 {
-                    "type": "aws_lightsail_container_service_deployment_version",
+                    "type": "aws_s3_bucket",
                     "name": "pawlocal",
                     "change": {"actions": ["delete"]},
                 }
@@ -402,6 +402,18 @@ class EntrypointGuardTests(unittest.TestCase):
         }
         with self.assertRaises(PlanViolation):
             validate_release_plan_strict(plan)
+
+    def test_strict_plan_validation_accepts_deployment_version_replacement(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "aws_lightsail_container_service_deployment_version",
+                    "name": "pawlocal",
+                    "change": {"actions": ["delete", "create"]},
+                }
+            ]
+        }
+        validate_release_plan_strict(plan)
 
     def test_strict_plan_validation_rejects_iam_modification(self):
         plan = {
