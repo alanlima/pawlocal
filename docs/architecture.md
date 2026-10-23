@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** Stages 2, 3, and 3.1 are complete and reviewed. Issue #75 accepts Lightsail Container Services and Aurora DSQL. Issue #135 replaces the former shared application-state layout with the existing standalone IAM bootstrap state plus clean development and production application states. Corrected read-only inventory verified the former application state is empty, no PawLocal application resources survive, and an unrelated account-level personal workload is out of scope. The new roots and workflows are implemented, but no bootstrap import/apply, application apply, or deployment is complete.
+**Status:** The approved source architecture uses S3/CloudFront, Lightsail Container Services, Aurora DSQL and Cognito in matching development/production states, plus the standalone IAM bootstrap state. Earlier “no apply/deployment complete” wording described the Issue #135 implementation baseline, not current live status. Current release/reconciliation evidence is linked from the [configuration inventory](configuration-inventory.md); live readiness must be checked against exact release and approval evidence. Hosted monitoring/responder implementation remains pending under #59/#42; [DEC-011](decisions.md#dec-011--hosted-observability-and-minimal-cloud-incident-responder) records the selected design.
 
 ## System shape
 
@@ -60,3 +60,11 @@ Public reads require no account. Write operations require authentication and bac
 ## Open decisions
 
 Moderation operations and source provenance schema require review before their respective implementation stages. Stage 3 token validation and reportable-contribution API decisions are recorded in DEC-002 and `openapi.yaml`; the approved Stage 4 Cognito identity lifecycle and delegated Terraform execution amendment are recorded in DEC-009. Issues #185, #192, and #187 do not configure or test self-service password recovery, and users without a verified email address or phone number cannot use `ForgotPassword`. A future recovery policy, account deletion and retention, social federation, sign-up abuse controls, and production deletion protection remain separate decisions. Documentation approval does not authorize provisioning AWS resources.
+
+## Hosted monitoring and incident response
+
+The [hosted observability specification](specs/hosted-observability.md) and [incident responder specification](specs/incident-responder.md) define the selected #59/#42 extension. React Faro sends to Grafana's hosted frontend collector; FastAPI sends direct asynchronous OTLP with a server-only credential. Optional Grafana panels query CloudWatch read-only. The independent HMAC-authenticated Lambda Function URL dispatches a fixed GitHub-hosted workflow; cloud agents produce a tested fix PR and independent report. Human review/squash merge and existing protected production promotion remain the release authorities.
+
+This explicitly supersedes old relay/backend-intake grooming guidance for the planned hosted extension: there is no custom collector, durable AWS incident queue or added FastAPI webhook in this design. The issue/OpenAPI host and accepted-dispatch/204 amendment is a recorded activation prerequisite, not an implemented API change. Local Compose collection remains unchanged. Development/production isolation, exact SSM mappings, state/secret ownership, delivery limitations and G1/G2/live gates are detailed in the specs and [implementation plan](plans/monitoring-implementation.md).
+
+![Hosted monitoring architecture](images/monitoring/stage5-monitoring-cloud-agent.svg)

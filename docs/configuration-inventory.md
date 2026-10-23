@@ -96,3 +96,9 @@ Each history entry applies only to R for development and production; lifecycle o
 | PAWLOCAL_DSQL_SECRET_ACCESS_KEY | Secret / true | Legacy static database credential | Deleted in R |
 
 Do not copy these credentials into Parameter Store. Keep these dated records after deletion and record actual deletion evidence separately; obsolete synchronization entries never remain executable. The cleanup code contains only the approved exact deletion allowlist, not active mappings.
+
+## Planned hosted monitoring sources (not active mappings)
+
+[Exact proposed keys, owners and consumers](specs/hosted-observability.md#exact-planned-ssm-source-and-destination-contract) use `/config/grafana/{stack-url,otlp-endpoint,otlp-instance-id,faro-collector-url}`, `/config/observability/enabled`, `/config/oncall/webhook-url` and `/secrets/grafana/{otlp-token,query-token,webhook-hmac}` per environment, plus receiver-only dispatch App key. These rows are not active YAML and do not change verified inventory counts above. Implementing PRs update sources, minimal mapping, inventory and consumers together.
+
+P1 explicitly reviews currently rejected on-call targets, protected setup, exact reader/token authority and negative tests. Query token alone synchronizes as `PAWLOCAL_GRAFANA_QUERY_TOKEN`; verify encrypted secret API write, never plaintext read-back. Runtime OTLP/HMAC/dispatch keys stay outside GitHub. OpenAI/publisher keys remain separate protected GitHub secrets. Approved owner SecureString setup/rotation stays outside Terraform payloads; this docs PR grants no live mutation exception.

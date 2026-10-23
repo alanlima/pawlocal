@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2200" height="1430" viewBox="0 0 2200 1430" role="img" aria-label="PawLocal · Incident &amp; agent lifecycle"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10Z" fill="#60758d"/></marker></defs><g font-family="Segoe UI,Arial,sans-serif">
+<rect x="0" y="0" width="2200" height="1430" rx="0" fill="#f1f5fa" stroke="none"/>
+<rect x="0" y="0" width="2200" height="172" rx="0" fill="#10243a" stroke="none"/>
+<text x="64" y="65" font-size="41" fill="#ffffff" font-weight="700">PawLocal · Incident &amp; agent lifecycle</text>
+<text x="64" y="110" font-size="24" fill="#b8cce3" font-weight="400">Direct telemetry + one authenticated webhook function + GitHub-hosted jobs • finite cloud execution</text>
+<text x="64" y="145" font-size="20" fill="#76d2ca" font-weight="600">GROOMING PROPOSAL  |  23 OCT 2026  |  #59 OBSERVABILITY → #42 INCIDENT RESPONSE</text>
+<rect x="64" y="220" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="242" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="283" font-size="27" fill="#275c86" font-weight="700">01</text>
+<text x="168" y="256" font-size="23" fill="#214665" font-weight="700">OBSERVE</text>
+<text x="168" y="293" font-size="23" fill="#23344a" font-weight="400">React Faro / FastAPI OTLP → Grafana Cloud</text>
+<text x="168" y="328" font-size="21" fill="#52677f" font-weight="400">Correlate journey, environment and deployed release.</text>
+<path d="M115,348 L115,375" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="64" y="375" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="397" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="438" font-size="27" fill="#275c86" font-weight="700">02</text>
+<text x="168" y="411" font-size="23" fill="#214665" font-weight="700">RECEIVE</text>
+<text x="168" y="448" font-size="23" fill="#23344a" font-weight="400">Signed firing / resolved alert → Function URL</text>
+<text x="168" y="483" font-size="21" fill="#52677f" font-weight="400">Authenticate HMAC / timestamp; allowlist payload.</text>
+<path d="M115,503 L115,530" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="64" y="530" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="552" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="593" font-size="27" fill="#275c86" font-weight="700">03</text>
+<text x="168" y="566" font-size="23" fill="#214665" font-weight="700">DISPATCH</text>
+<text x="168" y="603" font-size="23" fill="#23344a" font-weight="400">Lambda → GitHub workflow_dispatch</text>
+<text x="168" y="638" font-size="21" fill="#52677f" font-weight="400">204 only after accepted dispatch; reject on failure.</text>
+<path d="M115,658 L115,685" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="64" y="685" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="707" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="748" font-size="27" fill="#275c86" font-weight="700">04</text>
+<text x="168" y="721" font-size="23" fill="#214665" font-weight="700">VALIDATE / DEDUPE</text>
+<text x="168" y="758" font-size="23" fill="#23344a" font-weight="400">GitHub workflow: issue fingerprint + generation</text>
+<text x="168" y="793" font-size="21" fill="#52677f" font-weight="400">Serialize runs; dedupe PR; check current alert state.</text>
+<path d="M115,813 L115,840" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="64" y="840" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="862" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="903" font-size="27" fill="#275c86" font-weight="700">05</text>
+<text x="168" y="876" font-size="23" fill="#214665" font-weight="700">FIX</text>
+<text x="168" y="913" font-size="23" fill="#23344a" font-weight="400">Codex action · approved model profile required</text>
+<text x="168" y="948" font-size="21" fill="#52677f" font-weight="400">Reproduce affected release; regression test; patch.</text>
+<path d="M115,968 L115,995" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="64" y="995" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="84" y="1017" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="97" y="1058" font-size="27" fill="#275c86" font-weight="700">06</text>
+<text x="168" y="1031" font-size="23" fill="#214665" font-weight="700">INDEPENDENT REVIEW</text>
+<text x="168" y="1068" font-size="23" fill="#23344a" font-weight="400">Fresh call · approved profile · independent context</text>
+<text x="168" y="1103" font-size="21" fill="#52677f" font-weight="400">New context; pinned candidate; isolated tests.</text>
+<rect x="1134" y="220" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="242" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="283" font-size="27" fill="#275c86" font-weight="700">07</text>
+<text x="1238" y="256" font-size="23" fill="#214665" font-weight="700">PUBLISH PR</text>
+<text x="1238" y="293" font-size="23" fill="#23344a" font-weight="400">Trusted job validates patch and base identity</text>
+<text x="1238" y="328" font-size="21" fill="#52677f" font-weight="400">GitHub App credential isolated from agent jobs.</text>
+<path d="M1185,348 L1185,375" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1134" y="375" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="397" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="438" font-size="27" fill="#275c86" font-weight="700">08</text>
+<text x="1238" y="411" font-size="23" fill="#214665" font-weight="700">HUMAN REVIEW / MERGE</text>
+<text x="1238" y="448" font-size="23" fill="#23344a" font-weight="400">Required CI + owner approval → squash merge</text>
+<text x="1238" y="483" font-size="21" fill="#52677f" font-weight="400">Agent report cannot replace required human review.</text>
+<path d="M1185,503 L1185,530" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1134" y="530" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="552" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="593" font-size="27" fill="#275c86" font-weight="700">09</text>
+<text x="1238" y="566" font-size="23" fill="#214665" font-weight="700">VERIFY DEVELOPMENT</text>
+<text x="1238" y="603" font-size="23" fill="#23344a" font-weight="400">Existing fullstack-release.yml → live checks</text>
+<text x="1238" y="638" font-size="21" fill="#52677f" font-weight="400">Deploy immutable release; verify original regression.</text>
+<path d="M1185,658 L1185,685" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1134" y="685" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="707" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="748" font-size="27" fill="#275c86" font-weight="700">10</text>
+<text x="1238" y="721" font-size="23" fill="#214665" font-weight="700">HUMAN PRODUCTION GATE</text>
+<text x="1238" y="758" font-size="23" fill="#23344a" font-weight="400">Existing deploy-production.yml + protection</text>
+<text x="1238" y="793" font-size="21" fill="#52677f" font-weight="400">Promote exact development-verified SHA / artifact.</text>
+<path d="M1185,813 L1185,840" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1134" y="840" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="862" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="903" font-size="27" fill="#275c86" font-weight="700">11</text>
+<text x="1238" y="876" font-size="23" fill="#214665" font-weight="700">VERIFY RECOVERY</text>
+<text x="1238" y="913" font-size="23" fill="#23344a" font-weight="400">External journey + telemetry + regression</text>
+<text x="1238" y="948" font-size="21" fill="#52677f" font-weight="400">Observe recovery window; resolved alone is insufficient.</text>
+<path d="M1185,968 L1185,995" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+<rect x="1134" y="995" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
+<rect x="1154" y="1017" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
+<text x="1167" y="1058" font-size="27" fill="#275c86" font-weight="700">12</text>
+<text x="1238" y="1031" font-size="23" fill="#214665" font-weight="700">CLOSE OR ESCALATE</text>
+<text x="1238" y="1068" font-size="23" fill="#23344a" font-weight="400">GitHub incident issue + evidence + owner</text>
+<text x="1238" y="1103" font-size="21" fill="#52677f" font-weight="400">Record release identity; failed attempts escalate.</text>
+<rect x="64" y="1170" width="2072" height="184" rx="18" fill="#fff0d6" stroke="#dfbe80"/>
+<text x="90" y="1212" font-size="26" fill="#755017" font-weight="700">BOUNDED ATTEMPT / EXPLICIT DELIVERY LIMITS</text>
+<text x="90" y="1252" font-size="24" fill="#23344a" font-weight="400">One active run, one coding attempt, 20-minute total deadline. Timeout, stale alert, failed tests or review findings → owner.</text>
+<text x="90" y="1292" font-size="23" fill="#23344a" font-weight="400">Approved monthly quota + per-request and cumulative token/cost bounds are reserved before calls; unset configuration denies admission.</text>
+<text x="90" y="1330" font-size="23" fill="#23344a" font-weight="400">Resolved alerts update incident state; current state is checked before coding and publishing. Test dispatch-loss / retry / duplicate behavior.</text>
+<text x="64" y="1400" font-size="22" fill="#4a607a" font-weight="400">AWS Lambda receives alerts; GitHub hosts the agents. No long-running agent server, production credentials in agent jobs or automatic production approval.</text>
+</g></svg>

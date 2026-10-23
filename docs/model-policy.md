@@ -10,3 +10,13 @@
 - Future AI functionality needs approved usage quotas, request limits, budget ceilings and a conventional-search fallback before release.
 - Record material AI-assisted work, review approach and verification evidence in `docs/ai-usage-report.md`.
 
+
+## Incident-responder model selection and admission (#42)
+
+**Model selection remains pending.** Do not hardcode a model, reasoning effort or service tier. Before any unattended execution, the owner must approve a protected model profile identifying the model/version, supported effort/tier, API project, data handling, current rate source and bounded input/output limits. Fixer and fresh independent reviewer use that approved profile; API entitlement and Action/CLI compatibility require verification. An interactive subscription does not supply API funding.
+
+Admission must fail closed when the profile, rate data, monthly quota or token/cost limits are absent, stale or exhausted. Require approved monthly admission and usage/spend quotas, per-request input/output token ceilings and cumulative per-incident ceilings across fixer, review and tools. Globally serialize admissions and reserve both jobs' full worst-case envelope upfront in a protected monthly issue ledger. Do not automatically refund or settle monthly reservations against actual usage. Each request gateway charges counted input and full maximum output before forwarding; unknown, failed or interrupted usage remains charged. Any operator correction requires separately reviewed reconciliation. A concurrency queue or notification threshold is not a quota.
+
+One coding attempt per incident generation and one active run per environment remain. A trusted 20-minute total deadline from admission spans preflight, models, tests, review, publication and inter-job delays; initial queue waiting is excluded. Missing quota accounting or inability to enforce a provider/token bound escalates without a model call. No numeric monthly spending allowance is approved by this documentation.
+
+Coder/reviewer receive bounded redacted evidence and no App/private production telemetry/deployment credentials. Fresh review cannot authorize merge or production promotion. See the [responder specification](specs/incident-responder.md) and [implementation plan](plans/monitoring-implementation.md). Source-controlled profiles and prompt policy remain subject to a reviewed implementation; this PR starts no responder and grants no spending/apply authority.
