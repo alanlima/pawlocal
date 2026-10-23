@@ -1,0 +1,71 @@
+name: Grafana development folder and Faro setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Discover is read-only; plan/apply use a separately reviewed public development manifest.
+        required: true
+        default: discover
+        type: choice
+        options: [discover, plan, apply]
+      stack_url:
+        description: Discover only - actual approved Grafana stack HTTPS origin.
+        required: false
+        default: ''
+        type: string
+      region:
+        description: Discover only - actual Grafana region slug.
+        required: false
+        default: ''
+        type: string
+      public_bindings_json:
+        description: Plan/apply only - complete reviewed public manifest; production must remain disabled/null.
+        required: false
+        default: ''
+        type: string
+      frontend_origin:
+        description: Plan/apply only - reviewed actual development origin, without a path or wildcard.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-grafana-development-setup
+  cancel-in-progress: false
+
+jobs:
+  development-setup:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment: development-apply
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Discover or reconcile development folder and Faro only
+        env:
+          SETUP_MODE: ${{ inputs.mode }}
+          STACK_URL: ${{ inputs.stack_url }}
+          STACK_REGION: ${{ inputs.region }}
+          PUBLIC_BINDINGS_JSON: ${{ inputs.public_bindings_json }}
+          EXPECTED_FRONTEND_ORIGIN: ${{ inputs.frontend_origin }}
+          GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+          GRAFANA_FARO_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_FARO_ACCESS_POLICY_TOKEN }}
+          GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+        run: python observability/grafana/cloud/development_setup.py
+      - name: Retain public-only discovery or setup handoff
+        uses: actions/upload-artifact@v7
+        with:
+          name: grafana-development-public-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/grafana-development-public.json
+          if-no-files-found: error
+          retention-days: 7

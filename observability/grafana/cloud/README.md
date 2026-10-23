@@ -91,6 +91,33 @@ No automatic retry of a mutation follows a timeout. A request might have succeed
 - **Measure usage** in the actual account Usage/Billing views per signal and account. Track active series, logs/traces GB, Faro sessions and synthetic executions; two environments share applicable allowances. New frontend accounts may count sessions, logs and traces independently. Review quota/no-data/outage evidence before G1; lower SDK sample/label volume through #225 before a quota is exhausted. Responder model/admission quotas require separate owner approval and are not Grafana quota enforcement.
 - **Close only with evidence:** record actual account/region/Free setup, credentials/scope review (metadata only), origins, repeat plan/apply/noop evidence, public handoff, isolation limitations and independent review. Missing account credentials blocks live activation/closure, not this mock-tested implementation delivery. Production remains separately approved under #230/#231.
 
+## Development-only hosted launcher
+
+`grafana-development-setup.yml` runs this provisioner on GitHub-hosted Ubuntu
+from trusted main, under the existing protected `development-apply` Environment.
+It uses existing Cloud/Faro policy and stack service-account secrets; credentials
+are never dispatch inputs. The default `discover` mode takes actual `stack_url`
+and `region`, performs GETs only and emits the public stack/datasource metadata.
+It does not create a Faro collector before an application exists.
+
+Review that evidence, the actual development frontend origin, residency, shared
+Free quota and isolation constraints before preparing an enabled development
+manifest. Keep production disabled with all its bindings null. For `plan` or
+`apply`, supply that JSON as `public_bindings_json`, the reviewed origin as
+`frontend_origin`, and leave discovery-only stack/region inputs empty. Run plan
+first and independently review its exact folder/Faro changes before apply. The
+launcher rejects production enablement, duplicate fields, mixed mode inputs and
+origin mismatch before any remote request. Successful apply returns the actual
+public Faro collector URL; never manufacture an app key or approval reference.
+
+Only the existing selected-development folder/Faro reconciler is reachable.
+No dashboard/alert/experience/synthetic code is imported; no AWS permission is
+granted. The public handoff is retained for seven days. Timeout or uncertain
+mutation requires a new read-only plan, never an automatic retry. Application
+activation still needs its separate public Terraform input, exact runtime secret,
+reviewed development IAM plan and verified release. This launcher is not G1 or
+proof of accepted telemetry.
+
 ## API compatibility and sources
 
 Reviewed on 23 October 2026. The custom adapter contract is pinned to the official [Grafana provider v4.50.0 Faro client](https://github.com/grafana/terraform-provider-grafana/blob/v4.50.0/internal/common/frontendo11yapi/client.go) and [resource/model mapping](https://github.com/grafana/terraform-provider-grafana/blob/v4.50.0/internal/resources/frontendo11y/models.go): `/faro/api/v1/app`, stack-scoped `Bearer <stackID>:<token>` plus `X-Scope-OrgID`, CORS origins/labels/settings and collector endpoint plus public app key. This is a protocol reference, **not a provider dependency**. The Faro management endpoint is not listed as a general Cloud API endpoint; treat this pinned provider implementation as the compatibility boundary and revalidate it before any live rollout/API upgrade.

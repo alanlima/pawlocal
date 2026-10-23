@@ -304,6 +304,7 @@ Destroy is not a rollback and does not select a previous release.
 <!-- actions-protected-configuration
 secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN
 secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN
+secrets.GRAFANA_FARO_ACCESS_POLICY_TOKEN
 secrets.GRAFANA_SYNTHETIC_MONITORING_TOKEN
 secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN
 secrets.PAWLOCAL_API_HEALTH_URL
@@ -554,6 +555,21 @@ See the [independent receiver contract and activation runbook](../ops/incident-r
 
 
 ## Grafana read-only credential metadata check
+
+<!-- actions-reference: grafana-development-setup.yml; dispatch-inputs: mode,stack_url,region,public_bindings_json,frontend_origin; call-inputs: - -->
+
+[`grafana-development-setup.yml`](../.github/workflows/grafana-development-setup.yml) is a main-only manual launcher for the existing
+folder/Faro provisioner, using the protected `development-apply` approval target.
+It defaults to read-only discovery. Plan/apply require a complete reviewed public
+manifest with production disabled/null and the exact reviewed development origin.
+It uses existing Grafana credentials and has no AWS, model, dashboard, alert,
+synthetic or production operation. Discovery and successful setup retain the
+provisioner's public-only handoff artifact; setup does not enable application
+telemetry. See the [development setup procedure](../observability/grafana/cloud/README.md#development-only-hosted-launcher).
+
+An optional existing `GRAFANA_FARO_ACCESS_POLICY_TOKEN` can separate Faro writes;
+when absent, the reviewed provisioner uses the existing Cloud policy token. This
+launcher does not create or expand either credential.
 
 <!-- actions-reference: grafana-access-check.yml; dispatch-inputs: stack_url,region,sm_backend_url; call-inputs: - -->
 
