@@ -16,6 +16,37 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 ENVIRONMENTS = ("development", "production")
 MARKER = "pawlocal-cloud-provisioner"
 MAX_BODY = 2 * 1024 * 1024
+SIGNAL_TYPES = {"metrics": "prometheus", "logs": "loki", "traces": "tempo"}
+
+
+def datasource_selection(raw):
+    """Parse public reviewed selectors, never a credential or datasource payload."""
+    require(
+        isinstance(raw, str) and len(raw.encode("utf-8")) <= 512,
+        "Invalid datasource selector JSON",
+    )
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, "Duplicate datasource selector")
+            result[key] = value
+        return result
+
+    try:
+        result = json.loads(raw, object_pairs_hook=unique) if raw.strip() else {}
+    except ValueError as error:
+        raise ProvisionError("Invalid datasource selector JSON") from error
+    require(
+        isinstance(result, dict) and not set(result) - set(SIGNAL_TYPES),
+        "Unknown datasource selector signal",
+    )
+    for uid in result.values():
+        require(
+            isinstance(uid, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", uid),
+            "Invalid datasource selector UID",
+        )
+    return result
 
 
 class ProvisionError(Exception):
@@ -284,7 +315,8 @@ class Provisioner:
         )
         return self.transport.request(method, url, token, **kwargs)
 
-    def discover(self, stack_url, region):
+    def discover(self, stack_url, region, datasource_uids_json=""):
+        selected = datasource_selection(datasource_uids_json)
         stack_url = https_url(stack_url, origin=True, grafana=True)
         host = urlsplit(stack_url).hostname
         require(host.count(".") == 2, "Expected a standard stack.grafana.net URL")
@@ -318,26 +350,57 @@ class Provisioner:
         sources = self.call(
             "GET", stack_url + "/api/datasources", "GRAFANA_SERVICE_ACCOUNT_TOKEN"
         )
-        require(isinstance(sources, list), "Invalid datasource discovery response")
+        require(
+            isinstance(sources, list)
+            and len(sources) <= 100
+            and all(isinstance(source, dict) for source in sources),
+            "Invalid or oversized datasource discovery response",
+        )
         bindings = {}
-        for signal, kind in (
-            ("metrics", "prometheus"),
-            ("logs", "loki"),
-            ("traces", "tempo"),
-        ):
-            # Cloud defaults must be unambiguous; never choose another tenant's source silently.
-            candidates = [source for source in sources if source.get("type") == kind]
-            require(
-                len(candidates) == 1,
-                f"{signal} datasource discovery ambiguous; select reviewed UID explicitly",
-            )
-            bindings[signal] = {
-                "uid": candidates[0].get("uid"),
-                "name": candidates[0].get("name"),
-            }
+        public_candidates = {}
+        unresolved = []
+        for signal, kind in SIGNAL_TYPES.items():
+            candidates = []
+            for source in sources:
+                if source.get("type") != kind:
+                    continue
+                uid, name = source.get("uid"), source.get("name")
+                require(
+                    isinstance(uid, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", uid),
+                    "Invalid discovered datasource UID",
+                )
+                require(
+                    isinstance(name, str)
+                    and 0 < len(name) < 200
+                    and all(ord(char) >= 32 and ord(char) != 127 for char in name),
+                    "Invalid discovered datasource name",
+                )
+                candidates.append({"uid": uid, "name": name, "type": kind})
+            public_candidates[signal] = candidates
+            if signal in selected:
+                matches = [
+                    source
+                    for source in sources
+                    if source.get("uid") == selected[signal]
+                ]
+                require(
+                    len(matches) == 1 and matches[0].get("type") == kind,
+                    "Selected datasource UID missing, duplicated or wrong type",
+                )
+                candidates = [
+                    candidate
+                    for candidate in candidates
+                    if candidate["uid"] == selected[signal]
+                ]
+            if len(candidates) != 1:
+                unresolved.append(signal)
+                continue
+            bindings[signal] = {key: candidates[0][key] for key in ("uid", "name")}
         faro_api = faro_management_url(region, remote.get("createdAt"))
         return {
-            "status": "discovered-not-approved",
+            "status": "needs-selection-not-approved"
+            if unresolved
+            else "discovered-not-approved",
             "stack": {
                 "id": remote["id"],
                 "slug": slug,
@@ -348,6 +411,8 @@ class Provisioner:
                 "otlp_instance_id": str(remote["id"]),
             },
             "datasources": bindings,
+            "datasource_candidates": public_candidates,
+            "unresolved_signals": unresolved,
             "pending": [
                 "exact frontend origin from release evidence",
                 "account Free/quota/residency and per-signal isolation review",
@@ -592,6 +657,11 @@ def main():
         "--stack-url", help="Existing Grafana stack URL for read-only discovery"
     )
     parser.add_argument("--region", help="Approved expected region slug for discovery")
+    parser.add_argument(
+        "--datasource-uids-json",
+        default="",
+        help="Discovery-only reviewed signal-to-UID JSON selectors",
+    )
     args = parser.parse_args()
     if args.mode == "discover":
         require(
@@ -599,14 +669,14 @@ def main():
             "Discovery requires --stack-url and --region",
         )
         result = Provisioner(Transport(), os.environ).discover(
-            args.stack_url, args.region
+            args.stack_url, args.region, args.datasource_uids_json
         )
         result["environment"] = args.environment
         print(json.dumps(result, indent=2))
         return
     require(
-        not args.stack_url and not args.region,
-        "--stack-url/--region are discovery-only",
+        not args.stack_url and not args.region and not args.datasource_uids_json,
+        "--stack-url/--region/--datasource-uids-json are discovery-only",
     )
     document = load_manifest(args.manifest)
     if args.mode == "check":

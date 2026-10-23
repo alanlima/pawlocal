@@ -24,6 +24,11 @@ on:
         required: false
         default: ''
         type: string
+      datasource_uids_json:
+        description: Discover only - optional reviewed metrics/logs/traces UID selectors as JSON; no approval implied.
+        required: false
+        default: ''
+        type: string
       frontend_origin:
         description: Plan/apply only - reviewed actual development origin, without a path or wildcard.
         required: false
@@ -56,6 +61,7 @@ jobs:
           SETUP_MODE: ${{ inputs.mode }}
           STACK_URL: ${{ inputs.stack_url }}
           STACK_REGION: ${{ inputs.region }}
+          DATASOURCE_UIDS_JSON: ${{ inputs.datasource_uids_json }}
           PUBLIC_BINDINGS_JSON: ${{ inputs.public_bindings_json }}
           EXPECTED_FRONTEND_ORIGIN: ${{ inputs.frontend_origin }}
           GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
