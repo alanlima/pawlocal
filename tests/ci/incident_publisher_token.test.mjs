@@ -68,3 +68,18 @@ test('an unconfigured Administration-read App or unknown purpose cannot mint', a
   await assert.rejects(unknown.run());
   assert.deepEqual(unknown.calls, []);
 });
+
+test('status credential permits rerun attempts while publish and merge remain attempt 1 only', async () => {
+  const rerunStatus = fixture('status');
+  rerunStatus.env.GITHUB_RUN_ATTEMPT = '2';
+  await rerunStatus.run();
+  assert(rerunStatus.writes[0][0].endsWith('oncall-status-token.json'));
+
+  const rerunPublish = fixture('publish');
+  rerunPublish.env.GITHUB_RUN_ATTEMPT = '2';
+  await assert.rejects(rerunPublish.run());
+
+  const rerunMerge = fixture('merge');
+  rerunMerge.env.GITHUB_RUN_ATTEMPT = '2';
+  await assert.rejects(rerunMerge.run());
+});

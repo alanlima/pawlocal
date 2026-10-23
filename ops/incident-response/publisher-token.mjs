@@ -20,7 +20,10 @@ export async function mint(environment = process.env, fetcher = fetch, writer = 
   const expected = purpose === 'readiness' ? { administration: 'read' } : (purpose === 'status' ? statusAllowed : allowed);
   const deadline = Number(environment.INCIDENT_DEADLINE) * 1000;
   const maximumLifetime = purpose === 'publish' ? 1200000 : (purpose === 'status' ? 600000 : 3600000);
-  if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || environment.GITHUB_RUN_ATTEMPT !== '1' ||
+  const attemptAllowed = purpose === 'status'
+    ? /^[1-9][0-9]*$/.test(String(environment.GITHUB_RUN_ATTEMPT || ''))
+    : environment.GITHUB_RUN_ATTEMPT === '1';
+  if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || !attemptAllowed ||
       !Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + maximumLifetime) throw new Error('Trusted phase deadline required');
   const appId = environment.PAWLOCAL_PUBLISHER_APP_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_APP_ID;
   const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID;
