@@ -286,6 +286,27 @@ class ProvisionTests(unittest.TestCase):
             request = opening.call_args.args[0]
             self.assertEqual(request.get_header("Authorization"), "Bearer 42:secret")
             self.assertEqual(request.get_header("X-scope-orgid"), "42")
+            transport.request(
+                "PUT",
+                "https://test.grafana.net/api/v1/provisioning/policies",
+                "secret",
+                payload={"receiver": "operator"},
+                extra_headers={"X-Disable-Provenance": "true"},
+            )
+            request = opening.call_args.args[0]
+            self.assertEqual(request.get_header("X-disable-provenance"), "true")
+            self.assertEqual(request.get_header("Authorization"), "Bearer secret")
+            transport.request("GET", "https://test.grafana.net/api/org", "secret")
+            self.assertIsNone(
+                opening.call_args.args[0].get_header("X-disable-provenance")
+            )
+            with self.assertRaises(p.ProvisionError):
+                transport.request(
+                    "GET",
+                    "https://test.grafana.net/api/org",
+                    "secret",
+                    extra_headers={"Authorization": "Bearer other"},
+                )
         with self.assertRaises(p.ProvisionError):
             p.NoRedirect().redirect_request(
                 None, None, 302, "", {}, "https://attacker.test"

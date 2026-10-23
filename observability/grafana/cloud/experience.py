@@ -546,7 +546,14 @@ class Experience(Provisioner):
                     grafana("GET", "/api/v1/provisioning/policies") == policy,
                     "Notification policy changed during preflight; rerun plan",
                 )
-                grafana("PUT", "/api/v1/provisioning/policies", payload=updated_policy)
+                grafana(
+                    "PUT",
+                    "/api/v1/provisioning/policies",
+                    payload=updated_policy,
+                    # This API writes the entire shared tree. Preserve operator UI
+                    # editing instead of marking unrelated routes API-provisioned.
+                    extra_headers={"X-Disable-Provenance": "true"},
+                )
                 require(
                     subset_equal(
                         grafana("GET", "/api/v1/provisioning/policies"), updated_policy

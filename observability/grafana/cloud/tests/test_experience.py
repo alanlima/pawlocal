@@ -35,6 +35,7 @@ class API(FakeAPI):
         self.checks = []
         self.group = None
         self.contacts = []
+        self.request_headers = []
         self.policy = {
             "receiver": "reviewed-operator",
             "group_by": ["grafana_folder", "alertname"],
@@ -43,7 +44,17 @@ class API(FakeAPI):
             ],
         }
 
-    def request(self, method, url, token, payload=None, stack_id=None, missing=False):
+    def request(
+        self,
+        method,
+        url,
+        token,
+        payload=None,
+        stack_id=None,
+        missing=False,
+        extra_headers=None,
+    ):
+        self.request_headers.append((method, url, copy.deepcopy(extra_headers)))
         self.calls.append((method, url, token, payload, stack_id))
         if url.endswith("/api/org"):
             return {"id": 1}
@@ -202,6 +213,38 @@ class ExperienceTests(unittest.TestCase):
         self.assertEqual(result["operations"], ["contact-point:runtime-secret-write"])
         self.assertEqual([call[0] for call in self.api.writes], ["PUT"])
         self.assertNotIn("DELETE", [call[0] for call in self.api.calls])
+
+    def test_shared_policy_put_preserves_operator_ui_and_unrelated_tree(self):
+        original = copy.deepcopy(self.api.policy)
+        original["routes"][0]["routes"] = [
+            {"receiver": "nested-owner", "group_wait": "1m"}
+        ]
+        self.api.policy = copy.deepcopy(original)
+        self.runner.reconcile_experience(self.config, self.binding, apply=True)
+        self.assertEqual(self.api.policy["receiver"], original["receiver"])
+        self.assertEqual(self.api.policy["group_by"], original["group_by"])
+        self.assertEqual(self.api.policy["routes"][1:], original["routes"])
+        with_headers = [
+            call for call in self.api.request_headers if call[2] is not None
+        ]
+        self.assertEqual(
+            with_headers,
+            [
+                (
+                    "PUT",
+                    self.binding["stack"]["url"] + "/api/v1/provisioning/policies",
+                    {"X-Disable-Provenance": "true"},
+                )
+            ],
+        )
+        self.config["responder_routing"] = False
+        self.api.request_headers.clear()
+        self.runner.reconcile_experience(self.config, self.binding, apply=True)
+        self.assertEqual(self.api.policy, original)
+        self.assertEqual(
+            [call[2] for call in self.api.request_headers if call[0] == "PUT"],
+            [{"X-Disable-Provenance": "true"}],
+        )
 
     def test_foreign_dashboard_or_rule_collision_blocks_all_writes(self):
         self.api.dashboards["pawlocal-journey"] = {
