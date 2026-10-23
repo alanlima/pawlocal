@@ -7,7 +7,13 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from provision import ProvisionError, Transport, faro_management_url, otlp_http_endpoint
+from provision import (
+    ProvisionError,
+    Transport,
+    TransportError,
+    faro_management_url,
+    otlp_http_endpoint,
+)
 
 CHECKS = (
     "Cloud stack metadata",
@@ -24,6 +30,15 @@ SECRETS = {
     "stack": "GRAFANA_SERVICE_ACCOUNT_TOKEN",
     "query": "PAWLOCAL_GRAFANA_QUERY_TOKEN",
     "sm": "GRAFANA_SYNTHETIC_MONITORING_TOKEN",
+}
+CATEGORIES = {
+    "http-error",
+    "network",
+    "invalid-json",
+    "response-too-large",
+    "redirect",
+    "response-shape",
+    "internal-error",
 }
 
 
@@ -58,7 +73,7 @@ class ReadOnlyTransport(Transport):
         return super().request(method, url, token, stack_id=stack_id)
 
 
-def check(stack_url, region, sm_url, credentials, transport=None):
+def check(stack_url, region, sm_url, credentials, transport=None, diagnostics=None):
     stack = origin(stack_url, r"[a-z0-9][a-z0-9-]*[.]grafana[.]net")
     if not isinstance(region, str) or not re.fullmatch(r"[a-z0-9-]{1,80}", region):
         raise ProvisionError("Invalid region")
@@ -74,13 +89,21 @@ def check(stack_url, region, sm_url, credentials, transport=None):
     slug = urlsplit(stack).hostname.split(".")[0]
     transport = transport or ReadOnlyTransport()
     results = {name: "PENDING" for name in CHECKS}
+    diagnostics = diagnostics if diagnostics is not None else {}
+
+    def failure(label, category, status=None):
+        results[label] = "FAIL"
+        diagnostics[label] = (
+            category if category in CATEGORIES else "internal-error",
+            status if type(status) is int and 100 <= status <= 599 else None,
+        )
 
     def get(label, url, credential, shape, stack_id=None):
         token = credentials.get(SECRETS[credential])
         if not isinstance(token, str) or not token.strip():
             return None
         if any(c in token for c in "\r\n\x00"):
-            results[label] = "FAIL"
+            failure(label, "internal-error")
             return None
         transport.allowed.add(url)
         try:
@@ -89,8 +112,14 @@ def check(stack_url, region, sm_url, credentials, transport=None):
                 raise ProvisionError("Unexpected metadata shape")
             results[label] = "PASS"
             return value
+        except TransportError as error:
+            failure(label, error.category, error.http_status)
+            return None
+        except ProvisionError:
+            failure(label, "response-shape")
+            return None
         except Exception:  # noqa: BLE001 - server/transport diagnostics may contain private content
-            results[label] = "FAIL"
+            failure(label, "internal-error")
             return None
 
     remote = get(
@@ -129,7 +158,7 @@ def check(stack_url, region, sm_url, credentials, transport=None):
                 stack_id=remote["id"],
             )
         except Exception:  # noqa: BLE001 - keep metadata diagnostics private
-            results[CHECKS[2]] = "FAIL"
+            failure(CHECKS[2], "response-shape")
     if remote is not None:
         get(
             CHECKS[3],
@@ -171,14 +200,19 @@ def check(stack_url, region, sm_url, credentials, transport=None):
     return results
 
 
-def summary(results):
+def summary(results, diagnostics=None):
+    diagnostics = diagnostics or {}
     lines = [
         "# Grafana read-only access check",
         "",
-        "| Capability | Result |",
-        "|---|---|",
+        "| Capability | Result | Failure category | HTTP status |",
+        "|---|---|---|---|",
     ]
-    lines.extend(f"| {name} | {results[name]} |" for name in CHECKS)
+    for name in CHECKS:
+        category, status = diagnostics.get(name, ("—", None))
+        category = category if category in CATEGORIES else "—"
+        status = str(status) if type(status) is int and 100 <= status <= 599 else "—"
+        lines.append(f"| {name} | {results[name]} | {category} | {status} |")
     counts = {
         status: sum(value == status for value in results.values())
         for status in ("PASS", "PENDING", "FAIL")
@@ -199,13 +233,15 @@ def main():
             or os.environ.get("GITHUB_REF") != "refs/heads/main"
         ):
             raise ProvisionError("Trusted manual main execution required")
+        diagnostics = {}
         results = check(
             os.environ.get("STACK_URL", ""),
             os.environ.get("STACK_REGION", ""),
             os.environ.get("SM_BACKEND_URL", ""),
             os.environ,
+            diagnostics=diagnostics,
         )
-        report = summary(results)
+        report = summary(results, diagnostics)
     except Exception:  # noqa: BLE001 - never expose input/credential/server content
         print("Grafana access check: FAIL (invalid request or internal failure)")
         return 1

@@ -22,6 +22,15 @@ class ProvisionError(Exception):
     pass
 
 
+class TransportError(ProvisionError):
+    """Safe protocol metadata; never include a response body or request credential."""
+
+    def __init__(self, message, category, http_status=None):
+        super().__init__(message)
+        self.category = category
+        self.http_status = http_status
+
+
 def require(condition, message):
     if not condition:
         raise ProvisionError(message)
@@ -203,7 +212,9 @@ def load_manifest(path):
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ProvisionError("API redirect rejected; verify endpoint before retry")
+        raise TransportError(
+            "API redirect rejected; verify endpoint before retry", "redirect"
+        )
 
 
 class Transport:
@@ -240,17 +251,22 @@ class Transport:
         try:
             with self.opener.open(request, timeout=30) as response:
                 raw = response.read(MAX_BODY + 1)
-                require(len(raw) <= MAX_BODY, "API response too large")
+                if len(raw) > MAX_BODY:
+                    raise TransportError("API response too large", "response-too-large")
                 return json.loads(raw) if raw else None
         except HTTPError as error:
             if error.code == 404 and missing:
                 return None
             # Never print server response bodies which can echo credentials or data.
-            raise ProvisionError(
-                f"{method} API failed with HTTP {error.code}; inspect provider audit logs"
+            raise TransportError(
+                f"{method} API failed with HTTP {error.code}; inspect provider audit logs",
+                "http-error",
+                error.code,
             ) from None
-        except (URLError, ValueError) as error:
-            raise ProvisionError(f"{method} API transport/JSON failure") from error
+        except (URLError, TimeoutError, OSError):
+            raise TransportError(f"{method} API transport failure", "network") from None
+        except ValueError:
+            raise TransportError(f"{method} API JSON failure", "invalid-json") from None
 
 
 class Provisioner:
