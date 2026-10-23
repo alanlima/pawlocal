@@ -43,6 +43,10 @@ class CandidateTests(unittest.TestCase):
             "infra/main.tf",
             "backend/pawlocal/api/auth.py",
             "frontend/package.json",
+            "backend/migrations/dsql/0001_initial/001_places.sql",
+            "backend/pawlocal/dsql_post_apply_setup.py",
+            "frontend/.env.production",
+            "backend/data/places.json",
             "backend/pawlocal/application/places.py",
         ):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:

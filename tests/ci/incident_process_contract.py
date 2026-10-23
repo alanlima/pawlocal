@@ -58,7 +58,7 @@ def fingerprint(node):
 
 
 GLOBALS = {
-    "candidate.py": "8b3f9c0c54d4a45ee4d96a5ae00052bd45eedd8dded4cf216ed075031cabb660",
+    "candidate.py": "75ef4d8c0e19a4d222ea5b3b892e437d76130b605ce45d64426934527cf137de",
     "capture-cli-request.py": "b92a34dd110c8d3ae05f6af18988e3d23a411bc3812ad5e77f83ffeaeb60a79c",
     "checks.py": "ab7574af46865e05c77075e394d74cf01d507c2cffd7222fe3c5cafac09ed6f5",
     "deadline.py": "f3d0c3f4d9ea7f5f98d8b0f611a1c3ef98ab00620ecec4f9cd5ae24e0be4f89f",

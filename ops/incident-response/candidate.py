@@ -24,12 +24,21 @@ DISALLOWED_NAMES = {
     "yarn.lock",
     "package.json",
     "pyproject.toml",
+    "alembic.ini",
+    "Dockerfile",
+    "vite.config.ts",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "dsql_post_apply_setup.py",
+    "dsql_role_bootstrap.py",
 }
 
 DISALLOWED_EXTENSIONS = {
     ".lock",
     ".pyc",
     ".tsbuildinfo",
+    ".sql",
+    ".env",
 }
 
 
@@ -41,14 +50,22 @@ def is_allowed_path(name):
         return False
     if len(pure.parts) < 2:
         return False
-    if pure.parts[0] not in ("backend", "frontend"):
-        return False
     if any(part in IGNORED for part in pure.parts):
         return False
-    # Exclude workflow/IAM/auth/security/secrets/infrastructure/data repair per AGENTS.md
-    if any(part in ("auth", "security", "infra", "iam") for part in pure.parts):
+    # Only allow regular application code and tests under backend and frontend
+    valid_prefix = (
+        name.startswith(("backend/pawlocal/", "backend/tests/"))
+        or name.startswith(("frontend/src/", "frontend/public/"))
+    )
+    if not valid_prefix:
         return False
-    if pure.stem in ("auth", "security") or pure.name.startswith(("auth.", "auth_")):
+    # Exclude workflow/IAM/auth/security/secrets/infrastructure/data repair per AGENTS.md
+    if any(part in ("auth", "security", "infra", "iam", "migrations", "data", "scripts") for part in pure.parts):
+        return False
+    if (
+        pure.stem in ("auth", "security", "dsql_post_apply_setup", "dsql_role_bootstrap")
+        or pure.name.startswith(("auth.", "auth_", ".env"))
+    ):
         return False
     if pure.name in DISALLOWED_NAMES or pure.suffix in DISALLOWED_EXTENSIONS:
         return False
