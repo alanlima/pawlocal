@@ -42,7 +42,7 @@ def check(plan, client):
                 continue
             raise ReconciliationError(
                 f"Parameter collision inventory failed for {name!r}: "
-                f"ssm:GetParameter returned {code or type(error).__name__}"
+                f"ssm:GetParameter returned {code or type(error).__name__}: {error}"
             ) from error
         raise ReconciliationError(
             f"Existing parameter blocks new Terraform ownership: {name!r}"

@@ -8,6 +8,7 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -599,7 +600,8 @@ class IntegrationTests(unittest.TestCase):
                 }
             ]
         }
-        for stored in ({"Value": SENTINEL}, RuntimeError(SENTINEL), None):
+        lookup_error = "Could not connect to the endpoint URL: https://ssm.example.test"
+        for stored in ({"Value": SENTINEL}, RuntimeError(lookup_error), None):
             client = FakeSSM({key: stored})
             lookup = client.get_parameter
             with patch("builtins.print") as log:
@@ -619,7 +621,41 @@ class IntegrationTests(unittest.TestCase):
                         collision.check(plan, client)
                     self.assertIn(key, str(caught.exception))
                     self.assertNotIn(SENTINEL, str(caught.exception))
+                    if isinstance(stored, Exception):
+                        self.assertIn(lookup_error, str(caught.exception))
                 self.assertNotIn(SENTINEL, str(log.call_args_list))
+
+    def test_collision_cli_preserves_sdk_failure_details(self):
+        key = "/pawlocal/development/config/observability/enabled"
+        detail = "Access denied by explicit deny in a permissions boundary"
+        denied = RuntimeError(detail)
+        denied.response = {"Error": {"Code": "AccessDeniedException"}}
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "aws_ssm_parameter",
+                    "change": {"actions": ["create"], "after": {"name": key}},
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            path.write_text(json.dumps(plan), encoding="utf-8")
+            sdk = SimpleNamespace(client=lambda service: FakeSSM({key: denied}))
+            with (
+                patch.dict("sys.modules", {"boto3": sdk}),
+                patch(
+                    "sys.argv",
+                    ["check-collisions.py", str(path), "--environment", "development"],
+                ),
+                patch("builtins.print"),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                collision.main()
+            message = str(caught.exception)
+            self.assertIn(key, message)
+            self.assertIn("ssm:GetParameter returned AccessDeniedException", message)
+            self.assertIn(detail, message)
 
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(
