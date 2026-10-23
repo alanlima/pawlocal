@@ -12,11 +12,15 @@ The baseline issues still describe a custom server-side browser relay and backen
 
 Current readiness evidence: [development release run 39809521175](https://github.com/alanlima/pawlocal/actions/runs/39809521175) and [production promotion run 39812132462](https://github.com/alanlima/pawlocal/actions/runs/39812132462) completed application apply/reconciliation/verification for source SHA `3ee834f`. A read-only audit on 23 October 2026 returned HTTP 200 for both frontend roots, API `/health` and `/api/v1/places?limit=1`. This establishes reachable release surfaces, not hosted monitoring or responder acceptance. #191 and #203–#206 are closed; #43/#75/#135 are open historical umbrella trackers whose status cannot replace this evidence. Recent green [run 39865715956](https://github.com/alanlima/pawlocal/actions/runs/39865715956) skipped deployment and is not new deployment proof. P0 accepts reviewed readiness gates, not automatic closure of those umbrella issues.
 
+## Selected Grafana account
+
+The owner supplied **`https://alanlima.grafana.net/`**, confirmed the account is **Free**, and selected this same stack for all environments. Use separate `pawlocal-development` / `pawlocal-production` Faro apps with exact matching origins. Region is unknown and must be discovered read-only; stack ID, datasource bindings, quotas and per-signal permissions still require verification. Disabled configuration remains disabled. Do not select separate accounts as the solution or treat labels/folders as authorization: prove scoped reads/privacy in the selected shared stack and withhold signals the requester cannot access safely.
+
 ## Architecture
 
-![Hosted monitoring and cloud responder](../images/monitoring/stage5-monitoring-cloud-agent.png)
+![Hosted monitoring and cloud responder](../images/monitoring/stage5-monitoring-cloud-agent.svg)
 
-[Editable SVG](../images/monitoring/stage5-monitoring-cloud-agent.svg) Â· [source generator](../images/monitoring/generate-stage5-diagrams.py) Â· [icon attribution](../images/monitoring/icons/SOURCES.md)
+[Editable SVG](../images/monitoring/stage5-monitoring-cloud-agent.svg) · [editing and attribution](../images/monitoring/README.md)
 
 - FastAPI exports batched asynchronous OTLP/HTTP directly to Grafana Cloud with a private server-side ingestion credential.
 - React uses Grafana Faro's hosted frontend collector and public application key. No private Grafana ingestion token goes into browser code.

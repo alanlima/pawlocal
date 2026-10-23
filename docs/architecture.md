@@ -67,4 +67,4 @@ The [hosted observability specification](specs/hosted-observability.md) and [inc
 
 This explicitly supersedes old relay/backend-intake grooming guidance for the planned hosted extension: there is no custom collector, durable AWS incident queue or added FastAPI webhook in this design. The issue/OpenAPI host and accepted-dispatch/204 amendment is a recorded activation prerequisite, not an implemented API change. Local Compose collection remains unchanged. Development/production isolation, exact SSM mappings, state/secret ownership, delivery limitations and G1/G2/live gates are detailed in the specs and [implementation plan](plans/monitoring-implementation.md).
 
-![Hosted monitoring architecture](images/monitoring/stage5-monitoring-cloud-agent.png)
+![Hosted monitoring architecture](images/monitoring/stage5-monitoring-cloud-agent.svg)

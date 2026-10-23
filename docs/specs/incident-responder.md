@@ -28,7 +28,7 @@ Names below are proposed, not deployed IDs. `<env>` is exactly `development` or 
 | Dispatch GitHub App | Proposed `pawlocal-alert-dispatch` | Separate App installed only on `alanlima/pawlocal`; Actions write; receiver-only credential |
 | Publisher GitHub App | Proposed `pawlocal-oncall-publisher` | Separate identity with permitted issue/content/PR writes; trusted jobs only |
 | Protected GitHub configuration | Proposed `oncall-development`, `oncall-production` Environments | Restricted API/query/publisher secrets; no deployment credentials |
-| Model runner | Full-commit-pinned `openai/codex-action` and compatible pinned CLI | Both executions: `gpt-6.1-sol`, medium effort, Standard service |
+| Model runner | Full-commit-pinned `openai/codex-action` and compatible pinned CLI | Fixer/reviewer use an explicitly approved model profile; selection pending |
 | Existing release authority | `fullstack-release.yml`, `deploy-production.yml`, `terraform-environment.yml` | Development-verified commit/digest; manual protected production promotion |
 
 Existing bootstrap state owns new IAM identities/trust/boundaries. Existing development/production states own matching Lambda, URL/policy, log groups, non-secret SSM Strings and exact-resource policy attachments. No fourth state. Extend delegated Terraform authority explicitly; Cognito-only delegation does not cover this receiver. Terraform provisions AWS resources and application deployments; runtime agents cannot mutate them.
@@ -37,7 +37,7 @@ Runtime secret **values** remain outside Terraform state, deployment environment
 
 ## End-to-end workflow and lifecycle
 
-![Incident and agent lifecycle](../images/monitoring/stage5-monitoring-agent-lifecycle.png)
+![Incident and agent lifecycle](../images/monitoring/stage5-monitoring-agent-lifecycle.svg)
 
 [Editable SVG](../images/monitoring/stage5-monitoring-agent-lifecycle.svg)
 
@@ -62,7 +62,7 @@ Lifecycle: `RECEIVED → DISPATCH_ACCEPTED → ADMITTED → TRIAGING → REPRODU
 
 ## Agent authority, review and runtime
 
-Use **`gpt-6.1-sol`, medium reasoning, Standard service** for fixer and fresh reviewer. Pin full Action commit and CLI version; API access/rate limits/configuration compatibility remain to be verified in a separate OpenAI project. Store its key as the protected GitHub secret `OPENAI_API_KEY`; API billing is separate from the consumer subscription. Use supported Action security mode on disposable Ubuntu runners and protect the API proxy credential; never export it as an ordinary test variable. [Official Codex GitHub Action guidance](https://learn.chatgpt.com/docs/github-action), [model reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+**The model, reasoning effort and service tier will be selected later.** No default profile is approved. Pin the Action commit/CLI when implementation is reviewed, and verify the owner-selected model profile/API project and data handling before admission. `OPENAI_API_KEY` remains a protected setup credential; an interactive subscription does not fund unattended API work. The selected profile must include supported limits, current rate provenance and a reviewed API entitlement smoke test. See the [model policy](../model-policy.md#incident-responder-model-selection-and-admission-42).
 
 Coder/reviewer receive read-only GitHub access, bounded redacted evidence and no App keys, publication, deployment or AWS write credentials. Only trusted preflight/publisher have issue-write capability; only publisher has content/PR writes, and it never executes candidate scripts. Fixes exclude workflow/infrastructure/security-policy/IAM/authentication/secrets/data repair. Logs/source/model output are untrusted data, never shell instructions.
 
@@ -70,10 +70,15 @@ Dispatch and publisher are **different App identities**: Lambda cannot hold a pu
 
 One attempt per incident generation; one active remediation per environment; **a 20-minute wall-clock deadline from admission across all jobs**. The initial GitHub queue wait is excluded; scheduling delays after admission consume the remaining budget. Propagate a trusted absolute deadline and remaining-time limits to model/tests/review/publication; 20 minutes per job is insufficient. No automatic fix/retry loops; rejected/timed-out attempts need owner action. Usage logs retain redacted run/model/token/duration/cost metadata, not prompts/raw telemetry.
 
-Official model pricing checked 23 October 2026: Standard short-context prices: $2/M input, $10/M output. Cumulative 200K input + 20K output across both agents is **$0.60/incident**, **$12 for 20 incidents**, before retries/tools/other costs. Requests above 272K input have 2× input/cache and 1.5× output rates for the full request. Count repeated context and reasoning output. [OpenAI model/pricing](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+### Enforced admission quotas and token reservations
 
-**$20/month is a planning budget/notification threshold, not a hard cap or provisioning authorization.** Finite calls/time/tokens and a verified admission/disable mechanism reduce exposure; project budgets must not be assumed to stop billing. Grafana Free can remain $0 within quotas. PawLocal is public (`isPrivate: false`, live-checked); standard hosted runner minutes are free for public repositories, while artifact storage, larger runners, API calls and AWS Lambda/secrets/logs/CloudWatch may cost extra. [GitHub billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+No monthly spending amount is approved here; the earlier $20 figure was illustrative and is not an operative limit. Profile/model/rates and quota values remain unset, so **model admission is disabled**.
 
+Before admitting an incident, trusted code must validate an explicitly approved monthly run quota, monthly usage/spend ceiling, per-request input/output token limits and a cumulative per-incident token/cost ceiling spanning fixer, fresh review and tools. Reserve worst-case capacity in a trusted serialized monthly ledger before each call; admission fails closed if anything is unset, stale, exhausted or cannot be enforced. The ledger's ownership, month boundary, atomic reservation, crash recovery and reconciliation need reviewed implementation and negative tests. A bounded concurrency queue does not constrain monthly spend.
+
+After a call, settle actual billed tokens/cost against its reservation. On timeout, unknown usage, interruption or failed settlement, retain the reservation until trusted reconciliation; do not automatically refund and spend it again. All distinct alert generations count against the same approved monthly quota. Deny further calls if the cumulative incident ceiling would be exceeded, and escalate. Token bounds must cover repeated context, reasoning output and tool/model calls, with provider request limits verified before use. Notifications support operations but cannot replace this gate.
+
+Grafana Free can remain within its actual allowance; AWS/API/runner/artifact costs remain separately reviewed. This specification authorizes neither an API spending amount nor provisioning. Actual profile/rates and enforceable limits must be selected and reviewed before live model work.
 
 ## Exact runtime secrets and public configuration
 
@@ -93,4 +98,4 @@ G2 maps evidence to the amended #42 contract: automatic safe alert wake-up, repr
 
 Emergency disablement removes/disables the Grafana contact point and closes workflow admission before further model work. Existing in-flight runs check cancellation/current incident state before publication. Reenable only after signed-delivery and generation tests pass. Rotation updates server-side HMAC/App secrets and Grafana signing configuration using approved owner procedures, validates new signing before retiring old material, and records metadata-only evidence. Never automate production faults or data/IAM/infrastructure repair.
 
-P9 requires G2/P8 plus explicit production telemetry-read/budget authorization. P9 retains owner dispatch and protected apply of the exact development-verified release. Unhealthy smoke/readback escalates to the existing owner-approved Terraform/recovery path under #44; it does not grant rollback authority to the agent.
+P9 requires G2/P8 plus explicit production telemetry-read authorization and approved enforceable admission quotas. P9 retains owner dispatch and protected apply of the exact development-verified release. Unhealthy smoke/readback escalates to the existing owner-approved Terraform/recovery path under #44; it does not grant rollback authority to the agent.

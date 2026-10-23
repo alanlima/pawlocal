@@ -36,14 +36,14 @@
 <rect x="84" y="862" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="97" y="903" font-size="27" fill="#275c86" font-weight="700">05</text>
 <text x="168" y="876" font-size="23" fill="#214665" font-weight="700">FIX</text>
-<text x="168" y="913" font-size="23" fill="#23344a" font-weight="400">Codex action · gpt-6.1-sol / medium / Standard</text>
+<text x="168" y="913" font-size="23" fill="#23344a" font-weight="400">Codex action · approved model profile required</text>
 <text x="168" y="948" font-size="21" fill="#52677f" font-weight="400">Reproduce affected release; regression test; patch.</text>
 <path d="M115,968 L115,995" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
 <rect x="64" y="995" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="84" y="1017" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="97" y="1058" font-size="27" fill="#275c86" font-weight="700">06</text>
 <text x="168" y="1031" font-size="23" fill="#214665" font-weight="700">INDEPENDENT REVIEW</text>
-<text x="168" y="1068" font-size="23" fill="#23344a" font-weight="400">Fresh Codex call · same model / effort / tier</text>
+<text x="168" y="1068" font-size="23" fill="#23344a" font-weight="400">Fresh call · approved profile · independent context</text>
 <text x="168" y="1103" font-size="21" fill="#52677f" font-weight="400">New context; pinned candidate; isolated tests.</text>
 <rect x="1134" y="220" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="1154" y="242" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
@@ -89,7 +89,7 @@
 <rect x="64" y="1170" width="2072" height="184" rx="18" fill="#fff0d6" stroke="#dfbe80"/>
 <text x="90" y="1212" font-size="26" fill="#755017" font-weight="700">BOUNDED ATTEMPT / EXPLICIT DELIVERY LIMITS</text>
 <text x="90" y="1252" font-size="24" fill="#23344a" font-weight="400">One active run, one coding attempt, 20-minute total deadline. Timeout, stale alert, failed tests or review findings → owner.</text>
-<text x="90" y="1292" font-size="23" fill="#23344a" font-weight="400">Fingerprint / generation and current-alert checks reduce duplicate work; GitHub serialization is not durable queueing or exactly-once execution.</text>
+<text x="90" y="1292" font-size="23" fill="#23344a" font-weight="400">Approved monthly quota + per-request and cumulative token/cost bounds are reserved before calls; unset configuration denies admission.</text>
 <text x="90" y="1330" font-size="23" fill="#23344a" font-weight="400">Resolved alerts update incident state; current state is checked before coding and publishing. Test dispatch-loss / retry / duplicate behavior.</text>
 <text x="64" y="1400" font-size="22" fill="#4a607a" font-weight="400">AWS Lambda receives alerts; GitHub hosts the agents. No long-running agent server, production credentials in agent jobs or automatic production approval.</text>
 </g></svg>
