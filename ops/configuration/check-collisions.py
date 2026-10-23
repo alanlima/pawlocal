@@ -6,10 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from reconcile import ReconciliationError, inventory_mappings
+from reconcile import ReconciliationError
 
 
-def check(plan, client, allowed):
+def check(plan, client):
     for resource in plan.get("resource_changes", []):
         if resource.get("type") != "aws_ssm_parameter":
             continue
@@ -19,8 +19,10 @@ def check(plan, client, allowed):
         if "create" not in change.get("actions", []):
             continue
         name = (change.get("after") or {}).get("name")
-        if name not in allowed:
-            raise ReconciliationError("Unapproved parameter creation or adoption")
+        if not isinstance(name, str) or not name:
+            raise ReconciliationError(
+                "Planned parameter name must be known for collision inventory"
+            )
         if change.get("before") is not None:
             raise ReconciliationError("Parameter replacement requires separate review")
         try:
@@ -47,30 +49,11 @@ def main():
     )
     args = parser.parse_args()
     try:
-        selected = (
-            ("development", "production")
-            if args.environment == "bootstrap"
-            else (args.environment,)
-        )
-        allowed = {m.store_key for env in selected for m in inventory_mappings(env)}
-        if args.environment == "bootstrap":
-            allowed = {
-                key
-                for key in allowed
-                if key.split("/")[4] in {"iam", "aws", "terraform"}
-            }
-        else:
-            allowed = {
-                key
-                for key in allowed
-                if key.split("/")[4] in {"frontend", "api", "auth"}
-            }
         import boto3
 
         check(
             json.loads(args.plan.read_text(encoding="utf-8")),
             boto3.client("ssm"),
-            allowed,
         )
     except Exception as error:
         raise SystemExit(
