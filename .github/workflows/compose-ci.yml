@@ -67,6 +67,12 @@ jobs:
           python observability/grafana/cloud/provision.py --environment development --mode check
           python observability/grafana/cloud/provision.py --environment production --mode check
 
+      - name: Validate dashboard queries and native synthetic script offline
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pawlocal-promql" --ignore-scripts --no-package-lock --no-audit --no-fund @prometheus-io/lezer-promql@0.315.1
+          node observability/grafana/cloud/tests/validate-queries.mjs "$RUNNER_TEMP/pawlocal-promql"
+          python observability/grafana/cloud/experience.py --mode check
+
       - name: Configure local-only Compose environment
         run: cp .env.example .env
 

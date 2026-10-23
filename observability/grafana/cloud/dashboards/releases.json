@@ -1,0 +1,192 @@
+{
+  "id": null,
+  "uid": "pawlocal-releases",
+  "title": "PawLocal Releases",
+  "schemaVersion": 39,
+  "version": 0,
+  "tags": [
+    "pawlocal-managed-226"
+  ],
+  "editable": false,
+  "refresh": "1m",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "description": "Source-controlled #226. Missing data is unknown, never zero/healthy. Release is the deployed sha256 image digest. Authorization is enforced by datasource/token scopes, not dashboard variables.",
+  "links": [
+    {
+      "title": "Incident triage",
+      "type": "link",
+      "url": "/d/pawlocal-incidents",
+      "includeVars": true
+    },
+    {
+      "title": "Metrics / logs / traces Explore",
+      "type": "link",
+      "url": "/explore",
+      "includeVars": false
+    },
+    {
+      "title": "Account quota and usage",
+      "type": "link",
+      "url": "/a/grafana-billing-usage-app/usage"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__METRICS_UID__"
+        },
+        "query": "label_values(pawlocal_api_requests_total, environment)",
+        "current": {
+          "text": "development",
+          "value": "development"
+        },
+        "refresh": 1
+      },
+      {
+        "name": "service",
+        "type": "constant",
+        "query": "pawlocal-api",
+        "current": {
+          "text": "pawlocal-api",
+          "value": "pawlocal-api"
+        }
+      },
+      {
+        "name": "release",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__METRICS_UID__"
+        },
+        "query": "label_values(pawlocal_api_requests_total{environment=~\"$environment\",service=\"pawlocal-api\"}, release)",
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "title": "Request rate by immutable release digest",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (release) (rate(pawlocal_api_requests_total{environment=~\"$environment\",service=~\"$service\",release=~\"$release\"}[5m]))",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "p95 latency by release",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, release) (rate(pawlocal_api_duration_seconds_bucket{environment=~\"$environment\",service=~\"$service\",release=~\"$release\"}[5m])))",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Errors by release",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (release) (rate(pawlocal_api_requests_total{environment=~\"$environment\",service=~\"$service\",release=~\"$release\",outcome=\"error\"}[5m]))",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "enabled": false,
+  "active": false,
+  "usage_datasource_uid": null,
+  "synthetic_api_url": null,
+  "probe_id": null,
+  "api_base_url": null,
+  "webhook_url": null,
+  "operator_receiver": null,
+  "approval": null,
+  "responder_routing": false,
+  "responder_approval": null
+}
