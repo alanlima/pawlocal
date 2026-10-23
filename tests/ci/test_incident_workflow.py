@@ -1,15 +1,13 @@
-import importlib.util
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "incident_workflow_lint", ROOT / ".github/scripts/lint-workflows.py"
-)
-lint = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(lint)
 
 
 class IncidentWorkflowTests(unittest.TestCase):
@@ -17,18 +15,50 @@ class IncidentWorkflowTests(unittest.TestCase):
         self.raw = (ROOT / ".github/workflows/incident-responder.yml").read_text()
         self.workflow = yaml.safe_load(self.raw)
 
-    def test_queue_adapter_validates_exact_contract_and_changes_only_one_line(self):
+    def test_global_queue_has_exact_required_contract(self):
         self.assertEqual(
-            lint.compatible(self.raw), self.raw.replace("  queue: max\n", "", 1)
+            self.workflow["concurrency"],
+            {"group": "pawlocal-oncall-global-quota", "cancel-in-progress": False, "queue": "max"},
         )
-        for before, after in (
-            ("queue: max", "queue: single"),
-            ("cancel-in-progress: false", "cancel-in-progress: true"),
-            ("group: pawlocal-oncall-global-quota", "group: per-environment"),
-            ("  queue: max\n", ""),
-        ):
-            with self.subTest(before=before), self.assertRaises(ValueError):
-                lint.compatible(self.raw.replace(before, after))
+
+    def test_direct_lint_exception_preserves_other_errors(self):
+        ci = yaml.safe_load((ROOT / ".github/workflows/workflow-validation.yml").read_text())
+        steps = [step for job in ci["jobs"].values() for step in job.get("steps", [])]
+        script = next(step["run"] for step in steps if step.get("name") == "Lint workflow syntax and security")
+        self.assertEqual(script, "actionlint")
+        config = (ROOT / ".github/actionlint.yaml").read_text()
+        self.assertEqual(yaml.safe_load(config), {"paths": {
+            ".github/workflows/incident-responder.yml": {"ignore": [
+                '^unexpected key "queue" for "concurrency" section\\. expected one of "cancel-in-progress", "group"$'
+            ]}
+        }})
+        self.assertFalse((ROOT / ".github/scripts/lint-workflows.py").exists())
+        if not shutil.which("actionlint"):
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                self.fail("Hosted lint regression requires installed actionlint")
+            self.skipTest("actionlint is not installed locally")
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / ".git").mkdir()
+            workflows = repository / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (repository / ".github/actionlint.yaml").write_text(config)
+            path = workflows / "incident-responder.yml"
+            for extra, accepted in (("", True), ("    unexpected-job-key: true\n", False)):
+                path.write_text(
+                    "name: Fixture\non: push\nconcurrency:\n  group: fixture\n  queue: max\njobs:\n  fixture:\n    runs-on: ubuntu-24.04\n"
+                    + extra + "    steps:\n      - run: echo fixture\n"
+                )
+                result = subprocess.run(
+                    ["actionlint", str(path)],
+                    check=False, capture_output=True, cwd=repository,
+                )
+                self.assertEqual(result.returncode == 0, accepted)
+            path.write_text(path.read_text().replace("    unexpected-job-key: true\n", ""))
+            other = workflows / "ordinary.yml"
+            path.rename(other)
+            result = subprocess.run(["actionlint", str(other)], check=False, capture_output=True, cwd=repository)
+            self.assertNotEqual(result.returncode, 0)
 
     def test_model_executions_have_no_app_query_production_or_write_capability(self):
         jobs = self.workflow["jobs"]

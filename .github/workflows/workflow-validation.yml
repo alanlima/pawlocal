@@ -6,6 +6,7 @@ on:
       - ".github/workflows/**"
       - ".github/actions/**"
       - ".github/scripts/**"
+      - ".github/actionlint.yaml"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"
@@ -22,6 +23,7 @@ on:
       - ".github/workflows/**"
       - ".github/actions/**"
       - ".github/scripts/**"
+      - ".github/actionlint.yaml"
       - "scripts/ci/**"
       - "tests/ci/**"
       - "ops/**"
@@ -136,7 +138,7 @@ jobs:
           echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
 
       - name: Lint workflow syntax and security
-        run: python .github/scripts/lint-workflows.py
+        run: actionlint
 
       - name: Set up pinned Terraform for provider-free saved-plan fixture
         uses: hashicorp/setup-terraform@v4

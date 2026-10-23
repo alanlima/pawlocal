@@ -198,7 +198,9 @@ class WorkflowPathTests(unittest.TestCase):
 
     def test_local_action_changes_trigger_workflow_validation(self) -> None:
         self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actions/**"), 2)
+        self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actionlint.yaml"), 2)
         for path in (
+            ".github/actionlint.yaml",
             ".github/actions/deploy/action.yml",
             ".github/actions/deploy/index.js",
             ".github/actions/deploy/lib/publish.js",
