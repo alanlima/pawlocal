@@ -66,9 +66,9 @@ GLOBALS = {
     "process_policy.py": "fe451a62948669ded19f3cfc61d8233129fc2496fe984ed3881c63c85149be62",
 }
 DYNAMIC_READERS = {
-    "ops/configuration/tests/test_integration.py": "a3ca00642c3caaa6dce972684107c1542f3dc592982305c2f1237a231879d57f",
-    "ops/configuration/tests/test_job_summary.py": "6c95128a55644aef8a8a41da8d1eb3c26b83d24908df49370bc9476450259659",
-    "ops/configuration/tests/test_reconcile.py": "74277a6890ca4e68cfa2100b4629dafa1b0fdfbb73c047738cc84fcb7bb5a495",
+    "ops/configuration/tests/test_integration.py": "4f9eae545cb6c622cb710e51117cd1a3e9144a1a4a82389027cbfe75ed78083b",
+    "ops/configuration/tests/test_job_summary.py": "bdbac3edd26f3b5dc889ff3aacee998bcd39e68669949fa2541185825a0f96e5",
+    "ops/configuration/tests/test_reconcile.py": "21dd0836cc0fc599f1cf21a9b2c5f27f6fbe0b26247940e2e192d52b6f640494",
     "ops/incident-response/settings.py": "aa1b6fcff93ed7b23112b56a51de2a88bf7079e406c2e693cfd2353593dac208",
     "ops/tests/test_validate_seeded_places.py": "8a4e16668d014e543e4e73ce7f903a33316d39eb9aed1f7b39a444b2135b3f71",
 }
