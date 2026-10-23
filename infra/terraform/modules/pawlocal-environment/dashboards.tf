@@ -1,10 +1,26 @@
 locals {
   hosted_dashboards_enabled = var.hosted_observability != null && local.hosted_telemetry_enabled
 
-  grafana_datasource_metrics_uid = "grafanacloud-prom"
-  grafana_datasource_logs_uid    = "grafanacloud-logs"
-  grafana_datasource_traces_uid  = "grafanacloud-traces"
-  grafana_datasource_usage_uid   = "grafanacloud-usage"
+  grafana_datasource_metrics_uid = coalesce(
+    try(var.hosted_observability.datasources.metrics.uid, null),
+    try(var.hosted_observability.metrics_datasource_uid, null),
+    "grafanacloud-prom"
+  )
+  grafana_datasource_logs_uid = coalesce(
+    try(var.hosted_observability.datasources.logs.uid, null),
+    try(var.hosted_observability.logs_datasource_uid, null),
+    "grafanacloud-logs"
+  )
+  grafana_datasource_traces_uid = coalesce(
+    try(var.hosted_observability.datasources.traces.uid, null),
+    try(var.hosted_observability.traces_datasource_uid, null),
+    "grafanacloud-traces"
+  )
+  grafana_datasource_usage_uid = coalesce(
+    try(var.hosted_observability.datasources.usage.uid, null),
+    try(var.hosted_observability.usage_datasource_uid, null),
+    "grafanacloud-usage"
+  )
 
   dashboard_template_vars = {
     environment = var.environment

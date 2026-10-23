@@ -46,6 +46,7 @@ jobs:
     outputs:
       already_empty: ${{ steps.state-status.outputs.already_empty }}
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -66,7 +67,7 @@ jobs:
       TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy-prepare
       GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      GRAFANA_URL: https://alanlima.grafana.net
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - name: Check out the exact requested commit
         uses: actions/checkout@v7
@@ -108,6 +109,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
 
@@ -211,7 +213,7 @@ jobs:
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy-prepare
       GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      GRAFANA_URL: https://alanlima.grafana.net
+      GRAFANA_URL: ${{ needs.plan-preparation.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -289,6 +291,7 @@ jobs:
       id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -341,6 +344,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
       - uses: hashicorp/setup-terraform@v4

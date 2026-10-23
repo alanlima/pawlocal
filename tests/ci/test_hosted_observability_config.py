@@ -66,6 +66,24 @@ class HostedOperatorTests(unittest.TestCase):
         module.validate(json.dumps(PUBLIC | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
         module.validate(json.dumps(PUBLIC | {"enabled": True, "faro_app_name": "pawlocal-dev"}), "111111111111", "ap-southeast-2")
 
+    def test_discovery_mode_allows_datasource_bindings(self):
+        config = {
+            **PUBLIC,
+            "enabled": True,
+            "datasources": {
+                "metrics": {"uid": "prom-1", "name": "grafanacloud-prom"},
+                "logs": {"uid": "logs-1"},
+                "traces": {"uid": "traces-1"},
+                "usage": {"uid": "usage-1"},
+            },
+            "metrics_datasource_uid": "prom-1",
+            "logs_datasource_uid": "logs-1",
+            "traces_datasource_uid": "traces-1",
+            "usage_datasource_uid": "usage-1",
+        }
+        res = module.validate(json.dumps(config), "111111111111", "ap-southeast-2")
+        self.assertEqual(res["datasources"]["metrics"]["uid"], "prom-1")
+
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
             {"token": "private-sentinel"},

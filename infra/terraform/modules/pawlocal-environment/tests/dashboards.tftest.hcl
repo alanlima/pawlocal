@@ -289,3 +289,33 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "Telemetry quota panels must bind to grafanacloud-usage datasource."
   }
 }
+
+run "development_environment_derives_datasource_uids_from_discovery" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    environment                = "development"
+    terraform_apply_role_name  = "pawlocal-development-terraform-apply"
+    frontend_publish_role_name = "pawlocal-development-github-deploy"
+    runtime_role_arn           = "arn:aws:iam::111111111111:role/pawlocal-development-dsql-runtime"
+    hosted_observability = {
+      enabled   = true
+      stack_url = "https://fixture.grafana.net/"
+      datasources = {
+        metrics = { uid = "custom-prom-uid" }
+        logs    = { uid = "custom-loki-uid" }
+        traces  = { uid = "custom-tempo-uid" }
+        usage   = { uid = "custom-usage-uid" }
+      }
+    }
+  }
+  assert {
+    condition = (
+      strcontains(grafana_dashboard.journey[0].config_json, "custom-prom-uid") &&
+      strcontains(grafana_dashboard.journey[0].config_json, "custom-loki-uid") &&
+      strcontains(grafana_dashboard.journey[0].config_json, "custom-tempo-uid") &&
+      strcontains(grafana_dashboard.telemetry[0].config_json, "custom-usage-uid")
+    )
+    error_message = "Dashboards must derive datasource UIDs from approved discovery configuration."
+  }
+}
