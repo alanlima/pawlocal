@@ -1,6 +1,6 @@
 # Grafana Cloud bindings and provisioning (#224)
 
-Implementation is present; **live account/region, Free-plan access, credentials, origins, quotas and per-signal isolation remain pending**. Both checked-in environment bindings are disabled/null. No live requests, registration, token creation, Grafana mutation or AWS apply was performed to deliver this package.
+Implementation is present; **live Free-plan access, credentials, origins, quotas and per-signal isolation remain pending; the existing shared stack and region are identified**. Both checked-in environment bindings are disabled/null. No live requests, registration, token creation, Grafana mutation or AWS apply was performed to deliver this package.
 
 ## Ownership
 
@@ -10,7 +10,7 @@ Grafana resources use one source-controlled **API** owner. Terraform could manag
 
 ## Owner-selected account
 
-The owner selected the existing **Free** stack **`https://alanlima.grafana.net/`** for **all environments**. Development and production use separate Faro applications in that same stack. Region is unknown and must be discovered read-only; stack ID, datasource bindings, exact origins, scopes and actual account quotas remain to be verified. The checked-in bindings remain disabled/null until their required inputs and activation reviews exist. No separate account is selected as a workaround: withhold signals/reads that cannot be safely authorized in the shared stack and return an explicit owner decision if a requirement cannot be met.
+The owner selected **`https://alanlima.grafana.net/`** for **all environments**, with **Free** as the intended operating limit. Development and production use separate Faro applications in that same stack. Read-only Grafana UI inspection identified stack/OTLP username **`1880841`**, Grafana region **`prod-au-southeast-1`** (Australia), AWS region **`ap-southeast-2`**, and OTLP endpoint **`https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp`** ([stack details](https://grafana.com/orgs/alanlima/stacks/1880841/grafana), [OTLP connection](https://grafana.com/orgs/alanlima/stacks/1880841/otlp-info)). The account UI displayed **Trial: 10 days** at inspection; trial/paid allowances do not establish Free eligibility. Datasource bindings, exact origins, scopes, post-trial Free quotas and per-signal authorization still require verification. The checked-in bindings remain disabled/null until required inputs and activation reviews exist. No separate account is selected as a workaround: withhold signals/reads that cannot be safely authorized in the shared stack and return an explicit owner decision if a requirement cannot be met.
 
 ## Operator setup and approval record
 
@@ -55,7 +55,7 @@ Enabled binding example structure (actual values required; not executable defaul
 Start with only the existing stack URL, expected region and protected API access. Discovery reads stack metadata, connections and datasources, and returns selected public candidate bindings with no mutations:
 
 ```powershell
-python observability/grafana/cloud/provision.py --environment development --mode discover --stack-url https://alanlima.grafana.net --region ACTUAL-REGION
+python observability/grafana/cloud/provision.py --environment development --mode discover --stack-url https://alanlima.grafana.net --region prod-au-southeast-1
 ```
 
 Discovery derives stack ID, OTLP endpoint/username, datasource UID/names and regional Faro management endpoint from actual metadata plus the pinned official regional rules (including creation-date exceptions). Multiple datasource candidates fail rather than guessing; select the reviewed UID explicitly in that case. The remaining review input is the exact frontend origin from existing release evidence, plus approval/privacy/isolation/quota references. Do not invent values or claim discovery verifies quota/authorization. The Faro collector URL comes from creating/reading the app, not from a user-entered key. Two credential domains suffice: Cloud policy (stack/Faro scopes) and Grafana service-account token; a separate narrow Faro token is optional when supplied as `GRAFANA_FARO_ACCESS_POLICY_TOKEN`.
