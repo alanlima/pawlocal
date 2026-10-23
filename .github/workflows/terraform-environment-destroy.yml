@@ -46,6 +46,7 @@ jobs:
     outputs:
       already_empty: ${{ steps.state-status.outputs.already_empty }}
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -65,6 +66,8 @@ jobs:
       TF_VAR_cloudfront_distribution_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
       TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy-prepare
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - name: Check out the exact requested commit
         uses: actions/checkout@v7
@@ -105,7 +108,12 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Install hosted observability validator dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
 
@@ -208,6 +216,8 @@ jobs:
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy-prepare
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ needs.prepare-plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -285,6 +295,7 @@ jobs:
       id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -304,6 +315,8 @@ jobs:
       TF_VAR_cloudfront_distribution_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
       TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -334,7 +347,12 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Install hosted observability validator dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
       - uses: hashicorp/setup-terraform@v4
@@ -397,6 +415,8 @@ jobs:
       TERRAFORM_ROLE_ARN: ${{ vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ needs.destroy-plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:

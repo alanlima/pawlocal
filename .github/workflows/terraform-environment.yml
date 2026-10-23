@@ -35,6 +35,8 @@ on:
         required: false
       GRAFANA_CLOUD_ACCESS_POLICY_TOKEN:
         required: false
+      GRAFANA_SERVICE_ACCOUNT_TOKEN:
+        required: false
     outputs:
       frontend_config:
         value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
@@ -182,6 +184,7 @@ jobs:
       id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -202,6 +205,8 @@ jobs:
       TF_VAR_cloudfront_oac_arn: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_OAC_ARN || vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       TF_VAR_backend_image: ${{ inputs.backend_image }}
       GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - name: Check out the exact requested commit
         uses: actions/checkout@v7
@@ -282,7 +287,12 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Install hosted observability validator dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
 
@@ -467,6 +477,8 @@ jobs:
       TERRAFORM_ROLE_ARN: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN || vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID || vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ needs.plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - name: Check out the exact planned commit
         uses: actions/checkout@v7

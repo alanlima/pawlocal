@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import yaml
@@ -65,6 +67,82 @@ class HostedOperatorTests(unittest.TestCase):
         module.validate(json.dumps(PUBLIC | {"enabled": True}), "111111111111", "ap-southeast-2")
         module.validate(json.dumps(PUBLIC | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
         module.validate(json.dumps(PUBLIC | {"enabled": True, "faro_app_name": "pawlocal-dev"}), "111111111111", "ap-southeast-2")
+
+    def test_discovery_mode_allows_datasource_bindings(self):
+        config = {
+            **PUBLIC,
+            "enabled": True,
+            "datasources": {
+                "metrics": {"uid": "prom-1", "name": "grafanacloud-prom"},
+                "logs": {"uid": "logs-1"},
+                "traces": {"uid": "traces-1"},
+                "usage": {"uid": "usage-1"},
+            },
+            "metrics_datasource_uid": "prom-1",
+            "logs_datasource_uid": "logs-1",
+            "traces_datasource_uid": "traces-1",
+            "usage_datasource_uid": "usage-1",
+        }
+        res = module.validate(json.dumps(config), "111111111111", "ap-southeast-2")
+        self.assertEqual(res["datasources"]["metrics"]["uid"], "prom-1")
+
+        bad_binding = {
+            **PUBLIC,
+            "enabled": True,
+            "datasources": {
+                "metrics": {"uid": "prom-1", "access_token": "secret"},
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "Unknown field.*access_token"):
+            module.validate(json.dumps(bad_binding), "111111111111", "ap-southeast-2")
+
+    def test_resolve_owning_stack_url_retains_former_stack_when_disabled(self):
+        self.assertEqual(
+            module.resolve_owning_stack_url({"stack_url": "https://custom.grafana.net"}, "ap-southeast-2"),
+            "https://custom.grafana.net",
+        )
+        with patch.dict(os.environ, {"PAWLOCAL_GRAFANA_URL": "https://former.grafana.net"}):
+            self.assertEqual(
+                module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                "https://former.grafana.net",
+            )
+        with patch.dict(os.environ, {"PAWLOCAL_GRAFANA_URL": "", "PAWLOCAL_ENVIRONMENT": ""}):
+            self.assertEqual(
+                module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                "https://alanlima.grafana.net",
+            )
+
+    def test_resolve_owning_stack_url_checks_recorded_ssm_and_prevents_unmigrated_switch(self):
+        class MockSSM:
+            def get_parameter(self, Name):
+                if Name == "/pawlocal/production/config/grafana/stack-url":
+                    return {"Parameter": {"Value": "https://stack-a.grafana.net"}}
+                raise Exception("ParameterNotFound")
+
+        with patch.dict(os.environ, {"PAWLOCAL_ENVIRONMENT": "production"}):
+            with patch("boto3.client", return_value=MockSSM()):
+                # When disabled, retains recorded stack-a
+                self.assertEqual(
+                    module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                    "https://stack-a.grafana.net",
+                )
+                # When steady-state matches stack-a, returns stack-a
+                self.assertEqual(
+                    module.resolve_owning_stack_url({"stack_url": "https://stack-a.grafana.net"}, "ap-southeast-2"),
+                    "https://stack-a.grafana.net",
+                )
+                # When input attempts switch to stack-b without migration, raises ValueError
+                with self.assertRaisesRegex(ValueError, "differs from recorded owning stack"):
+                    module.resolve_owning_stack_url({"stack_url": "https://stack-b.grafana.net"}, "ap-southeast-2")
+
+        class FailingSSM:
+            def get_parameter(self, Name):
+                raise RuntimeError("AccessDeniedException: not authorized")
+
+        with patch.dict(os.environ, {"PAWLOCAL_ENVIRONMENT": "production"}):
+            with patch("boto3.client", return_value=FailingSSM()):
+                with self.assertRaises(RuntimeError):
+                    module.resolve_owning_stack_url(None, "ap-southeast-2")
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (

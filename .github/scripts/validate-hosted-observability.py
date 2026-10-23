@@ -8,7 +8,7 @@ import re
 import sys
 from urllib.parse import urlsplit
 
-_ALLOWED = {"enabled", "frontend_enabled", "stack_url", "stack_slug", "faro_app_name", "kms_key_arn"}
+_ALLOWED = {"enabled", "frontend_enabled", "stack_url", "stack_slug", "faro_app_name", "kms_key_arn", "datasources", "metrics_datasource_uid", "logs_datasource_uid", "traces_datasource_uid", "usage_datasource_uid"}
 # Fields removed in #260: now auto-discovered by Terraform via grafana_cloud_stack /
 # grafana_frontend_o11y_app data sources. Kept here to produce a specific error.
 _REMOVED = {"faro_collector_url", "otlp_endpoint", "otlp_instance_id"}
@@ -112,10 +112,87 @@ def validate(raw, account, region):
             f"'kms_key_arn' must be an existing key ARN for account {account} in {region}, got: {key!r}"
         )
 
+    if "datasources" in value:
+        ds = value["datasources"]
+        if not isinstance(ds, dict):
+            raise ValueError("'datasources' must be a JSON object")
+        allowed_signals = {"metrics", "logs", "traces", "usage"}
+        unknown_signals = set(ds) - allowed_signals
+        if unknown_signals:
+            raise ValueError(
+                f"Unknown signal(s) in 'datasources': {', '.join(sorted(unknown_signals))}. "
+                f"Allowed: {', '.join(sorted(allowed_signals))}."
+            )
+        allowed_binding_keys = {"uid", "name"}
+        for sig, binding in ds.items():
+            if not isinstance(binding, dict):
+                raise ValueError(f"'datasources.{sig}' must be an object")
+            unknown_keys = set(binding) - allowed_binding_keys
+            if unknown_keys:
+                raise ValueError(
+                    f"Unknown field(s) in 'datasources.{sig}': {', '.join(sorted(unknown_keys))}. "
+                    f"Allowed: {', '.join(sorted(allowed_binding_keys))}."
+                )
+            if "uid" in binding and not isinstance(binding["uid"], str):
+                raise ValueError(f"'datasources.{sig}.uid' must be a string")
+            if "name" in binding and not isinstance(binding["name"], str):
+                raise ValueError(f"'datasources.{sig}.name' must be a string")
+
+    for field in (
+        "metrics_datasource_uid",
+        "logs_datasource_uid",
+        "traces_datasource_uid",
+        "usage_datasource_uid",
+    ):
+        if field in value and not isinstance(value[field], str):
+            raise ValueError(f"'{field}' must be a string")
+
+    return value
+
+
+def resolve_owning_stack_url(parsed, region):
+    recorded_url = ""
+    env_name = os.environ.get("PAWLOCAL_ENVIRONMENT", "").strip()
+    if env_name:
+        import boto3
+        from botocore.exceptions import ClientError
+        try:
+            ssm = boto3.client("ssm", region_name=region)
+            param = f"/pawlocal/{env_name}/config/grafana/stack-url"
+            resp = ssm.get_parameter(Name=param)
+            recorded_url = resp.get("Parameter", {}).get("Value", "").strip().rstrip("/")
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code != "ParameterNotFound":
+                raise
+        except Exception as exc:
+            if "ParameterNotFound" not in str(exc):
+                raise
+
+    input_url = parsed.get("stack_url", "").strip().rstrip("/") if isinstance(parsed, dict) else ""
+
+    # Resolve recorded owning URL first; require an explicit migration before switching endpoints
+    if recorded_url:
+        if input_url and input_url != recorded_url:
+            raise ValueError(
+                f"Configured stack_url ({input_url!r}) differs from recorded owning stack ({recorded_url!r}). "
+                f"Dashboards must be migrated or destroyed on the owning stack before switching endpoints."
+            )
+        return recorded_url
+
+    if input_url:
+        return input_url
+
+    url = os.environ.get("PAWLOCAL_GRAFANA_URL", "").strip().rstrip("/")
+    if url:
+        return url
+
+    return "https://alanlima.grafana.net"
 
 if __name__ == "__main__":
+    parsed = None
     try:
-        validate(
+        parsed = validate(
             os.environ.get("TF_VAR_hosted_observability", "null"),
             os.environ["PAWLOCAL_AWS_ACCOUNT_ID"],
             os.environ["AWS_REGION"],
@@ -131,6 +208,13 @@ if __name__ == "__main__":
             f"Check the PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG environment variable "
             f"in the plan Environment and see docs/hosted-telemetry-operations.md."
         )
+    url = resolve_owning_stack_url(parsed, os.environ["AWS_REGION"])
+    if "GITHUB_ENV" in os.environ:
+        with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+            f.write(f"GRAFANA_URL={url}\n")
+    if "GITHUB_OUTPUT" in os.environ:
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write(f"grafana_url={url}\n")
     print(
         "Validated public hosted observability bindings; no secret payloads accepted."
     )
