@@ -150,6 +150,10 @@ def validate(raw, account, region):
     return value
 
 
+class MissingStackUrlError(ValueError):
+    pass
+
+
 def resolve_owning_stack_url(parsed, region):
     recorded_url = ""
     env_name = os.environ.get("PAWLOCAL_ENVIRONMENT", "").strip()
@@ -187,7 +191,11 @@ def resolve_owning_stack_url(parsed, region):
     if url:
         return url
 
-    return "https://alanlima.grafana.net"
+    param_hint = f"/pawlocal/{env_name}/config/grafana/stack-url" if env_name else "/pawlocal/<env>/config/grafana/stack-url"
+    raise MissingStackUrlError(
+        f"No Grafana stack URL configured or resolved from SSM parameter {param_hint} "
+        f"or PAWLOCAL_GRAFANA_URL environment variable."
+    )
 
 if __name__ == "__main__":
     parsed = None
@@ -208,7 +216,27 @@ if __name__ == "__main__":
             f"Check the PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG environment variable "
             f"in the plan Environment and see docs/hosted-telemetry-operations.md."
         )
-    url = resolve_owning_stack_url(parsed, os.environ["AWS_REGION"])
+    telemetry_active = bool(
+        isinstance(parsed, dict)
+        and (parsed.get("enabled") or parsed.get("frontend_enabled"))
+    )
+
+    url = ""
+    try:
+        url = resolve_owning_stack_url(parsed, os.environ["AWS_REGION"])
+    except MissingStackUrlError as exc:
+        if telemetry_active:
+            sys.exit(
+                f"Hosted observability configuration error: {exc}\n"
+                f"Check the PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG environment variable "
+                f"in the plan Environment and see docs/hosted-telemetry-operations.md."
+            )
+    except ValueError as exc:
+        sys.exit(
+            f"Hosted observability configuration error: {exc}\n"
+            f"Check the PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG environment variable "
+            f"in the plan Environment and see docs/hosted-telemetry-operations.md."
+        )
     if "GITHUB_ENV" in os.environ:
         with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
             f.write(f"GRAFANA_URL={url}\n")
