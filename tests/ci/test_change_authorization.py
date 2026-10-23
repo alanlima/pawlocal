@@ -219,6 +219,13 @@ class IncidentCandidateVerificationTests(unittest.TestCase):
         result = verify_incident_candidate(self.client, self.pr_number)
         self.assertTrue(result["authorized"])
 
+    def test_incident_candidate_head_mutation_denied(self):
+        pr = dict(self.valid_pr, head={"ref": "incident/dev/1", "sha": "c" * 40})
+        self.client.get_pr.return_value = pr
+        with self.assertRaises(Denied) as ctx:
+            verify_incident_candidate(self.client, self.pr_number, self.valid_receipt, expected_head_sha=self.head_sha)
+        self.assertIn("Candidate head changed", str(ctx.exception))
+
     def test_untrusted_workflow_path_for_publication_denied(self):
         pr_with_body = dict(
             self.valid_pr,

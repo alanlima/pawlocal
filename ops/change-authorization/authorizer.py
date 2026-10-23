@@ -261,6 +261,8 @@ def verify_incident_candidate(
     client: GitHubClient,
     pr_number: int,
     publication_receipt: dict | None = None,
+    expected_head_sha: str | None = None,
+    expected_base_sha: str | None = None,
 ) -> dict:
     """Verifies that an incident candidate meets all safety constraints and allowlists."""
     pr = client.get_pr(pr_number)
@@ -270,6 +272,11 @@ def verify_incident_candidate(
     head_sha = pr.get("head", {}).get("sha", "")
     base_sha = pr.get("base", {}).get("sha", "")
     head_ref = pr.get("head", {}).get("ref", "")
+
+    if expected_head_sha and head_sha != expected_head_sha:
+        raise Denied(f"Candidate head changed: expected {expected_head_sha}, got {head_sha}")
+    if expected_base_sha and base_sha != expected_base_sha:
+        raise Denied(f"Candidate base changed: expected {expected_base_sha}, got {base_sha}")
 
     # Retrieve authentic publication artifact if not passed directly
     if publication_receipt is None:
@@ -391,7 +398,12 @@ def main():
 
     if args.mode == "incident":
         try:
-            verify_incident_candidate(client, pr_number)
+            result = verify_incident_candidate(
+                client,
+                pr_number,
+                expected_head_sha=head_sha,
+                expected_base_sha=base_sha,
+            )
             client.post_status(head_sha, "success", "Authenticated incident candidate authorized")
             print("Incident change authorization status posted successfully.")
         except Denied as e:
