@@ -1,5 +1,7 @@
 # Stage 2 and Stage 3.1 — Local observability
 
+This document governs the local Stage 2/3.1 stack. Hosted Grafana Cloud enablement is specified separately in [hosted observability](hosted-observability.md); the webhook/agent lifecycle is in [incident responder](incident-responder.md). Local-only/no-hosted-resource constraints below remain scoped to this local workstream.
+
 **Status:** Approved for implementation on 2026-10-18. Stage 2 must pass its review gate before Stage 3.1 starts and before Stage 3 is complete.
 
 ## Workstream relationship
