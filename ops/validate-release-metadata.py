@@ -33,9 +33,26 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def frontend_mode(value: dict[str, Any], independent_version: int) -> bool:
+    """Historical releases coupled the modes; new releases must declare both."""
+    if value["schema_version"] == independent_version:
+        mode = value.get("frontend_telemetry_enabled")
+        if type(mode) is not bool:
+            fail("Independent release must declare a boolean frontend telemetry mode")
+        return mode
+    if "frontend_telemetry_enabled" in value:
+        fail("Historical metadata cannot declare independent frontend telemetry")
+    if type(value.get("telemetry_enabled")) is not bool:
+        fail("Historical telemetry mode must be boolean")
+    return value["telemetry_enabled"]
+
+
 def validate_manifest(manifest: dict[str, Any]) -> None:
-    if manifest.get("schema_version") != 2:
-        fail("Release manifest schema_version must be 2")
+    if type(manifest.get("schema_version")) is not int or manifest["schema_version"] not in {2, 3}:
+        fail("Release manifest schema_version must be 2 or 3")
+    if set(manifest) - {"schema_version", "commit", "backend_image", "backend_image_digest", "migration_chains", "telemetry_enabled", "frontend_telemetry_enabled", "frontend"}:
+        fail("Unknown release manifest field")
+    frontend_mode(manifest, 3)
     if not COMMIT.fullmatch(str(manifest.get("commit", ""))):
         fail("Release manifest commit must be a full lowercase commit SHA")
     digest = manifest.get("backend_image_digest")
@@ -83,8 +100,13 @@ def validate_evidence(
     migration_runner: str | None,
     migration_id: str | None,
 ) -> None:
-    if evidence.get("schema_version") != 1:
-        fail("Deployment evidence schema_version must be 1")
+    if set(evidence) - {"schema_version", "environment", "commit", "backend_image_digest", "running_image_digest", "frontend_artifact_digest", "database_provider", "migration_runner", "migration_id", "telemetry_enabled", "frontend_telemetry_enabled", "public_endpoint_health", "database_query_smoke", "verified_at"}:
+        fail("Unknown deployment evidence field")
+    expected_version = 2 if manifest["schema_version"] == 3 else 1
+    if type(evidence.get("schema_version")) is not int or evidence["schema_version"] != expected_version:
+        fail("Deployment evidence schema_version does not match the selected release")
+    if frontend_mode(evidence, 2) != frontend_mode(manifest, 3):
+        fail("Deployment evidence frontend telemetry mode must match the selected release")
     if evidence.get("environment") != environment:
         fail("Deployment evidence environment does not match the target")
     if evidence.get("commit") != manifest["commit"]:

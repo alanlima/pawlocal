@@ -22,7 +22,11 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.record(Path(directory), True)
 
-    def record(self, tmp_path, enabled):
+    def test_independent_browser_only_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.record(Path(directory), False, frontend=True)
+
+    def record(self, tmp_path, enabled, frontend=None):
         workflow = yaml.safe_load(
             (ROOT / ".github/workflows/deploy-production.yml").read_text()
         )
@@ -49,6 +53,10 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
                 "result": "valid_place_page",
             },
         }
+        if frontend is not None:
+            manifest["schema_version"] = 3
+            evidence["schema_version"] = 2
+            evidence["frontend_telemetry_enabled"] = frontend
         release = tmp_path / "release"
         release.mkdir()
         manifest_bytes = json.dumps(manifest).encode()
@@ -84,8 +92,8 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
         payload = record["payload"]
         assert record["environment"] == "production"
         assert payload["record_schema_version"] == 1
-        assert payload["manifest_schema_version"] == 2
-        assert payload["evidence_schema_version"] == 1
+        assert payload["manifest_schema_version"] == manifest["schema_version"]
+        assert payload["evidence_schema_version"] == evidence["schema_version"]
         assert payload["evidence_validated"] is True
         assert payload["workflow_run_id"] == 123
         assert payload["workflow_run_attempt"] == 2

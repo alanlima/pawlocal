@@ -290,6 +290,7 @@ class IntegrationTests(unittest.TestCase):
             for name, value in values("development").items()
             if name in module.FRONTEND_FIELDS
         }
+        public.update(PAWLOCAL_TELEMETRY_ENABLED="false", VITE_TELEMETRY_ENABLED="false")
         self.assertEqual(build.load_public(json.dumps(public)), public)
         for bad in (
             dict(public, PAWLOCAL_CONFIG_GITHUB_TOKEN=SENTINEL),
@@ -559,12 +560,18 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(module.ReconciliationError):
                 collision.check(plan, client)
         with self.assertRaisesRegex(
-            module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"
-        ):
+            module.ReconciliationError,
+            "ssm:GetParameter returned AccessDeniedException",
+        ) as caught:
+            detail = "Access denied by explicit deny in a permissions boundary"
+            denied = RuntimeError(detail)
+            denied.response = {"Error": {"Code": "AccessDeniedException"}}
             collision.check(
                 plan,
-                FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}),
+                FakeSSM({key: denied}),
             )
+        self.assertIn(detail, str(caught.exception))
+        self.assertIn(key, str(caught.exception))
         for arbitrary_key in (
             "/unrelated/service/setting",
             "/pawlocal/development/config/oncall/webhook-url",
@@ -585,6 +592,93 @@ class IntegrationTests(unittest.TestCase):
         create["change"]["actions"] = ["no-op"]
         with self.assertRaises(module.ReconciliationError):
             collision.check(plan, FakeSSM())
+
+    def test_warning_only_workflow_keeps_setup_failures_from_running_sync(self):
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+        )
+        events = workflow.get("on", workflow.get(True))
+        self.assertIs(
+            events["workflow_call"]["inputs"]["fail_on_error"]["default"], False
+        )
+        self.assertIs(
+            events["workflow_dispatch"]["inputs"]["fail_on_error"]["default"], True
+        )
+        steps = {
+            step.get("id"): step for step in workflow["jobs"]["reconcile"]["steps"]
+        }
+        for current, previous in (
+            ("entry", "checkout"),
+            ("python", "entry"),
+            ("dependencies", "python"),
+            ("credentials", "dependencies"),
+            ("sync", "credentials"),
+        ):
+            self.assertEqual(
+                steps[current]["if"], f"steps.{previous}.outcome == 'success'"
+            )
+            self.assertEqual(
+                steps[current]["continue-on-error"], "${{ !inputs.fail_on_error }}"
+            )
+        self.assertIn("--fail-on-error", steps["sync"]["run"])
+        outputs = workflow["jobs"]["reconcile"]["outputs"]
+        for expression in outputs.values():
+            self.assertIn("steps.sync.outputs.reconciled == 'true'", expression)
+        self.assertIn(
+            "steps.sync.outputs.reconciled == 'true'", steps["consumer"]["if"]
+        )
+        terraform = yaml.safe_load(
+            (ROOT / ".github/workflows/terraform-environment.yml").read_text()
+        )
+        for job in ("reconcile-preflight", "reconcile-after-apply"):
+            self.assertIs(terraform["jobs"][job]["with"]["fail_on_error"], False)
+        for job in ("plan", "apply"):
+            for expression in terraform["jobs"][job]["env"].values():
+                if "fromJSON(needs.reconcile-preflight.outputs.configuration" in str(
+                    expression
+                ):
+                    self.assertRegex(expression, r"\.[A-Z_]+ \|\| vars\.[A-Z_]+ ")
+        validator = next(
+            step["run"]
+            for step in terraform["jobs"]["plan"]["steps"]
+            if step["name"] == "Validate selection and required configuration"
+        )
+        self.assertIn("Missing required runtime configuration", validator)
+
+    def test_collision_diagnostics_precede_lookup_and_exclude_values(self):
+        key = "/pawlocal/development/config/observability/enabled"
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "aws_ssm_parameter",
+                    "change": {"actions": ["create"], "after": {"name": key}},
+                }
+            ]
+        }
+        lookup_error = "Could not connect to the endpoint URL: https://ssm.example.test"
+        for stored in ({"Value": SENTINEL}, RuntimeError(lookup_error), None):
+            client = FakeSSM({key: stored})
+            lookup = client.get_parameter
+            with patch("builtins.print") as log:
+
+                def checked_lookup(lookup=lookup, **kwargs):
+                    log.assert_called_once_with(
+                        f"Checking Parameter Store key: {key!r}", flush=True
+                    )
+                    return lookup(**kwargs)
+
+                client.get_parameter = checked_lookup
+                if stored is None:
+                    collision.check(plan, client)
+                    self.assertIn("1 key(s) checked", log.call_args.args[0])
+                else:
+                    with self.assertRaises(module.ReconciliationError) as caught:
+                        collision.check(plan, client)
+                    self.assertIn(key, str(caught.exception))
+                    self.assertNotIn(SENTINEL, str(caught.exception))
+                    if isinstance(stored, Exception):
+                        self.assertIn(lookup_error, str(caught.exception))
+                self.assertNotIn(SENTINEL, str(log.call_args_list))
 
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(

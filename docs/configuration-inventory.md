@@ -109,11 +109,12 @@ Paths below are prefixed `/pawlocal/{environment}/` for development/production. 
 
 | Source suffix | Type / secret | GitHub name / target | Consumer / owner |
 |---|---|---|---|
-| config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P; VITE_TELEMETRY_ENABLED / R | runtime/build mode; matching application state |
-| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state using approved Grafana input |
-| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state using actual Grafana input |
-| config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | public Faro key path; application state using actual Grafana input |
-| config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | trusted preflight; application state using actual Grafana input |
+| config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P | backend runtime mode; matching application state |
+| config/frontend/telemetry-enabled | String / false | VITE_TELEMETRY_ENABLED / R | independent frontend build mode; matching application state |
+| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state discovered via grafana_cloud_stack |
+| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state discovered via grafana_cloud_stack |
+| config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | public Faro key path; application state discovered via grafana_frontend_o11y_app |
+| config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | trusted preflight; application state using discovered or actual Grafana input |
 | config/oncall/webhook-url | String / false | PAWLOCAL_GRAFANA_WEBHOOK_URL / O | contact-point verification; application state derives Function URL |
 | secrets/grafana/query-token | SecureString / true | Proposed PAWLOCAL_GRAFANA_QUERY_TOKEN / O secret | Future separate reader/secret lifecycle approval; no active copy row |
 
@@ -137,3 +138,5 @@ Actual creation/population/rotation needs a reviewed owner procedure before live
 ## Proposed runtime secret lifecycle (#241)
 
 The [unaccepted DEC-013 proposal](specs/monitoring-secret-lifecycle.md) lists four exact source suffixes, application-state ownership and distinct runtime/query consumers. It evaluates state-free write-only creation/rotation and exact ephemeral maintenance reads; no resource or read/write grant is added here. Runtime-only OTLP/HMAC/dispatch values stay outside GitHub synchronization; query-token copying remains a separately reviewed inactive proposal. Public tag-reader/YAML semantics are unchanged.
+
+Frontend-first #225 amendment: public application-owned `/pawlocal/{environment}/config/frontend/telemetry-enabled` maps to `VITE_TELEMETRY_ENABLED` in R, independent of the backend observability flag. See the frontend-first rollout in `docs/hosted-telemetry-operations.md` for the operator JSON, migration order and versioned release contract.

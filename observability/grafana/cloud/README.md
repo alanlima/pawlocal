@@ -60,7 +60,7 @@ Supply the approved existing stack URL and actual Grafana region as command inpu
 python observability/grafana/cloud/provision.py --environment development --mode discover --stack-url https://approved-stack.grafana.net --region actual-region-slug
 ```
 
-Discovery derives stack ID, OTLP endpoint/username, datasource UID/names and regional Faro management endpoint from actual metadata plus the pinned official regional rules (including creation-date exceptions). Multiple datasource candidates fail rather than guessing; select the reviewed UID explicitly in that case. The remaining review input is the exact frontend origin from existing release evidence, plus approval/privacy/isolation/quota references. Do not invent values or claim discovery verifies quota/authorization. The Faro collector URL comes from creating/reading the app, not from a user-entered key. Two credential domains suffice: Cloud policy (stack/Faro scopes) and Grafana service-account token; a separate narrow Faro token is optional when supplied as `GRAFANA_FARO_ACCESS_POLICY_TOKEN`.
+Discovery derives stack ID, OTLP endpoint/username, datasource UID/names and regional Faro management endpoint from actual metadata plus the pinned official regional rules (including creation-date exceptions). Multiple datasource candidates return `needs-selection-not-approved`, partial bindings and bounded public candidate UID/name/type metadata rather than guessing. Review the candidates, then rerun discovery with `--datasource-uids-json '{"metrics":"reviewed-metrics-uid"}'` (optional keys: `metrics`, `logs`, `traces`). Every supplied UID must occur exactly once in that stack and match the corresponding signal type, even when a type otherwise has only one candidate. Discovery output is not an enabled manifest or approval; unresolved discovery cannot be submitted as plan/apply bindings. The remaining review input is the exact frontend origin from existing release evidence, plus approval/privacy/isolation/quota references. Do not invent values or claim discovery verifies quota/authorization. The Faro collector URL comes from creating/reading the app, not from a user-entered key. Two credential domains suffice: Cloud policy (stack/Faro scopes) and Grafana service-account token; a separate narrow Faro token is optional when supplied as `GRAFANA_FARO_ACCESS_POLICY_TOKEN`.
 
 Commands run from repository root. The default `check` performs **zero network calls**, including enabled bindings. Disabled `plan`/`apply` also perform no network calls and need no credentials.
 
@@ -90,6 +90,36 @@ No automatic retry of a mutation follows a timeout. A request might have succeed
 - **Rotate operator tokens** outside source/state through the approved credential owner, replace process environment values, verify read-only plan, then revoke retired tokens using the approved owner procedure. Token creation/revocation is not implemented here. Runtime ingestion/query/HMAC rotation remains #223; never put those values in the public handoff.
 - **Measure usage** in the actual account Usage/Billing views per signal and account. Track active series, logs/traces GB, Faro sessions and synthetic executions; two environments share applicable allowances. New frontend accounts may count sessions, logs and traces independently. Review quota/no-data/outage evidence before G1; lower SDK sample/label volume through #225 before a quota is exhausted. Responder model/admission quotas require separate owner approval and are not Grafana quota enforcement.
 - **Close only with evidence:** record actual account/region/Free setup, credentials/scope review (metadata only), origins, repeat plan/apply/noop evidence, public handoff, isolation limitations and independent review. Missing account credentials blocks live activation/closure, not this mock-tested implementation delivery. Production remains separately approved under #230/#231.
+
+## Development-only hosted launcher
+
+`grafana-development-setup.yml` runs this provisioner on GitHub-hosted Ubuntu
+from trusted main, under the existing protected `development-apply` Environment.
+It uses existing Cloud/Faro policy and stack service-account secrets; credentials
+are never dispatch inputs. The default `discover` mode takes actual `stack_url`
+and `region`, performs GETs only and emits the public stack/datasource metadata.
+If selection is needed, review the bounded `datasource_candidates`, then rerun
+with optional `datasource_uids_json` (for example `{"metrics":"reviewed-uid"}`).
+Do not treat candidate metadata as approved bindings.
+It does not create a Faro collector before an application exists.
+
+Review that evidence, the actual development frontend origin, residency, shared
+Free quota and isolation constraints before preparing an enabled development
+manifest. Keep production disabled with all its bindings null. For `plan` or
+`apply`, supply that JSON as `public_bindings_json`, the reviewed origin as
+`frontend_origin`, and leave discovery-only stack/region/selector inputs empty. Run plan
+first and independently review its exact folder/Faro changes before apply. The
+launcher rejects production enablement, duplicate fields, mixed mode inputs and
+origin mismatch before any remote request. Successful apply returns the actual
+public Faro collector URL; never manufacture an app key or approval reference.
+
+Only the existing selected-development folder/Faro reconciler is reachable.
+No dashboard/alert/experience/synthetic code is imported; no AWS permission is
+granted. The public handoff is retained for seven days. Timeout or uncertain
+mutation requires a new read-only plan, never an automatic retry. Application
+activation still needs its separate public Terraform input, exact runtime secret,
+reviewed development IAM plan and verified release. This launcher is not G1 or
+proof of accepted telemetry.
 
 ## API compatibility and sources
 

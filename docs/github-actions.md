@@ -87,7 +87,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | [`frontend-production-deploy.yml`](../.github/workflows/frontend-production-deploy.yml) | Relevant pushes to `main`, manual | Retained no-op for historical links; never deploys. | None |
 | [`fullstack-release.yml`](../.github/workflows/fullstack-release.yml) | Relevant pull requests, relevant pushes to `main`, manual | Run frontend/backend checks; on `main`, publish an immutable backend image, deploy development, publish the frontend, verify it, and record deployment evidence. | None |
 | [`rollback-development.yml`](../.github/workflows/rollback-development.yml) | Manual | Retained no-op for the retired combined-state rollback path. | None |
-| [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) | Manual, reusable call | Synchronize the exact Parameter Store mapping through matching protected approval; audit does not establish release readiness. | `environment`, `mode` |
+| [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) | Manual, reusable call | Synchronize the exact Parameter Store mapping through matching protected approval; audit does not establish release readiness. | `environment`, `mode`, `fail_on_error` |
 | [`cleanup-destroyed-configuration.yml`](../.github/workflows/cleanup-destroyed-configuration.yml) | Reusable protected destroy call | Delete exact generated GitHub settings only after verified destroy; no manual entry point. | None |
 | [`terraform-ci.yml`](../.github/workflows/terraform-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Format, initialize without a backend, validate, and test every active Terraform root/module. | None |
 | [`terraform-current-stack-operations.yml`](../.github/workflows/terraform-current-stack-operations.yml) | Manual | Retained no-op for the retired combined-state Terraform path. | None |
@@ -177,11 +177,18 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ### Reconcile Environment configuration
 
-<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,mode; call-inputs: environment,mode,caller_holds_lifecycle_lock -->
+<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,fail_on_error,mode; call-inputs: environment,fail_on_error,mode,caller_holds_lifecycle_lock -->
 
-`reconcile-environment.yml` accepts only `environment` and reporting/output `mode`; reusable callers additionally pass the internal lifecycle-lock flag. It copies the single `parameter-mapping.yaml`: read existing SSM values and add/update matching GitHub Environment variables/secrets. Missing SSM values or destination Environments warn and skip in both modes. Access errors fail; no Environment is implicitly created. Existing on-call targets require exactly one `main` branch deployment policy before source reads.
+`reconcile-environment.yml` accepts `environment`, reporting/output `mode`, and the `fail_on_error` boolean; reusable callers additionally pass the internal lifecycle-lock flag. The script and reusable call warn by default; manual dispatch defaults `fail_on_error` to true for operator verification. Terraform explicitly passes false so it can repair SSM access tags using existing protected configuration when synchronization is unavailable. It copies the single `parameter-mapping.yaml`: read existing SSM values and add/update matching GitHub Environment variables/secrets. Missing SSM values or destination Environments warn and skip in both modes. Access errors stop synchronization, retain their operational diagnostics, and warn unless `fail_on_error` is true; no Environment is implicitly created. Existing on-call targets require exactly one `main` branch deployment policy before source reads.
 
-The matching `<environment>-apply` gate and explicit `PAWLOCAL_CONFIG_GITHUB_TOKEN` remain. Variables use comparison/read-back; secrets use encrypted API writes. Consumers separately validate required pre-plan/build configuration; skipped values never authorize publication. Outputs contain only existing public consumer projections and never secrets.
+| Input | Manual dispatch | Reusable call | Meaning |
+|---|---|---|---|
+| `environment` | Required | Required | Matching development or production configuration. |
+| `mode` | `audit` default | `audit` default | Existing reporting/output selection: `audit` or `enforce`. |
+| `fail_on_error` | `true` default | `false` default | Explicitly require a failing workflow when synchronization cannot complete. |
+| `caller_holds_lifecycle_lock` | Not exposed | `false` default | Internal flag for callers already holding the environment lifecycle lock. |
+
+The matching `<environment>-apply` gate and explicit `PAWLOCAL_CONFIG_GITHUB_TOKEN` remain. Variables use comparison/read-back; secrets use encrypted API writes. Consumers separately validate required pre-plan/build configuration; skipped values never authorize publication. Outputs contain only existing public consumer projections and never secrets. Failed synchronization exposes no verified configuration or release snapshot, even when warning-only execution lets the caller continue.
 
 ### Internal destroy configuration cleanup
 
@@ -304,6 +311,7 @@ Destroy is not a rollback and does not select a previous release.
 <!-- actions-protected-configuration
 secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN
 secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN
+secrets.GRAFANA_FARO_ACCESS_POLICY_TOKEN
 secrets.GRAFANA_SYNTHETIC_MONITORING_TOKEN
 secrets.OPENAI_API_KEY
 secrets.PAWLOCAL_API_HEALTH_URL
@@ -566,6 +574,21 @@ See the [independent receiver contract and activation runbook](../ops/incident-r
 
 
 ## Grafana read-only credential metadata check
+
+<!-- actions-reference: grafana-development-setup.yml; dispatch-inputs: mode,stack_url,region,public_bindings_json,datasource_uids_json,frontend_origin; call-inputs: - -->
+
+[`grafana-development-setup.yml`](../.github/workflows/grafana-development-setup.yml) is a main-only manual launcher for the existing
+folder/Faro provisioner, using the protected `development-apply` approval target.
+It defaults to read-only discovery. Plan/apply require a complete reviewed public
+manifest with production disabled/null and the exact reviewed development origin.
+It uses existing Grafana credentials and has no AWS, model, dashboard, alert,
+synthetic or production operation. Discovery and successful setup retain the
+provisioner's public-only handoff artifact; setup does not enable application
+telemetry. See the [development setup procedure](../observability/grafana/cloud/README.md#development-only-hosted-launcher).
+
+An optional existing `GRAFANA_FARO_ACCESS_POLICY_TOKEN` can separate Faro writes;
+when absent, the reviewed provisioner uses the existing Cloud policy token. This
+launcher does not create or expand either credential.
 
 <!-- actions-reference: grafana-access-check.yml; dispatch-inputs: stack_url,region,sm_backend_url; call-inputs: - -->
 

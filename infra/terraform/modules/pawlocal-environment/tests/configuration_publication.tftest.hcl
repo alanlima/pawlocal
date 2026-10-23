@@ -73,7 +73,7 @@ run "foundation_publishes_only_available_application_values" {
   }
 
   assert {
-    condition = length(aws_ssm_parameter.configuration) == 11 && alltrue([
+    condition = toset(keys(aws_ssm_parameter.configuration)) == toset(["observability/enabled", "frontend/telemetry-enabled", "frontend/base-url", "frontend/bucket", "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn", "auth/client-id", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes"]) && alltrue([
       for suffix, parameter in aws_ssm_parameter.configuration :
       parameter.name == "/pawlocal/development/config/${suffix}" &&
       parameter.type == "String" && parameter.tier == "Standard" && parameter.overwrite == null &&
@@ -85,7 +85,9 @@ run "foundation_publishes_only_available_application_values" {
   }
 
   assert {
-    condition = (aws_ssm_parameter.configuration["frontend/base-url"].value == "https://pawlocal-dev.fixture.example" &&
+    condition = (aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "false" &&
+      aws_ssm_parameter.configuration["observability/enabled"].value == "false" &&
+      aws_ssm_parameter.configuration["frontend/base-url"].value == "https://pawlocal-dev.fixture.example" &&
       aws_ssm_parameter.configuration["auth/client-id"].value == "fixture-client" &&
       aws_ssm_parameter.configuration["auth/domain"].value == "https://pawlocal-development-c0ffee.auth.ap-southeast-2.amazoncognito.com" &&
       aws_ssm_parameter.configuration["auth/redirect-uri"].value == "https://pawlocal-dev.fixture.example/auth/callback" &&
@@ -97,10 +99,10 @@ run "foundation_publishes_only_available_application_values" {
   assert {
     condition = (length(jsondecode(data.aws_iam_policy_document.configuration.minified_json).Statement) == 1 &&
       toset(flatten([jsondecode(data.aws_iam_policy_document.configuration.minified_json).Statement[0].Action])) == toset(["ssm:GetParameter", "ssm:ListTagsForResource", "ssm:PutParameter", "ssm:DeleteParameter", "ssm:AddTagsToResource", "ssm:RemoveTagsFromResource"]) &&
-      length(jsondecode(data.aws_iam_policy_document.configuration.minified_json).Statement[0].Resource) == 17 &&
+      toset(flatten([jsondecode(data.aws_iam_policy_document.configuration.minified_json).Statement[0].Resource])) == toset([for suffix in ["observability/enabled", "frontend/telemetry-enabled", "frontend/base-url", "frontend/bucket", "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn", "auth/client-id", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes", "api/base-url", "api/health-url", "grafana/stack-url", "grafana/otlp-endpoint", "grafana/otlp-instance-id", "grafana/faro-collector-url"] : "arn:aws:ssm:ap-southeast-2:111111111111:parameter/pawlocal/development/config/${suffix}"]) &&
       alltrue([for arn in jsondecode(data.aws_iam_policy_document.configuration.minified_json).Statement[0].Resource : startswith(arn, "arn:aws:ssm:ap-southeast-2:111111111111:parameter/pawlocal/development/config/") && !strcontains(arn, "*") && !strcontains(arn, "/iam/") && !strcontains(arn, "/aws/") && !strcontains(arn, "/terraform/")]) &&
     aws_iam_role_policy_attachment.configuration.role == "pawlocal-development-terraform-apply")
-    error_message = "The matching application state may grant only exact-key lifecycle actions on its own 17 public keys, never another account/environment or bootstrap keys."
+    error_message = "The matching application state may grant only exact-key lifecycle actions on its own 18 public keys, never another account/environment or bootstrap keys."
   }
 }
 
@@ -133,15 +135,16 @@ run "converged_production_publishes_its_own_managed_api_values" {
   }
 
   assert {
-    condition = (length(aws_ssm_parameter.configuration) == 13 && alltrue([
+    condition = (toset(keys(aws_ssm_parameter.configuration)) == toset(["observability/enabled", "frontend/telemetry-enabled", "frontend/base-url", "frontend/bucket", "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn", "auth/client-id", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes", "api/base-url", "api/health-url"]) && alltrue([
       for suffix, parameter in aws_ssm_parameter.configuration : parameter.name == "/pawlocal/production/config/${suffix}" &&
       parameter.type == "String" && parameter.tags.project == var.project_name &&
       parameter.tags.environment == "production" && parameter.tags["configuration-access"] == "github-public"
-      ]) && aws_ssm_parameter.configuration["api/base-url"].value == "https://api.fixture.example/api/v1" &&
+      ]) && aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "false" &&
+      aws_ssm_parameter.configuration["observability/enabled"].value == "false" && aws_ssm_parameter.configuration["api/base-url"].value == "https://api.fixture.example/api/v1" &&
       aws_ssm_parameter.configuration["api/health-url"].value == "https://api.fixture.example/health" &&
       output.targets.api_base_url == "https://api.fixture.example/api/v1" &&
       output.targets.cognito_domain == "https://pawlocal-production-c0ffee.auth.ap-southeast-2.amazoncognito.com" &&
     aws_iam_role_policy_attachment.configuration.role == "pawlocal-production-terraform-apply")
-    error_message = "Converged production must publish all 13 available matching sources in canonical formats without development contamination."
+    error_message = "Converged production must publish all 14 available matching sources in canonical formats without development contamination."
   }
 }

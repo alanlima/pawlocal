@@ -146,7 +146,7 @@ class ReconcileTests(unittest.TestCase):
             mappings = module.load_mappings(
                 ROOT / "ops/configuration/parameter-mapping.yaml", environment
             )
-            self.assertEqual(len({m.store_key for m in mappings}), 24)
+            self.assertEqual(len({m.store_key for m in mappings}), 25)
             self.assertEqual(len(mappings), 33 if environment == "development" else 39)
             self.assertTrue(
                 all(
@@ -438,7 +438,9 @@ class ReconcileTests(unittest.TestCase):
             ),
             contextlib.redirect_stderr(captured),
         ):
-            self.assertEqual(module.main(["--environment", "development"]), 1)
+            self.assertEqual(
+                module.main(["--fail-on-error", "--environment", "development"]), 1
+            )
         store.assert_called_once_with()
         github.assert_called_once_with("alanlima/pawlocal", SENTINEL)
         self.assertNotIn(SENTINEL, captured.getvalue())
@@ -446,7 +448,9 @@ class ReconcileTests(unittest.TestCase):
             "RuntimeError: SSM endpoint connection refused", captured.getvalue()
         )
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            module.main(["--environment", "development", "--mode", "invalid"])
+            module.main(
+                ["--fail-on-error", "--environment", "development", "--mode", "invalid"]
+            )
 
     def test_workflow_protection_serialization_and_feature_harness(self):
         workflow = yaml.safe_load(

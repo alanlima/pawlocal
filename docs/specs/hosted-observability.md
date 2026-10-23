@@ -69,11 +69,12 @@ Expand `{environment}` to exactly development/production. R = matching release E
 
 | Exact `store_key` | Type / source owner | GitHub `env_name` / destination | Concrete consumer |
 |---|---|---|---|
-| `/pawlocal/{environment}/config/observability/enabled` | String; approved desired toggle, environment state publishes | `PAWLOCAL_TELEMETRY_ENABLED` → P; `VITE_TELEMETRY_ENABLED` → R | Backend runtime toggle and frontend build |
-| `/pawlocal/{environment}/config/grafana/stack-url` | String; approved Grafana setup input, environment state publishes | `PAWLOCAL_GRAFANA_URL` → O | Trusted preflight/query/dashboard origin |
-| `/pawlocal/{environment}/config/grafana/otlp-endpoint` | String; approved Grafana setup input, environment state publishes | `OTEL_EXPORTER_OTLP_ENDPOINT` → P | Backend direct exporter |
-| `/pawlocal/{environment}/config/grafana/otlp-instance-id` | String; approved Grafana setup input, environment state publishes | `PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID` → P | Backend server-side authentication identity |
-| `/pawlocal/{environment}/config/grafana/faro-collector-url` | String; full approved hosted intake URL, environment state publishes | `VITE_FARO_COLLECTOR_URL` → R | Browser Faro; public identity discovered from actual setup |
+| `/pawlocal/{environment}/config/observability/enabled` | String; approved desired toggle, environment state publishes | `PAWLOCAL_TELEMETRY_ENABLED` → P | Backend runtime toggle |
+| `/pawlocal/{environment}/config/frontend/telemetry-enabled` | Public String; matching application state | `VITE_TELEMETRY_ENABLED` → R | Independent frontend build toggle |
+| `/pawlocal/{environment}/config/grafana/stack-url` | String; discovered via `grafana_cloud_stack` or approved Grafana setup input, environment state publishes | `PAWLOCAL_GRAFANA_URL` → O | Trusted preflight/query/dashboard origin |
+| `/pawlocal/{environment}/config/grafana/otlp-endpoint` | String; discovered via `grafana_cloud_stack` or approved Grafana setup input, environment state publishes | `OTEL_EXPORTER_OTLP_ENDPOINT` → P | Backend direct exporter |
+| `/pawlocal/{environment}/config/grafana/otlp-instance-id` | String; discovered via `grafana_cloud_stack` or approved Grafana setup input, environment state publishes | `PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID` → P | Backend server-side authentication identity |
+| `/pawlocal/{environment}/config/grafana/faro-collector-url` | String; discovered via `grafana_frontend_o11y_app`, environment state publishes | `VITE_FARO_COLLECTOR_URL` → R | Browser Faro; public identity discovered from actual setup |
 | `/pawlocal/{environment}/config/oncall/webhook-url` | String; matching state derives Function URL | `PAWLOCAL_GRAFANA_WEBHOOK_URL` → O | Trusted Grafana contact-point provision/verification job |
 | `/pawlocal/{environment}/secrets/grafana/query-token` | SecureString; approved owner procedure outside Terraform | `PAWLOCAL_GRAFANA_QUERY_TOKEN` → O as GitHub secret | Trusted telemetry preflight only |
 | `/pawlocal/{environment}/secrets/grafana/otlp-token` | SecureString; approved owner procedure outside Terraform | No GitHub mapping | Matching backend runtime reads exact key |
@@ -116,3 +117,5 @@ Operators must be able to reproduce dashboard provisioning from `observability/`
 ## Unattended incident handoff (#239)
 
 After initial monitoring/privacy/credential/protection acceptance, the configured alert wakes the fully automatic controller: fix → fresh bound review → trusted PR → real CI → auto squash merge → verified dev → exact production promotion → verified recovery. There is no runtime human approval; the optional switch is deferred. Receiver route hints are omitted; configured alert authority and downstream rule validation govern incidents, while source/security scopes remain bounded. Initial setup and failed/out-of-scope escalation are separate from an approval-wait state. See DEC-012 and the responder specification.
+
+Frontend-first #225 amendment: public application-owned `/pawlocal/{environment}/config/frontend/telemetry-enabled` maps to `VITE_TELEMETRY_ENABLED` in R, independent of the backend observability flag. See the frontend-first rollout in `docs/hosted-telemetry-operations.md` for the operator JSON, migration order and versioned release contract.

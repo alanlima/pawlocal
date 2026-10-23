@@ -30,6 +30,7 @@ class Settings(BaseSettings):
         default="", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT"
     )
     grafana_otlp_instance_id: str = ""
+    grafana_otlp_token_parameter_name: str = ""
     demo_faults_enabled: bool = False
 
     model_config = SettingsConfigDict(

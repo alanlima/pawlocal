@@ -124,7 +124,7 @@ class MonitoringBoundaryTests(unittest.TestCase):
             r"hosted_public_suffixes\s*=\s*toset\(\[(.*?)\]\)", hosted, re.DOTALL
         )
         owned = set(re.findall(r'"([a-z/-]+)"', base[1] + extra[1]))
-        self.assertEqual(len(owned), 17)
+        self.assertEqual(len(owned), 18)
         for suffix in (
             "grafana/stack-url",
             "grafana/faro-collector-url",

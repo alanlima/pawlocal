@@ -19,6 +19,7 @@ locals {
   }
   application_configuration_values = merge({
     "observability/enabled"                = tostring(local.hosted_telemetry_enabled)
+    "frontend/telemetry-enabled"           = tostring(local.hosted_frontend_telemetry_enabled)
     "frontend/base-url"                    = local.public_configuration.frontend_base_url
     "frontend/bucket"                      = aws_s3_bucket.frontend.bucket
     "frontend/cloudfront-distribution-id"  = aws_cloudfront_distribution.frontend.id
@@ -33,10 +34,13 @@ locals {
     "api/base-url"   = local.public_configuration.api_base_url
     "api/health-url" = local.public_configuration.api_health_url
     } : {}, var.hosted_observability == null ? {} : {
-    "grafana/stack-url"          = var.hosted_observability.stack_url
-    "grafana/otlp-endpoint"      = var.hosted_observability.otlp_endpoint
-    "grafana/otlp-instance-id"   = var.hosted_observability.otlp_instance_id
-    "grafana/faro-collector-url" = var.hosted_observability.faro_collector_url
+    "grafana/stack-url" = local.hosted_stack_url
+    }, var.hosted_observability == null ? {} : {
+    for suffix, value in {
+      "grafana/otlp-endpoint"      = local.hosted_otlp_endpoint
+      "grafana/otlp-instance-id"   = local.hosted_otlp_instance_id
+      "grafana/faro-collector-url" = local.hosted_faro_collector_url
+    } : suffix => value if value != null
   })
 }
 

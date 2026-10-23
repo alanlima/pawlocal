@@ -108,6 +108,8 @@ jobs:
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
       PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
 
   verify-development:
     name: Publish frontend and verify development
@@ -174,7 +176,7 @@ jobs:
           archive = Path('release/frontend-development.tar.gz')
           image = os.environ['BACKEND_IMAGE']
           value = {
-              'schema_version': 2,
+              'schema_version': 3,
               'commit': os.environ['GITHUB_SHA'],
               'backend_image': image,
               'backend_image_digest': image.split('@', 1)[1],
@@ -182,7 +184,8 @@ jobs:
                   'postgresql': {'runner': 'alembic', 'migration_id': heads[0]},
                   'aurora_dsql': {'runner': 'dsql_baseline', 'migration_id': dsql_revision},
               },
-              'telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
+              'telemetry_enabled': os.environ['PAWLOCAL_TELEMETRY_ENABLED'] == 'true',
+              'frontend_telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
               'frontend': {
                   'environment': 'development',
                   'artifact_digest': 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -206,6 +209,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify served OAuth configuration
         env:
+          SERVED_RELEASE_ENV: development
+          SERVED_RELEASE_COMMIT: ${{ github.sha }}
           RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-development.outputs.frontend_config }}
         run: node ops/configuration/verify-served-auth.mjs
       - name: Validate development verification evidence
@@ -246,6 +251,7 @@ jobs:
                 migration_runner: evidence.migration_runner,
                 migration_id: evidence.migration_id,
                 telemetry_enabled: evidence.telemetry_enabled,
+                frontend_telemetry_enabled: evidence.frontend_telemetry_enabled,
                 public_endpoint_health: evidence.public_endpoint_health,
                 database_query_smoke: evidence.database_query_smoke,
               },

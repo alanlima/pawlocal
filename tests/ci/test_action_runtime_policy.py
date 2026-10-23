@@ -11,6 +11,7 @@ import yaml
 WORKFLOWS = Path(".github/workflows")
 
 EXPECTED_HOSTED_JOBS = {
+    ("grafana-development-setup.yml", "development-setup"),
     ("grafana-access-check.yml", "validate-access"),
     ("incident-responder.yml", "preflight"),
     ("incident-responder.yml", "fixer"),

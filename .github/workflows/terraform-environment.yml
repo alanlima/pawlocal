@@ -33,6 +33,10 @@ on:
         required: true
       PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN:
         required: false
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN:
+        required: false
+      GRAFANA_SERVICE_ACCOUNT_TOKEN:
+        required: false
     outputs:
       frontend_config:
         value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
@@ -129,7 +133,10 @@ jobs:
               }
               const workflowRun = `${payload.workflow_run_id}:${payload.workflow_run_attempt}`
               const evidenceMatches = payload.record_schema_version === 1 &&
-                payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                ((payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                  !Object.hasOwn(payload, 'frontend_telemetry_enabled')) ||
+                 (payload.manifest_schema_version === 3 && payload.evidence_schema_version === 2 &&
+                  typeof payload.frontend_telemetry_enabled === 'boolean')) &&
                 payload.evidence_validated === true && successfulRunIds.has(workflowRun) &&
                 payload.release_commit === commit &&
                 /^sha256:[0-9a-f]{64}$/.test(payload.release_manifest_digest || '') &&
@@ -160,6 +167,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       mode: enforce
+      fail_on_error: false
       caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
@@ -176,6 +184,7 @@ jobs:
       id-token: write
     outputs:
       plan_sha256: ${{ steps.metadata.outputs.plan_sha256 }}
+      grafana_url: ${{ steps.hosted-bindings.outputs.grafana_url }}
     env:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -184,17 +193,20 @@ jobs:
       TF_VAR_hosted_observability: ${{ vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
-      TERRAFORM_ROLE_ARN: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
-      PAWLOCAL_AWS_ACCOUNT_ID: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_AWS_ACCOUNT_ID || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID }}
+      PLAN_TRANSFER_BUCKET: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET || vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN || vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID || vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       TF_VAR_aws_region: ${{ vars.AWS_REGION }}
       TF_VAR_root_domain: ${{ vars.PAWLOCAL_DOMAIN_NAME }}
       TF_VAR_route53_zone_id: ${{ vars.PAWLOCAL_ROUTE53_ZONE_ID }}
       TF_VAR_cloudfront_certificate_arn: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
-      TF_VAR_runtime_role_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_RUNTIME_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_RUNTIME_ROLE_ARN }}
-      TF_VAR_cloudfront_distribution_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
-      TF_VAR_cloudfront_oac_arn: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_CLOUDFRONT_OAC_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_OAC_ARN }}
+      TF_VAR_runtime_role_arn: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_RUNTIME_ROLE_ARN || vars.PAWLOCAL_RUNTIME_ROLE_ARN }}
+      TF_VAR_cloudfront_distribution_arn: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN || vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN }}
+      TF_VAR_cloudfront_oac_arn: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_CLOUDFRONT_OAC_ARN || vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       TF_VAR_backend_image: ${{ inputs.backend_image }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || '' }}
     steps:
       - name: Check out the exact requested commit
         uses: actions/checkout@v7
@@ -207,6 +219,10 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain --untracked-files=all)"
+
+      - name: Report unavailable reconciliation
+        if: inputs.phase != 'foundation' && needs.reconcile-preflight.outputs.configuration == ''
+        run: echo '::warning::Configuration synchronization was unavailable. Terraform will use existing protected Environment variables; required inputs and review approval remain enforced.'
 
       - name: Validate selection and required configuration
         shell: bash
@@ -221,6 +237,12 @@ jobs:
           [[ "$TERRAFORM_ROLE_ARN" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-terraform-plan" ]]
           if [[ -n "$TF_VAR_backend_image" ]]; then
             [[ "$TF_VAR_backend_image" =~ ^ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}$ ]]
+          fi
+          if [[ '${{ inputs.phase }}' != 'foundation' ]]; then
+            for name in TF_VAR_runtime_role_arn TF_VAR_cloudfront_distribution_arn TF_VAR_cloudfront_oac_arn; do
+              [[ -n "${!name}" ]] || { echo "Missing required runtime configuration: $name" >&2; exit 1; }
+            done
+            [[ "$TF_VAR_runtime_role_arn" == "arn:aws:iam::${PAWLOCAL_AWS_ACCOUNT_ID}:role/pawlocal-${{ inputs.environment }}-dsql-runtime" ]]
           fi
           case '${{ inputs.phase }}' in
             foundation)
@@ -265,7 +287,12 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Install hosted observability validator dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Validate public hosted bindings before Terraform planning
+        id: hosted-bindings
         shell: bash
         run: python .github/scripts/validate-hosted-observability.py
 
@@ -336,6 +363,8 @@ jobs:
           COGNITO_DELEGATED_ROLE_ARN: ""
           COGNITO_DEPLOYMENT_PROFILE: ""
           COGNITO_TERRAFORM_PURPOSE: ""
+          GRAFANA_AUTH: ""
+          GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ""
           PAWLOCAL_AWS_ACCOUNT_ID: ""
           PAWLOCAL_TF_STATE_BUCKET: ""
           PLAN_PREFIX: ""
@@ -376,6 +405,8 @@ jobs:
           COGNITO_DELEGATED_ROLE_ARN: ""
           COGNITO_DEPLOYMENT_PROFILE: ""
           COGNITO_TERRAFORM_PURPOSE: ""
+          GRAFANA_AUTH: ""
+          GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ""
           PAWLOCAL_AWS_ACCOUNT_ID: ""
           PAWLOCAL_TF_STATE_BUCKET: ""
           PLAN_PREFIX: ""
@@ -442,9 +473,12 @@ jobs:
       COGNITO_TERRAFORM_PURPOSE: apply
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
-      PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
-      TERRAFORM_ROLE_ARN: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
-      PAWLOCAL_AWS_ACCOUNT_ID: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_AWS_ACCOUNT_ID || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID }}
+      PLAN_TRANSFER_BUCKET: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET || vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
+      TERRAFORM_ROLE_ARN: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN || vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN }}
+      PAWLOCAL_AWS_ACCOUNT_ID: ${{ fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_AWS_ACCOUNT_ID || vars.PAWLOCAL_AWS_ACCOUNT_ID }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+      GRAFANA_URL: ${{ needs.plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || '' }}
     steps:
       - name: Check out the exact planned commit
         uses: actions/checkout@v7
@@ -561,6 +595,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       mode: ${{ inputs.phase == 'foundation' && 'audit' || 'enforce' }}
+      fail_on_error: false
       caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}

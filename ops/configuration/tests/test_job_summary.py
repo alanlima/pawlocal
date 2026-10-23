@@ -48,11 +48,15 @@ class SummaryTests(unittest.TestCase):
         api=None,
         data=None,
         output_failure=False,
+        fail_on_error=True,
+        source_error=None,
     ):
         api = api or FakeAPI()
         data = values(environment) if data is None else data
         selected = mappings(environment)
         ssm = store_for(selected, data).client
+        if source_error:
+            ssm.values[selected[0].store_key] = source_error
         github = module.GitHub("alanlima/pawlocal", SENTINEL, api)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.md"
@@ -71,16 +75,20 @@ class SummaryTests(unittest.TestCase):
                     module, "parameter_store", return_value=module.ParameterStore(ssm)
                 ),
                 contextlib.redirect_stdout(io.StringIO()),
-                contextlib.redirect_stderr(io.StringIO()),
+                contextlib.redirect_stderr(io.StringIO()) as errors,
             ):
                 status = module.main(
                     [
+                        *(["--fail-on-error"] if fail_on_error else []),
                         "--environment",
                         environment,
                         "--mode",
                         mode,
                     ]
                 )
+            self.last_errors = errors.getvalue()
+            output_path = Path(directory) / "outputs"
+            self.last_outputs = output_path.read_text() if output_path.is_file() else ""
             content = path.read_text(encoding="utf-8")
             self.assertNotIn(SENTINEL, content)
             for value in data.values():
@@ -88,6 +96,41 @@ class SummaryTests(unittest.TestCase):
                 if len(value) > 12:
                     self.assertNotIn(value, content)
             return status, content, api
+
+    def test_default_warning_and_explicit_failure_preserve_failed_sync_evidence(self):
+        for strict in (False, True):
+            for source_failure in (True, False):
+                with self.subTest(strict=strict, source_failure=source_failure):
+                    api = FakeAPI()
+                    if not source_failure:
+                        api.fail_name = mappings("development")[4].env_name
+                    error = RuntimeError("AccessDeniedException: ssm:GetParameter")
+                    status, content, _ = self.execute(
+                        api=api,
+                        fail_on_error=strict,
+                        source_error=error if source_failure else None,
+                    )
+                    self.assertEqual(status, int(strict))
+                    self.assertIn("**FAILED**", content)
+                    self.assertNotIn("**SUCCESS**", content)
+                    self.assertNotIn("reconciled=true", self.last_outputs)
+                    self.assertNotIn("configuration=", self.last_outputs)
+                    if not strict:
+                        self.assertIn("::warning::", self.last_errors)
+                    if source_failure:
+                        self.assertIn("AccessDeniedException", self.last_errors)
+                        self.assertFalse(any(r.method != "GET" for r in api.calls))
+
+    def test_only_successful_complete_reporting_confirms_workflow_outputs(self):
+        status, _, _ = self.execute(fail_on_error=False)
+        self.assertEqual(status, 0)
+        self.assertIn("reconciled=true", self.last_outputs)
+        self.assertIn("configuration=", self.last_outputs)
+        status, content, _ = self.execute(output_failure=True, fail_on_error=False)
+        self.assertEqual(status, 0)
+        self.assertIn("**FAILED**", content)
+        self.assertIn("::warning::", self.last_errors)
+        self.assertNotIn("reconciled=true", self.last_outputs)
 
     def test_both_environments_all_preflight_and_noop(self):
         for environment in ("development", "production"):
@@ -305,7 +348,9 @@ class SummaryTests(unittest.TestCase):
                 ),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
-                self.assertEqual(module.main(["--environment", "development"]), 1)
+                self.assertEqual(
+                    module.main(["--fail-on-error", "--environment", "development"]), 1
+                )
             self.assertEqual(path.read_text().count("| /pawlocal/"), 72)
             path.unlink()
             with (
@@ -322,6 +367,7 @@ class SummaryTests(unittest.TestCase):
                 self.assertEqual(
                     module.main(
                         [
+                            "--fail-on-error",
                             "--environment",
                             "development",
                         ]
@@ -349,7 +395,9 @@ class SummaryTests(unittest.TestCase):
             patch.dict(os.environ, {"PAWLOCAL_CONFIG_GITHUB_TOKEN": ""}),
             contextlib.redirect_stderr(io.StringIO()) as error,
         ):
-            self.assertEqual(module.main(["--environment", "development"]), 1)
+            self.assertEqual(
+                module.main(["--fail-on-error", "--environment", "development"]), 1
+            )
         self.assertNotIn(SENTINEL, error.getvalue())
         self.assertIn(
             "Cannot write configuration summary: disk quota exceeded", error.getvalue()
@@ -720,7 +768,9 @@ class SummaryTests(unittest.TestCase):
                         contextlib.redirect_stderr(io.StringIO()),
                     ):
                         result = (
-                            module.main(["--environment", "development"])
+                            module.main(
+                                ["--fail-on-error", "--environment", "development"]
+                            )
                             if operation == "reconcile"
                             else cleanup.main(
                                 [
@@ -882,7 +932,7 @@ class SummaryTests(unittest.TestCase):
                     line.startswith("| production") and "| Not recorded |" in line
                     for line in text.splitlines()
                 ),
-                16,
+                17,
             )
 
 

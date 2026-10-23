@@ -109,6 +109,8 @@ class RefreshingSsmAuth(requests.auth.AuthBase):
         client_factory=None,
         clock=time.monotonic,
         ttl=60,
+        *,
+        parameter_name="",
     ):
         if environment not in {"development", "production"} or not re.fullmatch(
             r"[0-9]{1,20}", instance_id
@@ -121,7 +123,14 @@ class RefreshingSsmAuth(requests.auth.AuthBase):
             role_arn,
         ):
             raise ValueError("Hosted telemetry must use the matching runtime role")
-        self.path = f"/pawlocal/{environment}/secrets/grafana/otlp-token"
+        canonical = f"/pawlocal/{environment}/secrets/grafana/otlp-token"
+        allowed = {canonical}
+        if environment == "development":
+            allowed.add(canonical + "-v1")
+        selected = canonical if parameter_name == "" else parameter_name
+        if selected not in allowed:
+            raise ValueError("Hosted telemetry requires an approved token source")
+        self.path = selected
         self.instance_id, self.role_arn = instance_id, role_arn
         self.factory, self.clock, self.ttl = client_factory or ssm_client, clock, ttl
         self.client = None
@@ -296,6 +305,7 @@ def configure(settings):
         settings.release_environment,
         settings.grafana_otlp_instance_id,
         settings.dsql_assume_role_arn or "",
+        parameter_name=settings.grafana_otlp_token_parameter_name,
     )
     release = (
         settings.release_image_digest

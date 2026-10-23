@@ -8,6 +8,10 @@ on:
         required: true
         type: choice
         options: [development, production]
+      fail_on_error:
+        description: Fail the workflow when configuration cannot be reconciled
+        default: true
+        type: boolean
       mode:
         description: Audit synchronizes available values without release readiness
         default: audit
@@ -27,6 +31,10 @@ on:
       environment:
         required: true
         type: string
+      fail_on_error:
+        description: Fail instead of warning when reconciliation cannot complete
+        default: false
+        type: boolean
       mode:
         default: audit
         type: string
@@ -67,8 +75,8 @@ jobs:
       group: pawlocal-configuration-${{ inputs.environment }}
       cancel-in-progress: false
     outputs:
-      configuration: ${{ steps.sync.outputs.configuration }}
-      frontend_config: ${{ steps.consumer.outputs.frontend_config }}
+      configuration: ${{ steps.sync.outputs.reconciled == 'true' && steps.sync.outputs.configuration || '' }}
+      frontend_config: ${{ steps.sync.outputs.reconciled == 'true' && steps.consumer.outcome == 'success' && steps.consumer.outputs.frontend_config || '' }}
     permissions:
       contents: read
       id-token: write
@@ -79,10 +87,15 @@ jobs:
       SELECTED_MODE: ${{ inputs.mode }}
     steps:
       - name: Check out reviewed source
+        id: checkout
+        continue-on-error: ${{ !inputs.fail_on_error }}
         uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Validate entry configuration
+        id: entry
+        if: steps.checkout.outcome == 'success'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         env:
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
         run: |
@@ -90,12 +103,21 @@ jobs:
           test -n "$AWS_REGION"
           [[ "$PAWLOCAL_CONFIG_READER_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/pawlocal-${SELECTED_ENVIRONMENT}-configuration-reader$ ]]
       - name: Set up Python
+        id: python
+        if: steps.entry.outcome == 'success'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install reconciler dependencies
+        id: dependencies
+        if: steps.python.outcome == 'success'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         run: python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Assume exact configuration-reader role
+        id: credentials
+        if: steps.dependencies.outcome == 'success'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: ${{ env.AWS_REGION }}
@@ -105,24 +127,37 @@ jobs:
           mask-aws-account-id: false
       - name: Reconcile available configuration
         id: sync
+        if: steps.credentials.outcome == 'success'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         env:
           CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
-        run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE"
+        shell: bash
+        run: |
+          failure_args=()
+          if [[ '${{ inputs.fail_on_error }}' == 'true' ]]; then
+            failure_args+=(--fail-on-error)
+          fi
+          python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE" "${failure_args[@]}"
       - name: Prepare public release consumer snapshot
-        if: inputs.mode == 'enforce'
+        if: inputs.mode == 'enforce' && steps.sync.outputs.reconciled == 'true'
+        continue-on-error: ${{ !inputs.fail_on_error }}
         id: consumer
         env:
           RECONCILED_CONFIGURATION: ${{ steps.sync.outputs.configuration }}
         run: python ops/configuration/release-config.py
       - name: Publish configuration job summary
         if: always()
+        continue-on-error: ${{ !inputs.fail_on_error }}
         env:
           CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
           SYNC_OUTCOME: ${{ steps.sync.outcome }}
           REPORT_WRITTEN: ${{ steps.sync.outputs.summary_written }}
           JOB_STATUS: ${{ job.status }}
         run: |
+          if [[ '${{ steps.sync.outputs.reconciled }}' != 'true' || '${{ steps.consumer.outcome }}' == 'failure' ]]; then
+            echo '::warning::Configuration synchronization is incomplete; no verified release snapshot is available. See step errors and the summary.'
+          fi
           if [[ -f ops/configuration/job_summary.py ]] && python ops/configuration/job_summary.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE"; then
             exit 0
           fi
