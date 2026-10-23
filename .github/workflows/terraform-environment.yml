@@ -435,6 +435,12 @@ jobs:
             --environment '${{ inputs.environment }}' --skip-enforcement \
             "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Validate strict release plan guards
+        if: inputs.phase == 'release'
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+        run: python ops/change-authorization/guards.py --mode=validate-plan --plan-file="$RUNNER_TEMP/terraform-plan.json"
+
       - name: Bind exact plan metadata
         id: metadata
         shell: bash

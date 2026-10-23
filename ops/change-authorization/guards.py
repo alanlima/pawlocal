@@ -119,3 +119,38 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
             raise PlanViolation(
                 f"Disallowed action combination on release resource {resource_type}: {actions}"
             )
+
+
+def main():
+    import argparse
+    import os
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Change authorization guards")
+    parser.add_argument("--mode", choices=["validate-promotion", "validate-plan"], required=True)
+    parser.add_argument("--plan-file", default="", help="Path to terraform plan JSON")
+    parser.add_argument("--is-machine-route", action="store_true", default=False)
+    args = parser.parse_args()
+
+    if args.mode == "validate-promotion":
+        release_commit = os.environ.get("RELEASE_COMMIT", "")
+        backend_image = os.environ.get("BACKEND_IMAGE", "")
+        lineage_file = os.environ.get("LINEAGE_RECEIPT_FILE", "")
+        lineage_receipt = None
+        if lineage_file and Path(lineage_file).exists():
+            lineage_receipt = json.loads(Path(lineage_file).read_text(encoding="utf-8"))
+        is_machine = args.is_machine_route or bool(lineage_receipt)
+        validate_production_promotion(lineage_receipt, release_commit, backend_image, is_machine)
+        print("Production promotion authorization verified successfully.")
+
+    elif args.mode == "validate-plan":
+        plan_path = Path(args.plan_file)
+        if not plan_path.exists():
+            raise PlanViolation(f"Plan file missing at {plan_path}")
+        plan_dict = json.loads(plan_path.read_text(encoding="utf-8"))
+        validate_release_plan_strict(plan_dict)
+        print("Strict release plan validation passed successfully.")
+
+
+if __name__ == "__main__":
+    main()

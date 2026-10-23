@@ -274,6 +274,42 @@ class IncidentCandidateVerificationTests(unittest.TestCase):
         self.assertIn("not available within", str(ctx.exception))
 
 
+
+    def test_reset_authorization_status_posts_pending(self):
+        client = MagicMock(spec=GitHubClient)
+        head_sha = "e" * 40
+        client.post_status(head_sha, "pending", "Change authorization verification or approval in progress")
+        client.post_status.assert_called_once_with(head_sha, "pending", "Change authorization verification or approval in progress")
+
+    def test_reopened_same_sha_resets_authorization(self):
+        # Even if a previous run on this SHA posted success, reset sets pending
+        client = MagicMock(spec=GitHubClient)
+        sha = "f" * 40
+        client.post_status(sha, "pending", "Change authorization verification or approval in progress")
+        self.assertEqual(client.post_status.call_args[0][1], "pending")
+
+    def test_guards_cli_validate_plan(self):
+        from guards import main as guards_main
+        import tempfile, sys
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write(json.dumps({
+                "resource_changes": [
+                    {
+                        "type": "aws_lightsail_container_service_deployment_version",
+                        "name": "pawlocal",
+                        "change": {"actions": ["create"]},
+                    }
+                ]
+            }))
+            temp_name = f.name
+        old_argv = sys.argv
+        try:
+            sys.argv = ["guards.py", "--mode=validate-plan", f"--plan-file={temp_name}"]
+            guards_main()
+        finally:
+            sys.argv = old_argv
+            Path(temp_name).unlink(missing_ok=True)
+
 class OrdinaryChangeApprovalTests(unittest.TestCase):
     def setUp(self):
         self.client = MagicMock(spec=GitHubClient)

@@ -39,9 +39,52 @@ jobs:
           PYTHONPATH: ops/change-authorization:ops/incident-response
         run: python ops/change-authorization/authorizer.py --mode=classify --repository="${{ github.repository }}"
 
+  reset-status:
+    name: Reset change authorization status to pending
+    needs: classify
+    runs-on: ubuntu-24.04
+    environment: incident-change-authorization
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Compute status deadline
+        run: |
+          DEADLINE=$(( $(date +%s) + 300 ))
+          echo "STATUS_DEADLINE=$DEADLINE" >> "$GITHUB_ENV"
+
+      - name: Mint status-only publisher token
+        env:
+          PAWLOCAL_CREDENTIAL_PHASE: status
+          INCIDENT_DEADLINE: ${{ env.STATUS_DEADLINE }}
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+
+      - name: Post pending status
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+        run: python ops/change-authorization/authorizer.py --mode=reset --repository="${{ github.repository }}"
+
   incident-authorize:
     name: Authorize incident candidate
-    needs: classify
+    needs: [classify, reset-status]
     if: needs.classify.outputs.route == 'incident'
     runs-on: ubuntu-24.04
     environment: incident-change-authorization
@@ -87,7 +130,7 @@ jobs:
 
   ordinary-approval:
     name: Protected ordinary change approval
-    needs: classify
+    needs: [classify, reset-status]
     if: needs.classify.outputs.route == 'ordinary'
     runs-on: ubuntu-24.04
     environment: ordinary-change-approval

@@ -347,7 +347,7 @@ def verify_ordinary_approval(
 
 def main():
     parser = argparse.ArgumentParser(description="Change authorization")
-    parser.add_argument("--mode", choices=["classify", "incident", "ordinary"], required=True)
+    parser.add_argument("--mode", choices=["classify", "incident", "ordinary", "reset"], required=True)
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""), help="Target GitHub repository (owner/repo)")
     parser.add_argument("--context", default=os.environ.get("CHANGE_AUTHORIZATION_CONTEXT", DEFAULT_CONTEXT), help="Status check context name")
     parser.add_argument("--publisher-bot", default=os.environ.get("PUBLISHER_BOT_LOGIN", ""), help="Expected publisher bot login")
@@ -391,6 +391,12 @@ def main():
         context=args.context,
         read_token=os.environ.get("GITHUB_TOKEN"),
     )
+
+    if args.mode == "reset":
+        head_sha = os.environ["HEAD_SHA"]
+        client.post_status(head_sha, "pending", "Change authorization verification or approval in progress")
+        print(f"Change authorization status for {head_sha} reset to pending.")
+        return
 
     pr_number = int(os.environ["PR_NUMBER"])
     head_sha = os.environ["HEAD_SHA"]
