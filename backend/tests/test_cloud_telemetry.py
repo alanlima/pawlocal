@@ -94,7 +94,13 @@ def test_gateway_validation(url):
         cloud.endpoint(url)
 
 
-def test_cloud_export_is_source_redacted_correlated_and_async(monkeypatch):
+@pytest.mark.parametrize(
+    "parameter_name",
+    ["", "/pawlocal/development/secrets/grafana/otlp-token-v1"],
+)
+def test_cloud_export_is_source_redacted_correlated_and_async(
+    monkeypatch, parameter_name
+):
     store = Store()
     monkeypatch.setattr(cloud, "ssm_client", lambda _: store)
     prepared = []
@@ -111,6 +117,7 @@ def test_cloud_export_is_source_redacted_correlated_and_async(monkeypatch):
         cloud_otlp_endpoint="https://gateway.grafana.net/otlp",
         release_environment="development",
         grafana_otlp_instance_id="123",
+        grafana_otlp_token_parameter_name=parameter_name,
         dsql_assume_role_arn=ROLE,
         release_image_digest="sha256:" + "a" * 64,
     )
@@ -148,6 +155,9 @@ def test_cloud_export_is_source_redacted_correlated_and_async(monkeypatch):
     meters.force_flush(timeout_millis=3000)
     try:
         assert store.calls
+        assert {call["Name"] for call in store.calls} == {
+            parameter_name or "/pawlocal/development/secrets/grafana/otlp-token"
+        }
         bodies = b"".join(r.body for r in prepared)
         for forbidden in (
             b"PRIVATE_METHOD_SENTINEL",
@@ -200,6 +210,7 @@ def test_credential_outage_and_exporter_failure_leave_api_usable(client, monkeyp
         cloud_otlp_endpoint="https://gateway.grafana.net/otlp",
         release_environment="development",
         grafana_otlp_instance_id="123",
+        grafana_otlp_token_parameter_name="/pawlocal/development/secrets/grafana/otlp-token-v1",
         dsql_assume_role_arn=ROLE,
         release_image_digest="sha256:" + "a" * 64,
     )
@@ -213,6 +224,9 @@ def test_credential_outage_and_exporter_failure_leave_api_usable(client, monkeyp
         traces.force_flush(timeout_millis=3000)
         logs.force_flush(timeout_millis=3000)
         assert store.calls
+        assert {call["Name"] for call in store.calls} == {
+            settings.grafana_otlp_token_parameter_name
+        }
         assert client[0].get("/health").status_code == 200
         monkeypatch.setattr(
             cloud.ObservedSession,
@@ -332,3 +346,79 @@ def test_request_records_one_request_and_latency_with_safe_route(
     exported = json.dumps([requests.calls, durations.calls])
     assert "private-search-sentinel" not in exported
     assert "11111111-2222-3333-4444-555555555555" not in exported
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+def test_explicit_canonical_source_and_default_are_identical(environment):
+    canonical = f"/pawlocal/{environment}/secrets/grafana/otlp-token"
+    role = f"arn:aws:iam::111111111111:role/pawlocal-{environment}-dsql-runtime"
+    for selection in ("", canonical):
+        auth = cloud.RefreshingSsmAuth(
+            environment, "123", role, parameter_name=selection
+        )
+        assert auth.path == canonical
+
+
+@pytest.mark.parametrize(
+    "environment,selection",
+    [
+        ("development", "/pawlocal/production/secrets/grafana/otlp-token"),
+        ("production", "/pawlocal/development/secrets/grafana/otlp-token-v1"),
+        ("production", "/pawlocal/production/secrets/grafana/otlp-token-v1"),
+        ("development", "/pawlocal/development/secrets/grafana/otlp-token-v2"),
+        ("development", "/pawlocal/development/secrets/grafana/*"),
+        ("development", "/pawlocal/development/secrets/grafana/../otlp-token-v1"),
+        ("development", "arn:aws:ssm:ap-southeast-2:111111111111:parameter/foreign"),
+        ("development", " /pawlocal/development/secrets/grafana/otlp-token-v1"),
+        ("development", "/pawlocal/development/secrets/grafana/otlp-token-v1\n"),
+        ("development", "/pawlocal/development/secrets/grafana/otlp-token\x00"),
+        ("development", "${PAWLOCAL_OTHER_PARAMETER}"),
+    ],
+)
+def test_unapproved_source_is_rejected_before_client_creation(environment, selection):
+    role = f"arn:aws:iam::111111111111:role/pawlocal-{environment}-dsql-runtime"
+    with pytest.raises(ValueError, match="approved token source"):
+        cloud.RefreshingSsmAuth(
+            environment,
+            "123",
+            role,
+            lambda _: pytest.fail("invalid pointer must not create a client"),
+            parameter_name=selection,
+        )
+
+
+@pytest.mark.parametrize(
+    "response_type,value", [("String", SENTINEL), ("SecureString", "")]
+)
+def test_selected_versioned_source_never_falls_back_or_logs_private_failure(
+    response_type, value, caplog
+):
+    selected = "/pawlocal/development/secrets/grafana/otlp-token-v1"
+    calls = []
+
+    class InvalidSource:
+        def get_parameter(self, **kwargs):
+            calls.append(kwargs)
+            return {"Parameter": {"Type": response_type, "Value": value}}
+
+    auth = cloud.RefreshingSsmAuth(
+        "development", "123", ROLE, lambda _: InvalidSource(), parameter_name=selected
+    )
+    for _ in range(2):
+        req = requests.Request("POST", "https://otlp.example.net").prepare()
+        with pytest.raises(requests.exceptions.RequestException) as error:
+            auth(req)
+        assert SENTINEL not in str(error.value)
+        assert "Authorization" not in req.headers
+    assert calls == [{"Name": selected, "WithDecryption": True}] * 2
+    assert SENTINEL not in caplog.text
+
+
+def test_public_pointer_setting_is_loaded_from_environment(monkeypatch):
+    from pawlocal.config import Settings
+
+    selected = "/pawlocal/development/secrets/grafana/otlp-token-v1"
+    monkeypatch.delenv("PAWLOCAL_GRAFANA_OTLP_TOKEN_PARAMETER_NAME", raising=False)
+    assert Settings(_env_file=None).grafana_otlp_token_parameter_name == ""
+    monkeypatch.setenv("PAWLOCAL_GRAFANA_OTLP_TOKEN_PARAMETER_NAME", selected)
+    assert Settings(_env_file=None).grafana_otlp_token_parameter_name == selected
