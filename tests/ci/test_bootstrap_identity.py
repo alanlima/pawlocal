@@ -146,8 +146,8 @@ class BootstrapPolicyTests(unittest.TestCase):
         return (direct_resource_grant or grant and permits(boundary, action, resource, context)) and not explicitly_denied(boundary, action, resource)
 
     def test_inventory_and_managed_policy_limits(self):
-        self.assertEqual(len(self.graph["roles"]), 20)
-        self.assertEqual(len(self.graph["policies"]), 6)
+        self.assertEqual(len(self.graph["roles"]), 26)
+        self.assertEqual(len(self.graph["policies"]), 10)
         self.assertEqual(len(self.graph["parameters"]), 12)
         for document in self.documents.values():
             self.assertLessEqual(len(policy.compact(document)), 6144)
@@ -183,6 +183,26 @@ class BootstrapPolicyTests(unittest.TestCase):
             self.assertFalse(self.effective("ssm:PutParameter", arn))
         self.assertTrue(self.effective("ssm:DescribeParameters", "*", {"aws:RequestedRegion": "ap-southeast-2"}))
         self.assertFalse(self.effective("ssm:DescribeParameters", "*", {"aws:RequestedRegion": "us-east-1"}))
+
+    def test_oncall_exact_inventory_is_enableable_without_application_or_secret_grants(self):
+        iam = f"arn:aws:iam::{CONFIG['account_id']}:"
+        for environment in policy.ENVIRONMENTS:
+            for suffix in ("oncall-terraform-plan", "oncall-terraform-apply", "oncall-receiver"):
+                arn = iam + f"role/pawlocal-{environment}-{suffix}"
+                for action in ("iam:CreateRole", "iam:PutRolePolicy", "iam:DeleteRole", "iam:PutRolePermissionsBoundary"):
+                    self.assertTrue(self.effective(action, arn), (action, arn))
+                self.assertFalse(self.effective("iam:PassRole", arn))
+            for suffix in ("oncall-terraform-apply-boundary", "oncall-runtime-boundary"):
+                arn = iam + f"policy/pawlocal-{environment}-{suffix}"
+                self.assertTrue(self.effective("iam:CreatePolicy", arn))
+                self.assertTrue(self.effective("iam:CreatePolicyVersion", arn))
+            for suffix in ("config/oncall/webhook-url", "config/api/base-url", "config/observability/enabled", "secrets/grafana/webhook-hmac", "secrets/oncall/dispatch-app-private-key"):
+                arn = f"arn:aws:ssm:{CONFIG['region']}:{CONFIG['account_id']}:parameter/pawlocal/{environment}/{suffix}"
+                for action in ("ssm:GetParameter", "ssm:PutParameter", "ssm:DeleteParameter", "ssm:PutResourcePolicy"):
+                    self.assertFalse(self.effective(action, arn), (action, arn))
+        for name in ("pawlocal-staging-oncall-receiver", "pawlocal-development-oncall-other"):
+            self.assertFalse(self.effective("iam:CreateRole", iam + "role/" + name))
+        self.assertEqual(len(self.documents["permissions-storage.json"]["Statement"][-2]["Resource"]), 12)
 
     def test_no_external_identity_escalation_or_application_mutation(self):
         arn = f"arn:aws:iam::{CONFIG['account_id']}:"
