@@ -70,12 +70,12 @@ def main():
         status = None
         if isinstance(error, provision.TransportError):
             category = error.category if error.category in {
-                "http-error", "network", "invalid-json", "response-too-large"
+                "http-error", "network", "invalid-json", "response-too-large", "redirect"
             } else "internal-error"
             if type(error.http_status) is int and 100 <= error.http_status <= 599:
                 status = error.http_status
         print(
-            f"Development Grafana setup failed: category={category}, http_status={status}; no automatic mutation retry.",
+            f"Development Grafana setup failed: {error}; category={category}, http_status={status}; no automatic mutation retry.",
             file=sys.stderr,
         )
         raise SystemExit(1) from None

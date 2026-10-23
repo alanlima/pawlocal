@@ -2,9 +2,11 @@ import copy
 import importlib.util
 import io
 import json
+import os
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 from test_provision import FakeAPI, configured
 
@@ -28,14 +30,39 @@ def manifest():
 
 
 class DevelopmentSetupTests(unittest.TestCase):
-    def test_main_reports_only_safe_protocol_metadata_on_failure(self):
+    def test_main_preserves_actionable_real_validation_and_credential_reasons(self):
+        for env, reason in (
+            ({"SETUP_MODE": "discover"}, "Discovery requires actual stack URL and region"),
+            ({"STACK_URL": "https://teststack.grafana.net", "STACK_REGION": "au"}, "Missing operator credential GRAFANA_CLOUD_ACCESS_POLICY_TOKEN"),
+        ):
+            stderr = io.StringIO()
+            with self.subTest(reason=reason), patch.dict(os.environ, env, clear=True), patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+                setup.main()
+            self.assertIn(reason, stderr.getvalue())
+
+    def test_main_preserves_protocol_reason_without_actual_server_body_or_token(self):
+        for error, reason, category in (
+            (HTTPError("https://teststack.grafana.net", 403, "private-server-reason", {}, io.BytesIO(b"private-server-body")), "GET API failed with HTTP 403", "http-error"),
+            (URLError("private-network-detail"), "GET API transport failure", "network"),
+        ):
+            transport = setup.provision.Transport()
+            stderr = io.StringIO()
+            env = {"STACK_URL": "https://teststack.grafana.net", "STACK_REGION": "au", "GRAFANA_CLOUD_ACCESS_POLICY_TOKEN": "private-token-fixture"}
+            with self.subTest(category=category), patch.dict(os.environ, env, clear=True), patch.object(setup.provision, "Transport", return_value=transport), patch.object(transport.opener, "open", side_effect=error), patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+                setup.main()
+            self.assertIn(reason, stderr.getvalue())
+            self.assertIn("category=" + category, stderr.getvalue())
+            self.assertNotIn("private-", stderr.getvalue())
+
+    def test_main_preserves_actual_redirect_reason_and_category(self):
+        def redirected(*_args):
+            return setup.provision.NoRedirect().redirect_request(None, None, 302, None, None, "https://foreign.invalid")
+
         stderr = io.StringIO()
-        with patch.object(setup, "execute", side_effect=setup.provision.TransportError(
-            "private-response-fixture", "http-error", 403
-        )), patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+        with patch.object(setup, "execute", side_effect=redirected), patch("sys.stderr", stderr), self.assertRaises(SystemExit):
             setup.main()
-        self.assertIn("http_status=403", stderr.getvalue())
-        self.assertNotIn("private-response-fixture", stderr.getvalue())
+        self.assertIn("API redirect rejected; verify endpoint before retry", stderr.getvalue())
+        self.assertIn("category=redirect", stderr.getvalue())
 
     def test_default_discovery_reads_only_and_returns_actual_public_bindings(self):
         api = FakeAPI()
