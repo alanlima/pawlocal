@@ -213,7 +213,7 @@ jobs:
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy-prepare
       GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      GRAFANA_URL: ${{ needs.plan-preparation.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
+      GRAFANA_URL: ${{ needs.prepare-plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -312,7 +312,7 @@ jobs:
       TF_VAR_cloudfront_oac_arn: ${{ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy
       GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      GRAFANA_URL: https://alanlima.grafana.net
+      GRAFANA_URL: ${{ (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -408,7 +408,7 @@ jobs:
       PAWLOCAL_AWS_ACCOUNT_ID: ${{ vars.PAWLOCAL_AWS_ACCOUNT_ID }}
       PLAN_PREFIX: plans/production/${{ github.run_id }}/${{ github.run_attempt }}/destroy
       GRAFANA_AUTH: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
-      GRAFANA_URL: https://alanlima.grafana.net
+      GRAFANA_URL: ${{ needs.destroy-plan.outputs.grafana_url || (vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != '' && vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG != 'null' && fromJSON(vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG).stack_url) || 'https://alanlima.grafana.net' }}
     steps:
       - uses: actions/checkout@v7
         with:

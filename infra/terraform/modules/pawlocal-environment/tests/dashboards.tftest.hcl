@@ -312,8 +312,8 @@ run "development_environment_derives_datasource_uids_from_discovery" {
   assert {
     condition = (
       strcontains(grafana_dashboard.journey[0].config_json, "custom-prom-uid") &&
-      strcontains(grafana_dashboard.journey[0].config_json, "custom-loki-uid") &&
-      strcontains(grafana_dashboard.journey[0].config_json, "custom-tempo-uid") &&
+      strcontains(grafana_dashboard.incidents[0].config_json, "custom-loki-uid") &&
+      strcontains(grafana_dashboard.incidents[0].config_json, "custom-tempo-uid") &&
       strcontains(grafana_dashboard.telemetry[0].config_json, "custom-usage-uid")
     )
     error_message = "Dashboards must derive datasource UIDs from approved discovery configuration."
