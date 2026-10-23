@@ -10,7 +10,14 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
-from test_integration import CleanupAPI, cleanup, mappings, store_for, values
+from test_integration import (
+    CleanupAPI,
+    cleanup,
+    mappings,
+    selected_mappings,
+    store_for,
+    values,
+)
 from test_reconcile import ROOT, SENTINEL, FakeAPI, FakeSSM, module
 
 job_summary = sys.modules[module.Report.__module__]
@@ -22,17 +29,21 @@ class SummaryTests(unittest.TestCase):
         selected,
         environment="development",
         mode="audit",
-        selection="all",
+        selection="baseline",
         operation="reconcile",
     ):
         result = job_summary.Report(environment, mode, selection, operation)
-        result.inventory_for(mappings("development") + mappings("production"), selected)
+        result.inventory_for(
+            module.inventory_mappings("development")
+            + module.inventory_mappings("production"),
+            selected,
+        )
         return result
 
     def execute(
         self,
         environment="development",
-        selection="all",
+        selection="baseline",
         mode="enforce",
         api=None,
         data=None,
@@ -66,8 +77,6 @@ class SummaryTests(unittest.TestCase):
                     [
                         "--environment",
                         environment,
-                        "--selection",
-                        selection,
                         "--mode",
                         mode,
                     ]
@@ -82,13 +91,13 @@ class SummaryTests(unittest.TestCase):
 
     def test_both_environments_all_preflight_and_noop(self):
         for environment in ("development", "production"):
-            for selection in ("all", "preflight"):
+            for selection in ("baseline",):
                 with self.subTest(environment=environment, selection=selection):
                     api = FakeAPI()
-                    selected = module.select_mappings(mappings(environment), selection)
+                    selected = selected_mappings(mappings(environment), selection)
                     status, content, api = self.execute(environment, selection, api=api)
                     self.assertEqual(status, 0)
-                    self.assertEqual(content.count("| /pawlocal/"), 54)
+                    self.assertEqual(content.count("| /pawlocal/"), 68)
                     self.assertEqual(
                         sum(
                             row.status == "Not selected"
@@ -96,7 +105,7 @@ class SummaryTests(unittest.TestCase):
                                 selected, environment, selection=selection
                             ).rows.values()
                         ),
-                        54 - len(selected),
+                        68 - len(selected),
                     )
                     self.assertEqual(
                         len(
@@ -138,7 +147,7 @@ class SummaryTests(unittest.TestCase):
         status, content, _ = self.execute(api=api)
         self.assertEqual(status, 0)
         rows = [r for r in content.splitlines() if r.startswith("| /pawlocal/")]
-        self.assertEqual(sum("| Created |" in r for r in rows), 19)
+        self.assertEqual(sum("| Created |" in r for r in rows), 26)
         self.assertEqual(sum("| Updated |" in r for r in rows), 1)
         self.assertEqual(sum("| Unchanged |" in r for r in rows), 4)
         self.assertIn("| development-apply | 4 | 1 | 5 | 0 | 0 | 0 |", content)
@@ -148,22 +157,15 @@ class SummaryTests(unittest.TestCase):
             data = values(environment)
             data.pop("VITE_COGNITO_SCOPES")
             status, content, api = self.execute(environment, data=data)
-            self.assertEqual(status, 1)
-            self.assertFalse(any(r.method != "GET" for r in api.calls))
-            self.assertIn("Missing required source", content)
-            selected = [
-                r
-                for r in content.splitlines()
-                if r.startswith(f"| /pawlocal/{environment}/")
-            ]
-            self.assertTrue(all("| Not attempted |" in r for r in selected))
-            self.assertIn(
-                "Source diagnostics (not additional destination outcomes)", content
-            )
+            self.assertEqual(status, 0)
+            self.assertTrue(api.variables)
+            self.assertIn("Missing source", content)
+            self.assertIn("SUCCESS WITH WARNINGS", content)
+            self.assertNotIn((environment, "VITE_COGNITO_SCOPES"), api.variables)
             status, content, _ = self.execute(environment, data=data, mode="audit")
             self.assertEqual(status, 0)
             self.assertIn("SUCCESS WITH WARNINGS", content)
-            self.assertIn("does not establish release readiness", content)
+            self.assertIn("do not establish release readiness", content)
             data = values(environment)
             data["VITE_COGNITO_DOMAIN"] = SENTINEL
             status, content, api = self.execute(environment, data=data)
@@ -189,7 +191,7 @@ class SummaryTests(unittest.TestCase):
                 mode=mode,
                 summary=report,
             )
-            self.assertEqual(report.row(m).status, "Missing optional source")
+            self.assertEqual(report.row(m).status, "Missing source")
 
     def test_partial_rejection_timeout_server_error_and_readback(self):
         for outcome in ("reject", "timeout", "server", "readback", "unexpected"):
@@ -239,7 +241,7 @@ class SummaryTests(unittest.TestCase):
             ]
             self.assertEqual(sum("| Created |" in r for r in rows), 2)
             self.assertEqual(sum("| Failed |" in r for r in rows), 1)
-            self.assertEqual(sum("| Not attempted |" in r for r in rows), 21)
+            self.assertEqual(sum("| Not attempted |" in r for r in rows), 28)
             if outcome == "readback":
                 self.assertIn("Write accepted; verification incomplete", content)
             elif outcome in {"timeout", "server", "unexpected"}:
@@ -254,7 +256,7 @@ class SummaryTests(unittest.TestCase):
                     if line.startswith("| /pawlocal/development/")
                 ]
                 self.assertEqual(sum("| Unchanged |" in row for row in retry_rows), 2)
-                self.assertEqual(sum("| Created |" in row for row in retry_rows), 22)
+                self.assertEqual(sum("| Created |" in row for row in retry_rows), 29)
 
     def test_secret_acceptance_never_unchanged_or_verified(self):
         m = module.Mapping(
@@ -289,7 +291,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("**FAILED**", content)
         self.assertIn("Workflow output writing failed", content)
-        self.assertEqual(content.count("| Created | Variable comparison"), 24)
+        self.assertEqual(content.count("| Created | Variable comparison"), 31)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "summary"
             with (
@@ -304,10 +306,17 @@ class SummaryTests(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()),
             ):
                 self.assertEqual(module.main(["--environment", "development"]), 1)
-            self.assertEqual(path.read_text().count("| /pawlocal/"), 54)
+            self.assertEqual(path.read_text().count("| /pawlocal/"), 68)
             path.unlink()
             with (
                 patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(path)}),
+                patch.object(
+                    module,
+                    "inventory_mappings",
+                    side_effect=module.ReconciliationError(
+                        "Cannot read valid mapping YAML"
+                    ),
+                ),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
                 self.assertEqual(
@@ -315,8 +324,6 @@ class SummaryTests(unittest.TestCase):
                         [
                             "--environment",
                             "development",
-                            "--mapping",
-                            str(Path(directory) / "absent"),
                         ]
                     ),
                     1,
@@ -336,13 +343,17 @@ class SummaryTests(unittest.TestCase):
 
     def test_summary_write_failure_fails_entrypoint_with_operational_reason(self):
         with (
-            patch.object(job_summary.Report, "write", side_effect=OSError("disk quota exceeded")),
+            patch.object(
+                job_summary.Report, "write", side_effect=OSError("disk quota exceeded")
+            ),
             patch.dict(os.environ, {"PAWLOCAL_CONFIG_GITHUB_TOKEN": ""}),
             contextlib.redirect_stderr(io.StringIO()) as error,
         ):
             self.assertEqual(module.main(["--environment", "development"]), 1)
         self.assertNotIn(SENTINEL, error.getvalue())
-        self.assertIn("Cannot write configuration summary: disk quota exceeded", error.getvalue())
+        self.assertIn(
+            "Cannot write configuration summary: disk quota exceeded", error.getvalue()
+        )
 
     def test_secret_write_rejection_and_unknown_acceptance(self):
         mapping = module.Mapping(
@@ -388,15 +399,32 @@ class SummaryTests(unittest.TestCase):
     def test_cleanup_entrypoint_retains_standard_failure_reason(self):
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "summary.md")}),
+                patch.dict(
+                    os.environ,
+                    {"CONFIG_SUMMARY_PATH": str(Path(directory) / "summary.md")},
+                ),
                 patch.object(cleanup, "GitHub", return_value=object()),
-                patch.object(cleanup, "cleanup", side_effect=RuntimeError("GitHub HTTP 403: permission denied")),
+                patch.object(
+                    cleanup,
+                    "cleanup",
+                    side_effect=RuntimeError("GitHub HTTP 403: permission denied"),
+                ),
                 contextlib.redirect_stderr(io.StringIO()) as errors,
             ):
-                status = cleanup.main(["--environment", "development", "--operation", "legacy-cleanup",
-                                       "--confirmation", "CLEAN legacy development"])
+                status = cleanup.main(
+                    [
+                        "--environment",
+                        "development",
+                        "--operation",
+                        "legacy-cleanup",
+                        "--confirmation",
+                        "CLEAN legacy development",
+                    ]
+                )
             self.assertEqual(status, 1)
-            self.assertIn("RuntimeError: GitHub HTTP 403: permission denied", errors.getvalue())
+            self.assertIn(
+                "RuntimeError: GitHub HTTP 403: permission denied", errors.getvalue()
+            )
             self.assertNotIn(SENTINEL, errors.getvalue())
 
     def test_cleanup_invalid_confirmation_never_reports_deletion(self):
@@ -459,8 +487,6 @@ class SummaryTests(unittest.TestCase):
             "development",
             "--mode",
             "enforce",
-            "--selection",
-            "preflight",
             "--operation",
             "reconcile",
         ]
@@ -473,8 +499,7 @@ class SummaryTests(unittest.TestCase):
                 "GITHUB_STEP_SUMMARY": str(first_step),
             }
             report = self.report(
-                module.select_mappings(mappings("development"), "preflight"),
-                selection="preflight",
+                selected_mappings(mappings("development"), "preflight"),
             )
             report.succeeded()
             with patch.dict(os.environ, env):
@@ -513,7 +538,7 @@ class SummaryTests(unittest.TestCase):
                     self.assertEqual(job_summary.publish(), 0)
                 text = destination.read_text()
                 self.assertEqual(text.count("# Configuration reconciliation"), 1)
-                self.assertEqual(text.count("| /pawlocal/"), 54)
+                self.assertEqual(text.count("| /pawlocal/"), 68)
                 if outcome != "complete":
                     self.assertIn("**INCOMPLETE**", text)
                 if outcome in {"interrupted", "partial-file"}:
@@ -715,8 +740,6 @@ class SummaryTests(unittest.TestCase):
                         "development",
                         "--mode",
                         "audit",
-                        "--selection",
-                        "all",
                         "--operation",
                         operation,
                     ]
@@ -755,8 +778,6 @@ class SummaryTests(unittest.TestCase):
                         "development",
                         "--mode",
                         "enforce",
-                        "--selection",
-                        "all",
                         "--operation",
                         "reconcile",
                     ],
@@ -770,28 +791,61 @@ class SummaryTests(unittest.TestCase):
     def test_publisher_preserves_inventory_and_destination_failure_reasons(self):
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "published.md"
-            args = ["summary", "--environment", "development", "--mode", "audit",
-                    "--selection", "all", "--operation", "reconcile"]
+            args = [
+                "summary",
+                "--environment",
+                "development",
+                "--mode",
+                "audit",
+                "--operation",
+                "reconcile",
+            ]
             with (
-                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
-                                        "GITHUB_STEP_SUMMARY": str(destination)}),
+                patch.dict(
+                    os.environ,
+                    {
+                        "CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
+                        "GITHUB_STEP_SUMMARY": str(destination),
+                    },
+                ),
                 patch("sys.argv", args),
-                patch.object(module, "load_mappings", side_effect=ValueError("configuration mapping schema invalid")),
+                patch.object(
+                    module,
+                    "inventory_mappings",
+                    side_effect=ValueError("configuration mapping schema invalid"),
+                ),
                 contextlib.redirect_stderr(io.StringIO()) as errors,
             ):
                 self.assertEqual(job_summary.publish(), 0)
-            self.assertIn("ValueError: configuration mapping schema invalid", errors.getvalue())
+            self.assertIn(
+                "ValueError: configuration mapping schema invalid", errors.getvalue()
+            )
             self.assertIn("**INCOMPLETE**", destination.read_text())
-            self.assertNotIn("configuration mapping schema invalid", destination.read_text())
+            self.assertNotIn(
+                "configuration mapping schema invalid", destination.read_text()
+            )
             with (
-                patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
-                                        "GITHUB_STEP_SUMMARY": str(destination)}),
+                patch.dict(
+                    os.environ,
+                    {
+                        "CONFIG_SUMMARY_PATH": str(Path(directory) / "absent"),
+                        "GITHUB_STEP_SUMMARY": str(destination),
+                    },
+                ),
                 patch("sys.argv", args),
-                patch("builtins.open", side_effect=PermissionError("summary destination permission denied")),
+                patch(
+                    "builtins.open",
+                    side_effect=PermissionError(
+                        "summary destination permission denied"
+                    ),
+                ),
                 contextlib.redirect_stderr(io.StringIO()) as errors,
             ):
                 self.assertEqual(job_summary.publish(), 1)
-            self.assertIn("PermissionError: summary destination permission denied", errors.getvalue())
+            self.assertIn(
+                "PermissionError: summary destination permission denied",
+                errors.getvalue(),
+            )
 
     def test_interrupted_cleanup_fallback_has_exact_targets(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -802,8 +856,6 @@ class SummaryTests(unittest.TestCase):
                 "production",
                 "--mode",
                 "audit",
-                "--selection",
-                "all",
                 "--operation",
                 "destroy-cleanup",
             ]

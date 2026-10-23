@@ -76,6 +76,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 | [`fullstack-release.yml`](../.github/workflows/fullstack-release.yml) | Relevant pull requests, relevant pushes to `main`, manual | Run frontend/backend checks; on `main`, publish an immutable backend image, deploy development, publish the frontend, verify it, and record deployment evidence. | None |
 | [`rollback-development.yml`](../.github/workflows/rollback-development.yml) | Manual | Retained no-op for the retired combined-state rollback path. | None |
 | [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) | Manual, reusable call | Synchronize the exact Parameter Store mapping through matching protected approval; audit does not establish release readiness. | `environment`, `mode` |
+| [`cleanup-destroyed-configuration.yml`](../.github/workflows/cleanup-destroyed-configuration.yml) | Reusable protected destroy call | Delete exact generated GitHub settings only after verified destroy; no manual entry point. | None |
 | [`terraform-ci.yml`](../.github/workflows/terraform-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Format, initialize without a backend, validate, and test every active Terraform root/module. | None |
 | [`terraform-current-stack-operations.yml`](../.github/workflows/terraform-current-stack-operations.yml) | Manual | Retained no-op for the retired combined-state Terraform path. | None |
 | [`terraform-environment-destroy.yml`](../.github/workflows/terraform-environment-destroy.yml) | Manual | Prepare, approve, plan, approve again, and destroy the complete production application state. | `environment`, `backend_image`, `confirmation` |
@@ -164,15 +165,17 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ### Reconcile Environment configuration
 
-<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,operation,confirmation,mode; call-inputs: environment,mode,selection,operation,confirmation,destroy_confirmed,caller_holds_lifecycle_lock -->
+<!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,mode; call-inputs: environment,mode,caller_holds_lifecycle_lock -->
 
-`reconcile-environment.yml` accepts `environment` (development/production), `mode` (audit default or enforce), and `operation` (reconcile default or explicit legacy-cleanup). Cleanup also requires exact `confirmation` (`CLEAN legacy development` or `CLEAN legacy production`). Reusable calls additionally accept `selection` (all/default or preflight), internal destroy-cleanup and `destroy_confirmed`; confirmed destroy cleanup is callable only after the existing protected destroy succeeds and verifies the same state empty.
+`reconcile-environment.yml` accepts only `environment` and reporting/output `mode`; reusable callers additionally pass the internal lifecycle-lock flag. It copies the single `parameter-mapping.yaml`: read existing SSM values and add/update matching GitHub Environment variables/secrets. Missing SSM values or destination Environments warn and skip in both modes. Access errors fail; no Environment is implicitly created. Existing on-call targets require exactly one `main` branch deployment policy before source reads.
 
-Reusable callers that already hold the environment lifecycle lock pass `caller_holds_lifecycle_lock: true`. Other callers, including manual and CI runs, take that lock themselves.
+The matching `<environment>-apply` gate and explicit `PAWLOCAL_CONFIG_GITHUB_TOKEN` remain. Variables use comparison/read-back; secrets use encrypted API writes. Consumers separately validate required pre-plan/build configuration; skipped values never authorize publication. Outputs contain only existing public consumer projections and never secrets.
 
-One mutation job uses `<environment>-apply` for approval and the named `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret. Callers pass that secret explicitly; see [GitHub's reusable secret rules](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows). Audit warns/skips missing sources and does not establish release readiness. Enforce validates all selected values before writes. Existing-target checks, variable compare/write/read-back and encrypted secret API writes remain mandatory. Reports contain names/statuses only; secret payloads never enter outputs or artifacts.
+### Internal destroy configuration cleanup
 
-Converge and Release enforce required handoff inputs before planning; Foundation audit runs after apply without authorizing publication. Successful Converge/Release applies return a verified non-secret `frontend_config` output to the same run's build. Missing/invalid values, failed writes, failed apply or cancellation block publication. `selection=preflight` checks only the seven generated plan/apply handoff inputs; `selection=all` checks the full manifest and public build snapshot. No lifecycle fields are added to YAML.
+<!-- actions-reference: cleanup-destroyed-configuration.yml; dispatch-inputs: -; call-inputs: environment,confirmation,destroy_confirmed -->
+
+`cleanup-destroyed-configuration.yml` has no manual entry point. The existing protected production destroy workflow calls it only after successful destroy or verified empty-state recovery. It preserves exact confirmation, caller and target checks and per-environment mutation locking. Public reconciliation exposes no cleanup operation or confirmation selector.
 
 Use the [setup guide](configuration-management.md#set-up-access), then dispatch:
 

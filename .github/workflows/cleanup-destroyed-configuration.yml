@@ -1,0 +1,62 @@
+name: Clean up destroyed environment configuration
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      confirmation:
+        required: true
+        type: string
+      destroy_confirmed:
+        required: true
+        type: boolean
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ format('{0}-apply', inputs.environment) }}
+    concurrency:
+      group: pawlocal-configuration-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      SELECTED_ENVIRONMENT: ${{ inputs.environment }}
+      CLEANUP_CONFIRMATION: ${{ inputs.confirmation }}
+      DESTROY_CONFIRMED: ${{ inputs.destroy_confirmed }}
+      CALLER_WORKFLOW: ${{ github.workflow }}
+    steps:
+      - name: Validate protected destroy caller
+        run: |
+          [[ "$SELECTED_ENVIRONMENT" == production ]]
+          [[ "$DESTROY_CONFIRMED" == true && "$CALLER_WORKFLOW" == 'Terraform production destroy' ]]
+          [[ "$CLEANUP_CONFIRMATION" == 'DESTROY production' ]]
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install cleanup dependencies
+        run: python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
+      - name: Clean exact targets after verified destroy
+        id: cleanup
+        env:
+          PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+          CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
+        run: python ops/configuration/cleanup.py --environment "$SELECTED_ENVIRONMENT" --operation destroy-cleanup --confirmation "$CLEANUP_CONFIRMATION" --destroy-confirmed
+      - name: Publish cleanup summary
+        if: always()
+        env:
+          CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
+          CLEANUP_OUTCOME: ${{ steps.cleanup.outcome }}
+          REPORT_WRITTEN: ${{ steps.cleanup.outputs.summary_written }}
+          JOB_STATUS: ${{ job.status }}
+        run: python ops/configuration/job_summary.py --environment "$SELECTED_ENVIRONMENT" --mode enforce --operation destroy-cleanup

@@ -97,8 +97,20 @@ Each history entry applies only to R for development and production; lifecycle o
 
 Do not copy these credentials into Parameter Store. Keep these dated records after deletion and record actual deletion evidence separately; obsolete synchronization entries never remain executable. The cleanup code contains only the approved exact deletion allowlist, not active mappings.
 
-## Planned hosted monitoring sources (not active mappings)
+## Staged monitoring sources (#223; not live accepted)
 
-[Exact proposed keys, owners and consumers](specs/hosted-observability.md#exact-planned-ssm-source-and-destination-contract) use `/config/grafana/{stack-url,otlp-endpoint,otlp-instance-id,faro-collector-url}`, `/config/observability/enabled`, `/config/oncall/webhook-url` and `/secrets/grafana/{otlp-token,query-token,webhook-hmac}` per environment, plus receiver-only dispatch App key. These rows are not active YAML and do not change verified inventory counts above. Implementing PRs update sources, minimal mapping, inventory and consumers together.
+The single `parameter-mapping.yaml` contains ordinary and reviewed public monitoring rows. The copy operation warns/skips missing sources or destination Environments; genuine permission errors fail. Runtime secrets are not copied. Query-token synchronization remains a proposed later secret-reader scope and is not in the active manifest. Source production and consumer integration remain #224–#228; live tag-policy rollout is a separate predecessor.
 
-P1 explicitly reviews currently rejected on-call targets, protected setup, exact reader/token authority and negative tests. Query token alone synchronizes as `PAWLOCAL_GRAFANA_QUERY_TOKEN`; verify encrypted secret API write, never plaintext read-back. Runtime OTLP/HMAC/dispatch keys stay outside GitHub. OpenAI/publisher keys remain separate protected GitHub secrets. Approved owner SecureString setup/rotation stays outside Terraform payloads; this docs PR grants no live mutation exception.
+Paths below are prefixed `/pawlocal/{environment}/` for development/production. The table records planned destinations; presence does not activate telemetry. R = matching release, P = matching plan, O = `oncall-{environment}`.
+
+| Source suffix | Type / secret | GitHub name / target | Consumer / owner |
+|---|---|---|---|
+| config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P; VITE_TELEMETRY_ENABLED / R | runtime/build mode; matching application state |
+| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state using approved Grafana input |
+| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state using actual Grafana input |
+| config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | public Faro key path; application state using actual Grafana input |
+| config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | trusted preflight; application state using actual Grafana input |
+| config/oncall/webhook-url | String / false | PAWLOCAL_GRAFANA_WEBHOOK_URL / O | contact-point verification; application state derives Function URL |
+| secrets/grafana/query-token | SecureString / true | Proposed PAWLOCAL_GRAFANA_QUERY_TOKEN / O secret | Future separate reader/secret lifecycle approval; no active copy row |
+
+Runtime-only `secrets/grafana/otlp-token`, `secrets/grafana/webhook-hmac`, and `secrets/oncall/dispatch-app-private-key` never synchronize to GitHub. OpenAI/publisher App credentials remain separately scoped GitHub secrets. No secret payload is managed by this PR. Future source creation/rotation requires an explicit reviewed lifecycle satisfying Terraform ownership and no-secret-in-state requirements; no blanket CLI exception is granted.

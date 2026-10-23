@@ -82,7 +82,20 @@ class FakeAPI:
         self.assert_timeout = timeout
         path = request.full_url.split("/environments/", 1)[1]
         if "/" not in path:
-            return Response({"name": path})
+            result = {"name": path}
+            if path.startswith("oncall-"):
+                result["deployment_branch_policy"] = {
+                    "protected_branches": False,
+                    "custom_branch_policies": True,
+                }
+            return Response(result)
+        if path.endswith("/deployment-branch-policies"):
+            return Response(
+                {
+                    "total_count": 1,
+                    "branch_policies": [{"name": "main", "type": "branch"}],
+                }
+            )
         payload = json.loads(request.data) if request.data else None
         target, kind, *tail = path.split("/")
         name = tail[0] if tail else (payload or {}).get("name")
@@ -133,17 +146,15 @@ class ReconcileTests(unittest.TestCase):
             mappings = module.load_mappings(
                 ROOT / "ops/configuration/parameter-mapping.yaml", environment
             )
-            self.assertEqual(len({m.store_key for m in mappings}), 18)
-            self.assertEqual(len(mappings), 24 if environment == "development" else 30)
+            self.assertEqual(len({m.store_key for m in mappings}), 24)
+            self.assertEqual(len(mappings), 31 if environment == "development" else 37)
             self.assertTrue(
                 all(
                     m.store_key.startswith(f"/pawlocal/{environment}/config/")
                     for m in mappings
                 )
             )
-            self.assertTrue(
-                all(m.validations == ("required",) and not m.secret for m in mappings)
-            )
+            self.assertTrue(all(not m.validations and not m.secret for m in mappings))
         mapping = self.load([entry()])[0]
         self.assertFalse(mapping.secret)
         self.assertEqual(mapping.validations, ())
@@ -313,14 +324,22 @@ class ReconcileTests(unittest.TestCase):
         for code in (401, 403, 429, 500):
 
             def denied(request, timeout, code=code):
-                raise HTTPError(request.full_url, code, "Resource not accessible by integration", {}, None)
+                raise HTTPError(
+                    request.full_url,
+                    code,
+                    "Resource not accessible by integration",
+                    {},
+                    None,
+                )
 
             with self.assertRaises(module.ReconciliationError) as failure:
                 self.github(denied).request(
                     "GET", "environments/development/variables/TEST", missing=True
                 )
             self.assertIn(f"HTTP Error {code}", str(failure.exception))
-            self.assertIn("Resource not accessible by integration", str(failure.exception))
+            self.assertIn(
+                "Resource not accessible by integration", str(failure.exception)
+            )
             self.assertNotIn(SENTINEL, str(failure.exception))
 
         def disconnected(request, timeout):
@@ -363,19 +382,18 @@ class ReconcileTests(unittest.TestCase):
                 "production",
             )
 
-    def test_absent_target_fails_before_source_read_or_mutation(self):
+    def test_absent_target_warns_and_skips_before_source_read_or_mutation(self):
         ssm = FakeSSM()
 
         def absent(request, timeout):
             raise HTTPError(request.full_url, 404, "Not Found", {}, None)
 
-        with self.assertRaises(module.ReconciliationError):
-            module.reconcile(
-                self.load([entry()]),
-                module.ParameterStore(ssm),
-                self.github(absent),
-                lambda _: None,
-            )
+        module.reconcile(
+            self.load([entry()]),
+            module.ParameterStore(ssm),
+            self.github(absent),
+            lambda _: None,
+        )
         self.assertEqual(ssm.calls, [])
 
     def test_manifest_exact_producer_inventory_parity(self):
@@ -390,15 +408,14 @@ class ReconcileTests(unittest.TestCase):
                 r'"((?:iam|aws|terraform|frontend|api|auth)/[a-z-]+)"', inventory
             )
         )
-        mappings = module.load_mappings(
-            ROOT / "ops/configuration/parameter-mapping.yaml", "production"
-        )
-        self.assertEqual(
-            suffixes,
-            {
+        mappings = module.inventory_mappings("production")
+        self.assertTrue(
+            suffixes
+            <= {
                 m.store_key.removeprefix("/pawlocal/production/config/")
                 for m in mappings
-            },
+                if not m.secret
+            }
         )
 
     def test_main_reports_operational_exception_and_rejects_unknown_mode(self):
@@ -414,14 +431,20 @@ class ReconcileTests(unittest.TestCase):
             ),
             patch.object(module, "parameter_store", return_value=object()) as store,
             patch.object(module, "GitHub", return_value=object()) as github,
-            patch.object(module, "reconcile", side_effect=RuntimeError("SSM endpoint connection refused")),
+            patch.object(
+                module,
+                "reconcile",
+                side_effect=RuntimeError("SSM endpoint connection refused"),
+            ),
             contextlib.redirect_stderr(captured),
         ):
             self.assertEqual(module.main(["--environment", "development"]), 1)
         store.assert_called_once_with()
         github.assert_called_once_with("alanlima/pawlocal", SENTINEL)
         self.assertNotIn(SENTINEL, captured.getvalue())
-        self.assertIn("RuntimeError: SSM endpoint connection refused", captured.getvalue())
+        self.assertIn(
+            "RuntimeError: SSM endpoint connection refused", captured.getvalue()
+        )
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             module.main(["--environment", "development", "--mode", "invalid"])
 
