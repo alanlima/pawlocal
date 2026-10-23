@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { mint } from '../../ops/incident-response/publisher-token.mjs';
 
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const appPermissions = { contents: 'write', pull_requests: 'write', issues: 'write', administration: 'read' };
+const appPermissions = { contents: 'write', pull_requests: 'write', issues: 'write', statuses: 'write', administration: 'read' };
 
 function fixture(purpose, change = {}) {
   const env = { GITHUB_REPOSITORY: 'alanlima/pawlocal', GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ATTEMPT: '1',
@@ -24,6 +24,16 @@ function fixture(purpose, change = {}) {
   }
   return { env, calls, writes, run: () => mint(env, fetcher, (...args) => writes.push(args)) };
 }
+
+test('status credential is independently downscoped to statuses write only', async () => {
+  const value = fixture('status');
+  await value.run();
+  const body = JSON.parse(value.calls.at(-1).options.body);
+  assert.deepEqual(body, { repository_ids: [1423024931], permissions: { statuses: 'write' } });
+  assert(value.writes[0][0].endsWith('oncall-status-token.json'));
+  assert.deepEqual(JSON.parse(value.writes[0][1]).permissions, { statuses: 'write' });
+  assert.deepEqual(value.writes[0][2], { mode: 0o600, flag: 'wx' });
+});
 
 test('readiness credential is independently downscoped to Administration read only', async () => {
   const value = fixture('readiness');
@@ -57,4 +67,19 @@ test('an unconfigured Administration-read App or unknown purpose cannot mint', a
   const unknown = fixture('arbitrary');
   await assert.rejects(unknown.run());
   assert.deepEqual(unknown.calls, []);
+});
+
+test('status credential permits rerun attempts while publish and merge remain attempt 1 only', async () => {
+  const rerunStatus = fixture('status');
+  rerunStatus.env.GITHUB_RUN_ATTEMPT = '2';
+  await rerunStatus.run();
+  assert(rerunStatus.writes[0][0].endsWith('oncall-status-token.json'));
+
+  const rerunPublish = fixture('publish');
+  rerunPublish.env.GITHUB_RUN_ATTEMPT = '2';
+  await assert.rejects(rerunPublish.run());
+
+  const rerunMerge = fixture('merge');
+  rerunMerge.env.GITHUB_RUN_ATTEMPT = '2';
+  await assert.rejects(rerunMerge.run());
 });

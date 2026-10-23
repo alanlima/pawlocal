@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const allowed = { contents: 'write', pull_requests: 'write', issues: 'write' };
-const appPermissions = { ...allowed, administration: 'read' };
+const statusAllowed = { statuses: 'write' };
+const appPermissions = { ...allowed, ...statusAllowed, administration: 'read' };
 const repositoryId = 1423024931;
 const repository = 'alanlima/pawlocal';
 export function narrow(permissions, expected = appPermissions) {
@@ -15,14 +16,17 @@ export function narrow(permissions, expected = appPermissions) {
 }
 export async function mint(environment = process.env, fetcher = fetch, writer = writeFileSync) {
   const purpose = environment.PAWLOCAL_CREDENTIAL_PHASE || 'publish';
-  if (!['readiness', 'publish', 'merge'].includes(purpose)) throw new Error('Unknown credential purpose');
-  const expected = purpose === 'readiness' ? { administration: 'read' } : allowed;
+  if (!['readiness', 'publish', 'merge', 'status'].includes(purpose)) throw new Error('Unknown credential purpose');
+  const expected = purpose === 'readiness' ? { administration: 'read' } : (purpose === 'status' ? statusAllowed : allowed);
   const deadline = Number(environment.INCIDENT_DEADLINE) * 1000;
-  const maximumLifetime = purpose === 'publish' ? 1200000 : 3600000;
-  if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || environment.GITHUB_RUN_ATTEMPT !== '1' ||
+  const maximumLifetime = purpose === 'publish' ? 1200000 : (purpose === 'status' ? 600000 : 3600000);
+  const attemptAllowed = purpose === 'status'
+    ? /^[1-9][0-9]*$/.test(String(environment.GITHUB_RUN_ATTEMPT || ''))
+    : environment.GITHUB_RUN_ATTEMPT === '1';
+  if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || !attemptAllowed ||
       !Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + maximumLifetime) throw new Error('Trusted phase deadline required');
-  const appId = environment.PAWLOCAL_PUBLISHER_APP_ID;
-  const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID;
+  const appId = environment.PAWLOCAL_PUBLISHER_APP_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_APP_ID;
+  const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID;
   if (![appId, installationId].every(value => typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value) && Number.isSafeInteger(Number(value)))) throw new Error('Public publisher identities unconfigured');
   const key = createPrivateKey(environment.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY || '');
   if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails.modulusLength < 2048) throw new Error('Publisher RSA key invalid');
@@ -55,7 +59,7 @@ export async function mint(environment = process.env, fetcher = fetch, writer = 
   if (String(installation.id) !== installationId || String(installation.app_id) !== appId || installation.account?.login !== 'alanlima' || installation.repository_selection !== 'selected' || !narrow(installation.permissions)) throw new Error('Publisher installation mismatch');
   const token = await request(`/app/installations/${installationId}/access_tokens`, { repository_ids: [repositoryId], permissions: expected });
   if (!narrow(token.permissions, expected) || token.repository_selection !== 'selected' || typeof token.token !== 'string' || token.token.length < 20 || token.token.length > 1024) throw new Error('Publisher token scope mismatch');
-  const name = purpose === 'readiness' ? 'oncall-readiness-token.json' : 'oncall-publisher-token.json';
+  const name = purpose === 'readiness' ? 'oncall-readiness-token.json' : (purpose === 'status' ? 'oncall-status-token.json' : 'oncall-publisher-token.json');
   writer(join(environment.RUNNER_TEMP, name), JSON.stringify({ token: token.token, repository_id: repositoryId, permissions: expected }), { mode: 0o600, flag: 'wx' });
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

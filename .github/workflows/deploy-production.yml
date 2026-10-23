@@ -102,6 +102,12 @@ jobs:
         env:
           RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-production.outputs.frontend_config }}
         run: python .configuration-tools/ops/configuration/build-config.py
+      - name: Validate production promotion authorization guards
+        env:
+          PYTHONPATH: .configuration-tools/ops/change-authorization:.configuration-tools/ops/incident-response
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          BACKEND_IMAGE: ${{ inputs.backend_image }}
+        run: python .configuration-tools/ops/change-authorization/guards.py --mode=validate-promotion
       - name: Configure narrow production publisher credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
