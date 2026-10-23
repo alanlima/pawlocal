@@ -109,12 +109,10 @@ G1 requires exact development release/digest, all six dashboards, bounded usage,
 
 Operators must be able to reproduce dashboard provisioning from `observability/`, verify a synthetic journey, disable exports without breaking the app, rotate ingestion credentials safely, inspect no-data/export health and revert a configuration release through existing protected Terraform/release procedures. Dashboard drift is reconciled through source PRs. The approved region/account, data residency, initial thresholds and retention/usage proof are P0/P4 decisions; this specification does not pretend the account has been configured.
 
-<<<<<<< HEAD
 ## Proposed source-population decision (#241)
 
 [DEC-013 / the monitoring secret lifecycle proposal](monitoring-secret-lifecycle.md) evaluates sensitive ephemeral write-only Terraform inputs and exact ephemeral SSM maintenance reads. It proposes an isolated owner setup runner without permanent GitHub copies of runtime-only credentials. This is an unaccepted amendment to secret-input wording, not source population, permission approval or live acceptance; the active public-only copier/query-secret-inactive contract above remains unchanged.
-=======
+
 ## Unattended incident handoff (#239)
 
 After initial monitoring/privacy/credential/protection acceptance, the configured alert wakes the fully automatic controller: fix → fresh bound review → trusted PR → real CI → auto squash merge → verified dev → exact production promotion → verified recovery. There is no runtime human approval; the optional switch is deferred. Receiver route hints are omitted; configured alert authority and downstream rule validation govern incidents, while source/security scopes remain bounded. Initial setup and failed/out-of-scope escalation are separate from an approval-wait state. See DEC-012 and the responder specification.
->>>>>>> 5ca6ff1 (docs: specify fully unattended incident recovery MVP (#239))

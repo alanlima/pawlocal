@@ -10,6 +10,8 @@ Non-live implementation, mocks and schema work are authorized. Affected live act
 
 ## Ten packages, sequence and dependencies
 
+**Blocking protection prerequisite:** [#245](https://github.com/alanlima/pawlocal/issues/245), owned by Platform with independent review, implements [ordinary approval preservation](../specs/incident-responder.md#preserving-ordinary-approvals-245) before #223/#228 activation. Required App-bound change authorization distinguishes immutable incident proof from ordinary owner-approved PRs; every shared AWS/production entrypoint independently gates credentials and execution. Inventory direct/reusable/manual routes, reject forged/changed/reused proofs, and retain bootstrap/destroy/setup approval. Do not remove current CodeOwner/Environment reviewers until the replacement is implemented and verified. This is additional activation work, not a claim that a gate or App permission is already configured.
+
 | ID / issue | Parent | Deliverable / accountable owner | Depends on | Exit evidence |
 |---|---|---|---|---|
 | P0 [#222](https://github.com/alanlima/pawlocal/issues/222) | #59 | Specifications, baseline, diagrams and readiness / orchestrator + owner | Existing evidence and selected design | Reviewed specs/config source contract, issue amendments and recorded live-readiness gates; implementation completion not claimed |
@@ -82,12 +84,8 @@ P7 proves success plus low-confidence escalation, failed tests/review, unavailab
 
 ## Completion boundaries
 
-<<<<<<< HEAD
-Each package records linked issue/PR, tested commit, real checks and independent review. Provisioning additionally records reviewed exact saved plan and approved apply; green/skipped workflows are not deployment evidence. G1/G2 and production approvals are recorded separately. This specs PR completes documentation criteria in #222 only; it does not close #59/#42 or claim live monitoring/responder availability.
+Each package records linked issue/PR, tested commit, real checks and independent review. Provisioning additionally records reviewed exact saved plan and approved apply; green/skipped workflows are not deployment evidence. G1/G2 acceptance and one-time production activation/provisioning authorization are recorded separately from unattended runtime. #239 closes only after canonical docs, amended issues and Wiki are synchronized. This amendment records the #239 runtime contract and updates #222 documentation; it does not close #59/#42 or claim live monitoring/responder availability.
 
 ## Proposed secret lifecycle prerequisite (#241)
 
 P1 source population remains blocked on [#241 / DEC-013](../specs/monitoring-secret-lifecycle.md). The proposed setup-only handoff uses an isolated owner runner, ephemeral write-only values, exact maintenance reads and public write revisions in the existing application states. Local provider proof does not approve decrypted plan/apply access, the secure runner, source population or billable operations. Review and implement this prerequisite before enabling #225/#227/#228 consumers; the public YAML copier remains public-only, warns/skips missing values, and does not synchronize the query token. Runtime automatic-remediation policy is unchanged.
-=======
-Each package records linked issue/PR, tested commit, real checks and independent review. Provisioning additionally records reviewed exact saved plan and approved apply; green/skipped workflows are not deployment evidence. G1/G2 acceptance and one-time production activation/provisioning authorization are recorded separately from unattended runtime. #239 closes only after canonical docs, amended issues and Wiki are synchronized. This amendment records the #239 runtime contract and updates #222 documentation; it does not close #59/#42 or claim live monitoring/responder availability.
->>>>>>> 5ca6ff1 (docs: specify fully unattended incident recovery MVP (#239))
