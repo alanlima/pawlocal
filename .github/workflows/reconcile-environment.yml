@@ -10,7 +10,7 @@ on:
         options: [development, production]
       fail_on_error:
         description: Fail the workflow when configuration cannot be reconciled
-        default: false
+        default: true
         type: boolean
       mode:
         description: Audit synchronizes available values without release readiness
