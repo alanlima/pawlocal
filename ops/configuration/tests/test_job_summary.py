@@ -932,7 +932,7 @@ class SummaryTests(unittest.TestCase):
                     line.startswith("| production") and "| Not recorded |" in line
                     for line in text.splitlines()
                 ),
-                16,
+                17,
             )
 
 

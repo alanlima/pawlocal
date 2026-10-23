@@ -41,7 +41,7 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
     def validate(self, change, environment="development", release_only=False):
         return guard.validate({"resource_changes": [change]}, environment, release_only)
 
-    def test_all_seventeen_owned_parameters_are_accepted_for_both_environments(self):
+    def test_all_eighteen_owned_parameters_are_accepted_for_both_environments(self):
         for environment in ("development", "production"):
             with self.subTest(environment=environment):
                 changes = [
@@ -49,7 +49,7 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
                     for suffix in sorted(guard.APPLICATION_PARAMETER_SUFFIXES)
                 ]
                 rows = guard.validate({"resource_changes": changes}, environment, False)
-                self.assertEqual(rows, [("aws_ssm_parameter", "create")] * 17)
+                self.assertEqual(rows, [("aws_ssm_parameter", "create")] * 18)
                 summary = guard.render(rows, environment)
                 self.assertNotIn("unreported-private-fixture-value", summary)
                 self.assertNotIn("/pawlocal/", summary)

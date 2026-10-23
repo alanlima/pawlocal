@@ -122,3 +122,99 @@ run "private_endpoint_input_denied" {
   }
   expect_failures = [var.hosted_observability]
 }
+
+run "independent_backend_false_frontend_false" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    hosted_observability = {
+      enabled            = false
+      frontend_enabled   = false
+      stack_url          = "https://fixture.grafana.net/"
+      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+    }
+  }
+  assert {
+    condition     = local.application_configuration_values["observability/enabled"] == "false" && local.application_configuration_values["frontend/telemetry-enabled"] == "false" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "false"
+    error_message = "Backend runtime and independent public browser mode must match their own inputs."
+  }
+  assert {
+    condition     = length([for s in data.aws_iam_policy_document.runtime[0].statement : s if contains(flatten([s.actions]), "ssm:GetParameter")]) == 0
+    error_message = "Browser telemetry must not grant OTLP credential access."
+  }
+  assert {
+    condition     = !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-instance-id")
+    error_message = "Backend-disabled browser-only bindings need no OTLP parameters."
+  }
+}
+
+run "independent_backend_false_frontend_true" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    hosted_observability = {
+      enabled            = false
+      frontend_enabled   = true
+      stack_url          = "https://fixture.grafana.net/"
+      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+    }
+  }
+  assert {
+    condition     = local.application_configuration_values["observability/enabled"] == "false" && local.application_configuration_values["frontend/telemetry-enabled"] == "true" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "false"
+    error_message = "Backend runtime and independent public browser mode must match their own inputs."
+  }
+  assert {
+    condition     = length([for s in data.aws_iam_policy_document.runtime[0].statement : s if contains(flatten([s.actions]), "ssm:GetParameter")]) == 0
+    error_message = "Browser telemetry must not grant OTLP credential access."
+  }
+  assert {
+    condition     = !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-instance-id")
+    error_message = "Backend-disabled browser-only bindings need no OTLP parameters."
+  }
+}
+
+run "independent_backend_true_frontend_false" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    hosted_observability = {
+      enabled            = true
+      frontend_enabled   = false
+      stack_url          = "https://fixture.grafana.net/"
+      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      otlp_endpoint      = "https://gateway.grafana.net/otlp"
+      otlp_instance_id   = "12345"
+    }
+  }
+  assert {
+    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["frontend/telemetry-enabled"] == "false" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "true"
+    error_message = "Backend runtime and independent public browser mode must match their own inputs."
+  }
+  assert {
+    condition     = length([for s in data.aws_iam_policy_document.runtime[0].statement : s if contains(flatten([s.actions]), "ssm:GetParameter")]) == 1
+    error_message = "Browser telemetry must not grant OTLP credential access."
+  }
+}
+
+run "independent_backend_true_frontend_true" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    hosted_observability = {
+      enabled            = true
+      frontend_enabled   = true
+      stack_url          = "https://fixture.grafana.net/"
+      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      otlp_endpoint      = "https://gateway.grafana.net/otlp"
+      otlp_instance_id   = "12345"
+    }
+  }
+  assert {
+    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["frontend/telemetry-enabled"] == "true" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "true"
+    error_message = "Backend runtime and independent public browser mode must match their own inputs."
+  }
+  assert {
+    condition     = length([for s in data.aws_iam_policy_document.runtime[0].statement : s if contains(flatten([s.actions]), "ssm:GetParameter")]) == 1
+    error_message = "Browser telemetry must not grant OTLP credential access."
+  }
+}

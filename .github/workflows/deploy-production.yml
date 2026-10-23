@@ -118,7 +118,7 @@ jobs:
           archive = Path('release/frontend-production.tar.gz')
           image = os.environ['BACKEND_IMAGE']
           value = {
-              'schema_version': 2,
+              'schema_version': 3,
               'commit': os.environ['RELEASE_COMMIT'],
               'backend_image': image,
               'backend_image_digest': image.split('@', 1)[1],
@@ -126,7 +126,8 @@ jobs:
                   'postgresql': {'runner': 'alembic', 'migration_id': heads[0]},
                   'aurora_dsql': {'runner': 'dsql_baseline', 'migration_id': dsql_revision},
               },
-              'telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
+              'telemetry_enabled': os.environ['PAWLOCAL_TELEMETRY_ENABLED'] == 'true',
+              'frontend_telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
               'frontend': {
                   'environment': 'production',
                   'artifact_digest': 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -134,22 +135,28 @@ jobs:
           }
           Path('release/release-manifest.json').write_text(json.dumps(value, separators=(',', ':')), encoding='utf-8')
           PY
-          python ops/validate-release-metadata.py --manifest release/release-manifest.json
+          python .configuration-tools/ops/validate-release-metadata.py --manifest release/release-manifest.json
       - name: Publish exact production artifacts
         env:
           RELEASE_MANIFEST: release/release-manifest.json
           FRONTEND_ARCHIVE: release/frontend-production.tar.gz
-        run: bash ops/run-deployment-adapter.sh deploy --environment production --manifest "$RELEASE_MANIFEST" --frontend-archive "$FRONTEND_ARCHIVE"
+        run: |
+          cd .configuration-tools
+          bash ops/run-deployment-adapter.sh deploy --environment production --manifest "$GITHUB_WORKSPACE/$RELEASE_MANIFEST" --frontend-archive "$GITHUB_WORKSPACE/$FRONTEND_ARCHIVE"
       - name: Verify production release
         env:
           RELEASE_MANIFEST: release/release-manifest.json
           EVIDENCE_FILE: release/production-verification.json
-        run: bash ops/run-deployment-adapter.sh verify --environment production --manifest "$RELEASE_MANIFEST" --evidence "$EVIDENCE_FILE"
+        run: |
+          cd .configuration-tools
+          bash ops/run-deployment-adapter.sh verify --environment production --manifest "$GITHUB_WORKSPACE/$RELEASE_MANIFEST" --evidence "$GITHUB_WORKSPACE/$EVIDENCE_FILE"
       - name: Install browser for served authentication verification
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Verify served OAuth configuration
         env:
+          SERVED_RELEASE_ENV: production
+          SERVED_RELEASE_COMMIT: ${{ inputs.release_commit }}
           RECONCILED_FRONTEND_CONFIG: ${{ needs.terraform-production.outputs.frontend_config }}
         run: node .configuration-tools/ops/configuration/verify-served-auth.mjs
       - name: Record successful production deployment
@@ -188,6 +195,7 @@ jobs:
                 migration_runner: evidence.migration_runner,
                 migration_id: evidence.migration_id,
                 telemetry_enabled: evidence.telemetry_enabled,
+                frontend_telemetry_enabled: evidence.frontend_telemetry_enabled,
                 public_endpoint_health: evidence.public_endpoint_health,
                 database_query_smoke: evidence.database_query_smoke,
               },

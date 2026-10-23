@@ -85,7 +85,7 @@ run "foundation_publishes_only_existing_bootstrap_values" {
         for statement in jsondecode(policy.minified_json).Statement : statement
         if toset(flatten([statement.Action])) == toset(["ssm:GetParameter", "ssm:ListTagsForResource"]) &&
         toset(flatten([statement.Resource])) == toset(local.application_configuration_arns[local.role_definitions[key].environment]) &&
-        length(flatten([statement.Resource])) == 18 &&
+        length(flatten([statement.Resource])) == 19 &&
         alltrue([for arn in flatten([statement.Resource]) : !strcontains(arn, "*") && !strcontains(arn, "/iam/") && !strcontains(arn, "/aws/") && !strcontains(arn, "/terraform/")])
       ]) == 1 &&
       !strcontains(policy.minified_json, "ssm:GetParameterHistory") && !strcontains(policy.minified_json, "ssm:GetParametersByPath") &&

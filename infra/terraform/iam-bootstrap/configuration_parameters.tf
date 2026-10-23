@@ -25,7 +25,7 @@ locals {
 locals {
   # Exact public producer ownership for refresh/collision checks; not reader admission.
   monitoring_configuration_suffixes = toset([
-    "observability/enabled", "grafana/stack-url", "grafana/otlp-endpoint",
+    "observability/enabled", "frontend/telemetry-enabled", "grafana/stack-url", "grafana/otlp-endpoint",
     "grafana/otlp-instance-id", "grafana/faro-collector-url", "oncall/webhook-url"
   ])
   bootstrap_configuration_values = {

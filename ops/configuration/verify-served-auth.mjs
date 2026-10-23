@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { matchesOAuthSnapshot } from './oauth-snapshot.mjs'
+import { verifyServedTelemetry } from './verify-served-telemetry.mjs'
 
 const require = createRequire(resolve('frontend/package.json'))
 let browser
@@ -50,6 +51,7 @@ try {
     if (!verified && attempt < 5) await new Promise((resolve) => setTimeout(resolve, 5000))
   }
   if (!verified) throw new Error('served configuration mismatch')
+  await verifyServedTelemetry(browser, config, process.env.SERVED_RELEASE_ENV, process.env.SERVED_RELEASE_COMMIT)
   console.log(
     'Served OAuth host/client/callback/scopes match the same-run reconciled configuration.',
   )

@@ -4,6 +4,11 @@
   "title": "PawLocal full-stack release manifest",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [{
+    "if": { "properties": { "schema_version": { "const": 3 } } },
+    "then": { "required": ["frontend_telemetry_enabled"] },
+    "else": { "not": { "required": ["frontend_telemetry_enabled"] } }
+  }],
   "required": [
     "schema_version",
     "commit",
@@ -13,7 +18,7 @@
     "telemetry_enabled"
   ],
   "properties": {
-    "schema_version": { "const": 2 },
+    "schema_version": { "enum": [2, 3] },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "backend_image": { "type": "string", "pattern": "^.+@sha256:[0-9a-f]{64}$" },
     "backend_image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
@@ -43,6 +48,7 @@
       }
     },
     "telemetry_enabled": { "type": "boolean" },
+    "frontend_telemetry_enabled": { "type": "boolean" },
     "frontend": {
       "type": "object",
       "additionalProperties": false,
