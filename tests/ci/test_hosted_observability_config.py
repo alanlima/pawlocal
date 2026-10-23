@@ -107,10 +107,13 @@ class HostedOperatorTests(unittest.TestCase):
                 "https://former.grafana.net",
             )
         with patch.dict(os.environ, {"PAWLOCAL_GRAFANA_URL": "", "PAWLOCAL_ENVIRONMENT": ""}):
-            with self.assertRaisesRegex(ValueError, "No Grafana stack URL configured or resolved"):
+            with self.assertRaises(module.MissingStackUrlError):
                 module.resolve_owning_stack_url(None, "ap-southeast-2")
-            with self.assertRaisesRegex(ValueError, "No Grafana stack URL configured or resolved"):
+            with self.assertRaises(module.MissingStackUrlError):
                 module.resolve_owning_stack_url({"enabled": True}, "ap-southeast-2")
+
+    def test_missing_stack_url_error_is_value_error_subclass(self):
+        self.assertTrue(issubclass(module.MissingStackUrlError, ValueError))
 
     def test_resolve_owning_stack_url_checks_recorded_ssm_and_prevents_unmigrated_switch(self):
         class MockSSM:
