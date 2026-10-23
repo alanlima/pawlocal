@@ -20,7 +20,13 @@ class PlanViolation(Exception):
 # Allowed resource types for machine incident release updates
 ALLOWED_RELEASE_RESOURCES = {
     "aws_lightsail_container_service_deployment_version",
+    "local_file",
+    "null_resource",
 }
+
+ALLOWED_PACKAGING_ADDRESS_PATTERNS = [
+    r"^(module\.[a-zA-Z0-9_-]+\.)?module\.(cognito_pre_sign_up|oncall_receiver(\[\d+\])?)\.(local_file\.archive_plan|null_resource\.archive)(\[\d+\])?$",
+]
 
 # Strictly forbidden resource types for machine remediation
 FORBIDDEN_RESOURCE_PATTERNS = [
@@ -76,9 +82,10 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
     """Strictly validates a Terraform plan for machine incident release.
 
     Guarantees:
-    - No resource deletions ('delete' in actions).
+    - No resource deletions ('delete' in actions) unless expected replacement.
     - No unexpected resource creations.
-    - Only allowed container service deployment updates are permitted.
+    - Only allowed container service deployment updates/replacements and trusted
+      module-local Lambda packaging sidecars are permitted.
     - No modifications to IAM, database, security groups, or secrets.
     """
     resource_changes = plan_dict.get("resource_changes", [])
@@ -88,6 +95,7 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
     for change in resource_changes:
         resource_type = change.get("type", "")
         resource_name = change.get("name", "")
+        address = change.get("address", f"{resource_type}.{resource_name}")
         change_data = change.get("change", {})
         actions = change_data.get("actions", [])
 
@@ -102,25 +110,28 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
                     f"Machine incident plan cannot modify sensitive infrastructure: {resource_type}.{resource_name}"
                 )
 
-        # Allow only container service deployment version updates or replacements
+        # Allow only container service deployment version updates or approved local packaging sidecars
         if resource_type not in ALLOWED_RELEASE_RESOURCES:
             raise PlanViolation(
                 f"Machine incident plan contains unapproved resource change: {resource_type}.{resource_name} (actions: {actions})"
             )
 
-        # For allowed release resources, permit create, update, or immutable replacement ({'create', 'delete'})
-        expected_deployment_replacement = (
-            resource_type == "aws_lightsail_container_service_deployment_version"
-            and set(actions) == {"create", "delete"}
-        )
+        if resource_type in ("local_file", "null_resource"):
+            if not any(re.search(pat, address) for pat in ALLOWED_PACKAGING_ADDRESS_PATTERNS):
+                raise PlanViolation(
+                    f"Machine incident plan contains unapproved local packaging resource: {address}"
+                )
 
-        # Machine route strictly prohibits resource deletion unless it is the expected deployment-version replacement
-        if "delete" in actions and not expected_deployment_replacement:
+        # For allowed release resources, permit create, update, or immutable replacement ({'create', 'delete'})
+        expected_replacement = set(actions) == {"create", "delete"}
+
+        # Machine route strictly prohibits resource deletion unless it is the expected replacement
+        if "delete" in actions and not expected_replacement:
             raise PlanViolation(
                 f"Machine incident plan cannot delete resources: {resource_type}.{resource_name}"
             )
 
-        if actions not in (["update"], ["create"]) and not expected_deployment_replacement:
+        if actions not in (["update"], ["create"]) and not expected_replacement:
             raise PlanViolation(
                 f"Disallowed action combination on release resource {resource_type}: {actions}"
             )

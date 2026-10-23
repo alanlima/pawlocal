@@ -415,6 +415,70 @@ class EntrypointGuardTests(unittest.TestCase):
         }
         validate_release_plan_strict(plan)
 
+    def test_strict_plan_validation_permits_packaging_sidecars_replacement(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "aws_lightsail_container_service_deployment_version",
+                    "name": "pawlocal",
+                    "change": {"actions": ["delete", "create"]},
+                },
+                {
+                    "type": "local_file",
+                    "name": "archive_plan",
+                    "address": "module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]",
+                    "change": {"actions": ["create", "delete"]},
+                },
+                {
+                    "type": "null_resource",
+                    "name": "archive",
+                    "address": "module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]",
+                    "change": {"actions": ["delete", "create"]},
+                },
+                {
+                    "type": "local_file",
+                    "name": "archive_plan",
+                    "address": "module.pawlocal.module.oncall_receiver[0].local_file.archive_plan[0]",
+                    "change": {"actions": ["update"]},
+                },
+                {
+                    "type": "null_resource",
+                    "name": "archive",
+                    "address": "module.pawlocal.module.oncall_receiver[0].null_resource.archive[0]",
+                    "change": {"actions": ["create"]},
+                },
+            ]
+        }
+        validate_release_plan_strict(plan)
+
+    def test_strict_plan_validation_rejects_unapproved_packaging_address(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "null_resource",
+                    "name": "archive",
+                    "address": "module.unapproved.null_resource.archive[0]",
+                    "change": {"actions": ["create"]},
+                }
+            ]
+        }
+        with self.assertRaises(PlanViolation):
+            validate_release_plan_strict(plan)
+
+    def test_strict_plan_validation_rejects_packaging_deletion_without_create(self):
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "local_file",
+                    "name": "archive_plan",
+                    "address": "module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]",
+                    "change": {"actions": ["delete"]},
+                }
+            ]
+        }
+        with self.assertRaises(PlanViolation):
+            validate_release_plan_strict(plan)
+
     def test_strict_plan_validation_rejects_iam_modification(self):
         plan = {
             "resource_changes": [
