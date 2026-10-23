@@ -281,3 +281,54 @@ def test_cloud_logging_sdk_failure_preserves_api_success_and_error(client, monke
     finally:
         logger.removeHandler(handler)
         provider.shutdown()
+
+
+@pytest.mark.parametrize("failure", [None, "api", "database"])
+@pytest.mark.parametrize(
+    "path,template,normal_status",
+    [
+        ("/api/v1/places?q=private-search-sentinel", "/api/v1/places", 200),
+        (
+            "/api/v1/places/11111111-2222-3333-4444-555555555555",
+            "/api/v1/places/{place_id}",
+            404,
+        ),
+    ],
+)
+def test_request_records_one_request_and_latency_with_safe_route(
+    client, monkeypatch, failure, path, template, normal_status
+):
+    import json
+
+    from pawlocal.config import settings
+
+    class Instrument:
+        def __init__(self):
+            self.calls = []
+
+        def add(self, value, attributes):
+            self.calls.append((value, attributes))
+
+        def record(self, value, attributes):
+            self.calls.append((value, attributes))
+
+    requests, durations = Instrument(), Instrument()
+    monkeypatch.setattr(settings, "demo_faults_enabled", True)
+    monkeypatch.setattr(cloud, "_requests", requests)
+    monkeypatch.setattr(cloud, "_duration", durations)
+    response = client[0].get(
+        path, headers={"x-pawlocal-demo-failure": failure} if failure else {}
+    )
+    assert response.status_code == (503 if failure else normal_status)
+    assert len(requests.calls) == len(durations.calls) == 1
+    count, labels = requests.calls[0]
+    assert count == 1
+    assert labels["route"] == template
+    assert labels["method"] == "GET"
+    assert labels["status_class"] == f"{response.status_code // 100}xx"
+    assert labels["outcome"] == ("success" if response.status_code < 400 else "error")
+    assert durations.calls[0][0] >= 0
+    assert durations.calls[0][1] == labels
+    exported = json.dumps([requests.calls, durations.calls])
+    assert "private-search-sentinel" not in exported
+    assert "11111111-2222-3333-4444-555555555555" not in exported
