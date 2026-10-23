@@ -10,33 +10,47 @@ from reconcile import ReconciliationError
 
 
 def check(plan, client):
+    checked = 0
     for resource in plan.get("resource_changes", []):
         if resource.get("type") != "aws_ssm_parameter":
             continue
         change = resource.get("change", {})
+        address = resource.get("address", "aws_ssm_parameter (address unavailable)")
         if change.get("importing"):
-            raise ReconciliationError("Parameter adoption is not authorized")
+            raise ReconciliationError(
+                f"Parameter adoption is not authorized: {address}"
+            )
         if "create" not in change.get("actions", []):
             continue
         name = (change.get("after") or {}).get("name")
         if not isinstance(name, str) or not name:
             raise ReconciliationError(
-                "Planned parameter name must be known for collision inventory"
+                f"Planned parameter name must be known for collision inventory: {address}"
             )
         if change.get("before") is not None:
-            raise ReconciliationError("Parameter replacement requires separate review")
+            raise ReconciliationError(
+                f"Parameter replacement requires separate review: {name!r} ({address})"
+            )
+        print(f"Checking Parameter Store key: {name!r}", flush=True)
+        checked += 1
         try:
             client.get_parameter(Name=name, WithDecryption=False)
         except Exception as error:
-            if (
-                getattr(error, "response", {}).get("Error", {}).get("Code")
-                == "ParameterNotFound"
-            ):
+            code = getattr(error, "response", {}).get("Error", {}).get("Code")
+            if code == "ParameterNotFound":
+                print(f"Key available for creation: {name!r}", flush=True)
                 continue
             raise ReconciliationError(
-                f"Parameter collision inventory failed: {error}"
+                f"Parameter collision inventory failed for {name!r}: "
+                f"ssm:GetParameter returned {code or type(error).__name__}: {error}"
             ) from error
-        raise ReconciliationError("Existing parameter blocks new Terraform ownership")
+        raise ReconciliationError(
+            f"Existing parameter blocks new Terraform ownership: {name!r}"
+        )
+    print(
+        f"Parameter creation collision inventory passed: {checked} key(s) checked",
+        flush=True,
+    )
 
 
 def main():
@@ -48,6 +62,7 @@ def main():
         required=True,
     )
     args = parser.parse_args()
+    print(f"Checking Parameter Store collisions for {args.environment}", flush=True)
     try:
         import boto3
 
@@ -59,7 +74,6 @@ def main():
         raise SystemExit(
             f"Parameter collision check failed: {type(error).__name__}: {error}"
         ) from error
-    print("Parameter creation collision inventory passed")
 
 
 if __name__ == "__main__":
