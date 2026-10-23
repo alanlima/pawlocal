@@ -4,7 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 DIRECTORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DIRECTORY))
@@ -50,6 +50,76 @@ class Fake:
 
 
 class AccessCheckTests(unittest.TestCase):
+    def test_sm_failure_category_and_http_status_route_without_response_details(self):
+        class FailingSm(Fake):
+            def request(self, method, url, token, **kwargs):
+                if url.startswith(SM):
+                    raise self.error
+                return super().request(method, url, token, **kwargs)
+
+        for status in (401, 403, 404, 429, 503):
+            fake = FailingSm()
+            fake.error = access.TransportError(
+                "private-response-token-sentinel", "http-error", status
+            )
+            diagnostics = {}
+            result = access.check(
+                STACK, "test-region", SM, CREDENTIALS, fake, diagnostics
+            )
+            self.assertEqual(sum(v == "PASS" for v in result.values()), 6)
+            for label in access.CHECKS[6:]:
+                self.assertEqual(result[label], "FAIL")
+                self.assertEqual(diagnostics[label], ("http-error", status))
+            report = access.summary(result, diagnostics)
+            self.assertIn(f"| http-error | {status} |", report)
+            self.assertNotIn("private", report)
+            self.assertNotIn(SM, report)
+
+    def test_transport_http_network_json_and_size_errors_have_safe_categories(self):
+        client = access.ReadOnlyTransport()
+        url = STACK + "/api/datasources"
+        client.allowed.add(url)
+        for status in (401, 403, 404, 429, 503):
+            error = HTTPError(
+                url, status, "private-message", {}, io.BytesIO(b"private-body")
+            )
+            with patch.object(client.opener, "open", side_effect=error):
+                with self.assertRaises(access.TransportError) as caught:
+                    client.request("GET", url, "private-token")
+                self.assertEqual(caught.exception.category, "http-error")
+                self.assertEqual(caught.exception.http_status, status)
+                self.assertNotIn("private", str(caught.exception))
+        for error in (
+            URLError("private-network-detail"),
+            TimeoutError("private-detail"),
+        ):
+            with patch.object(client.opener, "open", side_effect=error):
+                with self.assertRaises(access.TransportError) as caught:
+                    client.request("GET", url, "private-token")
+                self.assertEqual(caught.exception.category, "network")
+                self.assertIsNone(caught.exception.http_status)
+                self.assertNotIn("private", str(caught.exception))
+
+    def test_shape_and_unexpected_failures_have_fixed_non_protocol_categories(self):
+        class BadShape(Fake):
+            def request(self, method, url, token, **kwargs):
+                if url.startswith(SM):
+                    return {"private-field": "private-value"}
+                return super().request(method, url, token, **kwargs)
+
+        diagnostics = {}
+        result = access.check(
+            STACK, "test-region", SM, CREDENTIALS, BadShape(), diagnostics
+        )
+        self.assertEqual(diagnostics[access.CHECKS[6]], ("response-shape", None))
+        self.assertNotIn("private", access.summary(result, diagnostics))
+        fake = Fake()
+        fake.fail = True
+        diagnostics = {}
+        result = access.check(STACK, "test-region", SM, CREDENTIALS, fake, diagnostics)
+        self.assertEqual(diagnostics[access.CHECKS[0]], ("internal-error", None))
+        self.assertNotIn("private", access.summary(result, diagnostics))
+
     def test_all_metadata_reads_use_only_fixed_gets_and_exact_credential_domains(self):
         fake = Fake()
         result = access.check(STACK, "test-region", SM, CREDENTIALS, fake)
@@ -229,6 +299,12 @@ class AccessCheckTests(unittest.TestCase):
                 with self.assertRaises(access.ProvisionError) as error:
                     client.request("GET", url, "private")
                 self.assertEqual(response.bound, 2 * 1024 * 1024 + 1)
+                self.assertEqual(
+                    error.exception.category,
+                    "response-too-large"
+                    if len(body) > 2 * 1024 * 1024
+                    else "invalid-json",
+                )
                 self.assertNotIn("private", str(error.exception))
 
     def test_cloud_identity_mismatch_does_not_forward_stack_or_query_tokens(self):
