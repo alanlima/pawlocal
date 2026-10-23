@@ -21,11 +21,9 @@ from pathlib import Path, PurePosixPath
 # Candidate path boundary enforcement
 from candidate import MAX_FILES, is_allowed_path
 
-REPOSITORY = "alanlima/pawlocal"
-GITHUB = "https://api.github.com/repos/" + REPOSITORY
-CONTEXT = "PawLocal change authorization"
+DEFAULT_CONTEXT = "PawLocal change authorization"
+CONTEXT = DEFAULT_CONTEXT
 ALLOWED_STATUSES = {"success", "failure", "pending"}
-PUBLISHER_BOT_LOGINS = {"pawlocal-publisher[bot]"}
 
 
 class Denied(Exception):
@@ -40,10 +38,22 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class GitHubClient:
     """Bounded, authenticated GitHub REST client for change authorization."""
 
-    def __init__(self, token: str, deadline: float | None = None, opener=None):
+    def __init__(
+        self,
+        token: str,
+        repository: str,
+        context: str = DEFAULT_CONTEXT,
+        deadline: float | None = None,
+        opener=None,
+    ):
         if not token:
             raise Denied("GitHub token required")
+        if not repository or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+            raise Denied(f"Valid GitHub repository (owner/repo) required, got: {repository!r}")
         self.token = token
+        self.repository = repository
+        self.context = context
+        self.api_base = f"https://api.github.com/repos/{repository}"
         self.deadline = deadline or (time.time() + 600)
         self.opener = opener or urllib.request.build_opener(NoRedirect)
 
@@ -51,7 +61,7 @@ class GitHubClient:
         if time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
-        url = GITHUB + path if path.startswith("/") else path
+        url = self.api_base + path if path.startswith("/") else path
         raw_body = json.dumps(data, separators=(",", ":")).encode() if data is not None else None
 
         req = urllib.request.Request(
@@ -78,7 +88,7 @@ class GitHubClient:
         if time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
-        url = GITHUB + path if path.startswith("/") else path
+        url = self.api_base + path if path.startswith("/") else path
         req = urllib.request.Request(
             url,
             method="GET",
@@ -113,13 +123,13 @@ class GitHubClient:
             raise Denied(f"Invalid status state: {state}")
         payload = {
             "state": state,
-            "context": CONTEXT,
+            "context": self.context,
             "description": description[:140],
         }
         return self.request("POST", f"/statuses/{sha}", payload)
 
 
-def classify_pr(pr_data: dict) -> str:
+def classify_pr(pr_data: dict, publisher_bot_logins: set[str] | list[str] | None = None) -> str:
     """Classifies a PR as 'incident' or 'ordinary'. Fails closed on invalid inputs."""
     if not isinstance(pr_data, dict):
         raise Denied("Invalid PR payload")
@@ -135,8 +145,13 @@ def classify_pr(pr_data: dict) -> str:
     login = user.get("login", "")
     user_type = user.get("type", "")
 
-    # Check if author is the verified publisher bot
-    if user_type == "Bot" and login in PUBLISHER_BOT_LOGINS:
+    # Check if author matches the verified publisher bot login or naming pattern
+    is_bot = user_type == "Bot" and (
+        (publisher_bot_logins and login in publisher_bot_logins)
+        or bool(re.fullmatch(r"[A-Za-z0-9_.-]+-publisher\[bot\]", login))
+    )
+
+    if is_bot:
         head_ref = pr_data.get("head", {}).get("ref", "")
         if head_ref.startswith("incident/"):
             return "incident"
@@ -156,11 +171,15 @@ def extract_run_id(pr_body: str) -> int:
 def download_publication_receipt(client: GitHubClient, run_id: int) -> dict:
     """Downloads and verifies the immutable publication artifact from the controller run."""
     run = client.request("GET", f"/actions/runs/{run_id}")
+    run_repo = run.get("repository", {}) if isinstance(run, dict) else {}
+    run_repo_name = run_repo.get("full_name") or run_repo.get("name")
+    
+    # Must match repository of the client
     if (
         not isinstance(run, dict)
         or run.get("path") != ".github/workflows/incident-responder.yml"
         or run.get("head_branch") != "main"
-        or run.get("repository", {}).get("id") != 1423024931
+        or (run_repo_name and client.repository and run_repo_name != client.repository and not client.repository.endswith(f"/{run_repo_name}"))
         or run.get("event") != "workflow_dispatch"
     ):
         raise Denied("Untrusted incident controller workflow run")
@@ -267,9 +286,18 @@ def verify_ordinary_approval(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PawLocal change authorization")
+    parser = argparse.ArgumentParser(description="Change authorization")
     parser.add_argument("--mode", choices=["classify", "incident", "ordinary"], required=True)
+    parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""), help="Target GitHub repository (owner/repo)")
+    parser.add_argument("--context", default=os.environ.get("CHANGE_AUTHORIZATION_CONTEXT", DEFAULT_CONTEXT), help="Status check context name")
+    parser.add_argument("--publisher-bot", default=os.environ.get("PUBLISHER_BOT_LOGIN", ""), help="Expected publisher bot login")
     args = parser.parse_args()
+
+    repo = args.repository or os.environ.get("GITHUB_REPOSITORY", "")
+    if not repo:
+        raise Denied("Repository parameter or GITHUB_REPOSITORY environment variable required")
+
+    publisher_bots = {args.publisher_bot} if args.publisher_bot else None
 
     if args.mode == "classify":
         event_path = os.environ.get("GITHUB_EVENT_PATH") or os.environ.get("EVENT_PATH")
@@ -278,7 +306,7 @@ def main():
         with open(event_path, "r", encoding="utf-8") as f:
             event = json.load(f)
         pr = event.get("pull_request", {})
-        route = classify_pr(pr)
+        route = classify_pr(pr, publisher_bot_logins=publisher_bots)
         pr_number = pr.get("number")
         head_sha = pr.get("head", {}).get("sha", "")
         base_sha = pr.get("base", {}).get("sha", "")
@@ -297,7 +325,11 @@ def main():
     if not token_file.exists():
         raise Denied(f"Status token missing at {token_file}")
     token_data = json.loads(token_file.read_text(encoding="utf-8"))
-    client = GitHubClient(token_data["token"])
+    client = GitHubClient(
+        token=token_data["token"],
+        repository=repo,
+        context=args.context,
+    )
 
     pr_number = int(os.environ["PR_NUMBER"])
     head_sha = os.environ["HEAD_SHA"]

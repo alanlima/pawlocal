@@ -36,7 +36,7 @@ jobs:
         id: classifier
         env:
           PYTHONPATH: ops/change-authorization:ops/incident-response
-        run: python ops/change-authorization/authorizer.py --mode=classify
+        run: python ops/change-authorization/authorizer.py --mode=classify --repository="${{ github.repository }}"
 
   incident-authorize:
     name: Authorize incident candidate
@@ -80,7 +80,7 @@ jobs:
           PR_NUMBER: ${{ needs.classify.outputs.pr_number }}
           HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
           BASE_SHA: ${{ needs.classify.outputs.base_sha }}
-        run: python ops/change-authorization/authorizer.py --mode=incident
+        run: python ops/change-authorization/authorizer.py --mode=incident --repository="${{ github.repository }}"
 
   ordinary-approval:
     name: Protected ordinary change approval
@@ -125,4 +125,4 @@ jobs:
           PR_NUMBER: ${{ needs.classify.outputs.pr_number }}
           HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
           BASE_SHA: ${{ needs.classify.outputs.base_sha }}
-        run: python ops/change-authorization/authorizer.py --mode=ordinary
+        run: python ops/change-authorization/authorizer.py --mode=ordinary --repository="${{ github.repository }}"

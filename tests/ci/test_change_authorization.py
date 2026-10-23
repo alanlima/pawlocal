@@ -79,6 +79,27 @@ class ChangeAuthorizationClassifierTests(unittest.TestCase):
         with self.assertRaises(Denied):
             classify_pr(pr)
 
+    def test_parameterized_publisher_bot_login(self):
+        pr = {
+            "number": 105,
+            "draft": False,
+            "base": {"ref": "main"},
+            "head": {"ref": "incident/development/test"},
+            "user": {"login": "custom-app-publisher[bot]", "type": "Bot"},
+        }
+        self.assertEqual(classify_pr(pr, publisher_bot_logins={"custom-app-publisher[bot]"}), "incident")
+
+    def test_github_client_parameterization_and_validation(self):
+        client = GitHubClient(token="dummy-token", repository="custom-org/custom-repo", context="Custom authorization")
+        self.assertEqual(client.repository, "custom-org/custom-repo")
+        self.assertEqual(client.context, "Custom authorization")
+        self.assertEqual(client.api_base, "https://api.github.com/repos/custom-org/custom-repo")
+
+        with self.assertRaises(Denied):
+            GitHubClient(token="dummy-token", repository="")
+        with self.assertRaises(Denied):
+            GitHubClient(token="dummy-token", repository="invalid-format-no-slash")
+
 
 class IncidentCandidateVerificationTests(unittest.TestCase):
     def setUp(self):

@@ -51,7 +51,7 @@ def validate_production_promotion(
     if not re.fullmatch(r"[0-9a-f]{40}", release_commit):
         raise ValueError("Invalid release commit SHA")
 
-    if not re.fullmatch(r"ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}", backend_image):
+    if not re.fullmatch(r"ghcr\.io/[a-z0-9_.-]+/[a-z0-9_.-]+@sha256:[0-9a-f]{64}", backend_image):
         raise ValueError("Invalid backend image reference")
 
     if is_machine_route:
