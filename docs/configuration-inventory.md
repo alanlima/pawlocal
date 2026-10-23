@@ -103,7 +103,7 @@ Do not copy these credentials into Parameter Store. Keep these dated records aft
 
 ## Staged monitoring sources (#223; not live accepted)
 
-The single `parameter-mapping.yaml` contains ordinary and reviewed public monitoring rows. The copy operation warns/skips missing sources or destination Environments; genuine permission errors fail. Runtime secrets are not copied. Query-token synchronization remains a proposed later secret-reader scope and is not in the active manifest. Source production and consumer integration remain #224–#228; live tag-policy rollout is a separate predecessor.
+The single `parameter-mapping.yaml` contains ordinary and reviewed public monitoring rows. #228 adds two real recovery consumers in each matching on-call Environment: existing `config/frontend/base-url` → `PAWLOCAL_PUBLIC_BASE_URL` and `config/api/base-url` → `VITE_API_BASE_URL`. This adds no source parameter or IAM grant. Including staged monitoring, the manifest now has 33 development and 39 production destinations from 24 distinct sources per environment; the opening baseline counts remain historical live evidence. The copy operation warns/skips missing sources or destination Environments; genuine permission errors fail. Runtime secrets are not copied. Query-token synchronization remains a proposed later secret-reader scope and is not in the active manifest. Source production and consumer integration remain #224–#228; live tag-policy rollout is a separate predecessor.
 
 Paths below are prefixed `/pawlocal/{environment}/` for development/production. The table records planned destinations; presence does not activate telemetry. R = matching release, P = matching plan, O = `oncall-{environment}`.
 

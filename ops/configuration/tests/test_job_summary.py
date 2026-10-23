@@ -140,7 +140,7 @@ class SummaryTests(unittest.TestCase):
                     selected = selected_mappings(mappings(environment), selection)
                     status, content, api = self.execute(environment, selection, api=api)
                     self.assertEqual(status, 0)
-                    self.assertEqual(content.count("| /pawlocal/"), 68)
+                    self.assertEqual(content.count("| /pawlocal/"), 72)
                     self.assertEqual(
                         sum(
                             row.status == "Not selected"
@@ -148,7 +148,7 @@ class SummaryTests(unittest.TestCase):
                                 selected, environment, selection=selection
                             ).rows.values()
                         ),
-                        68 - len(selected),
+                        72 - len(selected),
                     )
                     self.assertEqual(
                         len(
@@ -190,7 +190,7 @@ class SummaryTests(unittest.TestCase):
         status, content, _ = self.execute(api=api)
         self.assertEqual(status, 0)
         rows = [r for r in content.splitlines() if r.startswith("| /pawlocal/")]
-        self.assertEqual(sum("| Created |" in r for r in rows), 26)
+        self.assertEqual(sum("| Created |" in r for r in rows), 28)
         self.assertEqual(sum("| Updated |" in r for r in rows), 1)
         self.assertEqual(sum("| Unchanged |" in r for r in rows), 4)
         self.assertIn("| development-apply | 4 | 1 | 5 | 0 | 0 | 0 |", content)
@@ -284,7 +284,7 @@ class SummaryTests(unittest.TestCase):
             ]
             self.assertEqual(sum("| Created |" in r for r in rows), 2)
             self.assertEqual(sum("| Failed |" in r for r in rows), 1)
-            self.assertEqual(sum("| Not attempted |" in r for r in rows), 28)
+            self.assertEqual(sum("| Not attempted |" in r for r in rows), 30)
             if outcome == "readback":
                 self.assertIn("Write accepted; verification incomplete", content)
             elif outcome in {"timeout", "server", "unexpected"}:
@@ -299,7 +299,7 @@ class SummaryTests(unittest.TestCase):
                     if line.startswith("| /pawlocal/development/")
                 ]
                 self.assertEqual(sum("| Unchanged |" in row for row in retry_rows), 2)
-                self.assertEqual(sum("| Created |" in row for row in retry_rows), 29)
+                self.assertEqual(sum("| Created |" in row for row in retry_rows), 31)
 
     def test_secret_acceptance_never_unchanged_or_verified(self):
         m = module.Mapping(
@@ -334,7 +334,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("**FAILED**", content)
         self.assertIn("Workflow output writing failed", content)
-        self.assertEqual(content.count("| Created | Variable comparison"), 31)
+        self.assertEqual(content.count("| Created | Variable comparison"), 33)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "summary"
             with (
@@ -351,7 +351,7 @@ class SummaryTests(unittest.TestCase):
                 self.assertEqual(
                     module.main(["--fail-on-error", "--environment", "development"]), 1
                 )
-            self.assertEqual(path.read_text().count("| /pawlocal/"), 68)
+            self.assertEqual(path.read_text().count("| /pawlocal/"), 72)
             path.unlink()
             with (
                 patch.dict(os.environ, {"CONFIG_SUMMARY_PATH": str(path)}),
@@ -586,7 +586,7 @@ class SummaryTests(unittest.TestCase):
                     self.assertEqual(job_summary.publish(), 0)
                 text = destination.read_text()
                 self.assertEqual(text.count("# Configuration reconciliation"), 1)
-                self.assertEqual(text.count("| /pawlocal/"), 68)
+                self.assertEqual(text.count("| /pawlocal/"), 72)
                 if outcome != "complete":
                     self.assertIn("**INCOMPLETE**", text)
                 if outcome in {"interrupted", "partial-file"}:

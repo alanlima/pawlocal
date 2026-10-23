@@ -147,7 +147,7 @@ class ReconcileTests(unittest.TestCase):
                 ROOT / "ops/configuration/parameter-mapping.yaml", environment
             )
             self.assertEqual(len({m.store_key for m in mappings}), 25)
-            self.assertEqual(len(mappings), 31 if environment == "development" else 37)
+            self.assertEqual(len(mappings), 33 if environment == "development" else 39)
             self.assertTrue(
                 all(
                     m.store_key.startswith(f"/pawlocal/{environment}/config/")

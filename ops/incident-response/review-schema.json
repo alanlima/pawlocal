@@ -1,0 +1,1 @@
+{"type":"object","additionalProperties":false,"required":["verdict","candidate_sha","findings"],"properties":{"verdict":{"type":"string","enum":["pass","fail"]},"candidate_sha":{"type":"string","pattern":"^[0-9a-f]{40}$"},"findings":{"type":"array","maxItems":20,"items":{"type":"string","maxLength":1000}}}}

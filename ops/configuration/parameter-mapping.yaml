@@ -184,3 +184,13 @@ mappings:
     github_environment: oncall-{environment}
     env_name: PAWLOCAL_GRAFANA_WEBHOOK_URL
     secret: false
+  - store_key: /pawlocal/{environment}/config/frontend/base-url
+    environment: [development, production]
+    github_environment: oncall-{environment}
+    env_name: PAWLOCAL_PUBLIC_BASE_URL
+    secret: false
+  - store_key: /pawlocal/{environment}/config/api/base-url
+    environment: [development, production]
+    github_environment: oncall-{environment}
+    env_name: VITE_API_BASE_URL
+    secret: false

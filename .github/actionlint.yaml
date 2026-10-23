@@ -1,0 +1,10 @@
+# v1.7.12 is the latest official release and predates GitHub's queue:max.
+# Keep original workflow bytes; ignore only this exact diagnostic in one file.
+# tests/ci/test_incident_workflow.py enforces the concurrency policy and proves
+# unrelated diagnostics and the same error in other files still fail.
+# Remove this exception when a pinned release supports queue:max.
+# https://github.com/rhysd/actionlint/blob/v1.7.12/docs/config.md
+paths:
+  .github/workflows/incident-responder.yml:
+    ignore:
+      - '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'

@@ -1,0 +1,556 @@
+name: Controlled incident response
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment from the signed receiver.
+        type: choice
+        options: [development, production]
+        required: true
+      schema_version:
+        description: Normalized receiver contract version.
+        type: choice
+        options: ['1']
+        required: true
+      alerts_json:
+        description: Bounded normalized grouped alerts; treated as untrusted data.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# Shared monthly quota uses one global serialization lease, not per-env races.
+# queue:max is validated separately because actionlint 1.7.12 predates this key.
+concurrency:
+  group: pawlocal-oncall-global-quota
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  preflight:
+    name: Trusted preflight
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      issues: write
+    outputs:
+      admitted: ${{ steps.admit.outputs.admitted }}
+      admission_sha256: ${{ steps.admit.outputs.metadata_sha256 }}
+      profile_sha256: ${{ steps.admit.outputs.profile_sha256 }}
+      deadline: ${{ steps.budget.outputs.deadline }}
+      issue: ${{ steps.admit.outputs.issue }}
+      incident_key: ${{ steps.admit.outputs.incident_key }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Start one absolute admission work budget
+        id: budget
+        run: python -c "import time; print('deadline=' + str(int(time.time()) + 1200))" >> "$GITHUB_OUTPUT"
+      - name: Mint separate Administration-read protection capability
+        env:
+          INCIDENT_DEADLINE: ${{ steps.budget.outputs.deadline }}
+          PAWLOCAL_CREDENTIAL_PHASE: readiness
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+      - name: Claim incident and reserve full two-execution envelope
+        id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_DEADLINE: ${{ steps.budget.outputs.deadline }}
+          INCIDENT_ENVIRONMENT: ${{ inputs.environment }}
+          SCHEMA_VERSION: ${{ inputs.schema_version }}
+          ALERTS_JSON: ${{ inputs.alerts_json }}
+          PAWLOCAL_ONCALL_ENABLED: ${{ vars.PAWLOCAL_ONCALL_ENABLED }}
+          PAWLOCAL_AUTHORIZER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED: ${{ vars.PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED }}
+          PAWLOCAL_MODEL_PROFILE: ${{ vars.PAWLOCAL_ONCALL_MODEL_PROFILE }}
+          PAWLOCAL_QUOTA_ISSUE: ${{ vars.PAWLOCAL_ONCALL_QUOTA_ISSUE }}
+          PAWLOCAL_DISPATCH_ACTOR: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          GRAFANA_STACK_URL: ${{ vars.PAWLOCAL_GRAFANA_URL }}
+          PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+        run: python ops/incident-response/admission.py
+      - uses: actions/upload-artifact@v7
+        if: steps.admit.outputs.admitted == 'true'
+        with:
+          name: oncall-admission-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-admission/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  fixer:
+    name: Fix search/detail
+    needs: preflight
+    if: needs.preflight.outputs.admitted == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    env:
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+    outputs:
+      candidate_sha256: ${{ steps.seal.outputs.candidate_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Prepare isolated UID and bounded local quota gateway
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python ops/incident-response/job.py fixer
+      - name: One bounded fixer execution
+        uses: openai/codex-action@c05cfd74ad95c626cdf05c6685e62becc3bf7813
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          ACTIONS_RUNTIME_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+        with:
+          codex-version: '0.163.0'
+          model: ${{ steps.runtime.outputs.model }}
+          effort: ${{ steps.runtime.outputs.effort }}
+          openai-api-key: ${{ steps.runtime.outputs.local_token }}
+          responses-api-endpoint: http://127.0.0.1:8765/v1/responses
+          safety-strategy: unprivileged-user
+          codex-user: oncall
+          codex-home: /home/oncall/.codex
+          permission-profile: ':workspace'
+          working-directory: /tmp/pawlocal-oncall-candidate
+          prompt-file: /home/oncall/incident-prompt.md
+          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
+      - name: Stop all untrusted processes and seal allowed bytes
+        id: seal
+        run: python ops/incident-response/job.py seal
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oncall-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-trusted/export/candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
+  checks:
+    name: Validate candidate
+    needs: [preflight, fixer]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      eligible: ${{ steps.check.outputs.eligible }}
+      candidate_sha: ${{ steps.check.outputs.candidate_sha }}
+      checks_sha256: ${{ steps.check.outputs.checks_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Reproduce affected and main; validate candidate
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+          ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+          PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+          CANDIDATE_SHA256: ${{ needs.fixer.outputs.candidate_sha256 }}
+        run: python ops/incident-response/checks.py
+      - uses: actions/upload-artifact@v7
+        if: steps.check.outputs.eligible == 'true'
+        with:
+          name: oncall-checks-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-checks/export/checks.json
+          if-no-files-found: error
+          retention-days: 7
+
+  reviewer:
+    name: Fresh review
+    needs: [preflight, fixer, checks]
+    if: needs.checks.outputs.eligible == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    env:
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+      CANDIDATE_SHA256: ${{ needs.fixer.outputs.candidate_sha256 }}
+      PINNED_CANDIDATE_SHA: ${{ needs.checks.outputs.candidate_sha }}
+      CHECKS_SHA256: ${{ needs.checks.outputs.checks_sha256 }}
+    outputs:
+      review_sha256: ${{ steps.seal.outputs.review_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Independently rerun pinned candidate checks in fresh workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python ops/incident-response/checks.py
+      - name: Prepare fresh review UID and separate bounded gateway
+        id: runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python ops/incident-response/job.py reviewer
+      - name: One fresh bounded review execution
+        uses: openai/codex-action@c05cfd74ad95c626cdf05c6685e62becc3bf7813
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          ACTIONS_RUNTIME_TOKEN: ''
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ''
+        with:
+          codex-version: '0.163.0'
+          model: ${{ steps.runtime.outputs.model }}
+          effort: ${{ steps.runtime.outputs.effort }}
+          openai-api-key: ${{ steps.runtime.outputs.local_token }}
+          responses-api-endpoint: http://127.0.0.1:8765/v1/responses
+          safety-strategy: unprivileged-user
+          codex-user: oncall
+          codex-home: /home/oncall/.codex
+          permission-profile: ':read-only'
+          working-directory: /tmp/pawlocal-oncall-candidate
+          prompt-file: /home/oncall/incident-prompt.md
+          output-file: /tmp/pawlocal-oncall-review.json
+          output-schema-file: /home/oncall/review-schema.json
+          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
+      - name: Stop review processes and bind pinned result
+        id: seal
+        run: python ops/incident-response/job.py review-seal
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oncall-review-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-trusted/review-export/review.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publisher:
+    name: Publish incident PR
+    needs: [preflight, fixer, checks, reviewer]
+    if: always() && needs.preflight.outputs.admitted == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      issues: write
+    outputs:
+      publication_sha256: ${{ steps.publish.outputs.publication_sha256 }}
+      promotion_deadline: ${{ steps.publish.outputs.promotion_deadline }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Mint separate publisher installation credential
+        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        env:
+          INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+      - name: Recheck protection capability before publication
+        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        env:
+          INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+          PAWLOCAL_CREDENTIAL_PHASE: readiness
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+      - name: Verify authentic jobs, current alert/release and allowed operations
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+          ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+          PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+          CANDIDATE_SHA256: ${{ needs.fixer.outputs.candidate_sha256 }}
+          PINNED_CANDIDATE_SHA: ${{ needs.checks.outputs.candidate_sha }}
+          CHECKS_SHA256: ${{ needs.checks.outputs.checks_sha256 }}
+          REVIEW_SHA256: ${{ needs.reviewer.outputs.review_sha256 }}
+          GRAFANA_STACK_URL: ${{ vars.PAWLOCAL_GRAFANA_URL }}
+          PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+          PAWLOCAL_ONCALL_ENABLED: ${{ vars.PAWLOCAL_ONCALL_ENABLED }}
+          PAWLOCAL_AUTHORIZER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED: ${{ vars.PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED }}
+          FIXER_RESULT: ${{ needs.fixer.result }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          REVIEWER_RESULT: ${{ needs.reviewer.result }}
+          CANDIDATE_ELIGIBLE: ${{ needs.checks.outputs.eligible }}
+        run: python ops/incident-response/publisher.py
+      - uses: actions/upload-artifact@v7
+        if: steps.publish.outputs.publication_sha256 != ''
+        with:
+          name: oncall-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-publication/publication.json
+          if-no-files-found: error
+          retention-days: 7
+
+  merge:
+    name: Squash verified incident PR
+    needs: [preflight, publisher]
+    if: needs.publisher.outputs.publication_sha256 != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      pull-requests: read
+      issues: read
+    outputs:
+      merged_sha: ${{ steps.merge.outputs.merged_sha }}
+      merge_sha256: ${{ steps.merge.outputs.merge_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+      PUBLICATION_SHA256: ${{ needs.publisher.outputs.publication_sha256 }}
+      PAWLOCAL_ONCALL_ENABLED: ${{ vars.PAWLOCAL_ONCALL_ENABLED }}
+      PAWLOCAL_AUTHORIZER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+      PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED: ${{ vars.PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED }}
+      GRAFANA_STACK_URL: ${{ vars.PAWLOCAL_GRAFANA_URL }}
+      PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Mint merge-only trusted broker credential
+        env:
+          INCIDENT_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+          PAWLOCAL_CREDENTIAL_PHASE: merge
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+      - name: Mint independent read-only protection proof for merge
+        env:
+          INCIDENT_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+          PAWLOCAL_CREDENTIAL_PHASE: readiness
+          PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+      - name: Authenticate candidate PR checks and squash exact reviewed SHA
+        id: merge
+        run: python ops/incident-response/promotion.py merge
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oncall-merge-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-merge/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+
+  development_recovery:
+    name: Verify development recovery
+    needs: [preflight, publisher, merge]
+    if: needs.merge.outputs.merged_sha != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: oncall-development
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      pull-requests: read
+      issues: read
+    outputs:
+      development_sha256: ${{ steps.recover.outputs.development_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+      PUBLICATION_SHA256: ${{ needs.publisher.outputs.publication_sha256 }}
+      MERGED_SHA: ${{ needs.merge.outputs.merged_sha }}
+      MERGE_SHA256: ${{ needs.merge.outputs.merge_sha256 }}
+      PAWLOCAL_ONCALL_ENABLED: ${{ vars.PAWLOCAL_ONCALL_ENABLED }}
+      GRAFANA_STACK_URL: ${{ vars.PAWLOCAL_GRAFANA_URL }}
+      PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+      RECOVERY_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      RECOVERY_FRONTEND_ORIGIN: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Bind normal development release and observe stable public journey
+        id: recover
+        run: python ops/incident-response/promotion.py development
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oncall-development-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-development/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+
+  promote:
+    name: Promote exact verified incident release
+    needs: [preflight, publisher, merge, development_recovery]
+    if: needs.development_recovery.outputs.development_sha256 != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: oncall-production
+    permissions:
+      contents: read
+      actions: write
+      deployments: read
+      issues: read
+      pull-requests: read
+    outputs:
+      production_sha256: ${{ steps.promote.outputs.production_sha256 }}
+      progress_sha256: ${{ steps.promote.outputs.progress_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+      PUBLICATION_SHA256: ${{ needs.publisher.outputs.publication_sha256 }}
+      MERGED_SHA: ${{ needs.merge.outputs.merged_sha }}
+      MERGE_SHA256: ${{ needs.merge.outputs.merge_sha256 }}
+      DEVELOPMENT_SHA256: ${{ needs.development_recovery.outputs.development_sha256 }}
+      PAWLOCAL_ONCALL_ENABLED: ${{ vars.PAWLOCAL_ONCALL_ENABLED }}
+      PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED: ${{ vars.PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED }}
+      GRAFANA_STACK_URL: ${{ vars.PAWLOCAL_GRAFANA_URL }}
+      PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+      RECOVERY_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+      RECOVERY_FRONTEND_ORIGIN: ${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Wait for development, dispatch fixed production workflow, verify recovery
+        id: promote
+        run: python ops/incident-response/promotion.py promote
+      - uses: actions/upload-artifact@v7
+        if: steps.promote.outputs.production_sha256 != ''
+        with:
+          name: oncall-production-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-production/receipt.json
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: oncall-progress-${{ github.run_id }}
+          path: ${{ runner.temp }}/oncall-progress/receipt.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  finalize:
+    name: Record incident outcome
+    needs: [preflight, fixer, checks, reviewer, publisher, merge, development_recovery, promote]
+    if: always() && needs.preflight.outputs.issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: oncall-${{ inputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+      deployments: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
+      PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
+      ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
+      PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
+      PUBLICATION_SHA256: ${{ needs.publisher.outputs.publication_sha256 }}
+      MERGED_SHA: ${{ needs.merge.outputs.merged_sha }}
+      MERGE_SHA256: ${{ needs.merge.outputs.merge_sha256 }}
+      DEVELOPMENT_SHA256: ${{ needs.development_recovery.outputs.development_sha256 }}
+      PRODUCTION_SHA256: ${{ needs.promote.outputs.production_sha256 }}
+      INCIDENT_ISSUE: ${{ needs.preflight.outputs.issue }}
+      INCIDENT_KEY: ${{ needs.preflight.outputs.incident_key }}
+      PAWLOCAL_QUOTA_ISSUE: ${{ vars.PAWLOCAL_ONCALL_QUOTA_ISSUE }}
+      ADMITTED: ${{ needs.preflight.outputs.admitted }}
+      PROMOTER_RESULT: ${{ needs.promote.result }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Preserve uncertain lease or verify complete recovery and close incident
+        run: python ops/incident-response/finalize.py
