@@ -109,6 +109,22 @@ class ReleaseMetadataTests(unittest.TestCase):
             manifest=release_manifest();manifest["telemetry_enabled"]=invalid
             self.assertNotEqual(self.validate(manifest).returncode,0)
 
+    def test_independent_modes_require_new_versions_and_matching_explicit_evidence(self):
+        for backend in (False, True):
+            for frontend in (False, True):
+                manifest = release_manifest() | {"schema_version": 3, "telemetry_enabled": backend, "frontend_telemetry_enabled": frontend}
+                evidence = deployment_evidence(manifest, "aurora_dsql") | {"schema_version": 2, "telemetry_enabled": backend, "frontend_telemetry_enabled": frontend}
+                self.assertEqual(self.validate(manifest, evidence).returncode, 0)
+                for field in ("telemetry_enabled", "frontend_telemetry_enabled"):
+                    bad = evidence | {field: not evidence[field]}
+                    self.assertNotEqual(self.validate(manifest, bad).returncode, 0)
+                self.assertNotEqual(self.validate(manifest, evidence | {"schema_version": 1}).returncode, 0)
+        manifest = release_manifest() | {"schema_version": 3}
+        self.assertNotEqual(self.validate(manifest).returncode, 0)
+        for bad in (None, "true", 1):
+            self.assertNotEqual(self.validate(manifest | {"frontend_telemetry_enabled": bad}).returncode, 0)
+        self.assertNotEqual(self.validate(release_manifest() | {"frontend_telemetry_enabled": False}).returncode, 0)
+
     def test_evidence_rejects_unhealthy_endpoints_and_enabled_telemetry(self) -> None:
         manifest = release_manifest()
         evidence = deployment_evidence(manifest, "postgresql")

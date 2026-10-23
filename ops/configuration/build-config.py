@@ -31,15 +31,15 @@ def load_public(snapshot):
     if (
         not isinstance(values, dict)
         or not FIELDS <= set(values)
-        or set(values) - FIELDS - {"VITE_TELEMETRY_ENABLED", "VITE_FARO_COLLECTOR_URL"}
+        or set(values) - FIELDS - {"VITE_TELEMETRY_ENABLED", "PAWLOCAL_TELEMETRY_ENABLED", "VITE_FARO_COLLECTOR_URL"}
         or any(
             not isinstance(v, str) or not v or any(c in v for c in "\r\n\x00")
             for v in values.values()
         )
     ):
         raise ValueError("Invalid public configuration snapshot")
-    mode = values.get("VITE_TELEMETRY_ENABLED", "false")
-    if mode not in {"true", "false"}:
+    mode = values.get("VITE_TELEMETRY_ENABLED")
+    if mode not in {"true", "false"} or values.get("PAWLOCAL_TELEMETRY_ENABLED") not in {"true", "false"}:
         raise ValueError("Invalid telemetry release mode")
     if mode == "true":
         import re
@@ -66,11 +66,6 @@ def load_public(snapshot):
 def main():
     try:
         values = load_public(os.environ.get("RECONCILED_FRONTEND_CONFIG", ""))
-        values = {
-            **values,
-            "VITE_TELEMETRY_ENABLED": values.get("VITE_TELEMETRY_ENABLED", "false"),
-        }
-        values["PAWLOCAL_TELEMETRY_ENABLED"] = values["VITE_TELEMETRY_ENABLED"]
         with Path(os.environ["GITHUB_ENV"]).open("a", encoding="utf-8") as output:
             output.writelines(
                 f"{name}={value}\n" for name, value in sorted(values.items())

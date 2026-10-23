@@ -44,14 +44,17 @@ def project(values, environment):
     mode = values.get("VITE_TELEMETRY_ENABLED")
     if mode is None or values.get("PAWLOCAL_TELEMETRY_ENABLED") is None:
         return {}
-    if mode not in {"true", "false"} or values["PAWLOCAL_TELEMETRY_ENABLED"] != mode:
-        raise ValueError("Hosted release telemetry modes differ")
+    backend = values["PAWLOCAL_TELEMETRY_ENABLED"]
+    if mode not in {"true", "false"} or backend not in {"true", "false"}:
+        raise ValueError("Hosted release telemetry modes must be boolean")
     result = {k: values[k] for k in FRONTEND_FIELDS}
     result["VITE_TELEMETRY_ENABLED"] = mode
+    result["PAWLOCAL_TELEMETRY_ENABLED"] = backend
     if mode == "true":
         result["VITE_FARO_COLLECTOR_URL"] = grafana_url(
             values.get("VITE_FARO_COLLECTOR_URL"), r"/collect/[A-Za-z0-9_-]+"
         )
+    if backend == "true":
         grafana_url(values.get("OTEL_EXPORTER_OTLP_ENDPOINT"), r"/otlp/?")
         if not re.fullmatch(
             r"[0-9]{1,20}", values.get("PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID", "")

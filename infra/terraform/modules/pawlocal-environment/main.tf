@@ -396,8 +396,8 @@ locals {
     PAWLOCAL_CORS_ORIGINS             = jsonencode(["https://${local.frontend_hostname}"])
     PAWLOCAL_TELEMETRY_ENABLED        = tostring(local.hosted_telemetry_enabled)
     OTEL_SDK_DISABLED                 = tostring(!local.hosted_telemetry_enabled)
-    OTEL_EXPORTER_OTLP_ENDPOINT       = var.hosted_observability == null ? "" : var.hosted_observability.otlp_endpoint
-    PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID = var.hosted_observability == null ? "" : var.hosted_observability.otlp_instance_id
+    OTEL_EXPORTER_OTLP_ENDPOINT       = var.hosted_observability == null ? "" : try(coalesce(var.hosted_observability.otlp_endpoint), "")
+    PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID = var.hosted_observability == null ? "" : try(coalesce(var.hosted_observability.otlp_instance_id), "")
   } : {}
 }
 

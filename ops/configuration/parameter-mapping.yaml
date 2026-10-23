@@ -154,7 +154,7 @@ mappings:
     github_environment: '{environment}-plan'
     env_name: PAWLOCAL_TELEMETRY_ENABLED
     secret: false
-  - store_key: /pawlocal/{environment}/config/observability/enabled
+  - store_key: /pawlocal/{environment}/config/frontend/telemetry-enabled
     environment: [development, production]
     github_environment: '{environment}'
     env_name: VITE_TELEMETRY_ENABLED

@@ -53,6 +53,7 @@ APPLICATION_PARAMETER_SUFFIXES = frozenset(
         "auth/logout-uri",
         "auth/scopes",
         "observability/enabled",
+        "frontend/telemetry-enabled",
         "grafana/stack-url",
         "grafana/otlp-endpoint",
         "grafana/otlp-instance-id",

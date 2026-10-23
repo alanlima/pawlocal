@@ -129,7 +129,10 @@ jobs:
               }
               const workflowRun = `${payload.workflow_run_id}:${payload.workflow_run_attempt}`
               const evidenceMatches = payload.record_schema_version === 1 &&
-                payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                ((payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
+                  !Object.hasOwn(payload, 'frontend_telemetry_enabled')) ||
+                 (payload.manifest_schema_version === 3 && payload.evidence_schema_version === 2 &&
+                  typeof payload.frontend_telemetry_enabled === 'boolean')) &&
                 payload.evidence_validated === true && successfulRunIds.has(workflowRun) &&
                 payload.release_commit === commit &&
                 /^sha256:[0-9a-f]{64}$/.test(payload.release_manifest_digest || '') &&

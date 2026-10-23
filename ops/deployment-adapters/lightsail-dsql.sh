@@ -111,13 +111,14 @@ environment,manifest_path,evidence_path,running_image_digest=sys.argv[1:]
 manifest=json.loads(Path(manifest_path).read_text(encoding='utf-8'))
 frontend=manifest.get('frontend',{})
 Path(evidence_path).write_text(json.dumps({
-  'schema_version':1,'environment':environment,'commit':manifest['commit'],
+  'schema_version':2 if manifest['schema_version'] == 3 else 1,'environment':environment,'commit':manifest['commit'],
   'backend_image_digest':manifest['backend_image_digest'],
   'running_image_digest':running_image_digest,
   'frontend_artifact_digest':frontend['artifact_digest'],
   'database_provider':'aurora_dsql','migration_runner':'dsql_baseline',
   'migration_id':manifest['migration_chains']['aurora_dsql']['migration_id'],
   'telemetry_enabled':manifest['telemetry_enabled'],
+  **({'frontend_telemetry_enabled':manifest['frontend_telemetry_enabled']} if manifest['schema_version'] == 3 else {}),
   'public_endpoint_health':{'frontend':True,'api':True},
   'database_query_smoke':{'route':'/api/v1/places','result':'valid_place_page'},
   'verified_at':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),

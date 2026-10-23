@@ -146,7 +146,7 @@ class ReconcileTests(unittest.TestCase):
             mappings = module.load_mappings(
                 ROOT / "ops/configuration/parameter-mapping.yaml", environment
             )
-            self.assertEqual(len({m.store_key for m in mappings}), 24)
+            self.assertEqual(len({m.store_key for m in mappings}), 25)
             self.assertEqual(len(mappings), 31 if environment == "development" else 37)
             self.assertTrue(
                 all(

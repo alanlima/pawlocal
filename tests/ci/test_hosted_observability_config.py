@@ -33,6 +33,16 @@ class HostedOperatorTests(unittest.TestCase):
                     "ap-southeast-2",
                 )
 
+    def test_browser_only_needs_no_otlp_and_requires_strict_frontend_boolean(self):
+        value = {key: item for key, item in PUBLIC.items() if not key.startswith("otlp_")}
+        value["frontend_enabled"] = True
+        module.validate(json.dumps(value), "111111111111", "ap-southeast-2")
+        for bad in (None, 0, "true"):
+            with self.assertRaises(ValueError):
+                module.validate(json.dumps(value | {"frontend_enabled": bad}), "111111111111", "ap-southeast-2")
+        with self.assertRaises((ValueError, TypeError)):
+            module.validate(json.dumps(value | {"enabled": True}), "111111111111", "ap-southeast-2")
+
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
             {"token": "private-sentinel"},

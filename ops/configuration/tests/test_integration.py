@@ -290,6 +290,7 @@ class IntegrationTests(unittest.TestCase):
             for name, value in values("development").items()
             if name in module.FRONTEND_FIELDS
         }
+        public.update(PAWLOCAL_TELEMETRY_ENABLED="false", VITE_TELEMETRY_ENABLED="false")
         self.assertEqual(build.load_public(json.dumps(public)), public)
         for bad in (
             dict(public, PAWLOCAL_CONFIG_GITHUB_TOKEN=SENTINEL),
