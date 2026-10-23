@@ -1,5 +1,6 @@
 mock_provider "random" {}
 mock_provider "time" {}
+mock_provider "grafana" {}
 
 provider "aws" {
   alias                       = "test"
@@ -27,6 +28,15 @@ override_data {
 override_data {
   target = data.aws_partition.current
   values = { partition = "aws" }
+}
+
+override_data {
+  target = data.grafana_cloud_stack.selected
+  values = {
+    id       = 12345
+    url      = "https://fixture.grafana.net/"
+    otlp_url = "https://otlp-gateway.grafana.net/otlp"
+  }
 }
 
 override_resource {
@@ -195,7 +205,7 @@ run "independent_backend_true_frontend_false" {
     error_message = "Browser telemetry must not grant OTLP credential access."
   }
   assert {
-    condition     = one(aws_lightsail_container_service_deployment_version.api[0].container).environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == var.hosted_observability.otlp_endpoint && one(aws_lightsail_container_service_deployment_version.api[0].container).environment["PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID"] == var.hosted_observability.otlp_instance_id
+    condition     = one(aws_lightsail_container_service_deployment_version.api[0].container).environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == local.hosted_otlp_endpoint && one(aws_lightsail_container_service_deployment_version.api[0].container).environment["PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID"] == local.hosted_otlp_instance_id
     error_message = "Enabled backend export must retain the configured endpoint and instance in the actual container."
   }
 
@@ -223,7 +233,7 @@ run "independent_backend_true_frontend_true" {
     error_message = "Browser telemetry must not grant OTLP credential access."
   }
   assert {
-    condition     = one(aws_lightsail_container_service_deployment_version.api[0].container).environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == var.hosted_observability.otlp_endpoint && one(aws_lightsail_container_service_deployment_version.api[0].container).environment["PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID"] == var.hosted_observability.otlp_instance_id
+    condition     = one(aws_lightsail_container_service_deployment_version.api[0].container).environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == local.hosted_otlp_endpoint && one(aws_lightsail_container_service_deployment_version.api[0].container).environment["PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID"] == local.hosted_otlp_instance_id
     error_message = "Enabled backend export must retain the configured endpoint and instance in the actual container."
   }
 
@@ -249,5 +259,26 @@ run "browser_only_public_metadata_does_not_change_backend_container" {
   assert {
     condition     = aws_ssm_parameter.configuration["grafana/otlp-endpoint"].value == var.hosted_observability.otlp_endpoint && aws_ssm_parameter.configuration["grafana/otlp-instance-id"].value == var.hosted_observability.otlp_instance_id && aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "true" && alltrue([for s in data.aws_iam_policy_document.runtime[0].statement : !contains(flatten([s.actions]), "ssm:GetParameter") && !contains(flatten([s.actions]), "kms:Decrypt")])
     error_message = "Known public stack metadata must still be seeded without granting backend credential access."
+  }
+}
+
+run "enabled_mode_discovery_omitted_otlp_bindings" {
+  command   = plan
+  providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
+  variables {
+    hosted_observability = {
+      enabled            = true
+      stack_url          = "https://fixture.grafana.net/"
+      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      kms_key_arn        = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    }
+  }
+  assert {
+    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["grafana/otlp-endpoint"] == "https://otlp-gateway.grafana.net/otlp" && local.application_configuration_values["grafana/otlp-instance-id"] == "12345" && local.application_configuration_values["grafana/stack-url"] == "https://fixture.grafana.net/"
+    error_message = "Discovered public Grafana bindings must populate SSM parameters when omitted from operator inputs."
+  }
+  assert {
+    condition     = local.backend_runtime_environment["OTEL_SDK_DISABLED"] == "false" && local.backend_runtime_environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == "https://otlp-gateway.grafana.net/otlp" && local.backend_runtime_environment["PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID"] == "12345"
+    error_message = "Discovered OTLP endpoint and instance ID must populate backend runtime environment."
   }
 }

@@ -27,17 +27,21 @@ def validate(raw, account, region):
     if (
         not isinstance(value, dict)
         or not required <= value.keys()
-        or set(value) - required - {"enabled", "frontend_enabled", "otlp_endpoint", "otlp_instance_id", "kms_key_arn"}
+        or set(value) - required - {"enabled", "frontend_enabled", "stack_slug", "otlp_endpoint", "otlp_instance_id", "kms_key_arn"}
     ):
         raise ValueError("Unknown or missing public hosted field")
     if type(value.get("enabled", False)) is not bool or (
         "frontend_enabled" in value and type(value["frontend_enabled"]) is not bool
     ):
         raise ValueError("Hosted mode must be boolean")
-    if (value.get("enabled", False) or "otlp_instance_id" in value) and (
-        not isinstance(value.get("otlp_instance_id"), str) or not re.fullmatch(
-            r"[0-9]{1,20}", value["otlp_instance_id"]
-        )
+    if "stack_slug" in value and (
+        not isinstance(value["stack_slug"], str)
+        or not re.fullmatch(r"[a-z0-9-]+", value["stack_slug"])
+    ):
+        raise ValueError("Invalid Grafana stack slug")
+    if "otlp_instance_id" in value and (
+        not isinstance(value["otlp_instance_id"], str)
+        or not re.fullmatch(r"[0-9]{1,20}", value["otlp_instance_id"])
     ):
         raise ValueError("Invalid OTLP instance identifier")
     paths = {
@@ -46,7 +50,7 @@ def validate(raw, account, region):
         "faro_collector_url": r"/collect/[A-Za-z0-9_-]+",
     }
     for name, path in paths.items():
-        if name == "otlp_endpoint" and name not in value and not value.get("enabled", False):
+        if name == "otlp_endpoint" and name not in value:
             continue
         text = value.get(name)
         if not isinstance(text, str) or any(c in text for c in "\r\n\x00"):

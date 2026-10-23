@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.0, < 7.0"
     }
+    grafana = {
+      source  = "grafana/grafana"
+      version = ">= 3.0, < 4.0"
+    }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.6"
@@ -40,4 +44,8 @@ provider "aws" {
       managedby   = "terraform"
     }
   }
+}
+
+provider "grafana" {
+  # Authenticates via environment variables (e.g. GRAFANA_CLOUD_ACCESS_POLICY_TOKEN or GRAFANA_AUTH)
 }

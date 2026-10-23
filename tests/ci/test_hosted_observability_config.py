@@ -40,8 +40,11 @@ class HostedOperatorTests(unittest.TestCase):
         for bad in (None, 0, "true"):
             with self.assertRaises(ValueError):
                 module.validate(json.dumps(value | {"frontend_enabled": bad}), "111111111111", "ap-southeast-2")
-        with self.assertRaises((ValueError, TypeError)):
-            module.validate(json.dumps(value | {"enabled": True}), "111111111111", "ap-southeast-2")
+
+    def test_discovery_mode_allows_omitted_otlp_bindings(self):
+        value = {key: item for key, item in PUBLIC.items() if not key.startswith("otlp_")}
+        module.validate(json.dumps(value | {"enabled": True}), "111111111111", "ap-southeast-2")
+        module.validate(json.dumps(value | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
@@ -52,6 +55,8 @@ class HostedOperatorTests(unittest.TestCase):
             {"otlp_endpoint": "https://gateway.grafana.net/otlp?token=private"},
             {"faro_collector_url": "https://foreign.example.test/collect/public"},
             {"otlp_instance_id": "private-user-identity"},
+            {"stack_slug": "invalid_slug!"},
+            {"stack_slug": "https://slug.grafana.net"},
             {
                 "kms_key_arn": "arn:aws:kms:ap-southeast-2:222222222222:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
             },
