@@ -46,6 +46,14 @@ Reviewers assess independently and do not merge. The orchestrator must monitor i
 
 All implementation follows the GitHub workflow in `AGENTS.md`: issue with acceptance criteria and labels, linked branch, relevant checks, PR, review, evidence, and approved merge. Do not commit implementation directly to `main`. Use **Squash and merge** so each PR adds one commit to `main`; repository settings should allow squash and disable merge commits and rebase merging. Do not rewrite existing history.
 
+## Unattended incident runtime (#239 / DEC-012)
+
+The owner-approved MVP automatically handles an allowlisted application incident through fix, fresh review, trusted PR, real candidate CI, automatic squash merge, verified development, exact-release production dispatch and recovery. No runtime human approval is required. The optional approval switch is deferred. The ordinary implementation/review lifecycle above still governs authoring this controller and unrelated feature work; it does not insert an owner wait into an activated incident.
+
+A trusted verdict broker binds fresh reviewer evidence to base/candidate SHA, tree and patch; the reviewer does not hold merge credentials or mint GitHub status checks. Separate trusted publication and squash-merge jobs use the publisher App within their fixed operations; the merge triggers normal development publication. A separate promoter uses job-local `GITHUB_TOKEN actions: write` only for `deploy-production.yml` on `main` with the exact development-verified `release_commit` and `backend_image`. No credential-bearing job executes candidate code. Required machine CI and normal branch protections must pass without bypass.
+
+One-time setup removes human CodeOwner/Environment reviewers from the incident path while retaining PR/squash/thread resolution, main-only trust and force-push/deletion protections, and adds actual required candidate CI. Model/rate/budget/privacy/credential/provisioning setup and G1/G2 acceptance remain initial activation work, not per-incident approvals. The 20-minute admission-to-PR phase and proposed 60-minute CI/release/recovery phase are absolute; after expiry start no new mutation, reconcile bounded in-flight results and escalate unknown/failed/out-of-scope outcomes without an approval-wait state. Never automate infrastructure/IAM/data repairs or production fault injection.
+
 ## Gates and approvals
 
 - Stage 0 docs and plan require human review before Stage 1.
