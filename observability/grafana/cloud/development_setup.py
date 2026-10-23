@@ -13,7 +13,7 @@ provision = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(provision)
 
 
-def execute(mode, stack_url, region, raw_manifest, expected_origin, credentials, transport=None):
+def execute(mode, stack_url, region, raw_manifest, expected_origin, credentials, transport=None, datasource_uids_json=""):
     if mode not in {"discover", "plan", "apply"}:
         raise provision.ProvisionError("Unsupported development setup mode")
     if len(raw_manifest.encode("utf-8")) > 16384:
@@ -24,8 +24,8 @@ def execute(mode, stack_url, region, raw_manifest, expected_origin, credentials,
         if not stack_url or not region:
             raise provision.ProvisionError("Discovery requires actual stack URL and region")
         client = provision.Provisioner(transport or provision.Transport(), credentials)
-        return client.discover(stack_url, region)
-    if stack_url or region or not expected_origin:
+        return client.discover(stack_url, region, datasource_uids_json)
+    if stack_url or region or datasource_uids_json or not expected_origin:
         raise provision.ProvisionError("Plan/apply require manifest and reviewed development origin")
     provision.https_url(expected_origin, origin=True)
 
@@ -60,6 +60,7 @@ def main():
             os.environ.get("PUBLIC_BINDINGS_JSON", ""),
             os.environ.get("EXPECTED_FRONTEND_ORIGIN", ""),
             os.environ,
+            datasource_uids_json=os.environ.get("DATASOURCE_UIDS_JSON", ""),
         )
         # Provisioner result is its explicit public-only handoff, never raw API data.
         output = Path(os.environ["RUNNER_TEMP"]) / "grafana-development-public.json"

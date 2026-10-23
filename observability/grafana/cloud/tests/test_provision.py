@@ -148,6 +148,69 @@ class ProvisionTests(unittest.TestCase):
         with self.assertRaises(p.ProvisionError):
             self.runner.discover("https://teststack.grafana.net", "eu")
 
+    def test_ambiguous_discovery_returns_public_candidates_then_explicit_selection(self):
+        original = self.api.request
+        def request(method, url, token, **kwargs):
+            result = original(method, url, token, **kwargs)
+            if url.endswith("/api/datasources"):
+                result.append({"uid": "usage", "name": "cloud-usage", "type": "prometheus", "secureJsonData": {"token": "private-never-export"}})
+            return result
+        self.api.request = request
+        result = self.runner.discover("https://teststack.grafana.net", "au")
+        self.assertEqual(result["status"], "needs-selection-not-approved")
+        self.assertEqual(result["unresolved_signals"], ["metrics"])
+        self.assertNotIn("metrics", result["datasources"])
+        self.assertEqual(len(result["datasource_candidates"]["metrics"]), 2)
+        self.assertTrue(all(set(row) == {"uid", "name", "type"} for rows in result["datasource_candidates"].values() for row in rows))
+        self.assertNotIn("private-never-export", json.dumps(result))
+        self.assertNotIn("arbitrary", json.dumps(result))
+        self.assertEqual(len(self.api.calls), 3)
+        result = self.runner.discover("https://teststack.grafana.net", "au", '{"metrics":"metrics"}')
+        self.assertEqual(result["status"], "discovered-not-approved")
+        self.assertEqual(result["unresolved_signals"], [])
+        self.assertEqual(result["datasources"]["metrics"], {"uid": "metrics", "name": "cloud-metrics"})
+        self.assertEqual(len(self.api.calls), 6)
+        self.assertEqual(self.api.writes, [])
+        for selector in ('{"metrics":"foreign"}', '{"metrics":"logs"}'):
+            with self.subTest(selector=selector), self.assertRaises(p.ProvisionError):
+                self.runner.discover("https://teststack.grafana.net", "au", selector)
+
+    def test_bad_selector_denies_before_any_network_even_for_unique_sources(self):
+        for selector in ('[]', '{"metrics":1}', '{"metrics":""}', '{"metrics":"a/b"}', '{"metrics":"a\\n"}', '{"metrics":"a","metrics":"b"}', '{"unknown":"a"}', 'x'*513):
+            with self.subTest(selector=selector), self.assertRaises(p.ProvisionError):
+                self.runner.discover("https://teststack.grafana.net", "au", selector)
+            self.assertEqual(self.api.calls, [])
+        for selector in ('{"metrics":"missing"}', '{"metrics":"logs"}'):
+            with self.subTest(selector=selector), self.assertRaises(p.ProvisionError):
+                self.runner.discover("https://teststack.grafana.net", "au", selector)
+
+    def test_duplicate_selected_uid_and_malformed_or_oversized_candidates_deny(self):
+        original = self.api.request
+        for mutation in ("duplicate", "name", "uid", "oversized", "shape"):
+            def request(method, url, token, mutation=mutation, **kwargs):
+                result = original(method, url, token, **kwargs)
+                if url.endswith("/api/datasources"):
+                    if mutation == "duplicate": result.append(copy.deepcopy(result[0]))
+                    if mutation == "name": result[0]["name"] = "private\nline"
+                    if mutation == "uid": result[0]["uid"] = "foreign/path"
+                    if mutation == "oversized": result *= 34
+                    if mutation == "shape": result.append(None)
+                return result
+            self.api.request = request
+            with self.subTest(mutation=mutation), self.assertRaises(p.ProvisionError):
+                self.runner.discover("https://teststack.grafana.net", "au", '{"metrics":"metrics"}')
+        self.assertEqual(self.api.writes, [])
+
+    def test_cli_discovery_forwards_selector_and_rejects_it_in_other_modes(self):
+        arguments = ["provision.py", "--environment", "development", "--mode", "discover", "--stack-url", "https://teststack.grafana.net", "--region", "au", "--datasource-uids-json", '{"metrics":"metrics"}']
+        output = io.StringIO()
+        with patch("sys.argv", arguments), patch.object(p, "Transport", return_value=self.api), patch.dict(p.os.environ, self.credentials), patch("sys.stdout", output):
+            p.main()
+        self.assertEqual(json.loads(output.getvalue())["datasources"]["metrics"]["uid"], "metrics")
+        self.assertEqual(self.api.writes, [])
+        with patch("sys.argv", ["provision.py", "--environment", "development", "--mode", "check", "--datasource-uids-json", '{}']), self.assertRaises(p.ProvisionError):
+            p.main()
+
     def test_faro_endpoint_creation_cutoff_and_regional_exceptions(self):
         self.assertEqual(
             p.faro_management_url("prod-us-east-0", "2025-01-01T00:00:00Z"),

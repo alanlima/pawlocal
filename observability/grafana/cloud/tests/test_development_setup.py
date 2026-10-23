@@ -55,7 +55,7 @@ class DevelopmentSetupTests(unittest.TestCase):
             self.assertNotIn("private-", stderr.getvalue())
 
     def test_main_preserves_actual_redirect_reason_and_category(self):
-        def redirected(*_args):
+        def redirected(*_args, **_kwargs):
             return setup.provision.NoRedirect().redirect_request(None, None, 302, None, None, "https://foreign.invalid")
 
         stderr = io.StringIO()
@@ -72,6 +72,21 @@ class DevelopmentSetupTests(unittest.TestCase):
         self.assertEqual(result["stack"]["id"], 42)
         self.assertTrue(api.calls)
         self.assertTrue(all(call[0] == "GET" for call in api.calls))
+
+    def test_discovery_selector_is_forwarded_and_forbidden_in_plan_apply(self):
+        api = FakeAPI()
+        result = setup.execute("discover", "https://teststack.grafana.net", "au", "", "", CREDS, api, datasource_uids_json='{"metrics":"metrics"}')
+        self.assertEqual(result["datasources"]["metrics"]["uid"], "metrics")
+        for mode in ("plan", "apply"):
+            api = FakeAPI()
+            with self.subTest(mode=mode), self.assertRaises(setup.provision.ProvisionError):
+                setup.execute(mode, "", "", json.dumps(manifest()), configured()["frontend_origin"], CREDS, api, datasource_uids_json='{"metrics":"metrics"}')
+            self.assertEqual(api.calls, [])
+        # A discovery result (including partial binding evidence) is never an enabled manifest.
+        api = FakeAPI()
+        with self.assertRaises(setup.provision.ProvisionError):
+            setup.execute("plan", "", "", json.dumps(result), configured()["frontend_origin"], CREDS, api)
+        self.assertEqual(api.calls, [])
 
     def test_plan_is_read_only_and_apply_owns_only_selected_folder_and_faro(self):
         api = FakeAPI()

@@ -556,7 +556,7 @@ See the [independent receiver contract and activation runbook](../ops/incident-r
 
 ## Grafana read-only credential metadata check
 
-<!-- actions-reference: grafana-development-setup.yml; dispatch-inputs: mode,stack_url,region,public_bindings_json,frontend_origin; call-inputs: - -->
+<!-- actions-reference: grafana-development-setup.yml; dispatch-inputs: mode,stack_url,region,public_bindings_json,datasource_uids_json,frontend_origin; call-inputs: - -->
 
 [`grafana-development-setup.yml`](../.github/workflows/grafana-development-setup.yml) is a main-only manual launcher for the existing
 folder/Faro provisioner, using the protected `development-apply` approval target.
