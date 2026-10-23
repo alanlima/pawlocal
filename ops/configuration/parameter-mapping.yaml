@@ -1,181 +1,254 @@
 mappings:
-  - store_key: /pawlocal/{environment}/config/iam/terraform-plan-role-arn
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/iam/terraform-plan-role-arn
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/iam/terraform-apply-role-arn
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/aws/account-id
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_AWS_ACCOUNT_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/aws/account-id
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_AWS_ACCOUNT_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/terraform/plan-bucket
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/terraform/plan-bucket
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/iam/frontend-publish-role-arn
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: PAWLOCAL_DEPLOY_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/iam/runtime-role-arn
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_RUNTIME_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/iam/runtime-role-arn
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_RUNTIME_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/base-url
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: PAWLOCAL_PUBLIC_BASE_URL
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/api/health-url
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: PAWLOCAL_API_HEALTH_URL
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/bucket
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: PAWLOCAL_FRONTEND_BUCKET
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-id
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-arn
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-arn
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/cloudfront-oac-arn
-    environment: [development, production]
-    github_environment: "{environment}-plan"
-    env_name: PAWLOCAL_CLOUDFRONT_OAC_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/frontend/cloudfront-oac-arn
-    environment: [development, production]
-    github_environment: "{environment}-apply"
-    env_name: PAWLOCAL_CLOUDFRONT_OAC_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/auth/client-id
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_COGNITO_CLIENT_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/api/base-url
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_API_BASE_URL
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/auth/domain
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_COGNITO_DOMAIN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/auth/redirect-uri
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_COGNITO_REDIRECT_URI
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/auth/logout-uri
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_COGNITO_LOGOUT_URI
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/{environment}/config/auth/scopes
-    environment: [development, production]
-    github_environment: "{environment}"
-    env_name: VITE_COGNITO_SCOPES
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/iam/terraform-apply-role-arn
-    environment: [production]
-    github_environment: production-destroy-prepare
-    env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/iam/terraform-apply-role-arn
-    environment: [production]
-    github_environment: production-destroy
-    env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/aws/account-id
-    environment: [production]
-    github_environment: production-destroy-prepare
-    env_name: PAWLOCAL_AWS_ACCOUNT_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/aws/account-id
-    environment: [production]
-    github_environment: production-destroy
-    env_name: PAWLOCAL_AWS_ACCOUNT_ID
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/terraform/plan-bucket
-    environment: [production]
-    github_environment: production-destroy-prepare
-    env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
-    secret: false
-    validations: [required]
-  - store_key: /pawlocal/production/config/terraform/plan-bucket
-    environment: [production]
-    github_environment: production-destroy
-    env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
-    secret: false
-    validations: [required]
+- store_key: /pawlocal/{environment}/config/iam/terraform-plan-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/iam/terraform-plan-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/iam/terraform-apply-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/aws/account-id
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_AWS_ACCOUNT_ID
+  secret: false
+- store_key: /pawlocal/{environment}/config/aws/account-id
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_AWS_ACCOUNT_ID
+  secret: false
+- store_key: /pawlocal/{environment}/config/terraform/plan-bucket
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
+  secret: false
+- store_key: /pawlocal/{environment}/config/terraform/plan-bucket
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
+  secret: false
+- store_key: /pawlocal/{environment}/config/iam/frontend-publish-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: PAWLOCAL_DEPLOY_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/iam/runtime-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_RUNTIME_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/iam/runtime-role-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_RUNTIME_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/base-url
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: PAWLOCAL_PUBLIC_BASE_URL
+  secret: false
+- store_key: /pawlocal/{environment}/config/api/health-url
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: PAWLOCAL_API_HEALTH_URL
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/bucket
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: PAWLOCAL_FRONTEND_BUCKET
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-id
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/cloudfront-distribution-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/cloudfront-oac-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_CLOUDFRONT_OAC_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/frontend/cloudfront-oac-arn
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-apply'
+  env_name: PAWLOCAL_CLOUDFRONT_OAC_ARN
+  secret: false
+- store_key: /pawlocal/{environment}/config/auth/client-id
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_COGNITO_CLIENT_ID
+  secret: false
+- store_key: /pawlocal/{environment}/config/api/base-url
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_API_BASE_URL
+  secret: false
+- store_key: /pawlocal/{environment}/config/auth/domain
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_COGNITO_DOMAIN
+  secret: false
+- store_key: /pawlocal/{environment}/config/auth/redirect-uri
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_COGNITO_REDIRECT_URI
+  secret: false
+- store_key: /pawlocal/{environment}/config/auth/logout-uri
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_COGNITO_LOGOUT_URI
+  secret: false
+- store_key: /pawlocal/{environment}/config/auth/scopes
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_COGNITO_SCOPES
+  secret: false
+- store_key: /pawlocal/production/config/iam/terraform-apply-role-arn
+  environment:
+  - production
+  github_environment: production-destroy-prepare
+  env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/production/config/iam/terraform-apply-role-arn
+  environment:
+  - production
+  github_environment: production-destroy
+  env_name: PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
+  secret: false
+- store_key: /pawlocal/production/config/aws/account-id
+  environment:
+  - production
+  github_environment: production-destroy-prepare
+  env_name: PAWLOCAL_AWS_ACCOUNT_ID
+  secret: false
+- store_key: /pawlocal/production/config/aws/account-id
+  environment:
+  - production
+  github_environment: production-destroy
+  env_name: PAWLOCAL_AWS_ACCOUNT_ID
+  secret: false
+- store_key: /pawlocal/production/config/terraform/plan-bucket
+  environment:
+  - production
+  github_environment: production-destroy-prepare
+  env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
+  secret: false
+- store_key: /pawlocal/production/config/terraform/plan-bucket
+  environment:
+  - production
+  github_environment: production-destroy
+  env_name: PAWLOCAL_TERRAFORM_PLAN_BUCKET
+  secret: false
+- store_key: /pawlocal/{environment}/config/observability/enabled
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_TELEMETRY_ENABLED
+  secret: false
+- store_key: /pawlocal/{environment}/config/observability/enabled
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_TELEMETRY_ENABLED
+  secret: false
+- store_key: /pawlocal/{environment}/config/grafana/otlp-endpoint
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: OTEL_EXPORTER_OTLP_ENDPOINT
+  secret: false
+- store_key: /pawlocal/{environment}/config/grafana/otlp-instance-id
+  environment:
+  - development
+  - production
+  github_environment: '{environment}-plan'
+  env_name: PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID
+  secret: false
+- store_key: /pawlocal/{environment}/config/grafana/faro-collector-url
+  environment:
+  - development
+  - production
+  github_environment: '{environment}'
+  env_name: VITE_FARO_COLLECTOR_URL
+  secret: false
+- store_key: /pawlocal/{environment}/config/grafana/stack-url
+  environment:
+  - development
+  - production
+  github_environment: oncall-{environment}
+  env_name: PAWLOCAL_GRAFANA_URL
+  secret: false
+- store_key: /pawlocal/{environment}/config/oncall/webhook-url
+  environment:
+  - development
+  - production
+  github_environment: oncall-{environment}
+  env_name: PAWLOCAL_GRAFANA_WEBHOOK_URL
+  secret: false

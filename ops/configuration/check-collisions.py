@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from reconcile import ReconciliationError, load_mappings
+from reconcile import ReconciliationError, inventory_mappings
 
 
 def check(plan, client, allowed):
@@ -25,13 +25,15 @@ def check(plan, client, allowed):
             raise ReconciliationError("Parameter replacement requires separate review")
         try:
             client.get_parameter(Name=name, WithDecryption=False)
-        except Exception as error:  # noqa: BLE001 - retain normal SDK error context
+        except Exception as error:
             if (
                 getattr(error, "response", {}).get("Error", {}).get("Code")
                 == "ParameterNotFound"
             ):
                 continue
-            raise ReconciliationError(f"Parameter collision inventory failed: {error}") from error
+            raise ReconciliationError(
+                f"Parameter collision inventory failed: {error}"
+            ) from error
         raise ReconciliationError("Existing parameter blocks new Terraform ownership")
 
 
@@ -50,10 +52,7 @@ def main():
             if args.environment == "bootstrap"
             else (args.environment,)
         )
-        manifest = Path(__file__).with_name("parameter-mapping.yaml")
-        allowed = {
-            m.store_key for env in selected for m in load_mappings(manifest, env)
-        }
+        allowed = {m.store_key for env in selected for m in inventory_mappings(env)}
         if args.environment == "bootstrap":
             allowed = {
                 key
@@ -73,7 +72,7 @@ def main():
             boto3.client("ssm"),
             allowed,
         )
-    except Exception as error:  # noqa: BLE001 - keep standard operational errors
+    except Exception as error:
         raise SystemExit(
             f"Parameter collision check failed: {type(error).__name__}: {error}"
         ) from error

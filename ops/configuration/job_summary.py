@@ -58,7 +58,13 @@ class Report:
             environment if environment in {"development", "production"} else "Unknown"
         )
         self.mode = mode if mode in {"audit", "enforce"} else "Unknown"
-        self.selection = selection if selection in {"all", "preflight"} else "Unknown"
+        self.selection = (
+            selection
+            if isinstance(selection, str)
+            and re.fullmatch(r"[a-z][a-z0-9-]*-mapping[.]yaml", selection)
+            else "invalid-mapping"
+        )
+
         self.operation = (
             operation
             if operation in {"reconcile", "legacy-cleanup", "destroy-cleanup"}
@@ -95,7 +101,7 @@ class Report:
                 else "Not selected",
                 "No destination write started."
                 if (m.github_environment, m.env_name) in chosen
-                else "Outside environment or preflight selection; no read/write.",
+                else "Outside the selected environment/manifest; no read/write.",
             )
             for m in mappings
         }
@@ -124,14 +130,12 @@ class Report:
             self.reason = (
                 "Exact cleanup completed; mapped entries were not synchronized."
             )
-        elif self.mode == "audit":
+        elif any(row.diagnostic for row in self.rows.values()):
             if any(row.diagnostic for row in self.rows.values()):
                 self.result = "SUCCESS WITH WARNINGS"
-            self.reason = "Audit completed; this does not establish release readiness."
-        elif self.selection == "preflight":
-            self.reason = "Preflight complete; publication still requires successful apply and full reconciliation."
+            self.reason = "Reconciliation completed with warnings; skipped sources/targets do not establish release readiness."
         else:
-            self.reason = "Publication configuration verified; existing apply and promotion gates still apply."
+            self.reason = "Selected YAML mappings verified; publication still requires its consumer checks and existing apply/promotion gates."
 
     def render(self):
         lines = [
@@ -141,7 +145,7 @@ class Report:
             "",
             "No source/destination values or error payloads are included.",
             "",
-            "| Environment | Mode | Selection | Operation | Overall result | Run |",
+            "| Environment | Mode | Mapping manifest | Operation | Overall result | Run |",
             "|---|---|---|---|---|---|",
             f"| {cell(self.environment)} | {cell(self.mode)} | {cell(self.selection)} | {cell(self.operation)} | **{self.result}** | {run_link()} |",
             "",
@@ -166,6 +170,8 @@ class Report:
                 "Updated",
                 "Unchanged",
                 "Secret write accepted",
+                "Missing source",
+                "Missing target",
                 "Missing required source",
                 "Missing optional source",
                 "Failed",
@@ -317,8 +323,7 @@ def publish():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", required=True)
     parser.add_argument("--mode", required=True)
-    parser.add_argument("--selection", required=True)
-    parser.add_argument("--operation", required=True)
+    parser.add_argument("--operation", default="reconcile")
     args = parser.parse_args()
     try:
         private_path = os.environ.get("CONFIG_SUMMARY_PATH", "")
@@ -333,22 +338,21 @@ def publish():
         if not content.endswith(COMPLETE + "\n") or (
             outcome != "success" and os.environ.get("REPORT_WRITTEN") != "true"
         ):
-            report = Report(args.environment, args.mode, args.selection, args.operation)
+            report = Report(
+                args.environment, args.mode, "parameter-mapping.yaml", args.operation
+            )
             report.result = "INCOMPLETE"
             report.reason = "Operation report unavailable: setup failed or execution was interrupted. No readiness is claimed."
             try:
                 if args.operation in {"reconcile", "legacy-cleanup", "destroy-cleanup"}:
-                    from reconcile import load_mappings, select_mappings
+                    from reconcile import inventory_mappings
 
-                    path = Path(__file__).with_name("parameter-mapping.yaml")
-                    all_mappings = load_mappings(path, "development") + load_mappings(
-                        path, "production"
-                    )
-                    current = load_mappings(path, args.environment)
+                    all_mappings = inventory_mappings(
+                        "development"
+                    ) + inventory_mappings("production")
+                    current = inventory_mappings(args.environment)
                     if args.operation == "reconcile":
-                        report.inventory_for(
-                            all_mappings, select_mappings(current, args.selection)
-                        )
+                        report.inventory_for(all_mappings, current)
                     else:
                         from cleanup import cleanup_targets
 
@@ -371,7 +375,10 @@ def publish():
                             )
                             row.mutation = "possible" if started else "none"
             except Exception as error:  # noqa: BLE001 - preserve incomplete report and operational context
-                print(f"Cannot build configuration summary inventory: {type(error).__name__}: {error}", file=sys.stderr)
+                print(
+                    f"Cannot build configuration summary inventory: {type(error).__name__}: {error}",
+                    file=sys.stderr,
+                )
                 report.inventory = False
             content = report.render()
         if os.environ.get("JOB_STATUS") == "cancelled":

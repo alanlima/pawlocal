@@ -29,7 +29,7 @@ Roll out application public tags under the old reader policy **before** the boot
 
 The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default; choose enforce to require all selected values before synchronization/publication. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.
 
-Open the job's **Summary** for destination counts, changed GitHub Environments and the full mapping grouped by target. For example, a development no-op shows **24 unchanged, 30 not selected; changed Environments: None**. Preflight shows 13 selected destinations and 41 not selected. Cleanup has a separate exact-target table.
+Open the job's **Summary** for destination counts, changed GitHub Environments and the full mapping grouped by target. For example, a fully configured development no-op shows **31 unchanged, 37 not selected; changed Environments: None**. Missing sources/targets appear as warnings. Cleanup has a separate exact-target table.
 
 Variable results require matching readback. Secret writes show **write accepted**; GitHub does not return secret values or verify unchanged content. Failed or incomplete reports distinguish confirmed changes from accepted-but-unverified or possible writes. Completed writes remain after a failure; rerun after fixing the cause. Cancellation or runner loss can prevent a final report, so missing rows never prove no writes occurred.
 
@@ -75,7 +75,7 @@ mappings:
     validations: [required]
 ```
 
-Only these six fields are allowed. `secret` defaults false; `validations` defaults empty. Only `{environment}` may be substituted, after validating development/production input. Each destination has its own entry. Targets are matching release/plan/apply Environments, plus exactly `production-destroy-prepare`/`production-destroy` for the production apply-role ARN, account ID and plan bucket. No development-destroy/seed target is allowed.
+Only these six fields are allowed. `secret` defaults false; `validations` defaults empty. Only `{environment}` may be substituted, after validating development/production input. Each destination has its own entry. Targets are matching release/plan/apply and exact `oncall-{environment}` Environments, plus exactly `production-destroy-prepare`/`production-destroy` for the production apply-role ARN, account ID and plan bucket. No development-destroy/seed target is allowed.
 
 Reject unknown fields/placeholders/rules, duplicate destinations, cross-environment sources and inconsistent classification/type/secret flags. Never discover arbitrary keys. Ownership and lifecycle selection belong in inventory/orchestration, not extra YAML metadata. Actions configuration requiring synchronization updates mapping and inventory together; unrelated local/application configuration does not. Remove obsolete executable mappings; preserve original fields, obsolete date/reason and separate deletion status in history, including the old entry after a rename.
 
@@ -93,4 +93,8 @@ Test both environments: partial writes and safe reruns, missing optional/require
 
 Before token expiry, create its scoped replacement, replace both protected secrets through hidden input, run an authorized audit, then revoke the predecessor. Keep rotation records free of values.
 
-For approved legacy cleanup, dispatch the reconciliation workflow with `operation=legacy-cleanup` and exact `confirmation=CLEAN legacy <environment>`. Review the protected job and its consumer checks before approval. It deletes only the inventory's legacy release names; static plan/apply and seed settings are untouched. Destroy cleanup is internal to the existing reviewed destroy workflow after successful apply and empty-state verification. Never substitute missing sources for that confirmation.
+The reconciliation workflow copies the single reviewed YAML mapping. Missing Parameter Store values or destination Environments warn and skip; access errors still fail. It never creates GitHub Environments. Existing on-call Environments must restrict deployments to exactly the `main` branch before any source read or write. Release consumers separately check their required values.
+
+Destroy cleanup remains internal to the protected destroy workflow through `cleanup-destroyed-configuration.yml`, after successful apply and empty-state verification. Its exact confirmation is not a public reconciliation input. Legacy cleanup remains a separately reviewed internal helper operation.
+
+An actual `ParameterNotFound` response is warned and skipped. Under tag-based IAM, an absent parameter or absent authorization tag may instead produce `AccessDenied`; that behavior requires live verification under the exact reader role. AccessDenied remains an error. This change adds no metadata enumeration permission or missing-resource inference.

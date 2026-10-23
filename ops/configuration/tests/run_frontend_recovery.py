@@ -37,7 +37,6 @@ def main():
         lambda _: None,
         mode="enforce",
         environment=args.environment,
-        selection="all",
     )
     replacement = values(args.environment)
     replacement["VITE_COGNITO_CLIENT_ID"] = "replacementfixtureclient"
@@ -51,13 +50,12 @@ def main():
         lambda _: None,
         mode="enforce",
         environment=args.environment,
-        selection="all",
     )
     args.output_directory.mkdir(parents=True, exist_ok=True)
     for name, result in (("old", first), ("replacement", second)):
         path = args.output_directory / f"{name}.json"
         path.write_text(
-            json.dumps(module.configuration_outputs(result, "all")["frontend_config"]),
+            json.dumps(module.configuration_outputs(result)["frontend_config"]),
             encoding="utf-8",
         )
     print("Prepared old/replacement public configuration fixtures.")

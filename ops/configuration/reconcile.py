@@ -56,22 +56,10 @@ FRONTEND_FIELDS = frozenset(
 )
 
 
-def select_mappings(mappings, selection):
-    if selection == "all":
-        return mappings
-    if selection != "preflight":
-        raise ReconciliationError("Unsupported mapping selection")
-    selected = [
-        m
-        for m in mappings
-        if m.env_name in PREFLIGHT_FIELDS
-        and m.github_environment.endswith(("-plan", "-apply"))
-    ]
-    if {m.env_name for m in selected} != PREFLIGHT_FIELDS or any(
-        m.secret for m in selected
-    ):
-        raise ReconciliationError("Incomplete preflight mapping")
-    return selected
+def inventory_mappings(environment):
+    return load_mappings(
+        Path(__file__).with_name("parameter-mapping.yaml"), environment
+    )
 
 
 def validate_values(values, environment):
@@ -193,14 +181,19 @@ def validate_values(values, environment):
             raise ReconciliationError("Invalid OAuth scopes")
 
 
-def configuration_outputs(values, selection):
-    allowed = PREFLIGHT_FIELDS | FRONTEND_FIELDS
-    configuration = {name: value for name, value in values.items() if name in allowed}
-    frontend = {}
-    if selection == "all":
-        if not FRONTEND_FIELDS <= configuration.keys():
-            raise ReconciliationError("Incomplete frontend configuration")
-        frontend = {name: configuration[name] for name in sorted(FRONTEND_FIELDS)}
+def configuration_outputs(values):
+    # These projections are existing release consumer contracts, not mapping
+    # inventories. Reconciliation does not require an unrelated consumer's keys.
+    configuration = {
+        name: value
+        for name, value in values.items()
+        if name in PREFLIGHT_FIELDS | FRONTEND_FIELDS
+    }
+    frontend = (
+        {name: values[name] for name in sorted(FRONTEND_FIELDS)}
+        if FRONTEND_FIELDS <= values.keys()
+        else {}
+    )
     return {"configuration": configuration, "frontend_config": frontend}
 
 
@@ -314,7 +307,10 @@ def load_mappings(path: Path, environment: str) -> list[Mapping]:
                     or recovery_sources.get(suffix) != entry["env_name"]
                 ):
                     raise ReconciliationError("Forbidden production recovery mapping")
-            elif target not in (selected, f"{selected}-plan", f"{selected}-apply"):
+            elif (
+                target not in (selected, f"{selected}-plan", f"{selected}-apply")
+                and target != f"oncall-{selected}"
+            ):
                 raise ReconciliationError("Forbidden GitHub Environment target")
             destination = (selected, target, entry["env_name"])
             if destination in destinations:
@@ -335,13 +331,15 @@ class ParameterStore:
             parameter = self.client.get_parameter(
                 Name=mapping.store_key, WithDecryption=mapping.secret
             )["Parameter"]
-        except Exception as error:  # noqa: BLE001 - retain normal SDK error context
+        except Exception as error:
             if (
                 getattr(error, "response", {}).get("Error", {}).get("Code")
                 == "ParameterNotFound"
             ):
                 return None
-            raise ReconciliationError(f"Parameter Store access failed: {error}") from error
+            raise ReconciliationError(
+                f"Parameter Store access failed: {error}"
+            ) from error
         expected = "SecureString" if mapping.secret else "String"
         if (
             parameter.get("Type") != expected
@@ -464,7 +462,6 @@ def reconcile(
     report=print,
     mode="audit",
     environment="development",
-    selection=None,
     summary=None,
 ):
     if mode not in ("audit", "enforce"):
@@ -476,13 +473,49 @@ def reconcile(
         )
     # Never let a variable/secret write implicitly establish an unprotected target.
     # Validate all exact targets first, even when their sources will be absent.
+    missing_targets = set()
     for target in sorted({mapping.github_environment for mapping in mappings}):
-        github.request("GET", f"environments/{quote(target, safe='')}")
+        target_path = f"environments/{quote(target, safe='')}"
+        metadata = github.request("GET", target_path, missing=True)
+        if metadata is None:
+            missing_targets.add(target)
+            report(f"WARNING missing-target {target}; source reads and writes skipped")
+            if summary:
+                for mapping in mappings:
+                    if mapping.github_environment == target:
+                        row = summary.row(mapping)
+                        row.status = "Missing target"
+                        row.diagnostic = "Missing target"
+                        row.reason = "Target Environment does not exist; source was not read and target was not created."
+            continue
+        if target.startswith("oncall-"):
+            if metadata.get("deployment_branch_policy") != {
+                "protected_branches": False,
+                "custom_branch_policies": True,
+            }:
+                raise ReconciliationError(
+                    "On-call target must restrict deployments to exact main"
+                )
+            policies = github.request(
+                "GET", f"{target_path}/deployment-branch-policies"
+            )
+            branches = policies.get("branch_policies", [])
+            if (
+                policies.get("total_count") != 1
+                or len(branches) != 1
+                or branches[0].get("name") != "main"
+                or branches[0].get("type") != "branch"
+            ):
+                raise ReconciliationError(
+                    "On-call target must allow only main branch, with no tag policy"
+                )
     loaded = []
     values = {}
     if summary:
         summary.reason = "Source validation failed; no destination writes started."
     for mapping in mappings:
+        if mapping.github_environment in missing_targets:
+            continue
         try:
             value = store.read(mapping)
         except ReconciliationError:
@@ -498,19 +531,12 @@ def reconcile(
         if value is None:
             if summary:
                 row = summary.row(mapping)
-                row.diagnostic = (
-                    "Missing required source"
-                    if "required" in mapping.validations
-                    else "Missing optional source"
-                )
-                row.reason = row.diagnostic + "; no destination write."
-                if mode == "audit":
-                    row.status = row.diagnostic
+                row.diagnostic = "Missing source"
+                row.reason = "Parameter does not exist; destination write skipped."
+                row.status = "Missing source"
             report(
                 f"WARNING missing-source {mapping.github_environment}/{mapping.env_name}"
             )
-            if mode == "enforce" and "required" in mapping.validations:
-                raise ReconciliationError("Required configuration is missing")
             continue
         loaded.append((mapping, value))
         if not mapping.secret:
@@ -525,8 +551,6 @@ def reconcile(
         },
         environment,
     )
-    if mode == "enforce" and selection is not None:
-        configuration_outputs(values, selection)
     if summary:
         summary.reason = "Destination operation failed; completed actions remain; remaining writes were not attempted."
         for row in summary.rows.values():
@@ -580,9 +604,7 @@ def reconcile(
     report(
         "Audit completed; this does not establish release readiness"
         if mode == "audit"
-        else "Enforced preflight completed; publication remains blocked until successful apply and full reconciliation"
-        if selection == "preflight"
-        else "Publication configuration values verified; existing apply and promotion gates still apply"
+        else "Reconciliation completed; release consumers must check their required configuration"
     )
     return values
 
@@ -593,23 +615,13 @@ def main(argv=None):
         "--environment", required=True, choices=("development", "production")
     )
     parser.add_argument("--mode", default="audit", choices=("audit", "enforce"))
-    parser.add_argument("--selection", default="all", choices=("all", "preflight"))
-    parser.add_argument(
-        "--mapping",
-        type=Path,
-        default=Path(__file__).with_name("parameter-mapping.yaml"),
-    )
     arguments = parser.parse_args(argv)
-    summary = Report(arguments.environment, arguments.mode, arguments.selection)
+    summary = Report(arguments.environment, arguments.mode, "parameter-mapping.yaml")
     status = 0
     try:
         summary.clear()
-        inventory = load_mappings(arguments.mapping, "development") + load_mappings(
-            arguments.mapping, "production"
-        )
-        mappings = select_mappings(
-            load_mappings(arguments.mapping, arguments.environment), arguments.selection
-        )
+        inventory = inventory_mappings("development") + inventory_mappings("production")
+        mappings = inventory_mappings(arguments.environment)
         summary.inventory_for(inventory, mappings)
         github = GitHub(
             os.environ.get("GITHUB_REPOSITORY", ""),
@@ -621,12 +633,11 @@ def main(argv=None):
             github,
             mode=arguments.mode,
             environment=arguments.environment,
-            selection=arguments.selection if arguments.mode == "enforce" else None,
             summary=summary,
         )
         if arguments.mode == "enforce" and os.environ.get("GITHUB_OUTPUT"):
             summary.reason = "Workflow output writing failed; completed destination actions remain. Publication is blocked."
-            outputs = configuration_outputs(values, arguments.selection)
+            outputs = configuration_outputs(values)
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                 output.writelines(
                     f"{name}={json.dumps(value, separators=(',', ':'))}\n"

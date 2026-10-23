@@ -3,7 +3,10 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,7 +57,26 @@ def values(environment):
         "VITE_COGNITO_REDIRECT_URI": f"https://{frontend}/auth/callback",
         "VITE_COGNITO_LOGOUT_URI": f"https://{frontend}/",
         "VITE_COGNITO_SCOPES": "openid email profile",
+        "PAWLOCAL_TELEMETRY_ENABLED": "false",
+        "VITE_TELEMETRY_ENABLED": "false",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otlp.grafana.net/otlp",
+        "PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID": "12345",
+        "VITE_FARO_COLLECTOR_URL": "https://faro.grafana.net/collect/public-key",
+        "PAWLOCAL_GRAFANA_URL": "https://stack.grafana.net",
+        "PAWLOCAL_GRAFANA_WEBHOOK_URL": "https://abc.lambda-url.ap-southeast-2.on.aws/",
     }
+
+
+def selected_mappings(rows, selection):
+    # Fixture-only consumer projection; the synchronizer always reads one YAML.
+    if selection == "preflight":
+        return [
+            m
+            for m in rows
+            if m.env_name in module.PREFLIGHT_FIELDS
+            and m.github_environment.endswith(("-plan", "-apply"))
+        ]
+    return rows
 
 
 def mappings(environment):
@@ -108,27 +130,62 @@ class IntegrationTests(unittest.TestCase):
     def github(self, api):
         return module.GitHub("alanlima/pawlocal", SENTINEL, api)
 
-    def test_enforce_reads_all_selected_values_before_any_write(self):
+    def test_missing_source_skips_copy_but_build_consumer_rejects_incomplete_snapshot(
+        self,
+    ):
         for environment in ("development", "production"):
             data = values(environment)
-            data.pop("VITE_COGNITO_SCOPES")  # last required source
+            data.pop("VITE_COGNITO_SCOPES")
             selected = mappings(environment)
             api = FakeAPI()
-            with self.assertRaises(module.ReconciliationError):
-                module.reconcile(
-                    selected,
-                    store_for(selected, data),
-                    self.github(api),
-                    lambda _: None,
-                    mode="enforce",
-                    environment=environment,
-                    selection="all",
+            result = module.reconcile(
+                selected,
+                store_for(selected, data),
+                self.github(api),
+                lambda _: None,
+                mode="enforce",
+                environment=environment,
+            )
+            self.assertTrue(api.variables)
+            with self.assertRaises(ValueError):
+                build.load_public(
+                    json.dumps(module.configuration_outputs(result)["frontend_config"])
                 )
-            self.assertTrue(all(r.method == "GET" for r in api.calls))
+
+    def test_empty_same_run_snapshot_rejects_stale_environment_before_publisher_setup(
+        self,
+    ):
+        for environment in ("development", "production"):
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "github-env"
+                output.write_text("prior-step-marker\n", encoding="utf-8")
+                result = subprocess.run(
+                    [sys.executable, str(ROOT / "ops/configuration/build-config.py")],
+                    env={
+                        **os.environ,
+                        **values(environment),
+                        "RECONCILED_FRONTEND_CONFIG": "{}",
+                        "GITHUB_ENV": str(output),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(output.read_text(), "prior-step-marker\n")
+                self.assertIn(
+                    "Cannot load verified public build configuration", result.stderr
+                )
+        for filename in ("fullstack-release.yml", "deploy-production.yml"):
+            source = (ROOT / ".github/workflows" / filename).read_text()
+            self.assertLess(
+                source.index("build-config.py"),
+                source.index("role-to-assume: ${{ env.PAWLOCAL_DEPLOY_ROLE_ARN }}"),
+            )
 
     def test_preflight_does_not_require_future_api_or_browser_outputs(self):
         for environment in ("development", "production"):
-            selected = module.select_mappings(mappings(environment), "preflight")
+            selected = selected_mappings(mappings(environment), "preflight")
             data = {
                 name: value
                 for name, value in values(environment).items()
@@ -141,11 +198,10 @@ class IntegrationTests(unittest.TestCase):
                 lambda _: None,
                 mode="enforce",
                 environment=environment,
-                selection="preflight",
             )
             self.assertEqual(set(result), module.PREFLIGHT_FIELDS)
             self.assertEqual(
-                module.configuration_outputs(result, "preflight")["frontend_config"], {}
+                module.configuration_outputs(result)["frontend_config"], {}
             )
 
     def test_foundation_audit_warns_for_expected_missing_runtime_and_api(self):
@@ -164,7 +220,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(any("missing-source" in line for line in reports))
         self.assertIn("does not establish release readiness", reports[-1])
 
-    def test_optional_missing_warns_but_incomplete_public_snapshot_blocks_before_write(
+    def test_yaml_optional_missing_synchronizes_but_consumer_blocks_incomplete_snapshot(
         self,
     ):
         selected = mappings("development")
@@ -182,16 +238,17 @@ class IntegrationTests(unittest.TestCase):
         data = values("development")
         data.pop("VITE_COGNITO_SCOPES")
         api = FakeAPI()
-        with self.assertRaises(module.ReconciliationError):
-            module.reconcile(
-                selected,
-                store_for(selected, data),
-                self.github(api),
-                lambda _: None,
-                mode="enforce",
-                selection="all",
-            )
-        self.assertTrue(all(r.method == "GET" for r in api.calls))
+        result = module.reconcile(
+            selected,
+            store_for(selected, data),
+            self.github(api),
+            lambda _: None,
+            mode="enforce",
+        )
+        self.assertTrue(api.variables)
+        snapshot = module.configuration_outputs(result)["frontend_config"]
+        with self.assertRaises(ValueError):
+            build.load_public(json.dumps(snapshot))
         optional = module.Mapping(
             "/pawlocal/development/config/other/optional",
             "development",
@@ -226,7 +283,6 @@ class IntegrationTests(unittest.TestCase):
                     self.github(api),
                     lambda _: None,
                     mode="enforce",
-                    selection="all",
                 )
             self.assertTrue(all(r.method == "GET" for r in api.calls))
 
@@ -263,11 +319,8 @@ class IntegrationTests(unittest.TestCase):
             self.github(FakeAPI()),
             lambda _: None,
             mode="enforce",
-            selection="all",
         )
-        self.assertNotIn(
-            SENTINEL, json.dumps(module.configuration_outputs(result, "all"))
-        )
+        self.assertNotIn(SENTINEL, json.dumps(module.configuration_outputs(result)))
 
     def test_confirmed_destroy_then_reapply_fixture_is_exact_and_recovers(self):
         for environment in ("development", "production"):
@@ -284,7 +337,6 @@ class IntegrationTests(unittest.TestCase):
                 lambda _: None,
                 mode="enforce",
                 environment=environment,
-                selection="all",
             )
             api.variables[("development-seed", "PAWLOCAL_DSQL_ENDPOINT")] = "untouched"
             with self.assertRaises(module.ReconciliationError):
@@ -327,7 +379,6 @@ class IntegrationTests(unittest.TestCase):
                 lambda _: None,
                 mode="enforce",
                 environment=environment,
-                selection="all",
             )
             self.assertEqual(api.variables, before)
 
@@ -442,7 +493,7 @@ class IntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             reconcile["concurrency"]["group"],
-            "${{ inputs.caller_holds_lifecycle_lock && format('pawlocal-reconcile-call-{0}-{1}', github.run_id, inputs.selection || 'all') || format('pawlocal-lifecycle-{0}', inputs.environment) }}",
+            "${{ inputs.caller_holds_lifecycle_lock && format('pawlocal-reconcile-call-{0}', github.run_id) || format('pawlocal-lifecycle-{0}', inputs.environment) }}",
         )
         contract = reconcile[True]
         self.assertEqual(
@@ -458,11 +509,9 @@ class IntegrationTests(unittest.TestCase):
             self.assertIs(
                 terraform["jobs"][name]["with"]["caller_holds_lifecycle_lock"], True
             )
-        self.assertIs(
-            destroy["jobs"]["cleanup-generated-targets"]["with"][
-                "caller_holds_lifecycle_lock"
-            ],
-            True,
+        self.assertEqual(
+            destroy["jobs"]["cleanup-generated-targets"]["uses"],
+            "./.github/workflows/cleanup-destroyed-configuration.yml",
         )
         self.assertNotIn(
             "caller_holds_lifecycle_lock",
@@ -511,8 +560,14 @@ class IntegrationTests(unittest.TestCase):
         ):
             with self.assertRaises(module.ReconciliationError):
                 collision.check(plan, client, allowed)
-        with self.assertRaisesRegex(module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"):
-            collision.check(plan, FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}), {key})
+        with self.assertRaisesRegex(
+            module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"
+        ):
+            collision.check(
+                plan,
+                FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}),
+                {key},
+            )
         create["change"]["importing"] = {"id": key}
         with self.assertRaises(module.ReconciliationError):
             collision.check(plan, FakeSSM(), {key})

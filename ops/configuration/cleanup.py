@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import yaml
 from job_summary import Report
-from reconcile import GitHub, ReconciliationError, load_mappings
+from reconcile import GitHub, ReconciliationError, inventory_mappings
 
 LEGACY_VARIABLES = (
     "PAWLOCAL_BASELINE_SSH_CIDR_BLOCKS_JSON",
@@ -177,9 +177,7 @@ def main(argv=None):
     try:
         summary.clear()
         root = Path(__file__).resolve().parents[2]
-        mappings = load_mappings(
-            Path(__file__).with_name("parameter-mapping.yaml"), args.environment
-        )
+        mappings = inventory_mappings(args.environment)
         summary.cleanup_inventory(
             cleanup_targets(mappings, args.environment, args.operation)
         )

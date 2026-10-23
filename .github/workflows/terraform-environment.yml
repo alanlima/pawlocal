@@ -160,7 +160,6 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       mode: enforce
-      selection: preflight
       caller_holds_lifecycle_lock: true
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
