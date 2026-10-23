@@ -49,6 +49,7 @@ flowchart TD
   PROD --> TF_RELEASE_PROD["Reviewed Terraform + enforced config: production"]
   TF_RELEASE_PROD -->|verified public config| VERIFY_PROD["Build, publish and verify production"]
 
+  OPERATOR --> GRAFANA_ACCESS["Read-only Grafana credential metadata"]
   OPERATOR --> RECONCILE["Protected configuration audit/enforce"]
   OPERATOR --> SEED["Seed development Aurora DSQL"]
   OPERATOR --> DESTROY["Terraform production destroy"]
@@ -65,6 +66,7 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 
 | Workflow | Trigger | Purpose | Manual or reusable inputs |
 |---|---|---|---|
+| [`grafana-access-check.yml`](../.github/workflows/grafana-access-check.yml) | Manual from main only | Bounded GET-only credential/metadata checks; no telemetry queries or mutations. | `stack_url`, `region`, optional `sm_backend_url` |
 | [`terraform-iam-bootstrap.yml`](../.github/workflows/terraform-iam-bootstrap.yml) | Relevant pushes to `main`, manual from `main` | Normal-refresh bootstrap plan, no-op completion and owner-approved exact-plan apply. | None |
 | [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
 | [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all CI suites, or the protected development reconciliation smoke call. | `reconciliation_smoke` |
@@ -290,6 +292,10 @@ Destroy is not a rollback and does not select a previous release.
 ## Protected configuration used by operational workflows
 
 <!-- actions-protected-configuration
+secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN
+secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN
+secrets.GRAFANA_SYNTHETIC_MONITORING_TOKEN
+secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN
 secrets.PAWLOCAL_API_HEALTH_URL
 secrets.PAWLOCAL_AWS_ACCOUNT_ID
 secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID
@@ -532,3 +538,18 @@ After the existing Cognito profile setup, every plan/apply/production-recovery j
 Normal enabled saved plans force only the on-call module's local `archive_plan`/`archive` packaging sidecars, following the existing fresh-runner Lambda pattern. Teardown does not build a receiver package. Bootstrap additionally consumes optional operator `TF_VAR_oncall_environments` (default `[]`) and `TF_VAR_oncall_receiver_kms_key_arns` (default `{}`) in both protected bootstrap Environments. The manifest binds these typed collection inputs and rejects changed or unbound values. Bootstrap code/plan approval and environment apply remain separate; no secret values are Terraform inputs.
 
 See the [independent receiver contract and activation runbook](../ops/incident-response/README.md). This is dormant implementation; it does not configure live App/Grafana accounts or authorize an apply.
+
+
+## Grafana read-only credential metadata check
+
+<!-- actions-reference: grafana-access-check.yml; dispatch-inputs: stack_url,region,sm_backend_url; call-inputs: - -->
+
+Run `grafana-access-check.yml` manually from `main` after its reviewed workflow is merged. Supply the approved stack HTTPS origin and actual Grafana region slug at runtime; optionally supply the actual Synthetic Monitoring REST API origin (not the probe gRPC endpoint). No deployment/account identifiers are committed as defaults.
+
+The job reads four repository secrets: `GRAFANA_CLOUD_ACCESS_POLICY_TOKEN` for Cloud/Faro metadata, `GRAFANA_SERVICE_ACCOUNT_TOKEN` for stack folder/datasource lists, `PAWLOCAL_GRAFANA_QUERY_TOKEN` for self-permissions metadata only, and `GRAFANA_SYNTHETIC_MONITORING_TOKEN` for optional probe/check lists. Their presence is not validity evidence. Repository secrets are not intrinsically main-only credentials; the trusted workflow and helper enforce the main/manual execution restriction.
+
+Cloud connection metadata accepts a validated Grafana HTTPS origin or the exact `/otlp` endpoint (with optional trailing slash). The shared provisioner normalizes discovery to exactly one `/otlp` suffix and uses that same endpoint comparison before any provisioning write. Arbitrary signal paths, credentials, query strings and ports are rejected.
+
+Only bounded GETs to fixed API paths on validated Grafana hosts are permitted; redirects are rejected. Logs/summary contain fixed capability PASS/PENDING/FAIL results and counts, never returned bodies, tokens, account identities, datasource contents or alert data. Missing SM binding/credentials or dependent metadata produces PENDING. Failed auth/shape/transport produces FAIL. A metadata PASS does not prove write scopes, production telemetry authorization/isolation, complete setup, successful ingestion or Free eligibility. This workflow performs no AWS/model operation, production alert/telemetry query, token/app/rule/contact-point creation or other mutation.
+
+Primary contracts: [service-account permission debugging](https://grafana.com/docs/grafana/latest/administration/service-accounts/#debug-the-permissions-of-a-service-account-token), the [pinned provisioning client/runbook](../observability/grafana/cloud/README.md), and [Synthetic Monitoring API](https://github.com/grafana/synthetic-monitoring-api-go-client/blob/836cd7e209af74554519f5153d05d3990af5af2f/smapi.go). Legacy Grafana API compatibility still needs actual stack verification.

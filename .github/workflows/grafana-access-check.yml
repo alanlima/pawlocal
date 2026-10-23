@@ -1,0 +1,45 @@
+name: Grafana read-only access check
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack_url:
+        description: Actual approved Grafana stack HTTPS origin
+        required: true
+        type: string
+      region:
+        description: Actual Grafana region slug from stack metadata
+        required: true
+        type: string
+      sm_backend_url:
+        description: Optional actual Synthetic Monitoring API origin; leave blank if unknown
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-access:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Check bounded read-only metadata access
+        env:
+          STACK_URL: ${{ inputs.stack_url }}
+          STACK_REGION: ${{ inputs.region }}
+          SM_BACKEND_URL: ${{ inputs.sm_backend_url }}
+          GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+          GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
+          GRAFANA_SYNTHETIC_MONITORING_TOKEN: ${{ secrets.GRAFANA_SYNTHETIC_MONITORING_TOKEN }}
+          PAWLOCAL_GRAFANA_QUERY_TOKEN: ${{ secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN }}
+        run: python observability/grafana/cloud/access_check.py

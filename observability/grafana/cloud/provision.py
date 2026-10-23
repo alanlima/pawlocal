@@ -67,6 +67,22 @@ def https_url(value, *, origin=False, grafana=False):
     return value.rstrip("/")
 
 
+def otlp_http_endpoint(value):
+    """Cloud connections may return an origin or an already suffixed endpoint."""
+    https_url(value, grafana=True)
+    parsed = urlsplit(value)
+    require(
+        parsed.port is None
+        and re.fullmatch(
+            r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?[.])+grafana[.]net",
+            parsed.hostname or "",
+        )
+        and parsed.path in ("", "/", "/otlp", "/otlp/"),
+        "Expected a Grafana OTLP origin or exact /otlp endpoint",
+    )
+    return f"https://{parsed.hostname}/otlp"
+
+
 def validate_manifest(document):
     exact_keys(document, ("version", "environments"), "manifest")
     require(
@@ -282,9 +298,7 @@ class Provisioner:
             "GRAFANA_CLOUD_ACCESS_POLICY_TOKEN",
         )
         require(isinstance(connection, dict), "Missing stack connection metadata")
-        otlp_origin = https_url(
-            connection.get("otlpHttpUrl"), origin=True, grafana=True
-        )
+        connection_endpoint = otlp_http_endpoint(connection.get("otlpHttpUrl"))
         sources = self.call(
             "GET", stack_url + "/api/datasources", "GRAFANA_SERVICE_ACCOUNT_TOKEN"
         )
@@ -314,7 +328,7 @@ class Provisioner:
                 "url": stack_url,
                 "region": region,
                 "faro_api_url": faro_api,
-                "otlp_endpoint": otlp_origin + "/otlp",
+                "otlp_endpoint": connection_endpoint,
                 "otlp_instance_id": str(remote["id"]),
             },
             "datasources": bindings,
@@ -352,11 +366,9 @@ class Provisioner:
             "GRAFANA_CLOUD_ACCESS_POLICY_TOKEN",
         )
         require(isinstance(connection, dict), "Missing stack connection metadata")
-        otlp_origin = https_url(
-            connection.get("otlpHttpUrl"), origin=True, grafana=True
-        )
+        connection_endpoint = otlp_http_endpoint(connection.get("otlpHttpUrl"))
         require(
-            stack["otlp_endpoint"].rstrip("/") == otlp_origin + "/otlp",
+            stack["otlp_endpoint"].rstrip("/") == connection_endpoint,
             "OTLP endpoint differs from actual stack connection metadata",
         )
         for signal, expected_type in (

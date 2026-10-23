@@ -48,6 +48,7 @@ class FakeAPI:
         self.apps = []
         self.remote_region = "au"
         self.datasource_type = None
+        self.otlp_http_url = "https://otlp-gateway-prod-au-southeast-0.grafana.net"
 
     def request(self, method, url, token, payload=None, stack_id=None, missing=False):
         self.calls.append((method, url, token, payload, stack_id))
@@ -62,9 +63,7 @@ class FakeAPI:
                 "regionSlug": self.remote_region,
             }
         if url == "https://grafana.com/api/instances/teststack/connections":
-            return {
-                "otlpHttpUrl": "https://otlp-gateway-prod-au-southeast-0.grafana.net"
-            }
+            return {"otlpHttpUrl": self.otlp_http_url}
         if url == "https://teststack.grafana.net/api/datasources":
             return [
                 {
@@ -164,6 +163,35 @@ class ProvisionTests(unittest.TestCase):
         )
         with self.assertRaises(p.ProvisionError):
             p.faro_management_url("prod-us-east-0", None)
+
+    def test_connection_origin_and_suffixed_endpoint_normalize_once_for_discovery_and_reconcile(
+        self,
+    ):
+        expected = "https://otlp-gateway-prod-au-southeast-0.grafana.net/otlp"
+        for suffix in ("", "/", "/otlp", "/otlp/"):
+            with self.subTest(suffix=suffix):
+                self.api.otlp_http_url = expected.removesuffix("/otlp") + suffix
+                result = self.runner.discover("https://teststack.grafana.net", "au")
+                self.assertEqual(result["stack"]["otlp_endpoint"], expected)
+                self.runner.reconcile("development", self.config, apply=False)
+                self.assertEqual(self.api.writes, [])
+
+    def test_unsafe_or_non_otlp_connection_shape_blocks_discovery_and_all_writes(self):
+        for url in (
+            "https://otlp-gateway.grafana.net/otlp/otlp",
+            "https://otlp-gateway.grafana.net/v1/traces",
+            "https://user:private@otlp-gateway.grafana.net/otlp",
+            "https://otlp-gateway.grafana.net/otlp?token=private",
+            "https://otlp-gateway.grafana.net:443/otlp",
+            "https://otlp-gateway.invalid/otlp",
+        ):
+            self.api.otlp_http_url = url
+            with self.subTest(url=url):
+                with self.assertRaises(p.ProvisionError):
+                    self.runner.discover("https://teststack.grafana.net", "au")
+                with self.assertRaises(p.ProvisionError):
+                    self.runner.reconcile("development", self.config, apply=True)
+                self.assertEqual(self.api.writes, [])
 
     def test_disabled_never_reads_credentials_or_calls_network(self):
         disabled = json.loads(MODULE.with_name("bindings.json").read_text())[

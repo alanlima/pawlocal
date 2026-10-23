@@ -11,6 +11,7 @@ import yaml
 WORKFLOWS = Path(".github/workflows")
 
 EXPECTED_HOSTED_JOBS = {
+    ("grafana-access-check.yml", "validate-access"),
     ("backend-ci.yml", "backend"),
     ("compose-ci.yml", "compose"),
     ("deploy-production.yml", "verify-production"),
