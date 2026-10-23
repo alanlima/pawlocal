@@ -31,7 +31,7 @@ locals {
   hosted_faro_app_name = var.hosted_observability == null ? null : coalesce(var.hosted_observability.faro_app_name, "${var.project_name}-${var.environment}")
 
   hosted_discovered_stack_url          = length(data.grafana_cloud_stack.selected) > 0 ? try(data.grafana_cloud_stack.selected[0].url, null) : null
-  hosted_discovered_otlp_endpoint      = local.hosted_telemetry_enabled && length(data.grafana_cloud_stack.selected) > 0 ? try(data.grafana_cloud_stack.selected[0].otlp_url, null) : null
+  hosted_discovered_otlp_endpoint      = local.hosted_telemetry_enabled && length(data.grafana_cloud_stack.selected) > 0 ? try(can(regex("/otlp/?$", data.grafana_cloud_stack.selected[0].otlp_url)) ? trimsuffix(data.grafana_cloud_stack.selected[0].otlp_url, "/") : "${trimsuffix(data.grafana_cloud_stack.selected[0].otlp_url, "/")}/otlp", null) : null
   hosted_discovered_otlp_instance_id   = local.hosted_telemetry_enabled && length(data.grafana_cloud_stack.selected) > 0 ? try(tostring(data.grafana_cloud_stack.selected[0].id), null) : null
   hosted_discovered_faro_collector_url = local.hosted_frontend_telemetry_enabled && length(data.grafana_frontend_o11y_app.selected) > 0 ? try(data.grafana_frontend_o11y_app.selected[0].collector_endpoint, null) : null
 
