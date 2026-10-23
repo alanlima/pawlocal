@@ -2,7 +2,9 @@
 
 import importlib.util
 import json
+import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import yaml
@@ -83,6 +85,22 @@ class HostedOperatorTests(unittest.TestCase):
         }
         res = module.validate(json.dumps(config), "111111111111", "ap-southeast-2")
         self.assertEqual(res["datasources"]["metrics"]["uid"], "prom-1")
+
+    def test_resolve_owning_stack_url_retains_former_stack_when_disabled(self):
+        self.assertEqual(
+            module.resolve_owning_stack_url({"stack_url": "https://custom.grafana.net"}, "ap-southeast-2"),
+            "https://custom.grafana.net",
+        )
+        with patch.dict(os.environ, {"PAWLOCAL_GRAFANA_URL": "https://former.grafana.net"}):
+            self.assertEqual(
+                module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                "https://former.grafana.net",
+            )
+        with patch.dict(os.environ, {"PAWLOCAL_GRAFANA_URL": "", "PAWLOCAL_ENVIRONMENT": ""}):
+            self.assertEqual(
+                module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                "https://alanlima.grafana.net",
+            )
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (

@@ -143,6 +143,32 @@ def validate(raw, account, region):
     return value
 
 
+def resolve_owning_stack_url(parsed, region):
+    if isinstance(parsed, dict) and parsed.get("stack_url"):
+        return parsed["stack_url"].rstrip("/")
+
+    # Check configured environment variable if passed
+    url = os.environ.get("PAWLOCAL_GRAFANA_URL", "").strip().rstrip("/")
+    if url:
+        return url
+
+    # When disabling dashboards (hosted_observability is null), retain the owning stack URL
+    # from published SSM configuration if present so Terraform can refresh/delete existing dashboards.
+    env_name = os.environ.get("PAWLOCAL_ENVIRONMENT", "").strip()
+    if env_name:
+        try:
+            import boto3
+            ssm = boto3.client("ssm", region_name=region)
+            param = f"/pawlocal/{env_name}/config/grafana/stack-url"
+            resp = ssm.get_parameter(Name=param)
+            val = resp.get("Parameter", {}).get("Value", "").strip().rstrip("/")
+            if val:
+                return val
+        except Exception:
+            pass
+
+    return "https://alanlima.grafana.net"
+
 if __name__ == "__main__":
     parsed = None
     try:
@@ -162,7 +188,7 @@ if __name__ == "__main__":
             f"Check the PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG environment variable "
             f"in the plan Environment and see docs/hosted-telemetry-operations.md."
         )
-    url = (parsed.get("stack_url") if isinstance(parsed, dict) else "") or "https://alanlima.grafana.net"
+    url = resolve_owning_stack_url(parsed, os.environ["AWS_REGION"])
     if "GITHUB_ENV" in os.environ:
         with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
             f.write(f"GRAFANA_URL={url}\n")
