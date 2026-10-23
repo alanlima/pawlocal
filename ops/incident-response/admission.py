@@ -257,10 +257,14 @@ def verified_record(github, deployment, environment):
         or payload.get("backend_image") != "ghcr.io/alanlima/pawlocal-api@" + digest
     ):
         raise Denied("deployed immutable image differs")
+    record_schema = payload.get("record_schema_version")
+    manifest_schema = payload.get("manifest_schema_version")
+    evidence_schema = payload.get("evidence_schema_version")
+    if record_schema != 1 or (manifest_schema, evidence_schema) not in {(2, 1), (3, 2)}:
+        raise Denied("validated release/telemetry evidence missing")
+    if manifest_schema == 3 and not isinstance(payload.get("frontend_telemetry_enabled"), bool):
+        raise Denied("validated release/telemetry evidence missing")
     required = {
-        "record_schema_version": 1,
-        "manifest_schema_version": 2,
-        "evidence_schema_version": 1,
         "evidence_validated": True,
         "database_provider": "aurora_dsql",
         "migration_runner": "dsql_baseline",

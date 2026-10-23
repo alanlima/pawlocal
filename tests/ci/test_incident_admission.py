@@ -372,6 +372,28 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(admission.Denied):
                 admission.deployed_release(fake, "development")
 
+        # Verify schema version 3 with frontend telemetry passes
+        fake = FakeGitHub()
+        fake.record["payload"]["manifest_schema_version"] = 3
+        fake.record["payload"]["evidence_schema_version"] = 2
+        fake.record["payload"]["frontend_telemetry_enabled"] = True
+        self.assertIsNotNone(admission.deployed_release(fake, "development"))
+
+        # Incompatible schema versions or invalid frontend_telemetry_enabled deny
+        for invalid_mutation in (
+            {"manifest_schema_version": 3, "evidence_schema_version": 1},
+            {"manifest_schema_version": 2, "evidence_schema_version": 2},
+            {"manifest_schema_version": 4, "evidence_schema_version": 3},
+            {"manifest_schema_version": 3, "evidence_schema_version": 2, "frontend_telemetry_enabled": "true"},
+            {"manifest_schema_version": 3, "evidence_schema_version": 2},  # missing frontend_telemetry_enabled
+        ):
+            fake = FakeGitHub()
+            fake.record["payload"].update(invalid_mutation)
+            if "frontend_telemetry_enabled" not in invalid_mutation and "frontend_telemetry_enabled" in fake.record["payload"]:
+                del fake.record["payload"]["frontend_telemetry_enabled"]
+            with self.subTest(invalid_mutation=invalid_mutation), self.assertRaises(admission.Denied):
+                admission.deployed_release(fake, "development")
+
 
 if __name__ == "__main__":
     unittest.main()
