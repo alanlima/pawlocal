@@ -120,11 +120,12 @@ class MonitoringTests(unittest.TestCase):
         )
         triggers = workflow.get("on", workflow.get(True))
         self.assertEqual(
-            set(triggers["workflow_dispatch"]["inputs"]), {"environment", "mode"}
+            set(triggers["workflow_dispatch"]["inputs"]),
+            {"environment", "mode", "fail_on_error"},
         )
         self.assertEqual(
             set(triggers["workflow_call"]["inputs"]),
-            {"environment", "mode", "caller_holds_lifecycle_lock"},
+            {"environment", "mode", "caller_holds_lifecycle_lock", "fail_on_error"},
         )
         cleanup = yaml.safe_load(
             (root / ".github/workflows/cleanup-destroyed-configuration.yml").read_text()

@@ -611,6 +611,11 @@ def main(argv=None):
         "--environment", required=True, choices=("development", "production")
     )
     parser.add_argument("--mode", default="audit", choices=("audit", "enforce"))
+    parser.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="Exit nonzero if synchronization or reporting fails (default: warn).",
+    )
     arguments = parser.parse_args(argv)
     summary = Report(arguments.environment, arguments.mode, "parameter-mapping.yaml")
     status = 0
@@ -654,7 +659,20 @@ def main(argv=None):
     except Exception as error:  # noqa: BLE001 - summary failure never authorizes publication
         print(f"Cannot write configuration summary: {error}", file=sys.stderr)
         status = 1
-    return status
+    if not status and os.environ.get("GITHUB_OUTPUT"):
+        try:
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write("reconciled=true\n")
+        except OSError as error:
+            print(f"Cannot confirm reconciliation output: {error}", file=sys.stderr)
+            status = 1
+    if status and not arguments.fail_on_error:
+        print(
+            "::warning::Configuration reconciliation could not complete; "
+            "configuration was not verified. See the operational errors and summary.",
+            file=sys.stderr,
+        )
+    return status if arguments.fail_on_error else 0
 
 
 if __name__ == "__main__":
