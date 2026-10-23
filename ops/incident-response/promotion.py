@@ -37,7 +37,7 @@ class ReleaseClient(GitHub):
 
     def request(self, method, path, data=None):
         allowed = method == "GET" and re.fullmatch(
-            r"/(?:pulls/\d+|actions/runs(?:/\d+(?:/jobs)?)?|git/commits/[0-9a-f]{40}|environments/production(?:/deployment-branch-policies)?)(?:\?[A-Za-z0-9_=&%.-]+)?",
+            r"/(?:pulls/\d+|actions/runs(?:/\d+(?:/jobs)?)?|git/commits/[0-9a-f]{40}|commits/[0-9a-f]{40}/statuses|environments/production(?:/deployment-branch-policies)?)(?:\?[A-Za-z0-9_=&%.-]+)?",
             path,
         )
         if not allowed:
@@ -239,8 +239,28 @@ def pause(deadline):
     time.sleep(min(15, remaining))
 
 
+def candidate_authorization(client, value):
+    statuses = client.request("GET", f"/commits/{value['candidate_sha']}/statuses")
+    if not isinstance(statuses, list):
+        raise Denied("unable to inspect candidate commit statuses")
+    matches = [s for s in statuses if s.get("context") == "PawLocal change authorization"]
+    if not matches:
+        return False
+    latest = matches[0]
+    state = latest.get("state")
+    if state == "pending":
+        return False
+    if state != "success":
+        raise Denied(f"candidate change authorization denied with state: {state}")
+    creator = latest.get("creator", {})
+    creator_login = creator.get("login", "")
+    if not (creator_login.endswith("[bot]") or creator.get("type") == "Bot"):
+        raise Denied("candidate change authorization status not issued by authorized bot")
+    return True
+
+
 def merge(client, token, value, metadata):
-    while not candidate_ci(client, value):
+    while not (candidate_ci(client, value) and candidate_authorization(client, value)):
         check_pr(client, value)
         pause(client.deadline)
     check_pr(client, value)

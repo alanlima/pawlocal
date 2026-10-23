@@ -70,6 +70,13 @@ class Client:
             "total_count": 1,
             "branch_policies": [{"name": "main", "type": "branch"}],
         }
+        self.statuses = [
+            {
+                "context": "PawLocal change authorization",
+                "state": "success",
+                "creator": {"login": "pawlocal-publisher[bot]", "type": "Bot"},
+            }
+        ]
 
     def request(self, method, path, _body=None):
         assert method == "GET"
@@ -81,6 +88,8 @@ class Client:
             return self.branches
         if path.startswith("/environments/"):
             return self.environment
+        if path == f"/commits/{'a' * 40}/statuses":
+            return self.statuses
         raise AssertionError(path)
 
 
@@ -225,6 +234,30 @@ class PromotionTests(unittest.TestCase):
                 promotion.main()
             self.assertEqual(rule.call_args.args[1], "production")
             dispatch.assert_not_called()
+
+    def test_candidate_authorization_waits_for_pending_and_requires_authorized_bot(self):
+        client = Client()
+        self.assertTrue(promotion.candidate_authorization(client, publication()))
+
+        client.statuses = []
+        self.assertFalse(promotion.candidate_authorization(client, publication()))
+
+        client.statuses = [{"context": "PawLocal change authorization", "state": "pending"}]
+        self.assertFalse(promotion.candidate_authorization(client, publication()))
+
+        client.statuses = [{"context": "PawLocal change authorization", "state": "failure"}]
+        with self.assertRaises(promotion.Denied):
+            promotion.candidate_authorization(client, publication())
+
+        client.statuses = [
+            {
+                "context": "PawLocal change authorization",
+                "state": "success",
+                "creator": {"login": "attacker", "type": "User"},
+            }
+        ]
+        with self.assertRaises(promotion.Denied):
+            promotion.candidate_authorization(client, publication())
 
     def test_candidate_requires_both_authentic_jobs_from_fixed_pr_workflow(self):
         client = Client()
