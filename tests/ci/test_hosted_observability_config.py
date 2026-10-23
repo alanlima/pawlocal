@@ -86,6 +86,16 @@ class HostedOperatorTests(unittest.TestCase):
         res = module.validate(json.dumps(config), "111111111111", "ap-southeast-2")
         self.assertEqual(res["datasources"]["metrics"]["uid"], "prom-1")
 
+        bad_binding = {
+            **PUBLIC,
+            "enabled": True,
+            "datasources": {
+                "metrics": {"uid": "prom-1", "access_token": "secret"},
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "Unknown field.*access_token"):
+            module.validate(json.dumps(bad_binding), "111111111111", "ap-southeast-2")
+
     def test_resolve_owning_stack_url_retains_former_stack_when_disabled(self):
         self.assertEqual(
             module.resolve_owning_stack_url({"stack_url": "https://custom.grafana.net"}, "ap-southeast-2"),
@@ -124,6 +134,15 @@ class HostedOperatorTests(unittest.TestCase):
                 # When input attempts switch to stack-b without migration, raises ValueError
                 with self.assertRaisesRegex(ValueError, "differs from recorded owning stack"):
                     module.resolve_owning_stack_url({"stack_url": "https://stack-b.grafana.net"}, "ap-southeast-2")
+
+        class FailingSSM:
+            def get_parameter(self, Name):
+                raise RuntimeError("AccessDeniedException: not authorized")
+
+        with patch.dict(os.environ, {"PAWLOCAL_ENVIRONMENT": "production"}):
+            with patch("boto3.client", return_value=FailingSSM()):
+                with self.assertRaises(RuntimeError):
+                    module.resolve_owning_stack_url(None, "ap-southeast-2")
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (

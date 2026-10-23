@@ -287,6 +287,10 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Install hosted observability validator dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -r ops/configuration/requirements.txt
       - name: Validate public hosted bindings before Terraform planning
         id: hosted-bindings
         shell: bash

@@ -123,9 +123,16 @@ def validate(raw, account, region):
                 f"Unknown signal(s) in 'datasources': {', '.join(sorted(unknown_signals))}. "
                 f"Allowed: {', '.join(sorted(allowed_signals))}."
             )
+        allowed_binding_keys = {"uid", "name"}
         for sig, binding in ds.items():
             if not isinstance(binding, dict):
                 raise ValueError(f"'datasources.{sig}' must be an object")
+            unknown_keys = set(binding) - allowed_binding_keys
+            if unknown_keys:
+                raise ValueError(
+                    f"Unknown field(s) in 'datasources.{sig}': {', '.join(sorted(unknown_keys))}. "
+                    f"Allowed: {', '.join(sorted(allowed_binding_keys))}."
+                )
             if "uid" in binding and not isinstance(binding["uid"], str):
                 raise ValueError(f"'datasources.{sig}.uid' must be a string")
             if "name" in binding and not isinstance(binding["name"], str):
@@ -147,14 +154,20 @@ def resolve_owning_stack_url(parsed, region):
     recorded_url = ""
     env_name = os.environ.get("PAWLOCAL_ENVIRONMENT", "").strip()
     if env_name:
+        import boto3
+        from botocore.exceptions import ClientError
         try:
-            import boto3
             ssm = boto3.client("ssm", region_name=region)
             param = f"/pawlocal/{env_name}/config/grafana/stack-url"
             resp = ssm.get_parameter(Name=param)
             recorded_url = resp.get("Parameter", {}).get("Value", "").strip().rstrip("/")
-        except Exception:
-            pass
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code != "ParameterNotFound":
+                raise
+        except Exception as exc:
+            if "ParameterNotFound" not in str(exc):
+                raise
 
     input_url = parsed.get("stack_url", "").strip().rstrip("/") if isinstance(parsed, dict) else ""
 
