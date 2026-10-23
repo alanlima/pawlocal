@@ -68,7 +68,6 @@ resource "aws_ssm_parameter" "configuration" {
   # Omit overwrite: the pinned provider refuses to adopt an existing key on
   # creation, while later updates remain owned by this resource's state.
   tags = {
-    project                = var.project_name
     environment            = each.value.environment
     purpose                = "configuration"
     "configuration-access" = "github-public"

@@ -9,7 +9,12 @@ override_data {
 }
 
 provider "aws" {
-  alias                       = "test"
+  alias = "test"
+  # Match the root provider's inherited authorization tag; do not duplicate it
+  # on resources. test_cognito_iam separately guards the actual default_tags.
+  default_tags {
+    tags = { project = var.project_name, managedby = "terraform" }
+  }
   region                      = "ap-southeast-2"
   skip_credentials_validation = true
   skip_metadata_api_check     = true
@@ -18,6 +23,7 @@ provider "aws" {
 }
 
 variables {
+  project_name                = "pawlocal"
   terraform_state_bucket_name = "fixture-state-bucket-x"
   github_repository           = "example/pawlocal"
   github_owner_id             = "1"
@@ -35,7 +41,7 @@ run "foundation_publishes_only_existing_bootstrap_values" {
     condition = length(aws_ssm_parameter.configuration) == 10 && alltrue([
       for key, parameter in aws_ssm_parameter.configuration :
       parameter.type == "String" && parameter.tier == "Standard" &&
-      parameter.tags.project == var.project_name &&
+      parameter.tags_all.project == var.project_name &&
       parameter.tags.environment == local.bootstrap_configuration_parameters[key].environment &&
       parameter.tags["configuration-access"] == "github-public" &&
       startswith(parameter.name, "/pawlocal/${local.bootstrap_configuration_parameters[key].environment}/config/") &&
@@ -172,7 +178,7 @@ run "runtime_handoff_adds_only_actual_runtime_keys" {
       for environment in ["development", "production"] :
       aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].name == "/pawlocal/${environment}/config/iam/runtime-role-arn" &&
       aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].type == "String" &&
-      aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].tags.project == var.project_name &&
+      aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].tags_all.project == var.project_name &&
       aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].tags.environment == environment &&
       aws_ssm_parameter.configuration["${environment}/iam/runtime-role-arn"].tags["configuration-access"] == "github-public"
     ])
