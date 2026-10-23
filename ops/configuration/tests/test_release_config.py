@@ -2,7 +2,8 @@
 
 import unittest
 
-from test_integration import build, helper, values
+from test_integration import build, helper, values, mappings, store_for, FakeAPI, module
+from urllib.error import HTTPError
 
 consumer = helper("release_config", "release-config.py")
 
@@ -74,6 +75,52 @@ class ReleaseConsumerTests(unittest.TestCase):
                     self.assertEqual("VITE_FARO_COLLECTOR_URL" in result, frontend == "true")
                     self.assertEqual(build.load_public(__import__("json").dumps(result)), result)
                     self.assertNotIn("OTEL_EXPORTER_OTLP_ENDPOINT", result)
+
+    def test_frontend_only_complete_copier_snapshot_needs_seeded_public_metadata(self):
+        data = values("development") | {
+            "PAWLOCAL_TELEMETRY_ENABLED": "false",
+            "VITE_TELEMETRY_ENABLED": "true",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp",
+            "PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID": "1880841",
+        }
+        data.pop("PAWLOCAL_GRAFANA_URL")
+        data.pop("PAWLOCAL_GRAFANA_WEBHOOK_URL")
+        selected = mappings("development")
+
+        def target_api(api):
+            def request(value, timeout):
+                if "/environments/oncall-development" in value.full_url:
+                    raise HTTPError(value.full_url, 404, "Not Found", {}, None)
+                return api(value, timeout)
+            return request
+
+        api = FakeAPI()
+        store = store_for(selected, data)
+        result = module.reconcile(
+            selected, store, module.GitHub("alanlima/pawlocal", "fixture", target_api(api)),
+            lambda _: None, mode="enforce", environment="development",
+        )
+        snapshot = consumer.project(result, "development")
+        self.assertEqual(snapshot["VITE_TELEMETRY_ENABLED"], "true")
+        self.assertEqual(snapshot["PAWLOCAL_TELEMETRY_ENABLED"], "false")
+        self.assertEqual(build.load_public(__import__("json").dumps(snapshot)), snapshot)
+        self.assertFalse(any("/secrets/" in call["Name"] for call in store.client.calls))
+        self.assertFalse(any("/oncall/" in call["Name"] or call["Name"].endswith("grafana/stack-url") for call in store.client.calls))
+        self.assertFalse(api.secrets)
+
+        # An unseeded, tag-protected optional backend binding can be denied by
+        # AWS. Generic copying must abort, never manufacture a partial snapshot.
+        denied = Exception("public parameter denied")
+        denied.response = {"Error": {"Code": "AccessDeniedException"}}
+        store = store_for(selected, data)
+        store.client.values["/pawlocal/development/config/grafana/otlp-endpoint"] = denied
+        api = FakeAPI()
+        with self.assertRaises(module.ReconciliationError):
+            module.reconcile(
+                selected, store, module.GitHub("alanlima/pawlocal", "fixture", target_api(api)),
+                lambda _: None, mode="enforce", environment="development",
+            )
+        self.assertFalse(api.variables)
 
     def test_missing_mode_yields_no_build_snapshot_and_private_fields_never_pass(self):
         data = values("development")
