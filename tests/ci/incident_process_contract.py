@@ -39,7 +39,7 @@ FUNCTIONS = {
         "archive": "4cb6d3e3ec09d85929d60fe9dd8a687898bcc1780fadcbf41807a2feb7a0bd29",
         "download": "e5f20c0dd06f004baf551352c8f5ea5216331d77415a69aa44a1a93e58df7ad3",
         "main": "61930aba768d1763b49c2f1ddcbeae651c59b3474a6749ed9b10451e7d0821c2",
-        "prepare": "79c6748822d081fc79c1abe78044475f89f6e4629287bfcb26258e3020d2cbcf",
+        "prepare": "9aea5fe0f5951aea036b8cbe8c19659e61715601f9f5a9dc21ab1008cc2b7c19",
         "quiesce": "340951b162cef3a91b8baf1bb8f0e0342ae27bdae8ae8d5cfc7844d6775f5efa",
         "uid": "70fa3cbd5291221adea58c1be77e48794dbf3d45e3181c0a21734ab4a3fbeacc",
         "writable_tool_caches": "88c28e4bc71d939be736c2f410c7fe38f5df71b9757f6cfd94b8feefb968e53c",
@@ -47,8 +47,8 @@ FUNCTIONS = {
     "process_policy.py": {
         "approved": "f40d3b848879c33441e587f714c1d80bb8086a14238c272af754ae2986d2d950",
         "path": "4d97180285e9f90428b934131176143d46328dd68c11ecb8760724243dfa059b",
-        "unprivileged": "2fc2cea74445693d7086b1096ab20dd80d2ee3930f1eb50ba7fd799360a86d5a",
-        "validate": "272f2c631edcef071215d7788cdc6e71946f05289d3cc9c7ab04c860ab758b72",
+        "unprivileged": "949d8002d97c39e9bf5afb27cd735c5d05c6231ed95f94251a937d607aa86f44",
+        "validate": "1ecf772a8558452ddbe3399ff956fd4e0c2b205a341d0918109cc4d819fc5bb0",
     },
 }
 

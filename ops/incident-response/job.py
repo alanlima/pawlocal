@@ -286,6 +286,26 @@ def prepare(role):
             timeout=remaining(metadata),
         )
     writable_tool_caches(dependencies)
+    # Prove actual setup-python/venv ancestor and pytest readability before any
+    # model gateway starts. The child receives no runner/API/GitHub credentials.
+    run(
+        [
+            "sudo",
+            "-u",
+            "oncall",
+            "env",
+            "-i",
+            "PATH=" + os.environ["PATH"],
+            "HOME=/home/oncall",
+            str(dependencies / "venv/bin/python"),
+            "-m",
+            "pytest",
+            "--version",
+        ],
+        cwd="/tmp",
+        check=True,
+        timeout=remaining(metadata),
+    )
     (work / "frontend/node_modules").symlink_to(
         dependencies / "frontend/node_modules", target_is_directory=True
     )

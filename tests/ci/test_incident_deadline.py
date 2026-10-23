@@ -1,4 +1,5 @@
 import importlib
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -10,6 +11,27 @@ import process_policy
 
 
 class ProcessDeadlineTests(unittest.TestCase):
+    def test_git_loader_environment_must_equal_trusted_parent(self):
+        command = [
+            "git",
+            "-c",
+            "core.hooksPath=" + os.devnull,
+            "-c",
+            "core.fsmonitor=false",
+            "-C",
+            "/tmp/fixture",
+            "rev-parse",
+            "HEAD",
+        ]
+        with patch.dict(os.environ, {"LD_LIBRARY_PATH": "/trusted/toolcache/lib"}):
+            process_policy.validate(
+                command, None, {"env": {"LD_LIBRARY_PATH": "/trusted/toolcache/lib"}}
+            )
+            with self.assertRaises(deadline.Denied):
+                process_policy.validate(
+                    command, None, {"env": {"LD_LIBRARY_PATH": "/tmp/untrusted"}}
+                )
+
     def test_reflected_wrapper_cannot_execute_infrastructure_or_root_shell(self):
         wrapper = importlib.import_module("deadline")
         for command in (
@@ -35,6 +57,18 @@ class ProcessDeadlineTests(unittest.TestCase):
             [sys.executable, "-m", "venv", process_policy.DEPENDENCIES + "/venv"],
             ["sudo", "-u", "oncall", "env", "-i", "CI=true", "npm", "run", "build"],
             ["sudo", "pkill", "-KILL", "-u", "oncall"],
+            [
+                "sudo",
+                "-u",
+                "oncall",
+                "env",
+                "-i",
+                "PATH=/usr/bin:/bin",
+                process_policy.DEPENDENCIES + "/venv/bin/python",
+                "-m",
+                "pytest",
+                "--version",
+            ],
         ):
             with self.subTest(command=command):
                 process_policy.validate(
