@@ -28,12 +28,12 @@ locals {
     { for environment in var.oncall_environments : "${environment}-apply" => { environment = environment, purpose = "apply" } }
   )
   oncall_arns = { for environment in var.oncall_environments : environment => {
-    function   = "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:pawlocal-${environment}-oncall-receiver"
-    role       = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/pawlocal-${environment}-oncall-receiver"
-    logs       = "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/pawlocal-${environment}-oncall-receiver"
-    public_url = "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${environment}/config/oncall/webhook-url"
+    function   = "arn:${data.aws_partition.current.partition}:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-${environment}-oncall-receiver"
+    role       = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.project_name}-${environment}-oncall-receiver"
+    logs       = "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-${environment}-oncall-receiver"
+    public_url = "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${environment}/config/oncall/webhook-url"
     secrets = [for suffix in ["grafana/webhook-hmac", "oncall/dispatch-app-private-key"] :
-      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${environment}/secrets/${suffix}"
+      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${environment}/secrets/${suffix}"
     ]
   } }
   oncall_read_actions = [
@@ -187,7 +187,7 @@ data "aws_iam_policy_document" "oncall_trust" {
 }
 resource "aws_iam_policy" "oncall_apply_boundary" {
   for_each = local.oncall_environments
-  name     = "pawlocal-${each.key}-oncall-terraform-apply-boundary"
+  name     = "${var.project_name}-${each.key}-oncall-terraform-apply-boundary"
   policy   = data.aws_iam_policy_document.oncall_apply[each.key].json
   lifecycle {
     precondition {
@@ -198,7 +198,7 @@ resource "aws_iam_policy" "oncall_apply_boundary" {
 }
 resource "aws_iam_role" "oncall_terraform" {
   for_each             = local.oncall_roles
-  name                 = "pawlocal-${each.value.environment}-oncall-terraform-${each.value.purpose}"
+  name                 = "${var.project_name}-${each.value.environment}-oncall-terraform-${each.value.purpose}"
   assume_role_policy   = data.aws_iam_policy_document.oncall_trust[each.key].json
   permissions_boundary = each.value.purpose == "apply" ? aws_iam_policy.oncall_apply_boundary[each.value.environment].arn : null
   max_session_duration = 3600
@@ -206,13 +206,13 @@ resource "aws_iam_role" "oncall_terraform" {
 }
 resource "aws_iam_role_policy" "oncall_terraform" {
   for_each = local.oncall_roles
-  name     = "pawlocal-${each.value.environment}-oncall-terraform-${each.value.purpose}"
+  name     = "${var.project_name}-${each.value.environment}-oncall-terraform-${each.value.purpose}"
   role     = aws_iam_role.oncall_terraform[each.key].id
   policy   = each.value.purpose == "plan" ? data.aws_iam_policy_document.oncall_plan[each.value.environment].json : data.aws_iam_policy_document.oncall_apply[each.value.environment].json
 }
 resource "aws_iam_role_policy" "oncall_assume" {
   for_each = local.oncall_roles
-  name     = "pawlocal-${each.value.environment}-assume-oncall-${each.value.purpose}"
+  name     = "${var.project_name}-${each.value.environment}-assume-oncall-${each.value.purpose}"
   role     = aws_iam_role.github_terraform[each.key].id
   policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect = "Allow", Action = ["sts:AssumeRole"], Resource = [aws_iam_role.oncall_terraform[each.key].arn]
@@ -220,12 +220,12 @@ resource "aws_iam_role_policy" "oncall_assume" {
 }
 resource "aws_iam_policy" "oncall_runtime_boundary" {
   for_each = local.oncall_environments
-  name     = "pawlocal-${each.key}-oncall-runtime-boundary"
+  name     = "${var.project_name}-${each.key}-oncall-runtime-boundary"
   policy   = local.oncall_runtime_policies[each.key]
 }
 resource "aws_iam_role" "oncall_receiver" {
   for_each             = local.oncall_environments
-  name                 = "pawlocal-${each.key}-oncall-receiver"
+  name                 = "${var.project_name}-${each.key}-oncall-receiver"
   permissions_boundary = aws_iam_policy.oncall_runtime_boundary[each.key].arn
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{
     Effect = "Allow", Action = ["sts:AssumeRole"], Principal = { Service = "lambda.amazonaws.com" }

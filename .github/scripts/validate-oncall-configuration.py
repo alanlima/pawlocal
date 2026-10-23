@@ -25,9 +25,12 @@ def validate(raw: str, account: str, region: str) -> None:
         raise ValueError("ONCALL_INVALID_JSON") from error
     if value is None:
         return
-    required = {"app_id", "installation_id", "repository_id", "allowed_services", "allowed_alerts"}
+    required = {"app_id", "installation_id", "repository_id", "repository", "allowed_services", "allowed_alerts"}
     if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"kms_key_arn"}:
         raise ValueError("ONCALL_UNKNOWN_OR_MISSING_FIELDS")
+    repository = value["repository"]
+    if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository) or repository.split("/")[1] in {".", ".."}:
+        raise ValueError("ONCALL_INVALID_REPOSITORY")
     for name in ("app_id", "installation_id", "repository_id"):
         item = value[name]
         if not isinstance(item, str) or not re.fullmatch(r"[1-9][0-9]{0,15}", item):

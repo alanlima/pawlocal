@@ -50,7 +50,7 @@ run "receiver_has_exact_runtime_sources_and_url_only_invoke" {
   }
   variables {
     oncall_receiver = {
-      app_id           = "1", installation_id = "2", repository_id = "3"
+      app_id           = "1", installation_id = "2", repository_id = "3", repository = "alanlima/pawlocal"
       allowed_services = ["pawlocal-api"], allowed_alerts = ["pawlocal-development-search-detail-failure"]
       kms_key_arn      = "arn:aws:kms:ap-southeast-2:111111111111:key/11111111-1111-1111-1111-111111111111"
     }
@@ -58,6 +58,10 @@ run "receiver_has_exact_runtime_sources_and_url_only_invoke" {
   assert {
     condition     = module.oncall_receiver[0].lambda_function_name == "pawlocal-development-oncall-receiver" && aws_iam_role_policy.oncall_runtime[0].role == "pawlocal-development-oncall-receiver"
     error_message = "Environment owns resources and policy only on its fixed bootstrap-owned role."
+  }
+  assert {
+    condition     = aws_ssm_parameter.oncall_webhook_url[0].tags["configuration-access"] == "github-public"
+    error_message = "Only the public webhook URL producer must opt into the configuration reader's public tag contract."
   }
   assert {
     condition = (
@@ -88,7 +92,7 @@ run "default_ssm_mode_adds_no_wildcard_kms_permission" {
   }
   variables {
     oncall_receiver = {
-      app_id           = "1", installation_id = "2", repository_id = "3"
+      app_id           = "1", installation_id = "2", repository_id = "3", repository = "alanlima/pawlocal"
       allowed_services = ["pawlocal-api"], allowed_alerts = ["pawlocal-development-search-detail-failure"]
     }
   }
@@ -106,7 +110,7 @@ run "reject_cross_account_or_environment_key" {
   }
   variables {
     oncall_receiver = {
-      app_id           = "1", installation_id = "2", repository_id = "3"
+      app_id           = "1", installation_id = "2", repository_id = "3", repository = "alanlima/pawlocal"
       allowed_services = ["pawlocal-api"], allowed_alerts = ["pawlocal-development-search-detail-failure"]
       kms_key_arn      = "arn:aws:kms:ap-southeast-2:222222222222:key/11111111-1111-1111-1111-111111111111"
     }
@@ -122,9 +126,33 @@ run "reject_unsafe_repository_number" {
   }
   variables {
     oncall_receiver = {
-      app_id           = "1", installation_id = "2", repository_id = "9007199254740993"
+      app_id           = "1", installation_id = "2", repository_id = "9007199254740993", repository = "alanlima/pawlocal"
       allowed_services = ["pawlocal-api"], allowed_alerts = ["pawlocal-development-search-detail-failure"]
     }
   }
   expect_failures = [var.oncall_receiver]
+}
+
+run "nondefault_project_uses_matching_receiver_role_and_parameter_names" {
+  command = plan
+  providers = {
+    aws                    = aws.oncall_test
+    aws.cognito_deployment = aws.oncall_test
+    aws.oncall_deployment  = aws.oncall_test
+  }
+  variables {
+    project_name = "petdemo"
+    oncall_receiver = {
+      app_id           = "1", installation_id = "2", repository_id = "3", repository = "example/review-demo"
+      allowed_services = ["pawlocal-api"], allowed_alerts = ["pawlocal-development-search-detail-failure"]
+    }
+  }
+  assert {
+    condition     = module.oncall_receiver[0].lambda_function_name == "petdemo-development-oncall-receiver" && aws_iam_role_policy.oncall_runtime[0].role == "petdemo-development-oncall-receiver" && aws_iam_role_policy.oncall_runtime[0].name == "petdemo-development-oncall-runtime" && aws_ssm_parameter.oncall_webhook_url[0].name == "/petdemo/development/config/oncall/webhook-url"
+    error_message = "All receiver resource and public parameter names must use project_name."
+  }
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.oncall_runtime[0].policy).Statement[1].Resource == ["arn:aws:ssm:ap-southeast-2:111111111111:parameter/petdemo/development/secrets/grafana/webhook-hmac", "arn:aws:ssm:ap-southeast-2:111111111111:parameter/petdemo/development/secrets/oncall/dispatch-app-private-key"]
+    error_message = "Receiver policy secret prefixes must match its runtime project."
+  }
 }

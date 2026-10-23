@@ -126,11 +126,8 @@ components:
             release:
               type: string
               pattern: '^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$'
-            route:
-              type: string
-              enum: [/api/v1/places, '/api/v1/places/{place_id}']
 x-github-dispatch:
-  repository: alanlima/pawlocal
+  repository: Deployment-owned PAWLOCAL_DISPATCH_REPOSITORY (owner/repo); never alert controlled.
   workflow: incident-responder.yml
   ref: main
   inputs:
@@ -139,5 +136,5 @@ x-github-dispatch:
     alerts_json: >-
       JSON array of normalized objects containing incident_key, fingerprint,
       status, starts_at, ends_at, environment, service, alert_name and optional
-      release/route. incident_key is SHA256 of JSON.stringify([environment,
+      release. Route labels are ignored so configured alerts can cover new APIs without copying raw paths. incident_key is SHA256 of JSON.stringify([environment,
       fingerprint, canonical UTC starts_at]). All arbitrary fields are omitted.

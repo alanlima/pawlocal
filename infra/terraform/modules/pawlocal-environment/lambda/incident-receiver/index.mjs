@@ -1,6 +1,5 @@
 import { createHash, createHmac, createPrivateKey, sign, timingSafeEqual } from 'node:crypto';
 
-const REPOSITORY = 'alanlima/pawlocal';
 const WORKFLOW = 'incident-responder.yml';
 const REF = 'main';
 const API = 'https://api.github.com';
@@ -10,7 +9,6 @@ const MAX_RESPONSE = 32_768;
 const SIGNATURE_HEADER = 'x-grafana-alerting-signature';
 const TIMESTAMP_HEADER = 'x-grafana-alerting-timestamp';
 const STATUS = new Set(['firing', 'resolved']);
-const ROUTES = new Set(['/api/v1/places', '/api/v1/places/{place_id}']);
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 class Rejection extends Error {
@@ -32,6 +30,9 @@ function date(value, zeroAllowed = false) {
 
 export function configuration(env = process.env) {
   const environment = env.PAWLOCAL_ONCALL_ENVIRONMENT;
+  const project = env.PAWLOCAL_PROJECT_NAME;
+  const repository = env.PAWLOCAL_DISPATCH_REPOSITORY;
+  if (!/^[A-Za-z0-9._-]{1,8}$/.test(project ?? '') || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository ?? '') || ['.', '..'].includes(repository.split('/')[1])) reject(503, 'unconfigured');
   if (!['development', 'production'].includes(environment)) reject(503, 'unconfigured');
   const parseList = (value, pattern) => {
     let list;
@@ -48,14 +49,14 @@ export function configuration(env = process.env) {
       !Number.isSafeInteger(Number(env.PAWLOCAL_DISPATCH_REPOSITORY_ID)) ||
       Number(env.PAWLOCAL_DISPATCH_REPOSITORY_ID) < 1) reject(503, 'unconfigured');
   return {
-    environment,
+    environment, project, repository, repositoryOwner: repository.split('/')[0],
     services: parseList(env.PAWLOCAL_ONCALL_ALLOWED_SERVICES, /^[a-z][a-z0-9-]*$/),
     alerts: parseList(env.PAWLOCAL_ONCALL_ALLOWED_ALERTS, /^[a-z][a-z0-9-]*$/),
     appId: env.PAWLOCAL_DISPATCH_APP_ID,
     installationId: env.PAWLOCAL_DISPATCH_INSTALLATION_ID,
     repositoryId: env.PAWLOCAL_DISPATCH_REPOSITORY_ID,
-    hmacParameter: `/pawlocal/${environment}/secrets/grafana/webhook-hmac`,
-    keyParameter: `/pawlocal/${environment}/secrets/oncall/dispatch-app-private-key`,
+    hmacParameter: `/${project}/${environment}/secrets/grafana/webhook-hmac`,
+    keyParameter: `/${project}/${environment}/secrets/oncall/dispatch-app-private-key`,
   };
 }
 
@@ -110,10 +111,9 @@ export function normalize(bytes, config) {
     if (!record(alert) || !STATUS.has(alert.status) || !record(alert.labels) ||
         Object.keys(alert.labels).length > 32 || !/^[a-f0-9]{16,64}$/.test(alert.fingerprint ?? '')) reject(400, 'invalid_alert');
     if (!Object.entries(alert.labels).every(([key, value]) => bounded(key, 64) && bounded(value, 256))) reject(400, 'invalid_labels');
-    const { environment, service, alertname, release, route } = alert.labels;
+    const { environment, service, alertname, release } = alert.labels;
     if (environment !== config.environment || !config.services.has(service) || !config.alerts.has(alertname)) reject(403, 'alert_not_allowed');
     if (release !== undefined && !/^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$/.test(release)) reject(400, 'invalid_release');
-    if (route !== undefined && !ROUTES.has(route)) reject(400, 'invalid_route');
     const startsAt = date(alert.startsAt);
     const endsAt = date(alert.endsAt, true);
     if (alert.status === 'resolved' && Date.parse(endsAt) < Date.parse(startsAt)) reject(400, 'invalid_resolution');
@@ -125,7 +125,7 @@ export function normalize(bytes, config) {
     return {
       incident_key: incidentKey, fingerprint: alert.fingerprint, status: alert.status,
       starts_at: startsAt, ends_at: endsAt, environment, service, alert_name: alertname,
-      ...(release === undefined ? {} : { release }), ...(route === undefined ? {} : { route }),
+      ...(release === undefined ? {} : { release }),
     };
   });
 }
@@ -172,11 +172,11 @@ export async function dispatch(alerts, config, privateKey, now, http = fetch, si
   if (appResponse.status !== 200) reject(502, 'github_app_unavailable');
   const app = await responseJson(appResponse);
   if (String(app.id) !== config.appId || !dispatchOnly(app.permissions)) reject(503, 'app_permissions_not_allowed');
-  const installationResponse = await request(`/repos/${REPOSITORY}/installation`, jwt);
+  const installationResponse = await request(`/repos/${config.repository}/installation`, jwt);
   if (installationResponse.status !== 200) reject(502, 'github_installation_unavailable');
   const installation = await responseJson(installationResponse);
   if (String(installation.id) !== config.installationId || String(installation.app_id) !== config.appId ||
-      installation.account?.login !== 'alanlima' || installation.repository_selection !== 'selected' ||
+      installation.account?.login?.toLowerCase() !== config.repositoryOwner.toLowerCase() || installation.repository_selection !== 'selected' ||
       !dispatchOnly(installation.permissions)) reject(503, 'installation_not_allowed');
   const tokenResponse = await request(`/app/installations/${config.installationId}/access_tokens`, jwt, 'POST', {
     repository_ids: [Number(config.repositoryId)], permissions: { actions: 'write' },
@@ -184,7 +184,7 @@ export async function dispatch(alerts, config, privateKey, now, http = fetch, si
   if (tokenResponse.status !== 201) reject(502, 'github_token_unavailable');
   const token = await responseJson(tokenResponse);
   if (!bounded(token.token, 1024) || !dispatchOnly(token.permissions) || token.repository_selection !== 'selected') reject(502, 'github_invalid_token');
-  const response = await request(`/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches`, token.token, 'POST', {
+  const response = await request(`/repos/${config.repository}/actions/workflows/${WORKFLOW}/dispatches`, token.token, 'POST', {
     ref: REF, inputs: { environment: config.environment, schema_version: '1', alerts_json: JSON.stringify(alerts) },
   });
   if (response.status !== 204) reject(502, 'github_dispatch_failed');

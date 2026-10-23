@@ -8,6 +8,7 @@ const HMAC = 'hmac-test-fixture-32-bytes-minimum';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const KEY = privateKey.export({ type: 'pkcs8', format: 'pem' });
 const env = {
+  PAWLOCAL_PROJECT_NAME: 'pawlocal', PAWLOCAL_DISPATCH_REPOSITORY: 'alanlima/pawlocal',
   PAWLOCAL_ONCALL_ENVIRONMENT: 'development', PAWLOCAL_ONCALL_ALLOWED_SERVICES: '["pawlocal-api"]',
   PAWLOCAL_ONCALL_ALLOWED_ALERTS: '["pawlocal-development-search-detail-failure"]',
   PAWLOCAL_DISPATCH_APP_ID: '1', PAWLOCAL_DISPATCH_INSTALLATION_ID: '2', PAWLOCAL_DISPATCH_REPOSITORY_ID: '3',
@@ -34,9 +35,9 @@ function harness({ overrides = {}, environment = env, secret = HMAC, httpFailure
     const path = new URL(url).pathname;
     if (path in overrides) return overrides[path]();
     if (path === '/app') return Response.json({ id: 1, permissions });
-    if (path === '/repos/alanlima/pawlocal/installation') return Response.json({ id: 2, app_id: 1, account: { login: 'alanlima' }, repository_selection: 'selected', permissions });
+    if (path === `/repos/${environment.PAWLOCAL_DISPATCH_REPOSITORY}/installation`) return Response.json({ id: 2, app_id: 1, account: { login: environment.PAWLOCAL_DISPATCH_REPOSITORY.split('/')[0] }, repository_selection: 'selected', permissions });
     if (path === '/app/installations/2/access_tokens') return Response.json({ token: 'private-installation-token', permissions, repository_selection: 'selected' }, { status: 201 });
-    if (path === '/repos/alanlima/pawlocal/actions/workflows/incident-responder.yml/dispatches') return new Response(null, { status: 204 });
+    if (path === `/repos/${environment.PAWLOCAL_DISPATCH_REPOSITORY}/actions/workflows/incident-responder.yml/dispatches`) return new Response(null, { status: 204 });
     assert.fail(`Unexpected outbound request ${path}`);
   };
   return {
@@ -112,8 +113,6 @@ for (const [name, value, expected] of [
   ['service', payload([alert({ labels: { ...alert().labels, service: 'unapproved' } })]), 403],
   ['alert name', payload([alert({ labels: { ...alert().labels, alertname: 'unapproved' } })]), 403],
   ['injected release', payload([alert({ labels: { ...alert().labels, release: '$(run-command)' } })]), 400],
-  ['URL route', payload([alert({ labels: { ...alert().labels, route: 'https://evil.test' } })]), 400],
-  ['raw detail ID', payload([alert({ labels: { ...alert().labels, route: '/api/v1/places/customer-id' } })]), 400],
   ['invalid start date', payload([alert({ startsAt: 'not-a-date' })]), 400],
   ['nonexistent calendar day', payload([alert({ startsAt: '2026-02-31T00:00:00Z' })]), 400],
   ['invalid resolution', payload([alert({ status: 'resolved', endsAt: '2026-10-22T00:00:00Z' })]), 400],
@@ -168,3 +167,33 @@ test('in-window replays can dispatch twice; receiver does not claim persistent r
   assert.equal(calls.length, 2);
   assert.equal(JSON.parse(calls[0].options.body).inputs.alerts_json, JSON.parse(calls[1].options.body).inputs.alerts_json);
 });
+
+
+test('new API labels do not restrict configured alerts and raw route hints never leave receiver', async () => {
+  for (const route of ['/api/v2/new-feature', '/api/v1/places/customer-id', 'https://private.example/?search=customer']) {
+    const h = harness();
+    assert.equal((await h.handler(event(payload([alert({ labels: { ...alert().labels, route } })])))).statusCode, 204);
+    const dispatched = JSON.parse(h.calls.at(-1).options.body);
+    assert.ok(!JSON.stringify(dispatched).includes(route));
+    assert.ok(!Object.hasOwn(JSON.parse(dispatched.inputs.alerts_json)[0], 'route'));
+  }
+});
+
+test('trusted repository and project come from deployment environment, never alert labels', async () => {
+  const environment = { ...env, PAWLOCAL_PROJECT_NAME: 'petdemo', PAWLOCAL_DISPATCH_REPOSITORY: 'example/review-demo' };
+  const h = harness({ environment });
+  const labels = { ...alert().labels, repository: 'attacker/other' };
+  assert.equal((await h.handler(event(payload([alert({ labels })])))).statusCode, 204);
+  assert.deepEqual(h.parameters, ['/petdemo/development/secrets/grafana/webhook-hmac', '/petdemo/development/secrets/oncall/dispatch-app-private-key']);
+  assert.match(h.calls.at(-1).url, /^https:\/\/api\.github\.com\/repos\/example\/review-demo\/actions\/workflows\/incident-responder\.yml\/dispatches$/);
+  assert.ok(!JSON.stringify(JSON.parse(h.calls.at(-1).options.body)).includes('attacker/other'));
+});
+
+for (const repository of ['', 'https://github.com/example/repo', '../repo', 'example/..', 'example/repo/extra', 'example/repo?ref=main']) {
+  test(`invalid configured repository ${repository} fails before secret retrieval`, async () => {
+    const h = harness({ environment: { ...env, PAWLOCAL_DISPATCH_REPOSITORY: repository } });
+    assert.equal((await h.handler(event())).statusCode, 503);
+    assert.deepEqual(h.parameters, []);
+    assert.deepEqual(h.calls, []);
+  });
+}

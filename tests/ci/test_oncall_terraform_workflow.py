@@ -18,7 +18,7 @@ spec.loader.exec_module(configuration)
 
 class OncallConfigurationTests(unittest.TestCase):
     def fixture(self):
-        return {"app_id": "1", "installation_id": "2", "repository_id": "3", "allowed_services": ["pawlocal-api"], "allowed_alerts": ["search-failure"]}
+        return {"app_id": "1", "installation_id": "2", "repository_id": "3", "repository": "alanlima/pawlocal", "allowed_services": ["pawlocal-api"], "allowed_alerts": ["search-failure"]}
 
     def test_default_null_and_narrow_public_object(self):
         configuration.validate("null", "111111111111", "ap-southeast-2")
@@ -26,6 +26,7 @@ class OncallConfigurationTests(unittest.TestCase):
 
     def test_unknown_secret_fields_and_unbounded_inputs_fail_before_terraform(self):
         for fields in ({"private_key": "PRIVATE_PEM"}, {"repository_id": "9007199254740993"},
+                       {"repository": "https://github.com/example/repo"}, {"repository": "example/.."},
                        {"allowed_alerts": ["search-failure"] * 2}, {"kms_key_arn": "arn:aws:kms:us-east-1:222222222222:key/11111111-1111-1111-1111-111111111111"}):
             with self.subTest(fields=fields), self.assertRaises(ValueError):
                 configuration.validate(json.dumps(self.fixture() | fields), "111111111111", "ap-southeast-2")

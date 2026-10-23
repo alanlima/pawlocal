@@ -4,6 +4,7 @@ variable "oncall_receiver" {
     app_id           = string
     installation_id  = string
     repository_id    = string
+    repository       = string
     allowed_services = set(string)
     allowed_alerts   = set(string)
     kms_key_arn      = optional(string)
@@ -13,6 +14,8 @@ variable "oncall_receiver" {
     condition = var.oncall_receiver == null ? true : (
       alltrue([for value in [var.oncall_receiver.app_id, var.oncall_receiver.installation_id, var.oncall_receiver.repository_id] : can(regex("^[1-9][0-9]{0,15}$", value))]) &&
       try(tonumber(var.oncall_receiver.repository_id) <= 9007199254740991, false) &&
+      can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$", var.oncall_receiver.repository)) &&
+      !contains([".", ".."], try(split("/", var.oncall_receiver.repository)[1], "")) &&
       length(var.oncall_receiver.allowed_services) >= 1 && length(var.oncall_receiver.allowed_services) <= 10 &&
       length(var.oncall_receiver.allowed_alerts) >= 1 && length(var.oncall_receiver.allowed_alerts) <= 10 &&
       alltrue([for value in setunion(var.oncall_receiver.allowed_services, var.oncall_receiver.allowed_alerts) : can(regex("^[a-z][a-z0-9-]{0,99}$", value))]) &&
@@ -24,17 +27,17 @@ variable "oncall_receiver" {
 
 locals {
   oncall_enabled  = var.oncall_receiver != null
-  oncall_name     = "pawlocal-${var.environment}-oncall-receiver"
+  oncall_name     = "${var.project_name}-${var.environment}-oncall-receiver"
   oncall_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.oncall_name}"
   oncall_secret_arns = [for suffix in ["grafana/webhook-hmac", "oncall/dispatch-app-private-key"] :
-    "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${var.environment}/secrets/${suffix}"
+    "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/secrets/${suffix}"
   ]
 }
 
 resource "aws_iam_role_policy" "oncall_runtime" {
   count    = local.oncall_enabled ? 1 : 0
   provider = aws.oncall_deployment
-  name     = "pawlocal-${var.environment}-oncall-runtime"
+  name     = "${var.project_name}-${var.environment}-oncall-runtime"
   role     = local.oncall_name
   policy = jsonencode({
     Version = "2012-10-17"
@@ -73,10 +76,12 @@ module "oncall_receiver" {
   create_sam_metadata               = false
   allowed_triggers                  = {}
   environment_variables = {
+    PAWLOCAL_PROJECT_NAME             = var.project_name
     PAWLOCAL_ONCALL_ENVIRONMENT       = var.environment
     PAWLOCAL_DISPATCH_APP_ID          = var.oncall_receiver.app_id
     PAWLOCAL_DISPATCH_INSTALLATION_ID = var.oncall_receiver.installation_id
     PAWLOCAL_DISPATCH_REPOSITORY_ID   = var.oncall_receiver.repository_id
+    PAWLOCAL_DISPATCH_REPOSITORY      = var.oncall_receiver.repository
     PAWLOCAL_ONCALL_ALLOWED_SERVICES  = jsonencode(sort(tolist(var.oncall_receiver.allowed_services)))
     PAWLOCAL_ONCALL_ALLOWED_ALERTS    = jsonencode(sort(tolist(var.oncall_receiver.allowed_alerts)))
   }
@@ -112,11 +117,13 @@ resource "aws_lambda_permission" "oncall_via_url" {
 resource "aws_ssm_parameter" "oncall_webhook_url" {
   count       = local.oncall_enabled ? 1 : 0
   provider    = aws.oncall_deployment
-  name        = "/pawlocal/${var.environment}/config/oncall/webhook-url"
+  name        = "/${var.project_name}/${var.environment}/config/oncall/webhook-url"
   description = "Public independent Grafana receiver endpoint; never an ingestion credential."
   type        = "String"
   value       = aws_lambda_function_url.oncall_receiver[0].function_url
-  tags        = local.common_tags
+  tags = merge(local.common_tags, {
+    "configuration-access" = "github-public"
+  })
 }
 
 output "oncall_receiver_url" {

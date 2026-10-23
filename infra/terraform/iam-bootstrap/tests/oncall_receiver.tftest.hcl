@@ -77,3 +77,20 @@ run "reject_unknown_oncall_environment" {
   variables { oncall_environments = ["staging"] }
   expect_failures = [var.oncall_environments]
 }
+
+run "nondefault_oncall_project_has_matching_bootstrap_roles_and_policy_envelope" {
+  command   = plan
+  providers = { aws = aws.oncall_test }
+  variables {
+    project_name        = "petdemo"
+    oncall_environments = ["development"]
+  }
+  assert {
+    condition     = aws_iam_role.oncall_receiver["development"].name == "petdemo-development-oncall-receiver" && aws_iam_role.oncall_terraform["development-plan"].name == "petdemo-development-oncall-terraform-plan" && aws_iam_policy.oncall_apply_boundary["development"].name == "petdemo-development-oncall-terraform-apply-boundary" && aws_iam_policy.oncall_runtime_boundary["development"].name == "petdemo-development-oncall-runtime-boundary"
+    error_message = "Bootstrap on-call identities must match the environment project prefix."
+  }
+  assert {
+    condition     = local.oncall_arns.development.public_url == "arn:aws:ssm:ap-southeast-2:111111111111:parameter/petdemo/development/config/oncall/webhook-url" && local.oncall_arns.development.function == "arn:aws:lambda:ap-southeast-2:111111111111:function:petdemo-development-oncall-receiver" && length(data.aws_iam_policy_document.oncall_apply["development"].minified_json) <= 6144
+    error_message = "Bootstrap policy resources and size ceiling must match project_name."
+  }
+}

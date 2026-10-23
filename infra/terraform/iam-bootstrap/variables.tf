@@ -5,7 +5,7 @@ variable "aws_region" {
 }
 
 variable "project_name" {
-  description = "Project tag value for bootstrap-owned resources and their tag-based permission conditions. Deterministic pawlocal-* resource names remain fixed by DEC-009."
+  description = "Project tag value for bootstrap-owned resources and their tag-based permission conditions. Existing DEC-009 resource names remain fixed; Issue #227 on-call resources, policies and SSM paths use this project prefix consistently."
   type        = string
   default     = "pawlocal"
 

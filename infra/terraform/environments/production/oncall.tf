@@ -4,6 +4,7 @@ variable "oncall_receiver" {
     app_id           = string
     installation_id  = string
     repository_id    = string
+    repository       = string
     allowed_services = set(string)
     allowed_alerts   = set(string)
     kms_key_arn      = optional(string)
