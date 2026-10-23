@@ -235,6 +235,37 @@ class IncidentCandidateVerificationTests(unittest.TestCase):
         with self.assertRaises(Denied):
             verify_incident_candidate(self.client, self.pr_number)
 
+    def test_download_raw_redirect_handling(self):
+        import urllib.error
+        client = GitHubClient(token="status-token", repository="test-owner/test-repo", read_token="read-token")
+        
+        # Test unapproved storage host denied
+        unapproved_error = urllib.error.HTTPError("https://api.github.com/test", 302, "Found", {"Location": "https://evil.com/leak"}, None)
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = unapproved_error
+        client.opener = mock_opener
+        with self.assertRaises(Denied) as ctx:
+            client.download_raw("/actions/artifacts/123/zip")
+        self.assertIn("Unapproved artifact storage origin", str(ctx.exception))
+
+    def test_download_publication_receipt_timeout(self):
+        from authorizer import download_publication_receipt
+        mock_client = MagicMock(spec=GitHubClient)
+        mock_client.repository = "test-owner/test-repo"
+        mock_client.request.side_effect = lambda method, path: {
+            "/actions/runs/999": {
+                "path": ".github/workflows/incident-responder.yml",
+                "head_branch": "main",
+                "repository": {"full_name": "test-owner/test-repo"},
+                "event": "workflow_dispatch",
+            },
+            "/actions/runs/999/artifacts?per_page=100": {"artifacts": []},
+        }.get(path, {})
+
+        with self.assertRaises(Denied) as ctx:
+            download_publication_receipt(mock_client, 999, max_wait_seconds=0.1, poll_interval_seconds=0.05)
+        self.assertIn("not available within", str(ctx.exception))
+
 
 class OrdinaryChangeApprovalTests(unittest.TestCase):
     def setUp(self):

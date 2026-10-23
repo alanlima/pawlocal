@@ -14,6 +14,8 @@ import os
 import re
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -44,32 +46,35 @@ class GitHubClient:
         repository: str,
         context: str = DEFAULT_CONTEXT,
         deadline: float | None = None,
+        read_token: str | None = None,
         opener=None,
     ):
         if not token:
             raise Denied("GitHub token required")
         if not repository or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
             raise Denied(f"Valid GitHub repository (owner/repo) required, got: {repository!r}")
-        self.token = token
+        self.status_token = token
+        self.read_token = read_token or token
         self.repository = repository
         self.context = context
         self.api_base = f"https://api.github.com/repos/{repository}"
         self.deadline = deadline or (time.time() + 600)
         self.opener = opener or urllib.request.build_opener(NoRedirect)
 
-    def request(self, method: str, path: str, data: dict | None = None) -> dict | list:
+    def request(self, method: str, path: str, data: dict | None = None, use_status_token: bool = False) -> dict | list:
         if time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
         url = self.api_base + path if path.startswith("/") else path
         raw_body = json.dumps(data, separators=(",", ":")).encode() if data is not None else None
+        auth_token = self.status_token if use_status_token else self.read_token
 
         req = urllib.request.Request(
             url,
             data=raw_body,
             method=method,
             headers={
-                "Authorization": f"Bearer {self.token}",
+                "Authorization": f"Bearer {auth_token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 "Content-Type": "application/json",
@@ -85,6 +90,7 @@ class GitHubClient:
             return json.loads(body.decode("utf-8"))
 
     def download_raw(self, path: str) -> bytes:
+        """Downloads artifact archive, following signed redirect without forwarding credentials."""
         if time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
@@ -93,15 +99,52 @@ class GitHubClient:
             url,
             method="GET",
             headers={
-                "Authorization": f"Bearer {self.token}",
+                "Authorization": f"Bearer {self.read_token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
 
-        with self.opener.open(req, timeout=min(15, max(1, self.deadline - time.time()))) as resp:
+        redirect_url = None
+        try:
+            with self.opener.open(req, timeout=min(15, max(1, self.deadline - time.time()))) as resp:
+                if resp.status in (302, 307):
+                    redirect_url = resp.headers.get("Location")
+                elif resp.status == 200:
+                    body = resp.read(5 * 1024 * 1024 + 1)
+                    if len(body) > 5 * 1024 * 1024:
+                        raise Denied("Artifact download exceeded size bound")
+                    return body
+                else:
+                    raise Denied(f"Unexpected artifact response status: {resp.status}")
+        except urllib.error.HTTPError as error:
+            if error.code in (302, 307):
+                redirect_url = error.headers.get("Location")
+            else:
+                raise Denied(f"Artifact download failed with status {error.code}") from error
+
+        if not redirect_url:
+            raise Denied("Artifact signed redirect location missing")
+
+        parsed = urllib.parse.urlsplit(redirect_url)
+        if (
+            parsed.scheme != "https"
+            or parsed.username
+            or not parsed.hostname
+            or not (
+                parsed.hostname.endswith(".blob.core.windows.net")
+                or parsed.hostname.endswith(".githubusercontent.com")
+            )
+        ):
+            raise Denied(f"Unapproved artifact storage origin: {parsed.hostname}")
+
+        # Fetch signed storage URL without repository authorization credentials
+        storage_req = urllib.request.Request(redirect_url, method="GET")
+        with urllib.request.build_opener(NoRedirect).open(
+            storage_req, timeout=min(15, max(1, self.deadline - time.time()))
+        ) as resp:
             if resp.status != 200:
-                raise Denied(f"Artifact download failed with status {resp.status}")
+                raise Denied(f"Storage download failed with status {resp.status}")
             body = resp.read(5 * 1024 * 1024 + 1)
             if len(body) > 5 * 1024 * 1024:
                 raise Denied("Artifact download exceeded size bound")
@@ -126,7 +169,7 @@ class GitHubClient:
             "context": self.context,
             "description": description[:140],
         }
-        return self.request("POST", f"/statuses/{sha}", payload)
+        return self.request("POST", f"/statuses/{sha}", payload, use_status_token=True)
 
 
 def classify_pr(pr_data: dict, publisher_bot_logins: set[str] | list[str] | None = None) -> str:
@@ -168,40 +211,50 @@ def extract_run_id(pr_body: str) -> int:
     return int(match.group(1))
 
 
-def download_publication_receipt(client: GitHubClient, run_id: int) -> dict:
-    """Downloads and verifies the immutable publication artifact from the controller run."""
-    run = client.request("GET", f"/actions/runs/{run_id}")
-    run_repo = run.get("repository", {}) if isinstance(run, dict) else {}
-    run_repo_name = run_repo.get("full_name") or run_repo.get("name")
-    
-    # Must match repository of the client
-    if (
-        not isinstance(run, dict)
-        or run.get("path") != ".github/workflows/incident-responder.yml"
-        or run.get("head_branch") != "main"
-        or (run_repo_name and client.repository and run_repo_name != client.repository and not client.repository.endswith(f"/{run_repo_name}"))
-        or run.get("event") != "workflow_dispatch"
-    ):
-        raise Denied("Untrusted incident controller workflow run")
-
-    artifacts_resp = client.request("GET", f"/actions/runs/{run_id}/artifacts?per_page=100")
-    if not isinstance(artifacts_resp, dict) or not isinstance(artifacts_resp.get("artifacts"), list):
-        raise Denied("Unable to retrieve controller artifacts")
-
+def download_publication_receipt(
+    client: GitHubClient,
+    run_id: int,
+    max_wait_seconds: float = 60.0,
+    poll_interval_seconds: float = 3.0,
+) -> dict:
+    """Downloads and verifies the immutable publication artifact from the controller run,
+    retrying boundedly until uploaded by the controller."""
+    start_time = time.time()
     target_name = f"oncall-publication-{run_id}"
-    matched = [a for a in artifacts_resp["artifacts"] if a.get("name") == target_name]
-    if not matched:
-        raise Denied(f"Publication artifact {target_name} not found")
 
-    artifact_id = matched[0].get("id")
-    zip_bytes = client.download_raw(f"/actions/artifacts/{artifact_id}/zip")
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
-        if "publication.json" not in z.namelist():
-            raise Denied("publication.json missing in publication artifact")
-        raw = z.read("publication.json")
+    while True:
+        run = client.request("GET", f"/actions/runs/{run_id}")
+        run_repo = run.get("repository", {}) if isinstance(run, dict) else {}
+        run_repo_name = run_repo.get("full_name") or run_repo.get("name")
 
-    receipt = json.loads(raw.decode("utf-8"))
-    return receipt
+        # Must match repository of the client
+        if (
+            not isinstance(run, dict)
+            or run.get("path") != ".github/workflows/incident-responder.yml"
+            or run.get("head_branch") != "main"
+            or (run_repo_name and client.repository and run_repo_name != client.repository and not client.repository.endswith(f"/{run_repo_name}"))
+            or run.get("event") != "workflow_dispatch"
+        ):
+            raise Denied("Untrusted incident controller workflow run")
+
+        artifacts_resp = client.request("GET", f"/actions/runs/{run_id}/artifacts?per_page=100")
+        if not isinstance(artifacts_resp, dict) or not isinstance(artifacts_resp.get("artifacts"), list):
+            raise Denied("Unable to retrieve controller artifacts")
+
+        matched = [a for a in artifacts_resp["artifacts"] if a.get("name") == target_name and not a.get("expired")]
+        if matched:
+            artifact_id = matched[0].get("id")
+            zip_bytes = client.download_raw(f"/actions/artifacts/{artifact_id}/zip")
+            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+                if "publication.json" not in z.namelist():
+                    raise Denied("publication.json missing in publication artifact")
+                raw = z.read("publication.json")
+            return json.loads(raw.decode("utf-8"))
+
+        if time.time() - start_time >= max_wait_seconds:
+            raise Denied(f"Publication artifact {target_name} not available within {max_wait_seconds}s")
+
+        time.sleep(poll_interval_seconds)
 
 
 def verify_incident_candidate(
@@ -329,6 +382,7 @@ def main():
         token=token_data["token"],
         repository=repo,
         context=args.context,
+        read_token=os.environ.get("GITHUB_TOKEN"),
     )
 
     pr_number = int(os.environ["PR_NUMBER"])
