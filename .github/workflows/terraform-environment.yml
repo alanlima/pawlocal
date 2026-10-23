@@ -211,7 +211,7 @@ jobs:
 
       - name: Report unavailable reconciliation
         if: inputs.phase != 'foundation' && needs.reconcile-preflight.outputs.configuration == ''
-        run: echo '::warning::Configuration synchronization was unavailable. Terraform will use existing protected Environment variables; required inputs and plan approval remain enforced.'
+        run: echo '::warning::Configuration synchronization was unavailable. Terraform will use existing protected Environment variables; required inputs and review approval remain enforced.'
 
       - name: Validate selection and required configuration
         shell: bash
