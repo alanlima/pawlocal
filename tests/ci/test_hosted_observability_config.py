@@ -16,8 +16,6 @@ spec.loader.exec_module(module)
 PUBLIC = {
     "enabled": False,
     "stack_url": "https://fixture.grafana.net/",
-    "otlp_endpoint": "https://gateway.grafana.net/otlp",
-    "otlp_instance_id": "12345",
     "faro_collector_url": "https://faro.grafana.net/collect/public-key",
 }
 
@@ -34,17 +32,16 @@ class HostedOperatorTests(unittest.TestCase):
                 )
 
     def test_browser_only_needs_no_otlp_and_requires_strict_frontend_boolean(self):
-        value = {key: item for key, item in PUBLIC.items() if not key.startswith("otlp_")}
+        value = dict(PUBLIC)
         value["frontend_enabled"] = True
         module.validate(json.dumps(value), "111111111111", "ap-southeast-2")
         for bad in (None, 0, "true"):
             with self.assertRaises(ValueError):
                 module.validate(json.dumps(value | {"frontend_enabled": bad}), "111111111111", "ap-southeast-2")
 
-    def test_discovery_mode_allows_omitted_otlp_bindings(self):
-        value = {key: item for key, item in PUBLIC.items() if not key.startswith("otlp_")}
-        module.validate(json.dumps(value | {"enabled": True}), "111111111111", "ap-southeast-2")
-        module.validate(json.dumps(value | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
+    def test_discovery_mode_allows_public_bindings_with_optional_slug(self):
+        module.validate(json.dumps(PUBLIC | {"enabled": True}), "111111111111", "ap-southeast-2")
+        module.validate(json.dumps(PUBLIC | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
@@ -53,8 +50,10 @@ class HostedOperatorTests(unittest.TestCase):
             {"enabled": 0},
             {"otlp_endpoint": "https://user:private@gateway.grafana.net/otlp"},
             {"otlp_endpoint": "https://gateway.grafana.net/otlp?token=private"},
-            {"faro_collector_url": "https://foreign.example.test/collect/public"},
+            {"otlp_endpoint": "https://gateway.grafana.net/otlp"},
+            {"otlp_instance_id": "12345"},
             {"otlp_instance_id": "private-user-identity"},
+            {"faro_collector_url": "https://foreign.example.test/collect/public"},
             {"stack_slug": "invalid_slug!"},
             {"stack_slug": "https://slug.grafana.net"},
             {

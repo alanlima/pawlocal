@@ -4,8 +4,7 @@ variable "hosted_observability" {
     enabled            = optional(bool, false)
     frontend_enabled   = optional(bool)
     stack_url          = string
-    otlp_endpoint      = optional(string)
-    otlp_instance_id   = optional(string)
+    stack_slug         = optional(string)
     faro_collector_url = string
     kms_key_arn        = optional(string)
   })

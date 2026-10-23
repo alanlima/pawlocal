@@ -98,14 +98,12 @@ run "enabled_mode_exact_runtime_secret_and_public_bindings" {
     hosted_observability = {
       enabled            = true
       stack_url          = "https://fixture.grafana.net/"
-      otlp_endpoint      = "https://otlp-gateway.grafana.net/otlp"
-      otlp_instance_id   = "12345"
       faro_collector_url = "https://faro.grafana.net/collect/public-key"
       kms_key_arn        = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     }
   }
   assert {
-    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["grafana/otlp-endpoint"] == var.hosted_observability.otlp_endpoint && alltrue([for p in values(aws_ssm_parameter.configuration) : p.type == "String" && p.tags["configuration-access"] == "github-public"])
+    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["grafana/otlp-endpoint"] == "https://otlp-gateway.grafana.net/otlp" && alltrue([for p in values(aws_ssm_parameter.configuration) : p.type == "String" && p.tags["configuration-access"] == "github-public"])
     error_message = "Only actual public bindings must be published as tagged Strings."
   }
   assert {
@@ -113,7 +111,7 @@ run "enabled_mode_exact_runtime_secret_and_public_bindings" {
     error_message = "Runtime may read only its exact OTLP secret, with exact matching KMS context when configured."
   }
   assert {
-    condition     = local.backend_runtime_environment["OTEL_SDK_DISABLED"] == "false" && local.backend_runtime_environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == var.hosted_observability.otlp_endpoint && !contains(keys(local.backend_runtime_environment), "OTEL_EXPORTER_OTLP_HEADERS")
+    condition     = local.backend_runtime_environment["OTEL_SDK_DISABLED"] == "false" && local.backend_runtime_environment["OTEL_EXPORTER_OTLP_ENDPOINT"] == "https://otlp-gateway.grafana.net/otlp" && !contains(keys(local.backend_runtime_environment), "OTEL_EXPORTER_OTLP_HEADERS")
     error_message = "Release runtime must match the enabled public mode without credential payload environment variables."
   }
 }
@@ -124,9 +122,7 @@ run "private_endpoint_input_denied" {
   variables {
     hosted_observability = {
       enabled            = true
-      stack_url          = "https://fixture.grafana.net/"
-      otlp_endpoint      = "https://private:credential@otlp.grafana.net/otlp"
-      otlp_instance_id   = "12345"
+      stack_url          = "https://private:credential@fixture.grafana.net/"
       faro_collector_url = "https://faro.grafana.net/collect/public-key"
     }
   }
@@ -192,8 +188,6 @@ run "independent_backend_true_frontend_false" {
       frontend_enabled   = false
       stack_url          = "https://fixture.grafana.net/"
       faro_collector_url = "https://faro.grafana.net/collect/public-key"
-      otlp_endpoint      = "https://gateway.grafana.net/otlp"
-      otlp_instance_id   = "12345"
     }
   }
   assert {
@@ -220,8 +214,6 @@ run "independent_backend_true_frontend_true" {
       frontend_enabled   = true
       stack_url          = "https://fixture.grafana.net/"
       faro_collector_url = "https://faro.grafana.net/collect/public-key"
-      otlp_endpoint      = "https://gateway.grafana.net/otlp"
-      otlp_instance_id   = "12345"
     }
   }
   assert {
@@ -248,8 +240,6 @@ run "browser_only_public_metadata_does_not_change_backend_container" {
       frontend_enabled   = true
       stack_url          = "https://fixture.grafana.net/"
       faro_collector_url = "https://faro.grafana.net/collect/public-key"
-      otlp_endpoint      = "https://gateway.grafana.net/otlp"
-      otlp_instance_id   = "12345"
     }
   }
   assert {
@@ -257,7 +247,7 @@ run "browser_only_public_metadata_does_not_change_backend_container" {
     error_message = "Browser-only public metadata must leave the actual same-image backend container export settings at their null/disabled values."
   }
   assert {
-    condition     = aws_ssm_parameter.configuration["grafana/otlp-endpoint"].value == var.hosted_observability.otlp_endpoint && aws_ssm_parameter.configuration["grafana/otlp-instance-id"].value == var.hosted_observability.otlp_instance_id && aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "true" && alltrue([for s in data.aws_iam_policy_document.runtime[0].statement : !contains(flatten([s.actions]), "ssm:GetParameter") && !contains(flatten([s.actions]), "kms:Decrypt")])
+    condition     = !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-instance-id") && aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "true" && alltrue([for s in data.aws_iam_policy_document.runtime[0].statement : !contains(flatten([s.actions]), "ssm:GetParameter") && !contains(flatten([s.actions]), "kms:Decrypt")])
     error_message = "Known public stack metadata must still be seeded without granting backend credential access."
   }
 }

@@ -108,6 +108,7 @@ jobs:
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
       PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
 
   verify-development:
     name: Publish frontend and verify development

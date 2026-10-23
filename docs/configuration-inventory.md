@@ -111,8 +111,8 @@ Paths below are prefixed `/pawlocal/{environment}/` for development/production. 
 |---|---|---|---|
 | config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P | backend runtime mode; matching application state |
 | config/frontend/telemetry-enabled | String / false | VITE_TELEMETRY_ENABLED / R | independent frontend build mode; matching application state |
-| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state discovered via grafana_cloud_stack (or operator fallback) |
-| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state discovered via grafana_cloud_stack (or operator fallback) |
+| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state discovered via grafana_cloud_stack |
+| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state discovered via grafana_cloud_stack |
 | config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | public Faro key path; application state using explicit Grafana input (not discoverable from stack) |
 | config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | trusted preflight; application state using discovered or actual Grafana input |
 | config/oncall/webhook-url | String / false | PAWLOCAL_GRAFANA_WEBHOOK_URL / O | contact-point verification; application state derives Function URL |
