@@ -167,6 +167,53 @@ class IncidentCandidateVerificationTests(unittest.TestCase):
         with self.assertRaises(Denied):
             verify_incident_candidate(self.client, self.pr_number, receipt)
 
+    def test_automatic_publication_download_from_pr_body(self):
+        import io, zipfile
+        pr_with_body = dict(
+            self.valid_pr,
+            body="Workflow evidence: https://github.com/alanlima/pawlocal/actions/runs/12345"
+        )
+        self.client.get_pr.return_value = pr_with_body
+        self.client.get_pr_files.return_value = ["backend/pawlocal/api.py"]
+        
+        # Mock run and artifact calls
+        self.client.request.side_effect = lambda method, url, data=None: {
+            "/actions/runs/12345": {
+                "id": 12345,
+                "path": ".github/workflows/incident-responder.yml",
+                "head_branch": "main",
+                "repository": {"id": 1423024931},
+                "event": "workflow_dispatch",
+            },
+            "/actions/runs/12345/artifacts?per_page=100": {
+                "artifacts": [{"id": 999, "name": "oncall-publication-12345"}]
+            }
+        }.get(url, {})
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w") as z:
+            z.writestr("publication.json", json.dumps(self.valid_receipt))
+        self.client.download_raw.return_value = zip_buf.getvalue()
+
+        result = verify_incident_candidate(self.client, self.pr_number)
+        self.assertTrue(result["authorized"])
+
+    def test_untrusted_workflow_path_for_publication_denied(self):
+        pr_with_body = dict(
+            self.valid_pr,
+            body="Workflow evidence: https://github.com/alanlima/pawlocal/actions/runs/12345"
+        )
+        self.client.get_pr.return_value = pr_with_body
+        self.client.request.return_value = {
+            "id": 12345,
+            "path": ".github/workflows/untrusted.yml",
+            "head_branch": "main",
+            "repository": {"id": 1423024931},
+            "event": "workflow_dispatch",
+        }
+        with self.assertRaises(Denied):
+            verify_incident_candidate(self.client, self.pr_number)
+
 
 class OrdinaryChangeApprovalTests(unittest.TestCase):
     def setUp(self):

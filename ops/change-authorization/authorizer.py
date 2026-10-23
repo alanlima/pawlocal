@@ -8,12 +8,14 @@ or enforces protected human review for ordinary PRs.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
 import sys
 import time
 import urllib.request
+import zipfile
 from pathlib import Path, PurePosixPath
 
 # Candidate path boundary enforcement
@@ -72,6 +74,29 @@ class GitHubClient:
                 raise Denied("Response exceeded size bound")
             return json.loads(body.decode("utf-8"))
 
+    def download_raw(self, path: str) -> bytes:
+        if time.time() >= self.deadline:
+            raise Denied("Operation deadline exceeded")
+
+        url = GITHUB + path if path.startswith("/") else path
+        req = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+
+        with self.opener.open(req, timeout=min(15, max(1, self.deadline - time.time()))) as resp:
+            if resp.status != 200:
+                raise Denied(f"Artifact download failed with status {resp.status}")
+            body = resp.read(5 * 1024 * 1024 + 1)
+            if len(body) > 5 * 1024 * 1024:
+                raise Denied("Artifact download exceeded size bound")
+            return body
+
     def get_pr(self, number: int) -> dict:
         return self.request("GET", f"/pulls/{number}")
 
@@ -119,10 +144,51 @@ def classify_pr(pr_data: dict) -> str:
     return "ordinary"
 
 
+def extract_run_id(pr_body: str) -> int:
+    if not isinstance(pr_body, str):
+        raise Denied("PR body missing")
+    match = re.search(r"actions/runs/([1-9][0-9]*)", pr_body)
+    if not match:
+        raise Denied("No workflow run evidence found in PR body")
+    return int(match.group(1))
+
+
+def download_publication_receipt(client: GitHubClient, run_id: int) -> dict:
+    """Downloads and verifies the immutable publication artifact from the controller run."""
+    run = client.request("GET", f"/actions/runs/{run_id}")
+    if (
+        not isinstance(run, dict)
+        or run.get("path") != ".github/workflows/incident-responder.yml"
+        or run.get("head_branch") != "main"
+        or run.get("repository", {}).get("id") != 1423024931
+        or run.get("event") != "workflow_dispatch"
+    ):
+        raise Denied("Untrusted incident controller workflow run")
+
+    artifacts_resp = client.request("GET", f"/actions/runs/{run_id}/artifacts?per_page=100")
+    if not isinstance(artifacts_resp, dict) or not isinstance(artifacts_resp.get("artifacts"), list):
+        raise Denied("Unable to retrieve controller artifacts")
+
+    target_name = f"oncall-publication-{run_id}"
+    matched = [a for a in artifacts_resp["artifacts"] if a.get("name") == target_name]
+    if not matched:
+        raise Denied(f"Publication artifact {target_name} not found")
+
+    artifact_id = matched[0].get("id")
+    zip_bytes = client.download_raw(f"/actions/artifacts/{artifact_id}/zip")
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        if "publication.json" not in z.namelist():
+            raise Denied("publication.json missing in publication artifact")
+        raw = z.read("publication.json")
+
+    receipt = json.loads(raw.decode("utf-8"))
+    return receipt
+
+
 def verify_incident_candidate(
     client: GitHubClient,
     pr_number: int,
-    publication_receipt: dict,
+    publication_receipt: dict | None = None,
 ) -> dict:
     """Verifies that an incident candidate meets all safety constraints and allowlists."""
     pr = client.get_pr(pr_number)
@@ -132,6 +198,11 @@ def verify_incident_candidate(
     head_sha = pr.get("head", {}).get("sha", "")
     base_sha = pr.get("base", {}).get("sha", "")
     head_ref = pr.get("head", {}).get("ref", "")
+
+    # Retrieve authentic publication artifact if not passed directly
+    if publication_receipt is None:
+        run_id = extract_run_id(pr.get("body", ""))
+        publication_receipt = download_publication_receipt(client, run_id)
 
     # 1. Validate publication receipt provenance
     if (
@@ -233,16 +304,8 @@ def main():
     base_sha = os.environ["BASE_SHA"]
 
     if args.mode == "incident":
-        receipt = {
-            "schema": 1,
-            "pr": pr_number,
-            "candidate_sha": head_sha,
-            "base_sha": base_sha,
-            "branch": f"incident/development/{head_sha[:16]}",
-            "promotion_deadline": int(os.environ.get("PROMOTION_DEADLINE", 2147483647)),
-        }
         try:
-            verify_incident_candidate(client, pr_number, receipt)
+            verify_incident_candidate(client, pr_number)
             client.post_status(head_sha, "success", "Authenticated incident candidate authorized")
             print("Incident change authorization status posted successfully.")
         except Denied as e:
