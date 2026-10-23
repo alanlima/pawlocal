@@ -438,7 +438,9 @@ class ReconcileTests(unittest.TestCase):
             ),
             contextlib.redirect_stderr(captured),
         ):
-            self.assertEqual(module.main(["--environment", "development"]), 1)
+            self.assertEqual(
+                module.main(["--fail-on-error", "--environment", "development"]), 1
+            )
         store.assert_called_once_with()
         github.assert_called_once_with("alanlima/pawlocal", SENTINEL)
         self.assertNotIn(SENTINEL, captured.getvalue())
@@ -446,7 +448,9 @@ class ReconcileTests(unittest.TestCase):
             "RuntimeError: SSM endpoint connection refused", captured.getvalue()
         )
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-            module.main(["--environment", "development", "--mode", "invalid"])
+            module.main(
+                ["--fail-on-error", "--environment", "development", "--mode", "invalid"]
+            )
 
     def test_workflow_protection_serialization_and_feature_harness(self):
         workflow = yaml.safe_load(

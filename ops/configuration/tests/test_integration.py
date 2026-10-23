@@ -586,6 +586,54 @@ class IntegrationTests(unittest.TestCase):
         with self.assertRaises(module.ReconciliationError):
             collision.check(plan, FakeSSM())
 
+    def test_warning_only_workflow_keeps_setup_failures_from_running_sync(self):
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+        )
+        events = workflow.get("on", workflow.get(True))
+        for event in ("workflow_call", "workflow_dispatch"):
+            self.assertIs(events[event]["inputs"]["fail_on_error"]["default"], False)
+        steps = {
+            step.get("id"): step for step in workflow["jobs"]["reconcile"]["steps"]
+        }
+        for current, previous in (
+            ("entry", "checkout"),
+            ("python", "entry"),
+            ("dependencies", "python"),
+            ("credentials", "dependencies"),
+            ("sync", "credentials"),
+        ):
+            self.assertEqual(
+                steps[current]["if"], f"steps.{previous}.outcome == 'success'"
+            )
+            self.assertEqual(
+                steps[current]["continue-on-error"], "${{ !inputs.fail_on_error }}"
+            )
+        self.assertIn("--fail-on-error", steps["sync"]["run"])
+        outputs = workflow["jobs"]["reconcile"]["outputs"]
+        for expression in outputs.values():
+            self.assertIn("steps.sync.outputs.reconciled == 'true'", expression)
+        self.assertIn(
+            "steps.sync.outputs.reconciled == 'true'", steps["consumer"]["if"]
+        )
+        terraform = yaml.safe_load(
+            (ROOT / ".github/workflows/terraform-environment.yml").read_text()
+        )
+        for job in ("reconcile-preflight", "reconcile-after-apply"):
+            self.assertIs(terraform["jobs"][job]["with"]["fail_on_error"], False)
+        for job in ("plan", "apply"):
+            for expression in terraform["jobs"][job]["env"].values():
+                if "fromJSON(needs.reconcile-preflight.outputs.configuration" in str(
+                    expression
+                ):
+                    self.assertRegex(expression, r"\.[A-Z_]+ \|\| vars\.[A-Z_]+ ")
+        validator = next(
+            step["run"]
+            for step in terraform["jobs"]["plan"]["steps"]
+            if step["name"] == "Validate selection and required configuration"
+        )
+        self.assertIn("Missing required runtime configuration", validator)
+
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(
             (ROOT / ".github/workflows" / name).read_text()
