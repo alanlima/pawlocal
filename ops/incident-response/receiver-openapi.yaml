@@ -1,0 +1,143 @@
+openapi: 3.1.0
+info:
+  title: PawLocal independent Grafana incident receiver
+  version: 1.0.0
+  description: >-
+    Separate Lambda Function URL contract, not a FastAPI application route.
+    Use the generated receiver URL only after approved enablement. Dispatch
+    acceptance is not durable AWS recording or exactly-once execution.
+servers:
+  - url: /
+    description: Relative to the separately approved matching Lambda Function URL.
+paths:
+  /:
+    post:
+      operationId: dispatchGrafanaIncident
+      summary: Authenticate a bounded Grafana notification and request fixed workflow dispatch.
+      security:
+        - grafanaSignature: []
+      parameters:
+        - in: header
+          name: X-Grafana-Alerting-Timestamp
+          required: true
+          description: Unix seconds; maximum age 300 seconds and future skew 30 seconds.
+          schema:
+            type: string
+            pattern: '^[0-9]{1,12}$'
+      requestBody:
+        required: true
+        description: >-
+          At most 65536 UTF-8 bytes, uncompressed JSON. HMAC-SHA256 covers the
+          exact timestamp, a colon and original bytes before parsing. Unknown
+          annotations/messages/URLs/labels are never forwarded into GitHub.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Notification'
+      responses:
+        '204':
+          description: GitHub returned exactly HTTP 204 accepting the fixed workflow dispatch; execution is not yet verified.
+        '400':
+          description: Invalid body/schema/date/group status/duplicate group entry/query/length.
+        '401':
+          description: Invalid signature or expired/future timestamp.
+        '403':
+          description: Environment/service/alert not approved.
+        '404':
+          description: Only the Function URL root path is accepted.
+        '405':
+          description: Only POST is accepted.
+        '413':
+          description: Decoded request exceeds byte limit.
+        '415':
+          description: Non-JSON or compressed payload not supported.
+        '429':
+          description: AWS reserved-concurrency throttling; no dispatch acknowledgement.
+        '502':
+          description: Downstream lookup/HTTP failure, non-204 dispatch, timeout or uncertain acceptance; notification may retry.
+        '503':
+          description: Missing/invalid local configuration, key or prohibited App/installation grants.
+components:
+  securitySchemes:
+    grafanaSignature:
+      type: apiKey
+      in: header
+      name: X-Grafana-Alerting-Signature
+      description: Lowercase 64-hex HMAC-SHA256 with timestamp enabled; comparison is constant-time.
+  schemas:
+    Notification:
+      type: object
+      required: [status, alerts]
+      properties:
+        status:
+          type: string
+          enum: [firing, resolved]
+        truncatedAlerts:
+          type: integer
+          const: 0
+        alerts:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/Alert'
+      description: Resolved groups contain only resolved alerts; firing groups contain at least one firing alert.
+    Alert:
+      type: object
+      required: [status, labels, fingerprint, startsAt, endsAt]
+      properties:
+        status:
+          type: string
+          enum: [firing, resolved]
+        fingerprint:
+          type: string
+          pattern: '^[a-f0-9]{16,64}$'
+        startsAt:
+          type: string
+          format: date-time
+          maxLength: 40
+        endsAt:
+          type: string
+          format: date-time
+          maxLength: 40
+          description: Grafana zero date is allowed for firing; resolved end cannot precede start.
+        labels:
+          type: object
+          required: [environment, service, alertname]
+          maxProperties: 32
+          propertyNames:
+            type: string
+            minLength: 1
+            maxLength: 64
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 256
+          properties:
+            environment:
+              type: string
+              enum: [development, production]
+            service:
+              type: string
+              description: Must occur in this environment's explicit service allow-list.
+            alertname:
+              type: string
+              description: Must occur in this environment's explicit alert-name allow-list.
+            release:
+              type: string
+              pattern: '^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$'
+            route:
+              type: string
+              enum: [/api/v1/places, '/api/v1/places/{place_id}']
+x-github-dispatch:
+  repository: alanlima/pawlocal
+  workflow: incident-responder.yml
+  ref: main
+  inputs:
+    environment: Matching development or production.
+    schema_version: '1'
+    alerts_json: >-
+      JSON array of normalized objects containing incident_key, fingerprint,
+      status, starts_at, ends_at, environment, service, alert_name and optional
+      release/route. incident_key is SHA256 of JSON.stringify([environment,
+      fingerprint, canonical UTC starts_at]). All arbitrary fields are omitted.

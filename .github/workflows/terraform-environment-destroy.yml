@@ -50,6 +50,7 @@ jobs:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
+      TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -99,6 +100,10 @@ jobs:
       - name: Configure and verify delegated Cognito plan profile
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
@@ -225,6 +230,10 @@ jobs:
       - name: Configure and verify delegated Cognito apply profile
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -276,6 +285,7 @@ jobs:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
+      TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -315,6 +325,10 @@ jobs:
       - name: Configure and verify delegated Cognito plan profile
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -401,6 +415,10 @@ jobs:
       - name: Configure and verify delegated Cognito apply profile
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}

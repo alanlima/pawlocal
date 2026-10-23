@@ -30,8 +30,10 @@ INPUTS = (
     "manage_github_oidc_provider", "development_lightsail_principal_arn",
     "production_lightsail_principal_arn", "import_existing_github_oidc_provider",
     "import_existing_development_deploy_role", "import_existing_dsql_service_linked_role",
+    "oncall_environments", "oncall_receiver_kms_key_arns",
 )
 BOOLEAN_INPUTS = {"manage_github_oidc_provider", *(x for x in INPUTS if x.startswith("import_"))}
+STRUCTURED_INPUTS = {"oncall_environments": list, "oncall_receiver_kms_key_arns": dict}
 ACTIONS = {("no-op",), ("read",), ("create",), ("update",), ("delete",),
            ("delete", "create"), ("create", "delete")}
 RESOURCE_TYPES = {"aws_iam_role", "aws_iam_role_policy", "aws_iam_policy", "aws_iam_openid_connect_provider",
@@ -138,6 +140,22 @@ def effective_inputs():
         if name in BOOLEAN_INPUTS:
             require(value in {"true", "false"}, "INVALID_" + key)
             value = value == "true"
+        elif name in STRUCTURED_INPUTS:
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                raise Stop("INVALID_" + key) from None
+            require(type(value) is STRUCTURED_INPUTS[name], "INVALID_" + key)
+            if name == "oncall_environments":
+                require(all(type(item) is str and item in {"development", "production"} for item in value)
+                        and len(set(value)) == len(value), "INVALID_" + key)
+                value = sorted(value)
+            else:
+                require(all(environment in {"development", "production"} and isinstance(arn, str)
+                            and re.fullmatch(r"arn:aws:kms:" + re.escape(os.environ.get("AWS_REGION", ""))
+                                             + ":" + re.escape(os.environ.get("PAWLOCAL_AWS_ACCOUNT_ID", ""))
+                                             + r":key/[0-9a-f-]{36}", arn)
+                            for environment, arn in value.items()), "INVALID_" + key)
         elif not name.endswith("lightsail_principal_arn"):
             require(bool(value), "MISSING_" + key)
         result[name] = value
@@ -158,10 +176,13 @@ def verify_plan_inputs(plan):
     # Terraform 1.14.3 records the original TF_VAR environment strings in plan
     # JSON, including strings for bool declarations. Validate the effective
     # configuration first, then compare every original input without coercion.
-    expected = {name: os.environ["TF_VAR_" + name] for name in effective_inputs()}
+    canonical = effective_inputs()
+    expected = {name: canonical[name] if name in STRUCTURED_INPUTS else os.environ["TF_VAR_" + name]
+                for name in canonical}
     variables = plan.get("variables")
     require(isinstance(variables, dict) and set(variables) == set(expected), "EFFECTIVE_PLAN_INPUT_MISMATCH")
-    require(all(isinstance(entry, dict) and type(entry.get("value")) is str for entry in variables.values()),
+    require(all(isinstance(entry, dict) and type(entry.get("value")) is STRUCTURED_INPUTS.get(name, str)
+                for name, entry in variables.items()),
             "EFFECTIVE_PLAN_INPUT_MISMATCH")
     require({name: entry["value"] for name, entry in variables.items()} == expected,
             "EFFECTIVE_PLAN_INPUT_MISMATCH")

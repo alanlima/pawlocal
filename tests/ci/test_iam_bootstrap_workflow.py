@@ -44,6 +44,7 @@ def configuration_fixture():
     inputs.update(aws_region="ap-southeast-2", project_name="pawlocal", terraform_state_bucket_name="existing-state",
                   github_repository="alanlima/pawlocal", github_owner_id="4245961", github_repository_id="1423024931",
                   manage_github_oidc_provider="true", development_lightsail_principal_arn="", production_lightsail_principal_arn="")
+    inputs.update(oncall_environments="[]", oncall_receiver_kms_key_arns="{}")
     for name in bootstrap.INPUTS:
         if name.startswith("import_"):
             inputs[name] = "false"
@@ -128,16 +129,27 @@ class ConfigurationAndStateTests(unittest.TestCase):
 
 
 class PlanInputTests(unittest.TestCase):
+    def test_oncall_inputs_remain_bounded_and_plan_bound(self):
+        for name, value in (
+            ("oncall_environments", '["development", "development"]'),
+            ("oncall_environments", '["staging"]'),
+            ("oncall_environments", '{}'),
+            ("oncall_receiver_kms_key_arns", '{"development":"arn:aws:kms:us-east-1:222222222222:key/11111111-1111-1111-1111-111111111111"}'),
+        ):
+            with self.subTest(name=name, value=value), patch.object(bootstrap.os, "environ", configuration_fixture() | {"TF_VAR_" + name: value}), self.assertRaises(bootstrap.Stop):
+                bootstrap.effective_inputs()
+
     def variable_fixture(self):
         environment = configuration_fixture()
-        return {name: {"value": environment["TF_VAR_" + name]} for name in bootstrap.INPUTS}
+        return {name: {"value": json.loads(environment["TF_VAR_" + name]) if name in bootstrap.STRUCTURED_INPUTS
+                       else environment["TF_VAR_" + name]} for name in bootstrap.INPUTS}
 
     def test_all_original_environment_strings_match_including_bool_inputs(self):
         variables = self.variable_fixture()
         with patch.object(bootstrap.os, "environ", configuration_fixture()):
             bootstrap.verify_plan_inputs({"variables": variables})
             canonical = bootstrap.effective_inputs()
-        self.assertEqual(len(variables), 14)
+        self.assertEqual(len(variables), 16)
         self.assertTrue(all(type(variables[name]["value"]) is str for name in bootstrap.BOOLEAN_INPUTS))
         self.assertTrue(all(type(canonical[name]) is bool for name in bootstrap.BOOLEAN_INPUTS))
 
@@ -156,7 +168,12 @@ class PlanInputTests(unittest.TestCase):
     def test_every_changed_input_string_is_rejected(self):
         for name in bootstrap.INPUTS:
             changed = self.variable_fixture()
-            changed[name]["value"] += "changed"
+            if name == "oncall_environments":
+                changed[name]["value"] = ["production"]
+            elif name == "oncall_receiver_kms_key_arns":
+                changed[name]["value"] = {"development": "different-key"}
+            else:
+                changed[name]["value"] += "changed"
             with patch.object(bootstrap.os, "environ", configuration_fixture()), self.subTest(name=name), \
                  self.assertRaisesRegex(bootstrap.Stop, "EFFECTIVE_PLAN_INPUT_MISMATCH"):
                 bootstrap.verify_plan_inputs({"variables": changed})
@@ -176,7 +193,9 @@ class PlanInputTests(unittest.TestCase):
             root = Path(directory)
             environment["TF_DATA_DIR"] = str(root / ".terraform")
             declarations = "\n".join('variable "' + name + '" { type = ' +
-                ("bool" if name in bootstrap.BOOLEAN_INPUTS else "string") + " }" for name in bootstrap.INPUTS)
+                ("bool" if name in bootstrap.BOOLEAN_INPUTS else
+                 "set(string)" if name == "oncall_environments" else
+                 "map(string)" if name == "oncall_receiver_kms_key_arns" else "string") + " }" for name in bootstrap.INPUTS)
             output = 'output "inputs" { value = {' + ", ".join(name + " = var." + name for name in bootstrap.INPUTS) + "} }"
             (root / "main.tf").write_text(declarations + "\n" + output, encoding="utf-8")
             for command in (("init", "-backend=false", "-input=false"),

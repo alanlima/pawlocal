@@ -180,6 +180,7 @@ jobs:
       AWS_PARTITION: aws
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
+      TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -260,6 +261,10 @@ jobs:
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
 
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
         with:
@@ -287,10 +292,18 @@ jobs:
         shell: bash
         run: |
           python .github/scripts/verify-terraform-source-checkout.py
+          oncall_package_args=()
+          if [[ "$TF_VAR_oncall_receiver" != 'null' ]]; then
+            oncall_package_args+=(
+              '-replace=module.pawlocal.module.oncall_receiver[0].local_file.archive_plan[0]'
+              '-replace=module.pawlocal.module.oncall_receiver[0].null_resource.archive[0]'
+            )
+          fi
           if python .github/scripts/terraform-command-output.py --log "$RUNNER_TEMP/terraform-plan.log" -- \
             terraform -chdir="$TF_ROOT" plan -input=false -lock-timeout=5m -no-color -out=tfplan \
               -replace='module.pawlocal.module.cognito_pre_sign_up.local_file.archive_plan[0]' \
-              -replace='module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]'; then
+              -replace='module.pawlocal.module.cognito_pre_sign_up.null_resource.archive[0]' \
+              "${oncall_package_args[@]}"; then
             :
           else
             status=$?
@@ -458,6 +471,10 @@ jobs:
       - name: Configure and verify delegated Cognito apply profile
         shell: bash
         run: bash .github/scripts/configure-cognito-terraform-profile.sh
+
+      - name: Prepare optional on-call delegated profile
+        shell: bash
+        run: bash .github/scripts/configure-oncall-terraform-profile.sh
 
       - name: Install pinned Aurora DSQL setup dependencies
         shell: bash

@@ -4,7 +4,10 @@ module "pawlocal" {
   providers = {
     aws                    = aws
     aws.cognito_deployment = aws.cognito_deployment
+    aws.oncall_deployment  = aws.oncall_deployment
   }
+
+  oncall_receiver = var.oncall_receiver
 
   environment                 = "production"
   aws_region                  = var.aws_region
