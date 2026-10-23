@@ -75,10 +75,14 @@ class IncidentProcessContractTests(unittest.TestCase):
                 'import importlib as loader\nloader.import_module("deadline").run(["aws", "iam", "create-role"])',
                 '__import__("deadline").run(["terraform", "apply"])',
                 'import sys\nsys.modules["deadline"].run(["terraform", "apply"])',
+                'loader = __import__\nloader("deadline").run(["terraform", "apply"])',
             ):
                 added.write_text(source)
                 with self.subTest(source=source), self.assertRaises(AssertionError):
                     validate_inventory(root)
+            added.unlink()
+            added.write_text('__import__("json").loads("{}")')
+            validate_inventory(root)
             added.unlink()
             source = (
                 destination / "job.py"

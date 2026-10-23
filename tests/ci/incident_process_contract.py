@@ -84,6 +84,24 @@ def direct_launch(node):
     )
 
 
+def literal_json_import(node, tree):
+    # Existing release-config tests use this exact stdlib import as an expression.
+    # It cannot acquire deadline or escape the import callable as an alias.
+    return (
+        isinstance(node, ast.Name)
+        and node.id == "__import__"
+        and any(
+            isinstance(parent, ast.Call)
+            and parent.func is node
+            and len(parent.args) == 1
+            and not parent.keywords
+            and isinstance(parent.args[0], ast.Constant)
+            and parent.args[0].value == "json"
+            for parent in ast.walk(tree)
+        )
+    )
+
+
 def validate_inventory(root, overrides=None):
     """Reject new/changed wrappers and aliases before trusting a launch node."""
     overrides = overrides or {}
@@ -141,6 +159,7 @@ def validate_inventory(root, overrides=None):
             )
         if any(
             isinstance(node, ast.Name)
+            and not literal_json_import(node, tree)
             and node.id
             in {"__import__", "__builtins__", "eval", "exec", "globals", "locals"}
             or isinstance(node, ast.Attribute)
@@ -155,7 +174,9 @@ def validate_inventory(root, overrides=None):
             and set(node.names) & {"subprocess", "sys", "shutil", "run", "validate"}
             for node in ast.walk(tree)
         ):
-            raise AssertionError("Dynamic wrapper/launcher rebinding requires review")
+            raise AssertionError(
+                "Dynamic wrapper/launcher rebinding requires review: " + relative
+            )
         aliases = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Import) and any(
