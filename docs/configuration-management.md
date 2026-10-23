@@ -19,6 +19,12 @@ This guide covers Parameter Store values synchronized to GitHub Actions Environm
 
 One reconciliation job uses the matching protected `<environment>-apply` Environment for approval, token and exact repository-ID-qualified OIDC reader trust. Readers access only approved matching-environment keys, without writes, state access or cross-environment access. No current source requires decryption. See the inventory/issue for actual setup and runtime status.
 
+## Public reader authorization (#237)
+
+The configuration reader uses the configured account/region parameter scope and requires all three authorization tags: `project=<project_name>`, matching `environment`, and `configuration-access=github-public`. Public String producer tags are Terraform-owned; mapping growth does not require enumerating more reader ARNs. Producer write inventories remain exact and separate. No secret/KMS, tagging, discovery, history or by-path permission is added. A public tag on a private parameter is an access-control defect; variables and naming alone do not restrict the tag-based policy.
+
+Roll out application public tags under the old reader policy **before** the bootstrap tags/policy switch. Coordinate independent states and pause dependent callers for the transition; see the [ordered rollout/rollback and missing-resource limitation](../infra/terraform/iam-bootstrap/POLICY_DESIGN.md#ordered-rollout-and-rollback-237). No apply is authorized here. A missing untagged resource can produce `AccessDenied`; preserve that error rather than reporting it as missing. The requested warning/skip behavior remains a separate #223/#233 existence-design/live-verification dependency; this prerequisite does not claim it is solved.
+
 ## Run and verify
 
 The callable/on-demand `reconcile-environment.yml` selects development or production. Audit is the default; choose enforce to require all selected values before synchronization/publication. Missing sources warn/skip in audit, which synchronizes available values but **does not establish release readiness**.

@@ -76,6 +76,8 @@ run "foundation_publishes_only_available_application_values" {
       for suffix, parameter in aws_ssm_parameter.configuration :
       parameter.name == "/pawlocal/development/config/${suffix}" &&
       parameter.type == "String" && parameter.tier == "Standard" && parameter.overwrite == null &&
+      parameter.tags.project == var.project_name && parameter.tags.environment == var.environment &&
+      parameter.tags["configuration-access"] == "github-public" &&
       !startswith(suffix, "iam/") && !startswith(suffix, "aws/") && !startswith(suffix, "terraform/")
     ]) && !contains(keys(aws_ssm_parameter.configuration), "api/base-url") && !contains(keys(aws_ssm_parameter.configuration), "api/health-url")
     error_message = "Foundation must publish only actual available application keys; absent managed API DNS cannot be claimed ready or bootstrap-owned keys adopted."
@@ -130,7 +132,9 @@ run "converged_production_publishes_its_own_managed_api_values" {
 
   assert {
     condition = (length(aws_ssm_parameter.configuration) == 12 && alltrue([
-      for suffix, parameter in aws_ssm_parameter.configuration : parameter.name == "/pawlocal/production/config/${suffix}"
+      for suffix, parameter in aws_ssm_parameter.configuration : parameter.name == "/pawlocal/production/config/${suffix}" &&
+      parameter.type == "String" && parameter.tags.project == var.project_name &&
+      parameter.tags.environment == "production" && parameter.tags["configuration-access"] == "github-public"
       ]) && aws_ssm_parameter.configuration["api/base-url"].value == "https://api.fixture.example/api/v1" &&
       aws_ssm_parameter.configuration["api/health-url"].value == "https://api.fixture.example/health" &&
       output.targets.api_base_url == "https://api.fixture.example/api/v1" &&

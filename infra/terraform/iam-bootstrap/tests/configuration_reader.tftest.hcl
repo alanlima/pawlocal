@@ -69,14 +69,14 @@ run "configuration_readers_are_exact_and_isolated" {
       for environment, policy in data.aws_iam_policy_document.configuration_reader :
       length(jsondecode(policy.minified_json).Statement) == 1 &&
       toset(flatten([jsondecode(policy.minified_json).Statement[0].Action])) == toset(["ssm:GetParameter"]) &&
-      length(jsondecode(policy.minified_json).Statement[0].Resource) == 18 &&
-      alltrue([
-        for arn in jsondecode(policy.minified_json).Statement[0].Resource :
-        startswith(arn, "arn:aws:ssm:ap-southeast-2:111111111111:parameter/pawlocal/${environment}/config/") &&
-        !strcontains(arn, "*") && !strcontains(arn, "/secrets/")
-      ])
+      toset(flatten([jsondecode(policy.minified_json).Statement[0].Resource])) == toset(["arn:aws:ssm:ap-southeast-2:111111111111:parameter/*"]) &&
+      jsondecode(policy.minified_json).Statement[0].Condition.StringEquals == {
+        "aws:ResourceTag/project"              = var.project_name
+        "aws:ResourceTag/environment"          = environment
+        "aws:ResourceTag/configuration-access" = "github-public"
+      }
     ])
-    error_message = "Readers may only GetParameter for the 18 exact local String keys; no discovery, writes, decryption or cross-environment scope."
+    error_message = "Readers require all three authorization tags in the exact account/region; no discovery, writes or decryption."
   }
 
   assert {
@@ -86,6 +86,6 @@ run "configuration_readers_are_exact_and_isolated" {
       "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn",
       "auth/client-id", "api/base-url", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes"
     ])
-    error_message = "IAM reader keys must remain in parity with the approved 18-key inventory."
+    error_message = "Producer write inventory must remain unchanged; reader admission does not use this list."
   }
 }
