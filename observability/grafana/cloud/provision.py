@@ -194,7 +194,22 @@ class Transport:
     def __init__(self):
         self.opener = build_opener(NoRedirect())
 
-    def request(self, method, url, token, payload=None, stack_id=None, missing=False):
+    def request(
+        self,
+        method,
+        url,
+        token,
+        payload=None,
+        stack_id=None,
+        missing=False,
+        extra_headers=None,
+    ):
+        # The only additional header currently needed is public Grafana policy
+        # provenance. Never let an extra header override credential/scope headers.
+        require(
+            extra_headers is None or extra_headers == {"X-Disable-Provenance": "true"},
+            "Unsupported per-request headers",
+        )
         data = None if payload is None else json.dumps(payload).encode()
         authorization = token if stack_id is None else f"{stack_id}:{token}"
         headers = {
@@ -204,6 +219,7 @@ class Transport:
         }
         if stack_id is not None:
             headers["X-Scope-OrgID"] = str(stack_id)
+        headers.update(extra_headers or {})
         request = Request(url, data=data, headers=headers, method=method)
         try:
             with self.opener.open(request, timeout=30) as response:

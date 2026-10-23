@@ -1,0 +1,300 @@
+{
+  "id": null,
+  "uid": "pawlocal-telemetry",
+  "title": "PawLocal Telemetry",
+  "schemaVersion": 39,
+  "version": 0,
+  "tags": [
+    "pawlocal-managed-226"
+  ],
+  "editable": false,
+  "refresh": "1m",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "description": "Source-controlled #226. Missing data is unknown, never zero/healthy. Release is the deployed sha256 image digest. Authorization is enforced by datasource/token scopes, not dashboard variables.",
+  "links": [
+    {
+      "title": "Incident triage",
+      "type": "link",
+      "url": "/d/pawlocal-incidents",
+      "includeVars": true
+    },
+    {
+      "title": "Metrics / logs / traces Explore",
+      "type": "link",
+      "url": "/explore",
+      "includeVars": false
+    },
+    {
+      "title": "Account quota and usage",
+      "type": "link",
+      "url": "/a/grafana-billing-usage-app/usage"
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__METRICS_UID__"
+        },
+        "query": "label_values(pawlocal_api_requests_total, environment)",
+        "current": {
+          "text": "development",
+          "value": "development"
+        },
+        "refresh": 1
+      },
+      {
+        "name": "service",
+        "type": "constant",
+        "query": "pawlocal-api",
+        "current": {
+          "text": "pawlocal-api",
+          "value": "pawlocal-api"
+        }
+      },
+      {
+        "name": "release",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "__METRICS_UID__"
+        },
+        "query": "label_values(pawlocal_api_requests_total{environment=~\"$environment\",service=\"pawlocal-api\"}, release)",
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "title": "Completed exports by signal",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (signal) (rate(pawlocal_telemetry_exports_total{environment=~\"$environment\",service=~\"$service\",release=~\"$release\"}[10m]))",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 1,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Export failures (may be absent before first failure)",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (signal) (rate(pawlocal_telemetry_export_failures_total{environment=~\"$environment\",service=~\"$service\",release=~\"$release\"}[10m]))",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 2,
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Missing API telemetry: 1 means absent",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__METRICS_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "absent_over_time(pawlocal_api_requests_total{environment=~\"$environment\",service=~\"$service\",release=~\"$release\"}[10m])",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bool",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 3,
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Account active metric series (shared quota)",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__USAGE_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(grafanacloud_instance_active_series)",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 4,
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Account active log streams",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__USAGE_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(grafanacloud_logs_instance_active_streams)",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Account trace bytes per second",
+      "type": "timeseries",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "__USAGE_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(grafanacloud_traces_instance_bytes_received_per_second)",
+          "legendFormat": "{{route}}{{dependency}}{{signal}}{{release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 6,
+      "gridPos": {
+        "x": 12,
+        "y": 18,
+        "w": 12,
+        "h": 9
+      }
+    }
+  ]
+}
