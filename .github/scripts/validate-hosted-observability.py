@@ -144,16 +144,7 @@ def validate(raw, account, region):
 
 
 def resolve_owning_stack_url(parsed, region):
-    if isinstance(parsed, dict) and parsed.get("stack_url"):
-        return parsed["stack_url"].rstrip("/")
-
-    # Check configured environment variable if passed
-    url = os.environ.get("PAWLOCAL_GRAFANA_URL", "").strip().rstrip("/")
-    if url:
-        return url
-
-    # When disabling dashboards (hosted_observability is null), retain the owning stack URL
-    # from published SSM configuration if present so Terraform can refresh/delete existing dashboards.
+    recorded_url = ""
     env_name = os.environ.get("PAWLOCAL_ENVIRONMENT", "").strip()
     if env_name:
         try:
@@ -161,11 +152,27 @@ def resolve_owning_stack_url(parsed, region):
             ssm = boto3.client("ssm", region_name=region)
             param = f"/pawlocal/{env_name}/config/grafana/stack-url"
             resp = ssm.get_parameter(Name=param)
-            val = resp.get("Parameter", {}).get("Value", "").strip().rstrip("/")
-            if val:
-                return val
+            recorded_url = resp.get("Parameter", {}).get("Value", "").strip().rstrip("/")
         except Exception:
             pass
+
+    input_url = parsed.get("stack_url", "").strip().rstrip("/") if isinstance(parsed, dict) else ""
+
+    # Resolve recorded owning URL first; require an explicit migration before switching endpoints
+    if recorded_url:
+        if input_url and input_url != recorded_url:
+            raise ValueError(
+                f"Configured stack_url ({input_url!r}) differs from recorded owning stack ({recorded_url!r}). "
+                f"Dashboards must be migrated or destroyed on the owning stack before switching endpoints."
+            )
+        return recorded_url
+
+    if input_url:
+        return input_url
+
+    url = os.environ.get("PAWLOCAL_GRAFANA_URL", "").strip().rstrip("/")
+    if url:
+        return url
 
     return "https://alanlima.grafana.net"
 

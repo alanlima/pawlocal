@@ -102,6 +102,29 @@ class HostedOperatorTests(unittest.TestCase):
                 "https://alanlima.grafana.net",
             )
 
+    def test_resolve_owning_stack_url_checks_recorded_ssm_and_prevents_unmigrated_switch(self):
+        class MockSSM:
+            def get_parameter(self, Name):
+                if Name == "/pawlocal/production/config/grafana/stack-url":
+                    return {"Parameter": {"Value": "https://stack-a.grafana.net"}}
+                raise Exception("ParameterNotFound")
+
+        with patch.dict(os.environ, {"PAWLOCAL_ENVIRONMENT": "production"}):
+            with patch("boto3.client", return_value=MockSSM()):
+                # When disabled, retains recorded stack-a
+                self.assertEqual(
+                    module.resolve_owning_stack_url(None, "ap-southeast-2"),
+                    "https://stack-a.grafana.net",
+                )
+                # When steady-state matches stack-a, returns stack-a
+                self.assertEqual(
+                    module.resolve_owning_stack_url({"stack_url": "https://stack-a.grafana.net"}, "ap-southeast-2"),
+                    "https://stack-a.grafana.net",
+                )
+                # When input attempts switch to stack-b without migration, raises ValueError
+                with self.assertRaisesRegex(ValueError, "differs from recorded owning stack"):
+                    module.resolve_owning_stack_url({"stack_url": "https://stack-b.grafana.net"}, "ap-southeast-2")
+
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
             {"token": "private-sentinel"},
