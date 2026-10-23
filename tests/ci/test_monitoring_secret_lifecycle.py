@@ -4,13 +4,16 @@ Set PAWLOCAL_RUN_SECRET_LIFECYCLE_FIXTURE=1 after initializing the pinned
 iam-bootstrap provider. All AWS API requests terminate at this loopback stub.
 """
 
+import io
 import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -124,6 +127,61 @@ class TransitionContract(unittest.TestCase):
             ):
                 proposed_transition_guard(None, after, override)
         proposed_transition_guard(None, {"value_wo_version": 1}, True)
+
+
+def forward_checked_streams(stdout, stderr, *, private_stdout=False):
+    """Preserve operational logs only after checking both complete streams."""
+    stdout, stderr = stdout or b"", stderr or b""
+    if any(value.encode() in stdout + stderr for value in (FIRST, SECOND, THIRD)):
+        # Assertion helpers would include the forbidden bytes in their diagnostics.
+        raise AssertionError("Synthetic payload detected; captured streams withheld.")
+    if not private_stdout:
+        sys.stdout.write(stdout.decode("utf-8", errors="replace"))
+    sys.stderr.write(stderr.decode("utf-8", errors="replace"))
+
+
+class FixtureLoggingContract(unittest.TestCase):
+    def test_complete_success_or_failure_streams_are_forwarded_without_truncation(self):
+        stdout = "stdout-start" + "x" * 6000 + "stdout-end"
+        stderr = "stderr-start" + "y" * 4000 + "stderr-end"
+        with (
+            redirect_stdout(io.StringIO()) as out,
+            redirect_stderr(io.StringIO()) as err,
+        ):
+            forward_checked_streams(stdout.encode(), stderr.encode())
+        self.assertEqual(out.getvalue(), stdout)
+        self.assertEqual(err.getvalue(), stderr)
+
+    def test_payload_in_either_stream_withholds_both_and_failure_never_echoes_it(self):
+        for stdout, stderr in (
+            (FIRST.encode(), b"ordinary error"),
+            (b"ordinary output", SECOND.encode()),
+        ):
+            with (
+                redirect_stdout(io.StringIO()) as out,
+                redirect_stderr(io.StringIO()) as err,
+                self.assertRaisesRegex(
+                    AssertionError, "captured streams withheld"
+                ) as failure,
+            ):
+                forward_checked_streams(stdout, stderr)
+            self.assertEqual(out.getvalue(), "")
+            self.assertEqual(err.getvalue(), "")
+            self.assertNotIn(FIRST, str(failure.exception))
+            self.assertNotIn(SECOND, str(failure.exception))
+
+    def test_programmatic_json_stdout_stays_internal_while_stderr_is_preserved(self):
+        with (
+            redirect_stdout(io.StringIO()) as out,
+            redirect_stderr(io.StringIO()) as err,
+        ):
+            forward_checked_streams(
+                b'{"format_version":"1.2"}', b"complete diagnostic", private_stdout=True
+            )
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(), "complete diagnostic")
+        with self.assertRaisesRegex(AssertionError, "captured streams withheld"):
+            forward_checked_streams(THIRD.encode(), b"", private_stdout=True)
 
 
 class SsmStub(BaseHTTPRequestHandler):
@@ -317,20 +375,28 @@ class MonitoringSecretLifecycle(unittest.TestCase):
         )
 
     def run_tf(self, *arguments, allowed=(0,)):
-        result = subprocess.run(
-            ["terraform", *arguments, "-no-color"],
-            cwd=self.directory,
-            env=self.env,
-            capture_output=True,
-            check=False,
-            timeout=120,
+        private_stdout = arguments[:2] == ("show", "-json")
+        try:
+            result = subprocess.run(
+                ["terraform", *arguments, "-no-color"],
+                cwd=self.directory,
+                env=self.env,
+                capture_output=True,
+                check=False,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired as error:
+            forward_checked_streams(
+                error.stdout, error.stderr, private_stdout=private_stdout
+            )
+            raise
+        forward_checked_streams(
+            result.stdout, result.stderr, private_stdout=private_stdout
         )
-        for value in (FIRST, SECOND, THIRD):
-            self.assertNotIn(value.encode(), result.stdout + result.stderr)
         self.assertIn(
             result.returncode,
             allowed,
-            (result.stdout + result.stderr).decode(errors="replace")[-3000:],
+            "Terraform returned an unexpected exit code; complete diagnostics were emitted above.",
         )
         return result
 
