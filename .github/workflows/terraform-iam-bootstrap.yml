@@ -61,6 +61,7 @@ jobs:
       TF_VAR_domain_name: ${{ vars.TF_VAR_domain_name }}
       TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
       TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
+      TF_VAR_hosted_telemetry_kms_key_arns: ${{ vars.TF_VAR_hosted_telemetry_kms_key_arns || '{}' }}
       TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
       TF_VAR_oncall_environments: ${{ vars.TF_VAR_oncall_environments || '[]' }}
       TF_VAR_oncall_receiver_kms_key_arns: ${{ vars.TF_VAR_oncall_receiver_kms_key_arns || '{}' }}
@@ -141,6 +142,7 @@ jobs:
       TF_VAR_domain_name: ${{ vars.TF_VAR_domain_name }}
       TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
       TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
+      TF_VAR_hosted_telemetry_kms_key_arns: ${{ vars.TF_VAR_hosted_telemetry_kms_key_arns || '{}' }}
       TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
       TF_VAR_oncall_environments: ${{ vars.TF_VAR_oncall_environments || '[]' }}
       TF_VAR_oncall_receiver_kms_key_arns: ${{ vars.TF_VAR_oncall_receiver_kms_key_arns || '{}' }}

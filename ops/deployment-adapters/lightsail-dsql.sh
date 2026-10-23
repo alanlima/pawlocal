@@ -84,6 +84,8 @@ if health.get('status') != 'ok' or health.get('environment') != environment:
     raise SystemExit('API health response does not match the selected environment')
 if health.get('image_digest') != expected:
     raise SystemExit('API health response image digest does not match the selected release')
+if type(health.get('telemetry_enabled')) is not bool or health['telemetry_enabled'] != manifest['telemetry_enabled']:
+    raise SystemExit('API telemetry mode does not match the selected release')
 print(health['image_digest'])
 PY
 )"
@@ -115,7 +117,7 @@ Path(evidence_path).write_text(json.dumps({
   'frontend_artifact_digest':frontend['artifact_digest'],
   'database_provider':'aurora_dsql','migration_runner':'dsql_baseline',
   'migration_id':manifest['migration_chains']['aurora_dsql']['migration_id'],
-  'telemetry_enabled':False,
+  'telemetry_enabled':manifest['telemetry_enabled'],
   'public_endpoint_health':{'frontend':True,'api':True},
   'database_query_smoke':{'route':'/api/v1/places','result':'valid_place_page'},
   'verified_at':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),

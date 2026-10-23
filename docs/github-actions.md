@@ -305,6 +305,7 @@ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN
 vars.PAWLOCAL_CONFIG_READER_ROLE_ARN
 vars.PAWLOCAL_DEPLOY_ADAPTER_PATH
 vars.PAWLOCAL_DOMAIN_NAME
+vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG
 vars.PAWLOCAL_ROUTE53_ZONE_ID
 vars.PAWLOCAL_RUNTIME_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
@@ -316,6 +317,8 @@ vars.PAWLOCAL_TF_STATE_BUCKET
 -->
 
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
+
+`PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG` is an optional protected plan-Environment variable containing the reviewed public Grafana object (`enabled`, `stack_url`, `otlp_endpoint`, `otlp_instance_id`, `faro_collector_url`, and optional existing `kms_key_arn`). It defaults to null/disabled. The plan workflow validates its exact public shape before Terraform; apply uses the same saved plan. It never contains token payloads, and enabling it requires the separately reviewed live setup and source lifecycle.
 
 Reconciliation consumes `AWS_REGION`, `PAWLOCAL_CONFIG_READER_ROLE_ARN` and the scoped `PAWLOCAL_CONFIG_GITHUB_TOKEN` secret in the matching protected apply Environment. The owner-operated setup script publishes actual reader-role ARNs to matching release/apply pairs during initial setup or identity changes; existing reconciliation retains ongoing configuration synchronization. Bootstrap Actions do not duplicate it.
 

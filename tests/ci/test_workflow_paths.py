@@ -46,6 +46,17 @@ def matches(workflow: str, path: str) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
+    def test_hosted_telemetry_terraform_helpers_trigger_native_validation(self):
+        for path in (
+            ".github/scripts/validate-hosted-observability.py",
+            "tests/ci/test_hosted_observability_config.py",
+            "tests/ci/test_monitoring_boundary.py",
+            "tests/ci/fixtures/aws-ssm-action-catalog.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(matches("terraform-ci.yml", path))
+                self.assertTrue(matches("workflow-validation.yml", path))
+
     def test_development_seed_dispatch_relies_on_environment_approval(self) -> None:
         workflow = (WORKFLOWS / "development-dsql-seed.yml").read_text(
             encoding="utf-8-sig"

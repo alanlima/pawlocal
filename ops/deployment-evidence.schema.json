@@ -29,7 +29,7 @@
     "database_provider": { "enum": ["postgresql", "aurora_dsql"] },
     "migration_runner": { "enum": ["alembic", "dsql_baseline"] },
     "migration_id": { "type": "string", "minLength": 1 },
-    "telemetry_enabled": { "const": false },
+    "telemetry_enabled": { "type": "boolean" },
     "public_endpoint_health": {
       "type": "object",
       "additionalProperties": false,

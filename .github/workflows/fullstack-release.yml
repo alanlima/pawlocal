@@ -122,7 +122,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-      PAWLOCAL_TELEMETRY_ENABLED: "false"
       BACKEND_IMAGE: ${{ needs.publish.outputs.backend_image }}
     steps:
       - uses: actions/checkout@v7
@@ -148,7 +147,6 @@ jobs:
         env:
           VITE_RELEASE_ENV: development
           VITE_USE_MOCK_BACKEND: "false"
-          VITE_TELEMETRY_ENABLED: "false"
           VITE_APP_COMMIT: ${{ github.sha }}
         run: npm ci && npm run build
       - name: Create release manifest and frontend archive
@@ -184,7 +182,7 @@ jobs:
                   'postgresql': {'runner': 'alembic', 'migration_id': heads[0]},
                   'aurora_dsql': {'runner': 'dsql_baseline', 'migration_id': dsql_revision},
               },
-              'telemetry_enabled': False,
+              'telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
               'frontend': {
                   'environment': 'development',
                   'artifact_digest': 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest(),

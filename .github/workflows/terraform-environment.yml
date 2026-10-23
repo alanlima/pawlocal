@@ -141,7 +141,7 @@ jobs:
                 payload.database_provider === 'aurora_dsql' &&
                 payload.migration_runner === 'dsql_baseline' &&
                 payload.migration_id === 'dsql_0001_initial' &&
-                payload.telemetry_enabled === false &&
+                typeof payload.telemetry_enabled === 'boolean' &&
                 payload.public_endpoint_health?.frontend === true &&
                 payload.public_endpoint_health?.api === true &&
                 payload.database_query_smoke?.route === '/api/v1/places' &&
@@ -181,6 +181,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
       TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
+      TF_VAR_hosted_observability: ${{ vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: ${{ inputs.environment }}
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ inputs.phase == 'foundation' && vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET || fromJSON(needs.reconcile-preflight.outputs.configuration || '{}').PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -264,6 +265,9 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Validate public hosted bindings before Terraform planning
+        shell: bash
+        run: python .github/scripts/validate-hosted-observability.py
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4

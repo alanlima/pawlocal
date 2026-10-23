@@ -1,11 +1,11 @@
 """Validate and render a sanitized PawLocal environment Terraform plan."""
+
 from __future__ import annotations
 
 import argparse
 import json
 from collections import Counter
 from pathlib import Path
-
 
 ALLOWED_TYPES = {
     "aws_cloudfront_distribution",
@@ -38,12 +38,27 @@ FORBIDDEN_TYPES = {
     "aws_iam_role_policy",
 }
 
-APPLICATION_PARAMETER_SUFFIXES = frozenset({
-    "frontend/base-url", "api/health-url", "frontend/bucket",
-    "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn",
-    "frontend/cloudfront-oac-arn", "auth/client-id", "api/base-url",
-    "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes",
-})
+APPLICATION_PARAMETER_SUFFIXES = frozenset(
+    {
+        "frontend/base-url",
+        "api/health-url",
+        "frontend/bucket",
+        "frontend/cloudfront-distribution-id",
+        "frontend/cloudfront-distribution-arn",
+        "frontend/cloudfront-oac-arn",
+        "auth/client-id",
+        "api/base-url",
+        "auth/domain",
+        "auth/redirect-uri",
+        "auth/logout-uri",
+        "auth/scopes",
+        "observability/enabled",
+        "grafana/stack-url",
+        "grafana/otlp-endpoint",
+        "grafana/otlp-instance-id",
+        "grafana/faro-collector-url",
+    }
+)
 
 
 def configuration_ownership_errors(change: dict, environment: str) -> list[str]:
@@ -55,9 +70,12 @@ def configuration_ownership_errors(change: dict, environment: str) -> list[str]:
         environment not in {"development", "production"}
         or not isinstance(suffix, str)
         or suffix not in APPLICATION_PARAMETER_SUFFIXES
-        or change.get("address") != f"module.pawlocal.aws_ssm_parameter.configuration[{json.dumps(suffix)}]"
+        or change.get("address")
+        != f"module.pawlocal.aws_ssm_parameter.configuration[{json.dumps(suffix)}]"
     ):
-        return ["configuration parameter is outside the approved application ownership boundary"]
+        return [
+            "configuration parameter is outside the approved application ownership boundary"
+        ]
     expected_name = f"/pawlocal/{environment}/config/{suffix}"
     for values in (details.get("before"), after):
         if values is not None and (
@@ -67,9 +85,13 @@ def configuration_ownership_errors(change: dict, environment: str) -> list[str]:
             or values.get("tier") != "Standard"
             or values.get("overwrite") is True
         ):
-            return ["configuration parameter must retain its exact environment name and Standard String ownership"]
+            return [
+                "configuration parameter must retain its exact environment name and Standard String ownership"
+            ]
     if after is None:
-        return ["configuration parameter removal is not allowed by the normal environment workflow"]
+        return [
+            "configuration parameter removal is not allowed by the normal environment workflow"
+        ]
     if change.get("importing") is not None or details.get("importing") is not None:
         return ["application-resource import is prohibited: aws_ssm_parameter"]
     return []
@@ -108,24 +130,40 @@ def validate(plan: dict, environment: str, release_only: bool) -> list[tuple[str
         if actions == ["no-op"]:
             continue
         if resource_type in FORBIDDEN_TYPES or resource_type not in ALLOWED_TYPES:
-            errors.append(f"resource type is outside the environment ownership boundary: {resource_type}")
+            errors.append(
+                f"resource type is outside the environment ownership boundary: {resource_type}"
+            )
         expected_deployment_replacement = (
             resource_type == "aws_lightsail_container_service_deployment_version"
             and set(actions) == {"create", "delete"}
         )
         if "delete" in actions and not expected_deployment_replacement:
-            errors.append(f"delete or replacement is not allowed by the normal environment workflow: {resource_type}")
-        if change.get("importing") is not None or change.get("change", {}).get("importing") is not None:
+            errors.append(
+                f"delete or replacement is not allowed by the normal environment workflow: {resource_type}"
+            )
+        if (
+            change.get("importing") is not None
+            or change.get("change", {}).get("importing") is not None
+        ):
             errors.append(f"application-resource import is prohibited: {resource_type}")
-        if release_only and resource_type != "aws_lightsail_container_service_deployment_version":
-            errors.append(f"release-only plan changes a non-release resource: {resource_type}")
+        if (
+            release_only
+            and resource_type != "aws_lightsail_container_service_deployment_version"
+        ):
+            errors.append(
+                f"release-only plan changes a non-release resource: {resource_type}"
+            )
 
     variables = plan.get("variables", {})
     selected = variables.get("environment", {}).get("value")
     if selected is not None and selected != environment:
-        errors.append("plan environment does not match the selected workflow environment")
+        errors.append(
+            "plan environment does not match the selected workflow environment"
+        )
     if errors:
-        raise SystemExit("Plan guard rejected the saved plan:\n- " + "\n- ".join(sorted(set(errors))))
+        raise SystemExit(
+            "Plan guard rejected the saved plan:\n- " + "\n- ".join(sorted(set(errors)))
+        )
     return rows
 
 
@@ -159,7 +197,9 @@ def render(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("plan_json", type=Path)
-    parser.add_argument("--environment", choices=("development", "production"), required=True)
+    parser.add_argument(
+        "--environment", choices=("development", "production"), required=True
+    )
     parser.add_argument("--release-only", action="store_true")
     parser.add_argument("--skip-enforcement", action="store_true")
     args = parser.parse_args()

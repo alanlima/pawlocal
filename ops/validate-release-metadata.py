@@ -44,8 +44,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
     image = manifest.get("backend_image")
     if not isinstance(image, str) or image != f"{image.split('@')[0]}@{digest}":
         fail("Release manifest backend_image must be pinned to backend_image_digest")
-    if manifest.get("telemetry_enabled") is not False:
-        fail("Release manifest must explicitly disable telemetry")
+    if type(manifest.get("telemetry_enabled")) is not bool:
+        fail("Release manifest must declare a boolean telemetry mode")
 
     chains = manifest.get("migration_chains")
     if not isinstance(chains, dict) or set(chains) != set(MIGRATION_PROVIDERS):
@@ -112,8 +112,8 @@ def validate_evidence(
         fail("Deployment evidence migration_runner does not match the verified development release")
     if migration_id is not None and chain["migration_id"] != migration_id:
         fail("Deployment evidence migration_id does not match the verified development release")
-    if evidence.get("telemetry_enabled") is not False:
-        fail("Deployment evidence must confirm telemetry is disabled")
+    if type(evidence.get("telemetry_enabled")) is not bool or evidence["telemetry_enabled"] != manifest["telemetry_enabled"]:
+        fail("Deployment evidence telemetry mode must match the selected release")
     health = evidence.get("public_endpoint_health")
     if not isinstance(health, dict) or health != {"frontend": True, "api": True}:
         fail("Deployment evidence must confirm healthy frontend and API endpoints")

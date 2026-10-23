@@ -61,13 +61,13 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
 
   statement {
     effect = "Allow"
-    actions = [
-      "ssm:GetParameter", "ssm:ListTagsForResource", "ssm:PutParameter", "ssm:DeleteParameter",
-      "ssm:AddTagsToResource", "ssm:RemoveTagsFromResource"
-    ]
+    # Boundary-only compaction. Literal identity grants retain the six APIs.
+    # Official SSM catalog equivalence is pinned/tested; future APIs may widen
+    # this ceiling, never the effective identity permission by themselves.
+    actions = ["ssm:*Parameter", "ssm:*Tags*"]
     resources = [
-      for component in ["api", "auth", "frontend"] :
-      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/config/${component}/*"
+      for component in ["api/*", "auth/*", "frontend/*", "g*", "o*"] :
+      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/config/${component}"
     ]
   }
 

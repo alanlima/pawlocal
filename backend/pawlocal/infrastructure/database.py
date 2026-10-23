@@ -1,5 +1,6 @@
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager
+from time import monotonic
 
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
@@ -147,14 +148,19 @@ def _start_query_span(conn, _cursor, statement, _parameters, _context, _many):
         set_status_on_exception=False,
     )
     span = manager.__enter__()
-    conn.info.setdefault("pawlocal_query_spans", []).append((manager, span))
+    conn.info.setdefault("pawlocal_query_spans", []).append(
+        (manager, span, monotonic())
+    )
 
 
 def _finish_query_span(conn, error: BaseException | None = None) -> None:
     managers = conn.info.get("pawlocal_query_spans", [])
     if not managers:
         return
-    manager, span = managers.pop()
+    manager, span, started = managers.pop()
+    from pawlocal.cloud_telemetry import record_dependency
+
+    record_dependency(conn.dialect.name, monotonic() - started, error is not None)
     if error is not None:
         span.set_status(Status(StatusCode.ERROR, "database_operation_failed"))
         span.set_attribute("error.code", "database_operation_failed")

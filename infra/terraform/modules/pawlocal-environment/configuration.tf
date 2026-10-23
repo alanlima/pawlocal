@@ -1,9 +1,9 @@
 locals {
-  configuration_suffixes = toset([
+  configuration_suffixes = setunion(local.hosted_public_suffixes, toset([
     "frontend/base-url", "api/health-url", "frontend/bucket",
     "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn",
     "auth/client-id", "api/base-url", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes"
-  ])
+  ]))
   configuration_parameter_arns = [
     for suffix in sort(tolist(local.configuration_suffixes)) :
     "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${var.environment}/config/${suffix}"
@@ -18,6 +18,7 @@ locals {
     cognito_scopes       = join(" ", sort(tolist(aws_cognito_user_pool_client.browser.allowed_oauth_scopes)))
   }
   application_configuration_values = merge({
+    "observability/enabled"                = tostring(local.hosted_telemetry_enabled)
     "frontend/base-url"                    = local.public_configuration.frontend_base_url
     "frontend/bucket"                      = aws_s3_bucket.frontend.bucket
     "frontend/cloudfront-distribution-id"  = aws_cloudfront_distribution.frontend.id
@@ -31,7 +32,12 @@ locals {
     }, local.deployment_enabled ? {
     "api/base-url"   = local.public_configuration.api_base_url
     "api/health-url" = local.public_configuration.api_health_url
-  } : {})
+    } : {}, var.hosted_observability == null ? {} : {
+    "grafana/stack-url"          = var.hosted_observability.stack_url
+    "grafana/otlp-endpoint"      = var.hosted_observability.otlp_endpoint
+    "grafana/otlp-instance-id"   = var.hosted_observability.otlp_instance_id
+    "grafana/faro-collector-url" = var.hosted_observability.faro_collector_url
+  })
 }
 
 data "aws_iam_policy_document" "configuration" {

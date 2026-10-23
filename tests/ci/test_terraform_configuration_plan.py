@@ -1,4 +1,5 @@
 """Strict application-plan ownership checks for generated public configuration."""
+
 from __future__ import annotations
 
 import copy
@@ -6,7 +7,6 @@ import importlib.util
 import re
 import unittest
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".github/scripts/terraform-environment-plan.py"
@@ -41,12 +41,15 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
     def validate(self, change, environment="development", release_only=False):
         return guard.validate({"resource_changes": [change]}, environment, release_only)
 
-    def test_all_twelve_owned_parameters_are_accepted_for_both_environments(self):
+    def test_all_seventeen_owned_parameters_are_accepted_for_both_environments(self):
         for environment in ("development", "production"):
             with self.subTest(environment=environment):
-                changes = [parameter_change(environment, suffix) for suffix in sorted(guard.APPLICATION_PARAMETER_SUFFIXES)]
+                changes = [
+                    parameter_change(environment, suffix)
+                    for suffix in sorted(guard.APPLICATION_PARAMETER_SUFFIXES)
+                ]
                 rows = guard.validate({"resource_changes": changes}, environment, False)
-                self.assertEqual(rows, [("aws_ssm_parameter", "create")] * 12)
+                self.assertEqual(rows, [("aws_ssm_parameter", "create")] * 17)
                 summary = guard.render(rows, environment)
                 self.assertNotIn("unreported-private-fixture-value", summary)
                 self.assertNotIn("/pawlocal/", summary)
@@ -57,7 +60,12 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
                 with self.subTest(environment=environment, actions=actions):
                     change = parameter_change(environment, actions=actions)
                     rows = self.validate(change, environment)
-                    self.assertEqual(rows, [] if actions == ["no-op"] else [("aws_ssm_parameter", "update")])
+                    self.assertEqual(
+                        rows,
+                        []
+                        if actions == ["no-op"]
+                        else [("aws_ssm_parameter", "update")],
+                    )
                     if actions != ["no-op"]:
                         with self.assertRaisesRegex(SystemExit, "release-only"):
                             self.validate(change, environment, True)
@@ -91,9 +99,13 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
                     change["change"][side][field] = value
                     with self.assertRaises(SystemExit) as rejected:
                         self.validate(change)
-                    self.assertNotIn("unreported-private-fixture-value", str(rejected.exception))
+                    self.assertNotIn(
+                        "unreported-private-fixture-value", str(rejected.exception)
+                    )
         change = parameter_change()
-        change["address"] = 'module.other.aws_ssm_parameter.configuration["auth/client-id"]'
+        change["address"] = (
+            'module.other.aws_ssm_parameter.configuration["auth/client-id"]'
+        )
         with self.assertRaises(SystemExit):
             self.validate(change)
 
@@ -115,10 +127,29 @@ class ConfigurationPlanOwnershipTests(unittest.TestCase):
                         self.validate(change)
 
     def test_guard_allowlist_matches_only_application_owned_terraform_keys(self):
-        source = (ROOT / "infra/terraform/modules/pawlocal-environment/configuration.tf").read_text(encoding="utf-8")
-        declaration = re.search(r"configuration_suffixes\s*=\s*toset\(\[(.*?)\]\)", source, re.S)
+        source = (
+            ROOT / "infra/terraform/modules/pawlocal-environment/configuration.tf"
+        ).read_text(encoding="utf-8")
+        declaration = re.search(
+            r"configuration_suffixes\s*=\s*setunion\(local.hosted_public_suffixes,\s*toset\(\[(.*?)\]\)",
+            source,
+            re.DOTALL,
+        )
         assert declaration
-        self.assertEqual(set(re.findall(r'"([a-z/-]+)"', declaration.group(1))), guard.APPLICATION_PARAMETER_SUFFIXES)
+        hosted = (
+            ROOT
+            / "infra/terraform/modules/pawlocal-environment/hosted-observability.tf"
+        ).read_text(encoding="utf-8")
+        hosted_declaration = re.search(
+            r"hosted_public_suffixes\s*=\s*toset\(\[(.*?)\]\)", hosted, re.DOTALL
+        )
+        assert hosted_declaration
+        producer_keys = set(
+            re.findall(
+                r'"([a-z/-]+)"', declaration.group(1) + hosted_declaration.group(1)
+            )
+        )
+        self.assertEqual(producer_keys, guard.APPLICATION_PARAMETER_SUFFIXES)
 
 
 if __name__ == "__main__":

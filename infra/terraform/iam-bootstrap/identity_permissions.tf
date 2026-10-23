@@ -85,6 +85,29 @@ data "aws_iam_policy_document" "identity_app_role_boundary" {
       values   = [each.key]
     }
   }
+  statement {
+    sid       = "ReadOnlyMatchingRuntimeIngestionToken"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/secrets/grafana/otlp-token"]
+  }
+  dynamic "statement" {
+    for_each = contains(keys(var.hosted_telemetry_kms_key_arns), each.key) ? [var.hosted_telemetry_kms_key_arns[each.key]] : []
+    content {
+      actions   = ["kms:Decrypt"]
+      resources = [statement.value]
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        values   = ["ssm.${var.aws_region}.amazonaws.com"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "kms:EncryptionContext:PARAMETER_ARN"
+        values   = ["arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/secrets/grafana/otlp-token"]
+      }
+    }
+  }
+
 }
 
 removed {
@@ -130,4 +153,14 @@ resource "aws_iam_policy" "identity_app_role_boundary" {
 moved {
   from = aws_iam_policy.identity_app_role_boundary
   to   = aws_iam_policy.identity_app_role_boundary["development"]
+}
+
+variable "hosted_telemetry_kms_key_arns" {
+  description = "Optional exact existing KMS key for the environment runtime ingestion token. No key is created."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition     = alltrue([for environment, key in var.hosted_telemetry_kms_key_arns : contains(["development", "production"], environment) && can(regex("^arn:${data.aws_partition.current.partition}:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/[0-9a-f-]{36}$", key))])
+    error_message = "Runtime token keys must be existing keys in the matching account and region."
+  }
 }

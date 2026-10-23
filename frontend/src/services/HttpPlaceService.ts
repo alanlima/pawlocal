@@ -62,8 +62,13 @@ export class HttpPlaceService implements PlaceService {
     headers.set('Content-Type', 'application/json')
     const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
-    if (context?.traceparent) headers.set('traceparent', context.traceparent)
-    if (context?.tracestate) headers.set('tracestate', context.tracestate)
+    const approvedOrigin =
+      !import.meta.env.VITE_RELEASE_ENV ||
+      new URL(this.baseUrl, window.location.origin).origin ===
+        new URL(import.meta.env.VITE_API_BASE_URL ?? '', window.location.origin).origin
+    if (approvedOrigin && context?.traceparent) headers.set('traceparent', context.traceparent)
+    if (!import.meta.env.VITE_RELEASE_ENV && context?.tracestate)
+      headers.set('tracestate', context.tracestate)
     const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers })
     if (!response.ok) throw new Error(`PawLocal API error (${response.status})`)
     return response.status === 204 || response.status === 202

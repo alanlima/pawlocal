@@ -44,7 +44,7 @@ def configuration_fixture():
     inputs.update(aws_region="ap-southeast-2", project_name="pawlocal", terraform_state_bucket_name="existing-state",
                   github_repository="alanlima/pawlocal", github_owner_id="4245961", github_repository_id="1423024931",
                   manage_github_oidc_provider="true", development_lightsail_principal_arn="", production_lightsail_principal_arn="")
-    inputs.update(oncall_environments="[]", oncall_receiver_kms_key_arns="{}")
+    inputs.update(oncall_environments="[]", oncall_receiver_kms_key_arns="{}", hosted_telemetry_kms_key_arns="{}")
     for name in bootstrap.INPUTS:
         if name.startswith("import_"):
             inputs[name] = "false"
@@ -149,7 +149,7 @@ class PlanInputTests(unittest.TestCase):
         with patch.object(bootstrap.os, "environ", configuration_fixture()):
             bootstrap.verify_plan_inputs({"variables": variables})
             canonical = bootstrap.effective_inputs()
-        self.assertEqual(len(variables), 16)
+        self.assertEqual(len(variables), 17)
         self.assertTrue(all(type(variables[name]["value"]) is str for name in bootstrap.BOOLEAN_INPUTS))
         self.assertTrue(all(type(canonical[name]) is bool for name in bootstrap.BOOLEAN_INPUTS))
 
@@ -170,7 +170,7 @@ class PlanInputTests(unittest.TestCase):
             changed = self.variable_fixture()
             if name == "oncall_environments":
                 changed[name]["value"] = ["production"]
-            elif name == "oncall_receiver_kms_key_arns":
+            elif name in {"oncall_receiver_kms_key_arns", "hosted_telemetry_kms_key_arns"}:
                 changed[name]["value"] = {"development": "different-key"}
             else:
                 changed[name]["value"] += "changed"
@@ -195,7 +195,7 @@ class PlanInputTests(unittest.TestCase):
             declarations = "\n".join('variable "' + name + '" { type = ' +
                 ("bool" if name in bootstrap.BOOLEAN_INPUTS else
                  "set(string)" if name == "oncall_environments" else
-                 "map(string)" if name == "oncall_receiver_kms_key_arns" else "string") + " }" for name in bootstrap.INPUTS)
+                 "map(string)" if name in bootstrap.STRUCTURED_INPUTS else "string") + " }" for name in bootstrap.INPUTS)
             output = 'output "inputs" { value = {' + ", ".join(name + " = var." + name for name in bootstrap.INPUTS) + "} }"
             (root / "main.tf").write_text(declarations + "\n" + output, encoding="utf-8")
             for command in (("init", "-backend=false", "-input=false"),

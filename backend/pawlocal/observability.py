@@ -27,6 +27,7 @@ _configured = False
 _propagator = TraceContextTextMapPropagator()
 _tracer_provider: TracerProvider | None = None
 _logger_provider: LoggerProvider | None = None
+_meter_provider = None
 _SAFE_EXCEPTION_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z]{5}\Z")
 _MAX_EXCEPTION_CHAIN_DEPTH = 5
@@ -72,7 +73,7 @@ class _SafeJsonFormatter(logging.Formatter):
 
 
 def configure_observability() -> None:
-    global _configured, _tracer_provider, _logger_provider
+    global _configured, _tracer_provider, _logger_provider, _meter_provider
     if _configured:
         return
     _configured = True
@@ -88,6 +89,20 @@ def configure_observability() -> None:
         logger.addHandler(console)
 
     if not settings.telemetry_enabled:
+        return
+
+    if settings.release_environment:
+        try:
+            from pawlocal.cloud_telemetry import configure
+
+            _tracer_provider, _logger_provider, _meter_provider, handler = configure(
+                settings
+            )
+            trace.set_tracer_provider(_tracer_provider)
+            logger.addHandler(handler)
+        except Exception:  # noqa: BLE001 - export setup cannot prevent API startup
+            # Telemetry setup cannot prevent application startup or disclose credentials.
+            logger.warning("Hosted telemetry configuration unavailable")
         return
 
     endpoint = settings.otlp_endpoint.rstrip("/")
@@ -109,7 +124,7 @@ def configure_observability() -> None:
 
 
 def shutdown_observability() -> None:
-    for provider in (_tracer_provider, _logger_provider):
+    for provider in (_tracer_provider, _logger_provider, _meter_provider):
         if provider is not None:
             provider.force_flush()
             provider.shutdown()

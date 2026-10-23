@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     write_rate_limit_per_minute: int = 10
     telemetry_enabled: bool = False
     otlp_endpoint: str = "http://otel-collector:4318"
+    cloud_otlp_endpoint: str = Field(
+        default="", validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    grafana_otlp_instance_id: str = ""
     demo_faults_enabled: bool = False
 
     model_config = SettingsConfigDict(

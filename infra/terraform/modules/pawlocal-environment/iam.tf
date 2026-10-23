@@ -292,6 +292,31 @@ data "aws_iam_policy_document" "runtime" {
     actions   = ["dsql:DbConnect"]
     resources = [aws_dsql_cluster.application.arn]
   }
+  dynamic "statement" {
+    for_each = local.hosted_telemetry_enabled ? [true] : []
+    content {
+      actions   = ["ssm:GetParameter"]
+      resources = [local.hosted_token_arn]
+    }
+  }
+  dynamic "statement" {
+    for_each = var.hosted_observability == null ? [] : (var.hosted_observability.kms_key_arn == null || !local.hosted_telemetry_enabled ? [] : [var.hosted_observability.kms_key_arn])
+    content {
+      actions   = ["kms:Decrypt"]
+      resources = [statement.value]
+      condition {
+        test     = "StringEquals"
+        variable = "kms:ViaService"
+        values   = ["ssm.${var.aws_region}.amazonaws.com"]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "kms:EncryptionContext:PARAMETER_ARN"
+        values   = [local.hosted_token_arn]
+      }
+    }
+  }
+
 }
 
 data "aws_iam_policy_document" "dsql_setup" {

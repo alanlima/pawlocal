@@ -51,7 +51,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql
-      PAWLOCAL_TELEMETRY_ENABLED: "false"
       BACKEND_IMAGE: ${{ inputs.backend_image }}
       RELEASE_COMMIT: ${{ inputs.release_commit }}
     steps:
@@ -92,7 +91,6 @@ jobs:
         env:
           VITE_RELEASE_ENV: production
           VITE_USE_MOCK_BACKEND: "false"
-          VITE_TELEMETRY_ENABLED: "false"
           VITE_APP_COMMIT: ${{ inputs.release_commit }}
         run: npm ci && npm run build
       - name: Create production release manifest and frontend archive
@@ -128,7 +126,7 @@ jobs:
                   'postgresql': {'runner': 'alembic', 'migration_id': heads[0]},
                   'aurora_dsql': {'runner': 'dsql_baseline', 'migration_id': dsql_revision},
               },
-              'telemetry_enabled': False,
+              'telemetry_enabled': os.environ['VITE_TELEMETRY_ENABLED'] == 'true',
               'frontend': {
                   'environment': 'production',
                   'artifact_digest': 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -159,12 +157,40 @@ jobs:
         env:
           ENVIRONMENT_URL: ${{ env.PAWLOCAL_PUBLIC_BASE_URL }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
         with:
           script: |
+            const fs = require('fs')
+            const crypto = require('crypto')
+            const manifestBytes = fs.readFileSync('release/release-manifest.json')
+            const evidenceBytes = fs.readFileSync('release/production-verification.json')
+            const manifest = JSON.parse(manifestBytes.toString('utf8'))
+            const evidence = JSON.parse(evidenceBytes.toString('utf8'))
+            const sha256 = value => `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`
             const deployment = await github.rest.repos.createDeployment({
               ...context.repo, ref: process.env.RELEASE_COMMIT, environment: 'production',
               production_environment: true, auto_merge: false, required_contexts: [],
-              payload: {workflow_run_id: context.runId, backend_image: process.env.BACKEND_IMAGE, telemetry_enabled: false},
+              payload: {
+                record_schema_version: 1,
+                manifest_schema_version: manifest.schema_version,
+                evidence_schema_version: evidence.schema_version,
+                evidence_validated: true,
+                workflow_run_id: context.runId,
+                workflow_run_attempt: Number(process.env.RUN_ATTEMPT),
+                release_commit: manifest.commit,
+                release_manifest_digest: sha256(manifestBytes),
+                verification_evidence_digest: sha256(evidenceBytes),
+                backend_image: process.env.BACKEND_IMAGE,
+                backend_image_digest: evidence.backend_image_digest,
+                running_image_digest: evidence.running_image_digest,
+                frontend_artifact_digest: evidence.frontend_artifact_digest,
+                database_provider: evidence.database_provider,
+                migration_runner: evidence.migration_runner,
+                migration_id: evidence.migration_id,
+                telemetry_enabled: evidence.telemetry_enabled,
+                public_endpoint_health: evidence.public_endpoint_health,
+                database_query_smoke: evidence.database_query_smoke,
+              },
             })
             await github.rest.repos.createDeploymentStatus({
               ...context.repo, deployment_id: deployment.data.id, state: 'success',

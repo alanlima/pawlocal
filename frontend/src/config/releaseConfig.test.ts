@@ -24,11 +24,27 @@ describe('cloud release configuration', () => {
     expect(() => validateReleaseConfig()).not.toThrow()
   })
 
-  it('requires telemetry to be explicitly disabled', () => {
+  it('requires a verified collector for enabled telemetry', () => {
     setReleaseConfig({ VITE_TELEMETRY_ENABLED: 'true' })
     expect(() => validateReleaseConfig()).toThrow(
-      'Cloud release builds require VITE_TELEMETRY_ENABLED=false',
+      'Enabled cloud telemetry requires a verified public Faro collector URL',
     )
+  })
+
+  it('accepts enabled telemetry only with a public collector binding', () => {
+    setReleaseConfig({
+      VITE_TELEMETRY_ENABLED: 'true',
+      VITE_FARO_COLLECTOR_URL: 'https://faro.grafana.net/collect/public-key',
+    })
+    expect(() => validateReleaseConfig()).not.toThrow()
+    for (const value of [
+      'https://user:private@faro.grafana.net/collect/public-key',
+      'https://faro.grafana.net/collect/key?token=private',
+      'https://foreign.example.test/collect/key',
+    ]) {
+      setReleaseConfig({ VITE_TELEMETRY_ENABLED: 'true', VITE_FARO_COLLECTOR_URL: value })
+      expect(() => validateReleaseConfig()).toThrow()
+    }
   })
 
   it('does not allow the mock service in a cloud build', () => {

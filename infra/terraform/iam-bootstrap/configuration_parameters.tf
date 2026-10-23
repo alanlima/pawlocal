@@ -23,6 +23,11 @@ locals {
 }
 
 locals {
+  # Exact public producer ownership for refresh/collision checks; not reader admission.
+  monitoring_configuration_suffixes = toset([
+    "observability/enabled", "grafana/stack-url", "grafana/otlp-endpoint",
+    "grafana/otlp-instance-id", "grafana/faro-collector-url", "oncall/webhook-url"
+  ])
   bootstrap_configuration_values = {
     for environment in keys(local.environments) : environment => merge({
       "iam/terraform-plan-role-arn"   = aws_iam_role.github_terraform["${environment}-plan"].arn
@@ -45,10 +50,10 @@ locals {
       }
     }
   ]...)
-  application_configuration_suffixes = setsubtract(local.configuration_parameter_suffixes, toset([
+  application_configuration_suffixes = setunion(local.monitoring_configuration_suffixes, setsubtract(local.configuration_parameter_suffixes, toset([
     "iam/terraform-plan-role-arn", "iam/terraform-apply-role-arn", "aws/account-id",
     "terraform/plan-bucket", "iam/frontend-publish-role-arn", "iam/runtime-role-arn"
-  ]))
+  ])))
   application_configuration_arns = {
     for environment in keys(local.environments) : environment => [
       for suffix in sort(tolist(local.application_configuration_suffixes)) :

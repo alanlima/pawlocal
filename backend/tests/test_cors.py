@@ -19,7 +19,10 @@ def test_cors_allows_only_the_configured_frontend_origin():
         },
     )
     assert allowed.status_code == 200
-    assert allowed.headers["access-control-allow-origin"] == "https://pawlocal.example.test"
+    assert (
+        allowed.headers["access-control-allow-origin"]
+        == "https://pawlocal.example.test"
+    )
     assert "authorization" in allowed.headers["access-control-allow-headers"].lower()
 
     denied = client.options(
@@ -43,6 +46,7 @@ def test_health_exposes_nonsecret_release_identity(client, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
+        "telemetry_enabled": False,
         "environment": "development",
         "image_digest": "sha256:" + "a" * 64,
     }

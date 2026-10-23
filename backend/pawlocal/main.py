@@ -148,6 +148,9 @@ async def trace_and_log_request(request: Request, call_next):
             error_code=error_code if status_code >= 500 else None,
             **(exception_fields if error_code == "unhandled_api_error" else {}),
         )
+        from pawlocal.cloud_telemetry import record_request
+
+        record_request(operation, request.method, status_code, duration_ms / 1000)
         return response
 
 
@@ -174,9 +177,10 @@ async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "environment": settings.release_environment or "local",
         "image_digest": settings.release_image_digest or "unknown",
+        "telemetry_enabled": settings.telemetry_enabled,
     }

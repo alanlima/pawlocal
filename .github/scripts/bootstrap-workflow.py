@@ -27,13 +27,14 @@ PRIVATE = Path(os.environ.get("RUNNER_TEMP", ".tmp")) / "iam-bootstrap"
 INPUTS = (
     "aws_region", "project_name", "terraform_state_bucket_name", "github_repository",
     "github_owner_id", "github_repository_id", "route53_zone_id", "domain_name",
+    "hosted_telemetry_kms_key_arns",
     "manage_github_oidc_provider", "development_lightsail_principal_arn",
     "production_lightsail_principal_arn", "import_existing_github_oidc_provider",
     "import_existing_development_deploy_role", "import_existing_dsql_service_linked_role",
     "oncall_environments", "oncall_receiver_kms_key_arns",
 )
 BOOLEAN_INPUTS = {"manage_github_oidc_provider", *(x for x in INPUTS if x.startswith("import_"))}
-STRUCTURED_INPUTS = {"oncall_environments": list, "oncall_receiver_kms_key_arns": dict}
+STRUCTURED_INPUTS = {"oncall_environments": list, "oncall_receiver_kms_key_arns": dict, "hosted_telemetry_kms_key_arns": dict}
 ACTIONS = {("no-op",), ("read",), ("create",), ("update",), ("delete",),
            ("delete", "create"), ("create", "delete")}
 RESOURCE_TYPES = {"aws_iam_role", "aws_iam_role_policy", "aws_iam_policy", "aws_iam_openid_connect_provider",
@@ -159,16 +160,40 @@ def effective_inputs():
         elif not name.endswith("lightsail_principal_arn"):
             require(bool(value), "MISSING_" + key)
         result[name] = value
-    require(result["project_name"] == "pawlocal" and result["github_repository"] == REPOSITORY,
-            "PROJECT_IDENTITY_MISMATCH")
-    require(str(result["github_repository_id"]) == os.environ.get("GITHUB_REPOSITORY_ID"), "REPOSITORY_ID_MISMATCH")
-    require(str(result["github_owner_id"]) == os.environ.get("GITHUB_REPOSITORY_OWNER_ID"), "OWNER_ID_MISMATCH")
-    require(all(result[name] is False for name in INPUTS if name.startswith("import_")), "IMPORT_NOT_AUTHORIZED")
-    require(result["terraform_state_bucket_name"] == os.environ.get("PAWLOCAL_TF_STATE_BUCKET"), "BACKEND_INPUT_MISMATCH")
-    require(result["aws_region"] == os.environ.get("AWS_REGION"), "REGION_INPUT_MISMATCH")
+    require(
+        result["project_name"] == "pawlocal"
+        and result["github_repository"] == REPOSITORY,
+        "PROJECT_IDENTITY_MISMATCH",
+    )
+    require(
+        str(result["github_repository_id"]) == os.environ.get("GITHUB_REPOSITORY_ID"),
+        "REPOSITORY_ID_MISMATCH",
+    )
+    require(
+        str(result["github_owner_id"]) == os.environ.get("GITHUB_REPOSITORY_OWNER_ID"),
+        "OWNER_ID_MISMATCH",
+    )
+    require(
+        all(result[name] is False for name in INPUTS if name.startswith("import_")),
+        "IMPORT_NOT_AUTHORIZED",
+    )
+    require(
+        result["terraform_state_bucket_name"]
+        == os.environ.get("PAWLOCAL_TF_STATE_BUCKET"),
+        "BACKEND_INPUT_MISMATCH",
+    )
+    require(
+        result["aws_region"] == os.environ.get("AWS_REGION"), "REGION_INPUT_MISMATCH"
+    )
     # Terraform auto-loaded files and extra TF_VAR values can change effective inputs.
-    require(not any(ROOT.glob("*.tfvars*")) and not any(ROOT.glob("*.auto.tfvars*")), "UNBOUND_VARIABLE_FILE")
-    require({key[7:] for key in os.environ if key.startswith("TF_VAR_")} == set(INPUTS), "UNBOUND_TERRAFORM_INPUT")
+    require(
+        not any(ROOT.glob("*.tfvars*")) and not any(ROOT.glob("*.auto.tfvars*")),
+        "UNBOUND_VARIABLE_FILE",
+    )
+    require(
+        {key[7:] for key in os.environ if key.startswith("TF_VAR_")} == set(INPUTS),
+        "UNBOUND_TERRAFORM_INPUT",
+    )
     return result
 
 

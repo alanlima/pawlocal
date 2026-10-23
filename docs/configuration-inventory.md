@@ -129,3 +129,6 @@ The earlier unmanaged-parameter inventory above describes the pre-monitoring bas
 | /pawlocal/<environment>/secrets/oncall/dispatch-app-private-key | Matching receiver only; no GitHub synchronization | Separate dispatch-only GitHub App identity; RSA PEM at least 2048 bits; exact SSM read and optional existing-key encryption context |
 
 Actual creation/population/rotation needs a reviewed owner procedure before live mutation. Default `aws/ssm` decryption under the final execution-role boundary is an activation proof gap; optional exact existing KMS grants do not imply a new customer-managed key. Follow the [receiver runbook](../ops/incident-response/README.md). Public App IDs remain in the explicit operator JSON input, not extra unused SSM parameters.
+## Hosted telemetry operator input (#225)
+
+`PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG` is an optional public plan-Environment variable, not an SSM-derived credential: it supplies the reviewed Grafana object to Terraform so the matching application state can publish its owned Strings. Null keeps export disabled. See the [operations contract](hosted-telemetry-operations.md) for exact fields, runtime-only OTLP source, validation, release evidence and live limitations. It must not contain private token payloads.
