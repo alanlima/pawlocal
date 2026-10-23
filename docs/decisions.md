@@ -2,6 +2,14 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
+## DEC-013 — Proposed state-free monitoring secret setup
+
+- **Status:** PROPOSED under [#241](https://github.com/alanlima/pawlocal/issues/241), 2026-10-23; owner decision, independent review and live setup authorization pending.
+- **Context:** Runtime consumers need exact SSM SecureStrings, while existing ownership requires Terraform-only AWS mutation and excludes secret values from state. Current wording that Terraform never receives payloads leaves creation/rotation without an approved mechanism.
+- **Proposal:** Use Terraform 1.14.3 / AWS 6.69.1 sensitive ephemeral inputs and SSM `value_wo`/`value_wo_version` in existing matching application states. An owner-operated isolated setup runner retains secure stdin inputs in memory through saved-plan review and explicitly approved setup apply. Ordinary maintenance reads current exact SSM sources ephemerally by literal ARN, without permanent GitHub copies. Public identity/revision maps control the graph; no payload hash metadata or fourth state.
+- **Conditions:** Both plan/apply roles need newly reviewed exact decrypted reads and applicable KMS authority. Preserve nonempty write-only configuration through refresh. Guard metadata updates that need a write-revision advance; fail closed on missing/empty/stale inputs and unmanaged collisions. Saved-plan integrity does not bind ephemeral re-supply, so a lost input session requires a fresh reviewed operation. Runtime incidents gain no setup/write credentials or new approval state.
+- **Evidence and limits:** [Lifecycle proposal and local real-provider fixture](specs/monitoring-secret-lifecycle.md) define reproducible synthetic tests and remaining secure-runner/IAM/KMS/Grafana/live requirements. This entry implements no AWS resource, IAM grant, protected input channel or credential population. Existing secret-input restrictions remain effective until the proposal is accepted and implemented.
+
 ## DEC-011 — Hosted observability and minimal cloud incident responder
 
 - **Status:** Simplified architecture selected by the owner for documentation/planning on 2026-10-23; non-live implementation is authorized; issue-contract amendments, live activation and provisioning approval remain separately gated. This PR records the reviewable design and does not close #59/#42.

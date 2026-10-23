@@ -108,3 +108,7 @@ validations: [required]
 G1 requires exact development release/digest, all six dashboards, bounded usage, correlation, privacy review, disable/outage/recovery tests and signed alert evidence. P8 separately approves production enablement, isolation and smoke evidence before #59 closure. Grafana folders/environment labels do not establish authorization; prove actual read scopes per signal before production agent reads.
 
 Operators must be able to reproduce dashboard provisioning from `observability/`, verify a synthetic journey, disable exports without breaking the app, rotate ingestion credentials safely, inspect no-data/export health and revert a configuration release through existing protected Terraform/release procedures. Dashboard drift is reconciled through source PRs. The approved region/account, data residency, initial thresholds and retention/usage proof are P0/P4 decisions; this specification does not pretend the account has been configured.
+
+## Proposed source-population decision (#241)
+
+[DEC-013 / the monitoring secret lifecycle proposal](monitoring-secret-lifecycle.md) evaluates sensitive ephemeral write-only Terraform inputs and exact ephemeral SSM maintenance reads. It proposes an isolated owner setup runner without permanent GitHub copies of runtime-only credentials. This is an unaccepted amendment to secret-input wording, not source population, permission approval or live acceptance; the active public-only copier/query-secret-inactive contract above remains unchanged.

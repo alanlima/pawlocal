@@ -16,6 +16,7 @@ on:
       - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
+      - "tests/ci/test_monitoring_secret_lifecycle.py"
       - "tests/ci/incident_receiver.test.mjs"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-iam-bootstrap.yml"
@@ -50,6 +51,7 @@ on:
       - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
+      - "tests/ci/test_monitoring_secret_lifecycle.py"
       - "tests/ci/incident_receiver.test.mjs"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-iam-bootstrap.yml"
@@ -118,6 +120,12 @@ jobs:
       - name: Initialize reusable-module providers without configuring the backend
         if: ${{ matrix.root != 'iam-bootstrap' && !startsWith(matrix.root, 'environments/') }}
         run: terraform init -backend=false -input=false
+
+      - name: Prove proposed SSM write-only lifecycle against loopback only
+        if: matrix.root == 'iam-bootstrap'
+        env:
+          PAWLOCAL_RUN_SECRET_LIFECYCLE_FIXTURE: "1"
+        run: python ../../../tests/ci/test_monitoring_secret_lifecycle.py -v
 
       - name: Validate Terraform configuration
         if: matrix.root != 'modules/pawlocal-environment'
