@@ -37,7 +37,13 @@ jobs:
         id: classifier
         env:
           PYTHONPATH: ops/change-authorization:ops/incident-response
-        run: python ops/change-authorization/authorizer.py --mode=classify --repository="${{ github.repository }}"
+          PUBLISHER_BOT_LOGIN: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+        run: |
+          bot_args=()
+          if [ -n "$PUBLISHER_BOT_LOGIN" ]; then
+            bot_args+=("--publisher-bot=$PUBLISHER_BOT_LOGIN")
+          fi
+          python ops/change-authorization/authorizer.py --mode=classify --repository="${{ github.repository }}" "${bot_args[@]}"
 
   reset-status:
     name: Reset change authorization status to pending

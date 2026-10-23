@@ -79,6 +79,16 @@ class ChangeAuthorizationClassifierTests(unittest.TestCase):
         with self.assertRaises(Denied):
             classify_pr(pr)
 
+    def test_configured_bot_login_without_publisher_suffix(self):
+        pr = {
+            "number": 106,
+            "draft": False,
+            "base": {"ref": "main"},
+            "head": {"ref": "incident/development/test"},
+            "user": {"login": "pawlocal-oncall-automation[bot]", "type": "Bot"},
+        }
+        self.assertEqual(classify_pr(pr, publisher_bot_logins={"pawlocal-oncall-automation[bot]"}), "incident")
+
     def test_parameterized_publisher_bot_login(self):
         pr = {
             "number": 105,

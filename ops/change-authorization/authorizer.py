@@ -188,9 +188,15 @@ def classify_pr(pr_data: dict, publisher_bot_logins: set[str] | list[str] | None
     login = user.get("login", "")
     user_type = user.get("type", "")
 
+    configured_bots = (
+        {b.strip() for b in publisher_bot_logins if b and b.strip()}
+        if publisher_bot_logins
+        else set()
+    )
+
     # Check if author matches the verified publisher bot login or naming pattern
     is_bot = user_type == "Bot" and (
-        (publisher_bot_logins and login in publisher_bot_logins)
+        (login in configured_bots)
         or bool(re.fullmatch(r"[A-Za-z0-9_.-]+-publisher\[bot\]", login))
     )
 
