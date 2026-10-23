@@ -12,6 +12,7 @@ on:
       - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
+      - "tests/ci/incident_receiver.test.mjs"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-iam-bootstrap.yml"
       - ".github/scripts/bootstrap*.py"
@@ -41,6 +42,7 @@ on:
       - ".github/scripts/verify-terraform-source-checkout.py"
       - ".github/scripts/verify-cognito-provider-contract.py"
       - "tests/ci/test_cognito_lambda_module_saved_plan.py"
+      - "tests/ci/incident_receiver.test.mjs"
       - ".github/workflows/terraform-ci.yml"
       - ".github/workflows/terraform-iam-bootstrap.yml"
       - ".github/scripts/bootstrap*.py"
@@ -92,11 +94,11 @@ jobs:
           terraform_version: 1.14.3
           terraform_wrapper: false
 
-      - name: Set up Node.js for Cognito trigger tests
+      - name: Set up Node.js for Lambda handler tests
         if: matrix.root == 'modules/pawlocal-environment'
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
 
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive .
@@ -150,3 +152,7 @@ jobs:
       - name: Test DSQL setup lifecycle transitions
         if: matrix.root == 'modules/dsql-post-apply-setup'
         run: python ../../../../tests/ci/test_dsql_setup_terraform_lifecycle.py
+
+      - name: Test signed Grafana incident receiver
+        if: matrix.root == 'modules/pawlocal-environment'
+        run: node --test ../../../../tests/ci/incident_receiver.test.mjs

@@ -63,6 +63,7 @@ run "foundation_publishes_only_available_application_values" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   override_resource {
@@ -108,6 +109,7 @@ run "converged_production_publishes_its_own_managed_api_values" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {

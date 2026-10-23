@@ -542,35 +542,49 @@ class IntegrationTests(unittest.TestCase):
         for workflow in (terraform, reconcile, destroy):
             self.assertIs(workflow["concurrency"]["cancel-in-progress"], False)
 
-    def test_collision_inventory_rejects_existing_unknown_denied_and_adoption(self):
+    def test_collision_inventory_checks_any_key_and_rejects_existing_denied_and_adoption(
+        self,
+    ):
         key = "/pawlocal/development/config/auth/client-id"
         create = {
             "type": "aws_ssm_parameter",
             "change": {"actions": ["create"], "before": None, "after": {"name": key}},
         }
         plan = {"resource_changes": [create]}
-        collision.check(plan, FakeSSM(), {key})
-        for client, allowed in (
-            (FakeSSM({key: {"Type": "String", "Value": SENTINEL}}), {key}),
-            (FakeSSM(), set()),
-            (FakeSSM({key: RuntimeError(SENTINEL)}), {key}),
+        collision.check(plan, FakeSSM())
+        for client in (
+            FakeSSM({key: {"Type": "String", "Value": SENTINEL}}),
+            FakeSSM({key: RuntimeError(SENTINEL)}),
         ):
             with self.assertRaises(module.ReconciliationError):
-                collision.check(plan, client, allowed)
+                collision.check(plan, client)
         with self.assertRaisesRegex(
             module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"
         ):
             collision.check(
                 plan,
                 FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}),
-                {key},
             )
+        for arbitrary_key in (
+            "/unrelated/service/setting",
+            "/pawlocal/development/config/oncall/webhook-url",
+        ):
+            create["change"]["after"]["name"] = arbitrary_key
+            source = FakeSSM()
+            collision.check(plan, source)
+            self.assertEqual(
+                source.calls, [{"Name": arbitrary_key, "WithDecryption": False}]
+            )
+        create["change"]["after"]["name"] = None
+        with self.assertRaisesRegex(module.ReconciliationError, "name must be known"):
+            collision.check(plan, FakeSSM())
+        create["change"]["after"]["name"] = key
         create["change"]["importing"] = {"id": key}
         with self.assertRaises(module.ReconciliationError):
-            collision.check(plan, FakeSSM(), {key})
+            collision.check(plan, FakeSSM())
         create["change"]["actions"] = ["no-op"]
         with self.assertRaises(module.ReconciliationError):
-            collision.check(plan, FakeSSM(), {key})
+            collision.check(plan, FakeSSM())
 
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(

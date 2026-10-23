@@ -309,6 +309,7 @@ vars.PAWLOCAL_ROUTE53_ZONE_ID
 vars.PAWLOCAL_RUNTIME_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS
+vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG
 vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET
 vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
 vars.PAWLOCAL_TF_STATE_BUCKET
@@ -520,3 +521,14 @@ When adding, removing, renaming, or changing a workflow:
 4. Update the matching `actions-reference` metadata for both manual-dispatch and reusable-call inputs.
 5. Update the protected-configuration prose and `actions-protected-configuration` metadata when variable or secret consumption changed; the metadata records `vars.` and `secrets.` contexts separately.
 6. Run `python -m unittest tests.ci.test_github_actions_reference` and the applicable workflow tests.
+
+
+## Optional incident receiver Terraform inputs (Issue #227)
+
+`PAWLOCAL_ONCALL_RECEIVER_CONFIG` is a public JSON operator input in the matching plan Environment, including `production-plan` for both destroy plans. It defaults to `null`; no reconciliation mapping is added. Its reviewed App/installation/repository IDs, alert/service allow-lists and optional exact existing KMS ARN feed `TF_VAR_oncall_receiver`. Apply consumes the saved plan unchanged, not an apply-side reconstruction. It never contains private PEM/HMAC values.
+
+After the existing Cognito profile setup, every plan/apply/production-recovery job appends the fixed `<project_name>-oncall-deployment` profile to that same private temporary config. The trusted job selects only the matching `pawlocal-<environment>-oncall-terraform-{plan,apply}` identity. Default-disabled resources never assume it, so normal releases need no new credentials. The existing always-run cleanup removes both profiles together. Keep enabled configuration until approved Terraform teardown removes the receiver; disabling configuration is not permission to remove state bindings.
+
+Normal enabled saved plans force only the on-call module's local `archive_plan`/`archive` packaging sidecars, following the existing fresh-runner Lambda pattern. Teardown does not build a receiver package. Bootstrap additionally consumes optional operator `TF_VAR_oncall_environments` (default `[]`) and `TF_VAR_oncall_receiver_kms_key_arns` (default `{}`) in both protected bootstrap Environments. The manifest binds these typed collection inputs and rejects changed or unbound values. Bootstrap code/plan approval and environment apply remain separate; no secret values are Terraform inputs.
+
+See the [independent receiver contract and activation runbook](../ops/incident-response/README.md). This is dormant implementation; it does not configure live App/Grafana accounts or authorize an apply.

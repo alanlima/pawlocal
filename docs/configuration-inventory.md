@@ -63,6 +63,10 @@ These are not automatically added as Parameter Store mappings. Their lifecycle o
 | PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN | P; Terraform certificate input | Existing secret setting; approved matching certificate ARN | Preserve current storage/configuration; no copying into Parameter Store |
 | PAWLOCAL_DEPLOY_ADAPTER_PATH | R; frontend release adapter | Variable; reviewed repository adapter path | Static input; retain |
 | PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS | Repository; Terraform diagnostics | Variable; exact `true` enables existing diagnostic mode | Existing operator control; do not change through reconciliation |
+| PAWLOCAL_ONCALL_RECEIVER_CONFIG | Matching plan Environment; production-plan also supplies receiver configuration to production recovery plans | Public JSON operator input, default `null`; validated numeric IDs, bounded service/alert allow-lists and optional exact existing KMS ARN | #227 proposed opt-in, not live-configured; intentionally outside synchronization, no secret payloads; apply uses saved plan |
+| TF_VAR_oncall_environments | iam-bootstrap-plan and iam-bootstrap-apply | Public JSON set of development/production, default `[]` | #227 bootstrap identity opt-in; effective values bound to reviewed saved plan, no live setup performed |
+| TF_VAR_oncall_receiver_kms_key_arns | iam-bootstrap-plan and iam-bootstrap-apply | Public JSON map of matching environment to exact existing same-account/region KMS key ARN, default `{}` | #227 optional explicit decrypt envelope; no key created or wildcard grant when absent |
+
 
 Release constants (`VITE_RELEASE_ENV`, mock-backend false, telemetry false, selected commit/image) remain workflow-owned. Generated Lightsail principal, DSQL endpoint/database role, Cognito issuer and delegated-role verification outputs have current Terraform/backend/seed consumers but no new GitHub synchronization target in this contract. Keep the separately protected `development-seed` settings untouched. The bootstrap runtime trust still consumes its exact matching Lightsail principal through the separately reviewed bootstrap input; this project does not automate that handoff or #191.
 
@@ -114,3 +118,14 @@ Paths below are prefixed `/pawlocal/{environment}/` for development/production. 
 | secrets/grafana/query-token | SecureString / true | Proposed PAWLOCAL_GRAFANA_QUERY_TOKEN / O secret | Future separate reader/secret lifecycle approval; no active copy row |
 
 Runtime-only `secrets/grafana/otlp-token`, `secrets/grafana/webhook-hmac`, and `secrets/oncall/dispatch-app-private-key` never synchronize to GitHub. OpenAI/publisher App credentials remain separately scoped GitHub secrets. No secret payload is managed by this PR. Future source creation/rotation requires an explicit reviewed lifecycle satisfying Terraform ownership and no-secret-in-state requirements; no blanket CLI exception is granted.
+
+## Planned incident-receiver runtime sources (Issue #227)
+
+The earlier unmanaged-parameter inventory above describes the pre-monitoring baseline. #227 introduces actual dormant runtime consumers below, rather than pre-creating unused configuration. Status: **planned, not populated or live-verified**. SecureString values remain operator-managed under a separately approved lifecycle; Terraform reads no values, creates no secret payload and adds no duplicate Secrets Manager copy.
+
+| Source | Consumer / destination | Ownership and validation |
+|---|---|---|
+| /pawlocal/<environment>/secrets/grafana/webhook-hmac | Matching receiver only; no GitHub synchronization | Approved secret owner lifecycle; SecureString, minimum 32 UTF-8 bytes; exact SSM read and optional existing-key encryption context |
+| /pawlocal/<environment>/secrets/oncall/dispatch-app-private-key | Matching receiver only; no GitHub synchronization | Separate dispatch-only GitHub App identity; RSA PEM at least 2048 bits; exact SSM read and optional existing-key encryption context |
+
+Actual creation/population/rotation needs a reviewed owner procedure before live mutation. Default `aws/ssm` decryption under the final execution-role boundary is an activation proof gap; optional exact existing KMS grants do not imply a new customer-managed key. Follow the [receiver runbook](../ops/incident-response/README.md). Public App IDs remain in the explicit operator JSON input, not extra unused SSM parameters.

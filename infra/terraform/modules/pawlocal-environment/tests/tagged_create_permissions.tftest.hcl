@@ -39,6 +39,7 @@ run "tagged_create_permissions_are_size_safe" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -206,6 +207,7 @@ run "runtime_identity_activates_protected_setup_and_deployment" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -262,6 +264,7 @@ run "production_resource_names_use_normalized_suffixes" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -299,6 +302,7 @@ run "project_name_over_policy_budget_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {

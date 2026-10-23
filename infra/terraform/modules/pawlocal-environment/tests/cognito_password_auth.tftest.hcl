@@ -56,6 +56,7 @@ run "development_uses_relaxed_password_policy_and_default_role" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -138,6 +139,7 @@ run "production_uses_strict_password_policy_and_exact_override" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -189,6 +191,7 @@ run "non_default_project_name_sets_user_pool_name" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -221,6 +224,7 @@ run "password_minimum_below_cognito_range_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -249,6 +253,7 @@ run "password_minimum_above_cognito_range_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -277,6 +282,7 @@ run "wrong_account_override_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -306,6 +312,7 @@ run "wrong_partition_override_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -335,6 +342,7 @@ run "wrong_environment_override_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {
@@ -364,6 +372,7 @@ run "wrong_role_name_override_is_rejected" {
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
   }
 
   variables {

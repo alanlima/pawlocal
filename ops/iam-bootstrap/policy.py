@@ -44,9 +44,11 @@ def inventory(config: dict) -> dict:
         role_names += [f"pawlocal-{env}-{suffix}" for suffix in (
             "terraform-plan", "terraform-apply", "github-deploy", "dsql-runtime",
             "configuration-reader", "cognito-terraform-plan", "cognito-terraform-apply",
-            "cognito-pre-signup")]
+            "cognito-pre-signup", "oncall-terraform-plan", "oncall-terraform-apply", "oncall-receiver")]
         policy_names += [f"pawlocal-{env}-terraform-apply-boundary",
-                         f"pawlocal-{env}-cognito-terraform-apply-boundary"]
+                         f"pawlocal-{env}-cognito-terraform-apply-boundary",
+                         f"pawlocal-{env}-oncall-terraform-apply-boundary",
+                         f"pawlocal-{env}-oncall-runtime-boundary"]
     return {
         "roles": [iam + "role/" + name for name in sorted(role_names)],
         "policies": [iam + "policy/" + name for name in sorted(policy_names)],
@@ -133,6 +135,16 @@ def render(config: dict) -> dict:
     iam_statements = [s for s in statements if s["Action"][0].split(":")[0] in ("iam", "sts")]
     storage_statements = [s for s in statements if s not in iam_statements]
     boundary = json.loads(compact(policy))
+    # The single boundary cannot fit the expanded exact IAM graph plus twelve
+    # repeated SSM ARNs. Its SSM ceiling covers public config namespaces only;
+    # the separate identity grant retains the twelve exact bootstrap keys.
+    # No secret path or SSM resource-policy administration is authorized.
+    for statement in boundary["Statement"]:
+        if statement["Action"][0] == "ssm:GetParameter":
+            statement["Resource"] = [
+                f"arn:aws:ssm:{config['region']}:{config['account_id']}:parameter/pawlocal/{env}/config/*"
+                for env in ENVIRONMENTS
+            ]
     # IAM resource policies cannot grant IAM administrative API permissions;
     # keep the service-linked role's read in the same ceiling resource list.
     # Its identity grant still authorizes only GetRole and constrained creation.

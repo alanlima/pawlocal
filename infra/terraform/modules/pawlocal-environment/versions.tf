@@ -7,6 +7,7 @@ terraform {
       version = ">= 6.0, < 7.0"
       configuration_aliases = [
         aws.cognito_deployment,
+        aws.oncall_deployment,
       ]
     }
     random = {

@@ -62,6 +62,8 @@ jobs:
       TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
       TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
       TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
+      TF_VAR_oncall_environments: ${{ vars.TF_VAR_oncall_environments || '[]' }}
+      TF_VAR_oncall_receiver_kms_key_arns: ${{ vars.TF_VAR_oncall_receiver_kms_key_arns || '{}' }}
     steps:
       - name: Start friendly job report
         run: |
@@ -140,6 +142,8 @@ jobs:
       TF_VAR_manage_github_oidc_provider: ${{ vars.TF_VAR_manage_github_oidc_provider }}
       TF_VAR_development_lightsail_principal_arn: ${{ vars.TF_VAR_development_lightsail_principal_arn }}
       TF_VAR_production_lightsail_principal_arn: ${{ vars.TF_VAR_production_lightsail_principal_arn }}
+      TF_VAR_oncall_environments: ${{ vars.TF_VAR_oncall_environments || '[]' }}
+      TF_VAR_oncall_receiver_kms_key_arns: ${{ vars.TF_VAR_oncall_receiver_kms_key_arns || '{}' }}
       EXPECTED_PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
       EXPECTED_MANIFEST_VERSION: ${{ needs.plan.outputs.manifest_version }}
     steps:
