@@ -1,4 +1,28 @@
 locals {
+  # Exact producer ownership inventory; never used to authorize reader admission.
+  configuration_parameter_suffixes = toset([
+    "iam/terraform-plan-role-arn",
+    "iam/terraform-apply-role-arn",
+    "aws/account-id",
+    "terraform/plan-bucket",
+    "iam/frontend-publish-role-arn",
+    "iam/runtime-role-arn",
+    "frontend/base-url",
+    "api/health-url",
+    "frontend/bucket",
+    "frontend/cloudfront-distribution-id",
+    "frontend/cloudfront-distribution-arn",
+    "frontend/cloudfront-oac-arn",
+    "auth/client-id",
+    "api/base-url",
+    "auth/domain",
+    "auth/redirect-uri",
+    "auth/logout-uri",
+    "auth/scopes"
+  ])
+}
+
+locals {
   bootstrap_configuration_values = {
     for environment in keys(local.environments) : environment => merge({
       "iam/terraform-plan-role-arn"   = aws_iam_role.github_terraform["${environment}-plan"].arn
@@ -44,7 +68,8 @@ resource "aws_ssm_parameter" "configuration" {
   # Omit overwrite: the pinned provider refuses to adopt an existing key on
   # creation, while later updates remain owned by this resource's state.
   tags = {
-    environment = each.value.environment
-    purpose     = "configuration"
+    environment            = each.value.environment
+    purpose                = "configuration"
+    "configuration-access" = "github-public"
   }
 }

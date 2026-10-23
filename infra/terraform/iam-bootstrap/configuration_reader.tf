@@ -1,28 +1,3 @@
-locals {
-  # Keep this exact allowlist in parity with the active configuration inventory
-  # and mapping. Readers never discover keys or read an environment subtree.
-  configuration_parameter_suffixes = toset([
-    "iam/terraform-plan-role-arn",
-    "iam/terraform-apply-role-arn",
-    "aws/account-id",
-    "terraform/plan-bucket",
-    "iam/frontend-publish-role-arn",
-    "iam/runtime-role-arn",
-    "frontend/base-url",
-    "api/health-url",
-    "frontend/bucket",
-    "frontend/cloudfront-distribution-id",
-    "frontend/cloudfront-distribution-arn",
-    "frontend/cloudfront-oac-arn",
-    "auth/client-id",
-    "api/base-url",
-    "auth/domain",
-    "auth/redirect-uri",
-    "auth/logout-uri",
-    "auth/scopes"
-  ])
-}
-
 data "aws_iam_policy_document" "configuration_reader_trust" {
   for_each = local.environments
 
@@ -64,13 +39,25 @@ data "aws_iam_policy_document" "configuration_reader" {
   for_each = local.environments
 
   statement {
-    sid     = "ReadOnlyExplicitEnvironmentConfiguration"
-    effect  = "Allow"
-    actions = ["ssm:GetParameter"]
-    resources = [
-      for suffix in sort(tolist(local.configuration_parameter_suffixes)) :
-      "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/pawlocal/${each.key}/config/${suffix}"
-    ]
+    sid       = "ReadOnlyTaggedPublicConfiguration"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/project"
+      values   = [var.project_name]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/environment"
+      values   = [each.key]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/configuration-access"
+      values   = ["github-public"]
+    }
   }
 }
 
@@ -80,4 +67,7 @@ resource "aws_iam_role_policy" "configuration_reader" {
   name   = "pawlocal-${each.key}-configuration-read"
   role   = aws_iam_role.configuration_reader[each.key].id
   policy = data.aws_iam_policy_document.configuration_reader[each.key].json
+
+  # Same-state tags precede the switch; application-state ordering is an operator gate.
+  depends_on = [aws_ssm_parameter.configuration]
 }

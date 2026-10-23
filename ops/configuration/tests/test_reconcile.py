@@ -378,14 +378,17 @@ class ReconcileTests(unittest.TestCase):
             )
         self.assertEqual(ssm.calls, [])
 
-    def test_manifest_iam_exact_source_parity(self):
+    def test_manifest_exact_producer_inventory_parity(self):
         import re
 
-        policy = (
-            ROOT / "infra/terraform/iam-bootstrap/configuration_reader.tf"
-        ).read_text()
+        # Producer write ownership remains exact; ABAC reader admission is independent.
+        inventory = (
+            ROOT / "infra/terraform/iam-bootstrap/configuration_parameters.tf"
+        ).read_text(encoding="utf-8")
         suffixes = set(
-            re.findall(r'"((?:iam|aws|terraform|frontend|api|auth)/[a-z-]+)"', policy)
+            re.findall(
+                r'"((?:iam|aws|terraform|frontend|api|auth)/[a-z-]+)"', inventory
+            )
         )
         mappings = module.load_mappings(
             ROOT / "ops/configuration/parameter-mapping.yaml", "production"

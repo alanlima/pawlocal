@@ -75,6 +75,8 @@ resource "aws_ssm_parameter" "configuration" {
   tier        = "Standard"
   value       = each.value
   # Default no-overwrite-on-create rejects colliding unmanaged parameters.
-  tags       = local.common_tags
+  tags = merge(local.common_tags, {
+    "configuration-access" = "github-public"
+  })
   depends_on = [time_sleep.configuration_permissions_propagation]
 }
