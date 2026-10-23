@@ -24,6 +24,7 @@ EXPECTED_HOSTED_JOBS = {
     ("backend-ci.yml", "backend"),
     ("compose-ci.yml", "compose"),
     ("deploy-production.yml", "verify-production"),
+    ("deploy-production.yml", "workflow-binding"),
     ("development-dsql-seed.yml", "seed"),
     ("frontend-deploy.yml", "frontend"),
     ("frontend-production-deploy.yml", "disabled"),

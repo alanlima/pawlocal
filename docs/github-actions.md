@@ -246,7 +246,7 @@ Converge and Release enforce required handoff inputs before planning. The prefli
 
 ### Promote verified release to production
 
-<!-- actions-reference: deploy-production.yml; dispatch-inputs: release_commit,backend_image; call-inputs: - -->
+<!-- actions-reference: deploy-production.yml; dispatch-inputs: release_commit,backend_image,expected_workflow_sha; call-inputs: - -->
 
 `deploy-production.yml` is the normal production application-promotion entry point after the infrastructure has converged. It rejects a commit/image pair unless a successful development deployment recorded matching verification evidence. It then calls the production Release phase, builds the selected commit's frontend with production configuration, publishes it, runs public verification, and records the successful production deployment.
 

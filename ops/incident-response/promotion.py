@@ -63,7 +63,10 @@ def request(token, deadline, method, path, body=None, opener=None):
             and body.get("ref") == "main"
             and body.get("return_run_details") is True
             and isinstance(body.get("inputs"), dict)
-            and set(body["inputs"]) == {"release_commit", "backend_image"}
+            and set(body["inputs"])
+            == {"release_commit", "backend_image", "expected_workflow_sha"}
+            and body["inputs"].get("expected_workflow_sha")
+            == body["inputs"].get("release_commit")
             and re.fullmatch(r"[0-9a-f]{40}", str(body["inputs"].get("release_commit")))
             and re.fullmatch(
                 r"ghcr\.io/alanlima/pawlocal-api@sha256:[0-9a-f]{64}",
@@ -365,7 +368,11 @@ def promote(client, sha, control=None, progress=None, expected_development=None)
         "/actions/workflows/deploy-production.yml/dispatches",
         {
             "ref": "main",
-            "inputs": {"release_commit": sha, "backend_image": image},
+            "inputs": {
+                "release_commit": sha,
+                "backend_image": image,
+                "expected_workflow_sha": sha,
+            },
             "return_run_details": True,
         },
     )
@@ -388,7 +395,7 @@ def promote(client, sha, control=None, progress=None, expected_development=None)
     while True:
         control()
         run = client.request("GET", f"/actions/runs/{run_id}")
-        if not valid_run(run, "deploy-production.yml", "workflow_dispatch"):
+        if not valid_run(run, "deploy-production.yml", "workflow_dispatch", sha):
             raise Denied("production run provenance differs")
         if run.get("status") == "completed":
             if run.get("conclusion") != "success":

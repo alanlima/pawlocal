@@ -11,6 +11,11 @@ on:
         description: Exact development-verified immutable backend image reference.
         required: true
         type: string
+      expected_workflow_sha:
+        description: Optional exact workflow-source assertion; incident controller must bind this to release_commit. This is not authorization.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -20,8 +25,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  workflow-binding:
+    name: Verify production workflow source binding
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Reject a changed dispatch source before deployment authority
+        env:
+          EXPECTED_WORKFLOW_SHA: ${{ inputs.expected_workflow_sha }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          ACTUAL_WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$EXPECTED_WORKFLOW_SHA" ]]; then
+            [[ "$EXPECTED_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+            test "$ACTUAL_WORKFLOW_SHA" = "$EXPECTED_WORKFLOW_SHA"
+            test "$RELEASE_COMMIT" = "$EXPECTED_WORKFLOW_SHA"
+          fi
+
   terraform-production:
     name: Apply exact production release plan
+    needs: workflow-binding
     permissions:
       actions: read
       contents: read

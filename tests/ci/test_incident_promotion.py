@@ -2,12 +2,15 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import promotion
@@ -82,6 +85,100 @@ class Client:
 
 
 class PromotionTests(unittest.TestCase):
+    def test_dispatch_broker_requires_the_exact_workflow_assertion(self):
+        body = {
+            "ref": "main",
+            "return_run_details": True,
+            "inputs": {
+                "release_commit": "a" * 40,
+                "backend_image": "ghcr.io/alanlima/pawlocal-api@sha256:" + "d" * 64,
+                "expected_workflow_sha": "a" * 40,
+            },
+        }
+        for expected in (None, "", "b" * 40, True):
+            bad = copy.deepcopy(body)
+            if expected is None:
+                del bad["inputs"]["expected_workflow_sha"]
+            else:
+                bad["inputs"]["expected_workflow_sha"] = expected
+            with self.subTest(expected=expected), self.assertRaisesRegex(
+                promotion.Denied, "non-allowlisted"
+            ):
+                promotion.request(
+                    "fixture", time.time() + 30, "POST",
+                    "/actions/workflows/deploy-production.yml/dispatches", bad,
+                )
+
+    def test_main_race_returns_wrong_workflow_sha_and_never_claims_production(self):
+        sha = "a" * 40
+        development = {"affected_sha": sha, "image_digest": "sha256:" + "d" * 64}
+        client = Client()
+        dispatched_run = run("deploy-production.yml", "workflow_dispatch")
+        dispatched_run["head_sha"] = "b" * 40
+
+        def read(method, path, _body=None):
+            if path == "/git/ref/heads/main":
+                return {"object": {"sha": sha}}
+            if path == "/actions/runs/123":
+                return dispatched_run
+            raise AssertionError(path)
+
+        client.request = read
+        with (
+            patch.object(promotion, "runtime_ready"),
+            patch.object(promotion, "wait_development", return_value=development),
+            patch.object(promotion, "deployed_release") as deployed,
+            patch.object(promotion, "request", return_value={
+                "workflow_run_id": 123,
+                "run_url": promotion.GITHUB + "/actions/runs/123",
+                "html_url": "https://github.com/alanlima/pawlocal/actions/runs/123",
+            }) as dispatch,
+        ):
+            with self.assertRaisesRegex(promotion.Denied, "provenance"):
+                promotion.promote(client, sha)
+            inputs = dispatch.call_args.args[4]["inputs"]
+            self.assertEqual(inputs["expected_workflow_sha"], sha)
+            self.assertEqual(inputs["release_commit"], sha)
+            deployed.assert_not_called()
+
+    def test_production_binding_precedes_every_reusable_or_credential_job(self):
+        root = Path(__file__).resolve().parents[2]
+        jobs = yaml.safe_load((root / ".github/workflows/deploy-production.yml").read_text())["jobs"]
+        guard = jobs["workflow-binding"]
+        self.assertEqual(guard["permissions"], {})
+        self.assertNotIn("environment", guard)
+        self.assertTrue(all("uses" not in step for step in guard["steps"]))
+
+        def depends(name):
+            needs = jobs[name].get("needs", [])
+            needs = [needs] if isinstance(needs, str) else needs
+            return "workflow-binding" in needs or any(depends(item) for item in needs)
+
+        for name, job in jobs.items():
+            if "uses" in job or job.get("permissions", {}).get("id-token") == "write":
+                with self.subTest(job=name):
+                    self.assertTrue(depends(name))
+
+    @unittest.skipIf(os.name == "nt", "Production guard executes under hosted Linux bash")
+    def test_actual_entry_guard_rejects_race_and_preserves_ordinary_older_release(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = yaml.safe_load((root / ".github/workflows/deploy-production.yml").read_text())
+        script = workflow["jobs"]["workflow-binding"]["steps"][0]["run"]
+        for expected, actual, release, accepted in (
+            ("a" * 40, "a" * 40, "a" * 40, True),
+            ("a" * 40, "b" * 40, "a" * 40, False),
+            ("a" * 40, "a" * 40, "b" * 40, False),
+            ("true", "a" * 40, "a" * 40, False),
+            ("", "b" * 40, "a" * 40, True),
+        ):
+            with self.subTest(expected=expected, actual=actual, release=release):
+                result = subprocess.run(
+                    ["bash", "-c", script], check=False, capture_output=True,
+                    env={"PATH": os.environ["PATH"], "EXPECTED_WORKFLOW_SHA": expected,
+                         "ACTUAL_WORKFLOW_SHA": actual, "RELEASE_COMMIT": release},
+                )
+                self.assertEqual(result.returncode == 0, accepted)
+
     def test_configured_production_rule_is_required_before_dispatch(self):
         metadata = {"alert": {"environment": "development", "service": "pawlocal-api"}}
         profile = SimpleNamespace(digest="d" * 64, recovery_seconds=600)

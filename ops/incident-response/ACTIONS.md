@@ -30,6 +30,15 @@ Globally serialized admission claims the incident generation and reserves both r
 
 ## Deadlines and recovery
 
+The controller always supplies `expected_workflow_sha` equal to its reviewed
+release commit when dispatching the fixed production workflow on main. A
+credential-free entry job rejects a malformed assertion or changed workflow SHA
+before calling Terraform or any publisher job. The controller also validates
+the fetched production run's exact head SHA. An ordinary manual promotion can
+leave this optional assertion blank to select an older verified release with
+current trusted workflow code. The assertion only narrows execution: it never
+authenticates incident authority or replaces the pending #245 gate.
+
 The admission/model/check/review/PR phase has one absolute 20-minute budget, including subsequent job scheduling delays. The machine CI/development/production/recovery phase uses the explicit approved profile duration, at most 60 minutes, starting at publication. The latter never extends model work. Kernel alarms and bounded subprocess/HTTP operations enforce work deadlines; GitHub queue/cancellation latency can delay the workflow's terminal UI status beyond them.
 
 Public recovery URLs reuse the existing source keys: `config/frontend/base-url` and `config/api/base-url`, copied into matching on-call Environments as `PAWLOCAL_PUBLIC_BASE_URL` and `VITE_API_BASE_URL`. They are checked against reviewed Grafana bindings; no alert or model supplies a URL. Recovery must observe the approved stable window, public journey and fresh scoped signal/rule health. An absent alert alone is insufficient.
