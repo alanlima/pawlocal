@@ -14,7 +14,9 @@ Current readiness evidence: [development release run 39809521175](https://github
 
 ## Selected Grafana account
 
-The owner supplied **`https://alanlima.grafana.net/`**, confirmed the account is **Free**, and selected this same stack for all environments. Use separate `pawlocal-development` / `pawlocal-production` Faro apps with exact matching origins. Region is unknown and must be discovered read-only; stack ID, datasource bindings, quotas and per-signal permissions still require verification. Disabled configuration remains disabled. Do not select separate accounts as the solution or treat labels/folders as authorization: prove scoped reads/privacy in the selected shared stack and withhold signals the requester cannot access safely.
+The owner selected **`https://alanlima.grafana.net/`** as the shared stack for all environments, with **Free as the intended operating limit**. Read-only Grafana UI inspection verified stack/OTLP instance ID **1880841**, Grafana region **`prod-au-southeast-1`** (Australia), cloud provider **AWS `ap-southeast-2`**, and endpoint **`https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp`**. The UI also showed a trial with 10 days remaining; do not count trial/paid entitlements as verified Free capacity. Sources: [instance/region](https://grafana.com/orgs/alanlima/stacks/1880841/grafana), [OTLP connection](https://grafana.com/orgs/alanlima/stacks/1880841/otlp-info), observed 23 October 2026.
+
+Use separate `pawlocal-development` / `pawlocal-production` Faro apps with exact matching origins in that same stack. API credential access, datasource bindings, actual Free quotas/retention and per-signal read/privacy proof remain pending. Disabled configuration remains disabled. Do not select separate accounts as the solution or treat folders/labels as authorization: withhold signals the requester cannot access safely. These public setup observations authorize no provisioning or model admission.
 
 ## Architecture
 

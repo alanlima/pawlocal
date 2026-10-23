@@ -22,7 +22,7 @@
 <text x="866" y="288" font-size="25" fill="#102a44" font-weight="700">Grafana Cloud Free</text>
 <text x="804" y="340" font-size="20" fill="#d77a22" font-weight="600">MANAGED METRICS + LOKI LOGS + TEMPO TRACES</text>
 <text x="804" y="378" font-size="22" fill="#23344a" font-weight="400">10k metric series · 50 GB logs · 50 GB traces</text>
-<text x="804" y="407" font-size="22" fill="#23344a" font-weight="400">Shared: alanlima.grafana.net · region pending</text>
+<text x="804" y="407" font-size="22" fill="#23344a" font-weight="400">Shared: alanlima.grafana.net · Australia / AWS</text>
 <text x="804" y="436" font-size="22" fill="#23344a" font-weight="400">Journey dashboards + external synthetic checks</text>
 <text x="804" y="465" font-size="22" fill="#23344a" font-weight="400">Signed firing / resolved HTTPS notifications</text>
 <rect x="1496" y="246" width="640" height="260" rx="18" fill="#ffffff" stroke="#cbd7e4"/>
