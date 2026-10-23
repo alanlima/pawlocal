@@ -3,7 +3,7 @@
 <rect x="0" y="0" width="2200" height="172" rx="0" fill="#10243a" stroke="none"/>
 <text x="64" y="65" font-size="41" fill="#ffffff" font-weight="700">PawLocal · Incident &amp; agent lifecycle</text>
 <text x="64" y="110" font-size="24" fill="#b8cce3" font-weight="400">Direct telemetry + one authenticated webhook function + GitHub-hosted jobs • finite cloud execution</text>
-<text x="64" y="145" font-size="20" fill="#76d2ca" font-weight="600">GROOMING PROPOSAL  |  23 OCT 2026  |  #59 OBSERVABILITY → #42 INCIDENT RESPONSE</text>
+<text x="64" y="145" font-size="20" fill="#76d2ca" font-weight="600">OWNER-APPROVED MVP CONTRACT  |  23 OCT 2026  |  #239 · #59 → #42</text>
 <rect x="64" y="220" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="84" y="242" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="97" y="283" font-size="27" fill="#275c86" font-weight="700">01</text>
@@ -44,20 +44,20 @@
 <text x="97" y="1058" font-size="27" fill="#275c86" font-weight="700">06</text>
 <text x="168" y="1031" font-size="23" fill="#214665" font-weight="700">INDEPENDENT REVIEW</text>
 <text x="168" y="1068" font-size="23" fill="#23344a" font-weight="400">Fresh call · approved profile · independent context</text>
-<text x="168" y="1103" font-size="21" fill="#52677f" font-weight="400">New context; pinned candidate; isolated tests.</text>
+<text x="168" y="1103" font-size="21" fill="#52677f" font-weight="400">Pinned SHA/tree; isolated tests; trusted verdict broker.</text>
 <rect x="1134" y="220" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="1154" y="242" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="1167" y="283" font-size="27" fill="#275c86" font-weight="700">07</text>
 <text x="1238" y="256" font-size="23" fill="#214665" font-weight="700">PUBLISH PR</text>
-<text x="1238" y="293" font-size="23" fill="#23344a" font-weight="400">Trusted job validates patch and base identity</text>
+<text x="1238" y="293" font-size="23" fill="#23344a" font-weight="400">Trusted publisher binds base / candidate / tree</text>
 <text x="1238" y="328" font-size="21" fill="#52677f" font-weight="400">GitHub App credential isolated from agent jobs.</text>
 <path d="M1185,348 L1185,375" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
 <rect x="1134" y="375" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="1154" y="397" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="1167" y="438" font-size="27" fill="#275c86" font-weight="700">08</text>
-<text x="1238" y="411" font-size="23" fill="#214665" font-weight="700">HUMAN REVIEW / MERGE</text>
-<text x="1238" y="448" font-size="23" fill="#23344a" font-weight="400">Required CI + owner approval → squash merge</text>
-<text x="1238" y="483" font-size="21" fill="#52677f" font-weight="400">Agent report cannot replace required human review.</text>
+<text x="1238" y="411" font-size="23" fill="#214665" font-weight="700">MACHINE CHECKS / AUTO MERGE</text>
+<text x="1238" y="448" font-size="23" fill="#23344a" font-weight="400">Real candidate CI + bound verdict → auto squash</text>
+<text x="1238" y="483" font-size="21" fill="#52677f" font-weight="400">Trusted merge job; no bypass or model credentials.</text>
 <path d="M1185,503 L1185,530" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
 <rect x="1134" y="530" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="1154" y="552" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
@@ -69,8 +69,8 @@
 <rect x="1134" y="685" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
 <rect x="1154" y="707" width="62" height="62" rx="31" fill="#dceaf6" stroke="none"/>
 <text x="1167" y="748" font-size="27" fill="#275c86" font-weight="700">10</text>
-<text x="1238" y="721" font-size="23" fill="#214665" font-weight="700">HUMAN PRODUCTION GATE</text>
-<text x="1238" y="758" font-size="23" fill="#23344a" font-weight="400">Existing deploy-production.yml + protection</text>
+<text x="1238" y="721" font-size="23" fill="#214665" font-weight="700">AUTOMATIC PRODUCTION</text>
+<text x="1238" y="758" font-size="23" fill="#23344a" font-weight="400">GITHUB_TOKEN → fixed deploy-production.yml / main</text>
 <text x="1238" y="793" font-size="21" fill="#52677f" font-weight="400">Promote exact development-verified SHA / artifact.</text>
 <path d="M1185,813 L1185,840" stroke="#60758d" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
 <rect x="1134" y="840" width="1010" height="128" rx="18" fill="#ffffff" stroke="#ccd8e6"/>
@@ -88,8 +88,8 @@
 <text x="1238" y="1103" font-size="21" fill="#52677f" font-weight="400">Record release identity; failed attempts escalate.</text>
 <rect x="64" y="1170" width="2072" height="184" rx="18" fill="#fff0d6" stroke="#dfbe80"/>
 <text x="90" y="1212" font-size="26" fill="#755017" font-weight="700">BOUNDED ATTEMPT / EXPLICIT DELIVERY LIMITS</text>
-<text x="90" y="1252" font-size="24" fill="#23344a" font-weight="400">One active run, one coding attempt, 20-minute total deadline. Timeout, stale alert, failed tests or review findings → owner.</text>
-<text x="90" y="1292" font-size="23" fill="#23344a" font-weight="400">Approved monthly quota + per-request and cumulative token/cost bounds are reserved before calls; unset configuration denies admission.</text>
+<text x="90" y="1252" font-size="24" fill="#23344a" font-weight="400">One attempt / lease. 20 min to PR; proposed 60 min CI→recovery. Failed, stale or unknown work → escalation.</text>
+<text x="90" y="1292" font-size="23" fill="#23344a" font-weight="400">Both model envelopes reserved upfront; monthly and request/cumulative bounds enforced; unset configuration denies admission.</text>
 <text x="90" y="1330" font-size="23" fill="#23344a" font-weight="400">Resolved alerts update incident state; current state is checked before coding and publishing. Test dispatch-loss / retry / duplicate behavior.</text>
-<text x="64" y="1400" font-size="22" fill="#4a607a" font-weight="400">AWS Lambda receives alerts; GitHub hosts the agents. No long-running agent server, production credentials in agent jobs or automatic production approval.</text>
+<text x="64" y="1400" font-size="22" fill="#4a607a" font-weight="400">Lambda receives; GitHub runs agents. Trusted jobs automate merge/release; models hold no publication or deployment credentials.</text>
 </g></svg>

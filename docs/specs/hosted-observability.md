@@ -14,7 +14,7 @@ Current readiness evidence: [development release run 39809521175](https://github
 
 ## Selected Grafana account
 
-The owner selected **`https://alanlima.grafana.net/`** as the shared stack for all environments, with **Free as the intended operating limit**. Read-only Grafana UI inspection verified stack/OTLP instance ID **1880841**, Grafana region **`prod-au-southeast-1`** (Australia), cloud provider **AWS `ap-southeast-2`**, and endpoint **`https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp`**. The UI also showed a trial with 10 days remaining; do not count trial/paid entitlements as verified Free capacity. Sources: [instance/region](https://grafana.com/orgs/alanlima/stacks/1880841/grafana), [OTLP connection](https://grafana.com/orgs/alanlima/stacks/1880841/otlp-info), observed 23 October 2026.
+The owner selected **one shared Grafana Cloud stack for all environments**, with separate Faro applications and **Free as the intended operating limit**. Stack URL/ID, region, OTLP connection and datasource UIDs come from approved deployment configuration and read-only discovery; reusable design docs do not embed personal account identifiers. Trial entitlements are not evidence of Free capacity; verify actual account quotas and per-signal privacy before activation.
 
 Use separate `pawlocal-development` / `pawlocal-production` Faro apps with exact matching origins in that same stack. API credential access, datasource bindings, actual Free quotas/retention and per-signal read/privacy proof remain pending. Disabled configuration remains disabled. Do not select separate accounts as the solution or treat folders/labels as authorization: withhold signals the requester cannot access safely. These public setup observations authorize no provisioning or model admission.
 
@@ -112,3 +112,7 @@ Operators must be able to reproduce dashboard provisioning from `observability/`
 ## Proposed source-population decision (#241)
 
 [DEC-013 / the monitoring secret lifecycle proposal](monitoring-secret-lifecycle.md) evaluates sensitive ephemeral write-only Terraform inputs and exact ephemeral SSM maintenance reads. It proposes an isolated owner setup runner without permanent GitHub copies of runtime-only credentials. This is an unaccepted amendment to secret-input wording, not source population, permission approval or live acceptance; the active public-only copier/query-secret-inactive contract above remains unchanged.
+
+## Unattended incident handoff (#239)
+
+After initial monitoring/privacy/credential/protection acceptance, the configured alert wakes the fully automatic controller: fix → fresh bound review → trusted PR → real CI → auto squash merge → verified dev → exact production promotion → verified recovery. There is no runtime human approval; the optional switch is deferred. Receiver route hints are omitted; configured alert authority and downstream rule validation govern incidents, while source/security scopes remain bounded. Initial setup and failed/out-of-scope escalation are separate from an approval-wait state. See DEC-012 and the responder specification.

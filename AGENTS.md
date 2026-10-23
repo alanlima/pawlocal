@@ -145,7 +145,7 @@ Implementation must happen in the following order.
 ### Stage 4 — Production readiness
 - Validate complete Docker Compose startup.
 - Implement CI/CD.
-- Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Production must not deploy automatically on merges to `main`.
+- Desired release model: pull requests run applicable CI; successful merges to `main` publish and automatically deploy a verified release to development; production promotion is a separate `workflow_dispatch` action selecting a release already verified in development. Ordinary feature merges must not deploy automatically to production. The owner-approved Issue #239 incident MVP is the scoped exception: after machine checks and verified development release, a separate trusted promoter automatically dispatches that exact release to production without a runtime human approval.
 - Keep any historical mock-backed static frontend release evidence distinct from the full-stack release model. Issue #135 rebuilds the approved Issue #75 architecture from clean application states: one standalone IAM bootstrap state and separate development and production application states. Do not migrate or preserve the former application state, and do not point a workflow at unconfigured targets or credentials.
 - Before merging any Issue #135 Terraform, deployment-workflow, or deployment-helper implementation, disable or make fail-closed the legacy automatic development-deploy path and verify that a `main` merge cannot invoke the former combined-state deployment. Keep that path disabled until the new environment roots, targets, credentials, and release path are configured and independently reviewed.
 - Use `pawlocal-dev.<domain>` for the development site and `pawlocal.<domain>` for production. No domain, DNS, certificate, target, or secret is authorized by this naming convention alone.
@@ -209,7 +209,7 @@ All implementation work must be traceable.
 8. Open a Pull Request linking the issue.
 9. Record implementation details, decisions and verification evidence.
 10. Review and address Pull Request comments.
-11. Merge only after required approvals.
+11. Merge only after required approvals. For the activated Issue #239 incident MVP, the required approvals are the trusted fresh-review verdict and real required CI; a separate trusted job squash-merges automatically without human review or a bypass actor.
 
 Labels support triage. They do not represent approval or completion, replace verification of an issue's acceptance criteria, or authorize bypassing a project gate.
 
@@ -299,6 +299,16 @@ Do not give incident agents unrestricted production permissions.
 
 ---
 
+### Unattended incident MVP exception — Issue #239
+
+The owner requires the allowlisted application-remediation MVP to run end to end without human approval: alert → triage/fix → fresh independent review → trusted PR → real candidate CI → trusted automatic squash merge → verified development → automatic exact-release production promotion → verified recovery. No runtime human merge, Environment review or production-promotion gate is permitted; an optional human-approval switch is deferred, not part of this implementation.
+
+Initial setup still requires selected model/rates, enforceable budgets, credentials/scoped telemetry access and billable infrastructure authorization. Removing shared CodeOwner or Environment reviewers also affects ordinary changes: do not remove them until Issue #245 implements and independently verifies their enforceable replacement. Main must require the exact `PawLocal change authorization` status from the verified publisher App integration ID, plus actual required candidate CI. Trusted code admits only an authenticated, immutable incident candidate; every other PR requires owner approval in a dedicated protected Environment. Every shared infrastructure or production entrypoint must independently verify incident lineage and release-only authority before any AWS credentials, or require the ordinary protected human approval. An actor, branch/title/label or `incident=true` input is never sufficient. Preserve PR/squash/thread resolution, main-only trust, force-push/deletion protections and no bypass actors. Bootstrap, destroy and unrelated setup retain their existing gates. #245 is an activation blocker; these docs change no live setting.
+
+Models hold no publication, merge, production query or deployment credentials. Trusted broker/publication/merge/promoter jobs validate candidate SHA/tree/patch, current incident, real CI and immutable development release evidence. Only allowlisted application paths may change; workflow/IAM/auth/security/secrets/infrastructure/data repair is excluded. Existing Terraform state ownership and release-only plan guards remain mandatory; no blind in-flight apply cancellation or infrastructure rollback.
+
+One admission-to-PR deadline is 20 minutes across all model/test/review/publication jobs. A separate proposed 60-minute deadline spans CI/merge/dev/prod/recovery without increasing model quota. Exhaustion, failed checks, unsupported repairs or uncertain release outcomes stop new mutations and record escalation; no approval-wait state or new coding attempt is added. See DEC-012 and the incident-responder specification. This amendment authorizes the documented runtime design; it does not itself activate live settings or provision infrastructure.
+
 ## 10. Cost management
 
 Issue #191's owner-approved account-bootstrap exception permits the separately operated, documented `ops/iam-bootstrap/` setup tool to manage only the single `pawlocal-terraform-bootstrap-actions` user, its dedicated permission policies/boundary, access-key lifecycle and matching protected GitHub setup. The lifecycle owner is `alanlima`. Independently review its scoped permissions before attachment; never use root credentials or steady-state AdministratorAccess. This external identity is not managed by the IAM Terraform workflow or adopted into application/bootstrap state. Record rotation, audit, revocation and retirement procedures in `docs/iam-bootstrap-actions.md`.
@@ -324,7 +334,7 @@ Before deploying AWS infrastructure:
 - Establish AWS budget notifications.
 - Document infrastructure teardown procedures.
 
-**Never execute `terraform apply` against billable infrastructure without explicit human approval.**
+**Never provision or change billable infrastructure without explicit human approval.** The activated #239 controller may automatically apply only its machine-validated application-release plan within existing authorized resources/state; any non-release infrastructure change fails closed. This limited runtime authorization does not permit new infrastructure, IAM, data repair or arbitrary Terraform changes.
 
 For future AI features, enforce usage quotas, model budgets, request limits and a fallback to conventional search.
 
