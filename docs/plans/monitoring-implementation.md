@@ -82,3 +82,7 @@ P7 proves success plus low-confidence escalation, failed tests/review, unavailab
 ## Completion boundaries
 
 Each package records linked issue/PR, tested commit, real checks and independent review. Provisioning additionally records reviewed exact saved plan and approved apply; green/skipped workflows are not deployment evidence. G1/G2 and production approvals are recorded separately. This specs PR completes documentation criteria in #222 only; it does not close #59/#42 or claim live monitoring/responder availability.
+
+## Proposed secret lifecycle prerequisite (#241)
+
+P1 source population remains blocked on [#241 / DEC-013](../specs/monitoring-secret-lifecycle.md). The proposed setup-only handoff uses an isolated owner runner, ephemeral write-only values, exact maintenance reads and public write revisions in the existing application states. Local provider proof does not approve decrypted plan/apply access, the secure runner, source population or billable operations. Review and implement this prerequisite before enabling #225/#227/#228 consumers; the public YAML copier remains public-only, warns/skips missing values, and does not synchronize the query token. Runtime automatic-remediation policy is unchanged.
