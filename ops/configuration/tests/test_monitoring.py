@@ -95,7 +95,7 @@ class MonitoringTests(unittest.TestCase):
         def transport(request, timeout):
             if "/environments/oncall-development" in request.full_url:
                 raise HTTPError(request.full_url, 404, "Not Found", {}, None)
-            return api(request, timeout)
+            return api.__call__(request, timeout)
 
         result = module.reconcile(
             selected,

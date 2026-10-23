@@ -103,14 +103,14 @@ The single `parameter-mapping.yaml` contains ordinary and reviewed public monito
 
 Paths below are prefixed `/pawlocal/{environment}/` for development/production. The table records planned destinations; presence does not activate telemetry. R = matching release, P = matching plan, O = `oncall-{environment}`.
 
-| Source suffix | Type / secret | GitHub name / target | Selection / consumer / owner |
+| Source suffix | Type / secret | GitHub name / target | Consumer / owner |
 |---|---|---|---|
-| config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P; VITE_TELEMETRY_ENABLED / R | monitoring; runtime/build mode; matching application state |
-| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | monitoring; direct backend exporter; application state using approved Grafana input |
-| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | monitoring; backend auth identity; application state using actual Grafana input |
-| config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | monitoring; public Faro key path; application state using actual Grafana input |
-| config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | oncall; trusted preflight; application state using actual Grafana input |
-| config/oncall/webhook-url | String / false | PAWLOCAL_GRAFANA_WEBHOOK_URL / O | oncall; contact-point verification; application state derives Function URL |
+| config/observability/enabled | String / false | PAWLOCAL_TELEMETRY_ENABLED / P; VITE_TELEMETRY_ENABLED / R | runtime/build mode; matching application state |
+| config/grafana/otlp-endpoint | String / false | OTEL_EXPORTER_OTLP_ENDPOINT / P | direct backend exporter; application state using approved Grafana input |
+| config/grafana/otlp-instance-id | String / false | PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID / P | backend auth identity; application state using actual Grafana input |
+| config/grafana/faro-collector-url | String / false | VITE_FARO_COLLECTOR_URL / R | public Faro key path; application state using actual Grafana input |
+| config/grafana/stack-url | String / false | PAWLOCAL_GRAFANA_URL / O | trusted preflight; application state using actual Grafana input |
+| config/oncall/webhook-url | String / false | PAWLOCAL_GRAFANA_WEBHOOK_URL / O | contact-point verification; application state derives Function URL |
 | secrets/grafana/query-token | SecureString / true | Proposed PAWLOCAL_GRAFANA_QUERY_TOKEN / O secret | Future separate reader/secret lifecycle approval; no active copy row |
 
 Runtime-only `secrets/grafana/otlp-token`, `secrets/grafana/webhook-hmac`, and `secrets/oncall/dispatch-app-private-key` never synchronize to GitHub. OpenAI/publisher App credentials remain separately scoped GitHub secrets. No secret payload is managed by this PR. Future source creation/rotation requires an explicit reviewed lifecycle satisfying Terraform ownership and no-secret-in-state requirements; no blanket CLI exception is granted.

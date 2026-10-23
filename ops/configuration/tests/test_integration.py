@@ -5,11 +5,10 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.error import HTTPError
 
 import yaml
@@ -159,23 +158,21 @@ class IntegrationTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / "github-env"
                 output.write_text("prior-step-marker\n", encoding="utf-8")
-                result = subprocess.run(
-                    [sys.executable, str(ROOT / "ops/configuration/build-config.py")],
-                    env={
-                        **os.environ,
-                        **values(environment),
-                        "RECONCILED_FRONTEND_CONFIG": "{}",
-                        "GITHUB_ENV": str(output),
-                    },
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-                self.assertNotEqual(result.returncode, 0)
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            **values(environment),
+                            "RECONCILED_FRONTEND_CONFIG": "{}",
+                            "GITHUB_ENV": str(output),
+                        },
+                    ),
+                    self.assertRaisesRegex(
+                        SystemExit, "Cannot load verified public build configuration"
+                    ),
+                ):
+                    build.main()
                 self.assertEqual(output.read_text(), "prior-step-marker\n")
-                self.assertIn(
-                    "Cannot load verified public build configuration", result.stderr
-                )
         for filename in ("fullstack-release.yml", "deploy-production.yml"):
             source = (ROOT / ".github/workflows" / filename).read_text()
             self.assertLess(
