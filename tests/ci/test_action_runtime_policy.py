@@ -19,6 +19,8 @@ EXPECTED_HOSTED_JOBS = {
     ("incident-responder.yml", "publisher"),
     ("incident-responder.yml", "merge"),
     ("incident-responder.yml", "promote"),
+    ("incident-responder.yml", "development_recovery"),
+    ("incident-responder.yml", "finalize"),
     ("backend-ci.yml", "backend"),
     ("compose-ci.yml", "compose"),
     ("deploy-production.yml", "verify-production"),

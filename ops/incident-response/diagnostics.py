@@ -173,8 +173,11 @@ def gather(trusted, stack_url, token, alert, release, deadline, opener=None):
     environment = alert["environment"]
     service = alert.get("service", "")
     digest = release["image_digest"]
-    if not isinstance(service, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,99}", service) or environment not in {"development", "production"} or not re.fullmatch(
-        r"sha256:[0-9a-f]{64}", digest
+    if (
+        not isinstance(service, str)
+        or not re.fullmatch(r"[a-z][a-z0-9-]{0,99}", service)
+        or environment not in {"development", "production"}
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
     ):
         raise Denied("diagnostic scope invalid")
     parsed = urllib.parse.urlsplit(stack_url)
@@ -224,7 +227,9 @@ def gather(trusted, stack_url, token, alert, release, deadline, opener=None):
             "format": "time_series",
         },
         "logs": {
-            "expr": '{service_name="' + service + '"} | json | environment="'
+            "expr": '{service_name="'
+            + service
+            + '"} | json | environment="'
             + environment
             + '" | release="'
             + digest
@@ -234,7 +239,9 @@ def gather(trusted, stack_url, token, alert, release, deadline, opener=None):
             "direction": "backward",
         },
         "traces": {
-            "query": '{ resource.service.name = "' + service + '" && resource.deployment.environment.name = "'
+            "query": '{ resource.service.name = "'
+            + service
+            + '" && resource.deployment.environment.name = "'
             + environment
             + '" && resource.service.version = "'
             + digest

@@ -1,6 +1,10 @@
 """Read-only verification of one-time autonomous runtime settings."""
 
-from quota import Denied
+import importlib.util
+import re
+from pathlib import Path
+
+from quota import Denied, strict_json
 
 RUNTIME_ENVIRONMENTS = (
     "development",
@@ -51,3 +55,32 @@ def runtime_ready(client):
     # targets. Every target actually entered by automated release is checked.
     for name in RUNTIME_ENVIRONMENTS:
         environment_ready(client, name)
+
+
+def bindings_ready(trusted):
+    # Reuse the producer's complete public schema; it performs no API calls.
+    validator_path = (
+        Path(__file__).resolve().parents[2] / "observability/grafana/cloud/provision.py"
+    )
+    specification = importlib.util.spec_from_file_location(
+        "oncall_binding_validator", validator_path
+    )
+    validator = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(validator)
+    value = strict_json(
+        (Path(trusted) / "observability/grafana/cloud/bindings.json").read_bytes()
+    )
+    try:
+        validator.validate_manifest(value)
+    except validator.ProvisionError as error:
+        raise Denied("canonical approved hosted binding schema required") from error
+    for environment in ("development", "production"):
+        selected = value["environments"][environment]
+        prefix = "pawlocal-dev" if environment == "development" else "pawlocal"
+        if selected.get("enabled") is not True or not re.fullmatch(
+            r"https://" + prefix + r"\.[a-z0-9.-]+/?",
+            str(selected.get("frontend_origin", "")),
+        ):
+            raise Denied(
+                "both environment bindings must be configured and approved before full-loop admission"
+            )

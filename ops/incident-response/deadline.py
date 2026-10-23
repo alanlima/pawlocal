@@ -5,6 +5,7 @@ import signal
 import subprocess
 import time
 
+from process_policy import validate
 from quota import Denied
 
 DEADLINE = None
@@ -31,6 +32,18 @@ def arm(value, maximum=1200):
 
 
 def run(command, *, input=None, stdout=None, check=False, timeout=None, **kwargs):
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(argument, str) for argument in command)
+        or "shell" in kwargs
+        or "executable" in kwargs
+        or set(kwargs) - {"cwd", "env"}
+        or stdout is not None
+        and (type(stdout) is not int or stdout != subprocess.PIPE)
+    ):
+        raise Denied("trusted direct argument vector required")
+    validate(command, input, kwargs)
     allowed = None if DEADLINE is None else DEADLINE - time.time()
     if allowed is not None and allowed <= 0:
         raise Denied("work deadline exhausted")

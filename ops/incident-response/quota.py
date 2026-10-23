@@ -51,6 +51,8 @@ class Profile:
     monthly_microdollars: int
     monthly_runs: int
     promotion_seconds: int
+    recovery_seconds: int
+    rule_uids: dict
     requests_per_role: int
     input_per_request: int
     output_per_request: int
@@ -86,16 +88,29 @@ class Profile:
             "rates_source",
             "rates_reviewed_at",
             "expires_at",
+            "rule_uids",
         }:
             integer(value[name])
         if (
             value["monthly_runs"] > 1000
             or value["promotion_seconds"] > 3600
+            or not 600 <= value["recovery_seconds"] <= 900
+            or value["promotion_seconds"] < 2 * value["recovery_seconds"] + 300
             or value["requests_per_role"] > 32
             or value["input_per_request"] > 250000
             or value["output_per_request"] > 32000
         ):
             raise Denied("request limits exceed reviewed gateway bounds")
+        if (
+            not isinstance(value["rule_uids"], dict)
+            or set(value["rule_uids"]) != {"development", "production"}
+            or any(
+                not isinstance(uid, str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", uid)
+                for uid in value["rule_uids"].values()
+            )
+        ):
+            raise Denied("explicit per-environment recovery rule UIDs required")
         for prefix in ("input", "output"):
             if (
                 value[f"{prefix}_per_role"]

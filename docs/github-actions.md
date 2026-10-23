@@ -305,7 +305,7 @@ Destroy is not a rollback and does not select a previous release.
 secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN
 secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN
 secrets.GRAFANA_SYNTHETIC_MONITORING_TOKEN
-secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN
+secrets.OPENAI_API_KEY
 secrets.PAWLOCAL_API_HEALTH_URL
 secrets.PAWLOCAL_AWS_ACCOUNT_ID
 secrets.PAWLOCAL_BOOTSTRAP_AWS_ACCESS_KEY_ID
@@ -314,6 +314,8 @@ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN
 secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN
 secrets.PAWLOCAL_DSQL_ENDPOINT
 secrets.PAWLOCAL_DSQL_SEED_ROLE_ARN
+secrets.PAWLOCAL_GRAFANA_QUERY_TOKEN
+secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY
 vars.AWS_REGION
 vars.PAWLOCAL_AWS_ACCOUNT_ID
 vars.PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN
@@ -321,15 +323,25 @@ vars.PAWLOCAL_CLOUDFRONT_OAC_ARN
 vars.PAWLOCAL_CONFIG_READER_ROLE_ARN
 vars.PAWLOCAL_DEPLOY_ADAPTER_PATH
 vars.PAWLOCAL_DOMAIN_NAME
+vars.PAWLOCAL_GRAFANA_URL
 vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG
+vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR
+vars.PAWLOCAL_ONCALL_ENABLED
+vars.PAWLOCAL_ONCALL_MODEL_PROFILE
+vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID
+vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID
+vars.PAWLOCAL_ONCALL_QUOTA_ISSUE
+vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG
+vars.PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED
+vars.PAWLOCAL_PUBLIC_BASE_URL
 vars.PAWLOCAL_ROUTE53_ZONE_ID
 vars.PAWLOCAL_RUNTIME_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_APPLY_ROLE_ARN
 vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS
-vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG
 vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET
 vars.PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN
 vars.PAWLOCAL_TF_STATE_BUCKET
+vars.VITE_API_BASE_URL
 -->
 
 Workflow-dispatch inputs are not secrets. Operational workflows additionally consume configuration from protected GitHub Environments.
@@ -566,3 +578,10 @@ Cloud connection metadata accepts a validated Grafana HTTPS origin or the exact 
 Only bounded GETs to fixed API paths on validated Grafana hosts are permitted; redirects are rejected. Logs/summary contain fixed capability PASS/PENDING/FAIL results and counts, never returned bodies, tokens, account identities, datasource contents or alert data. Missing SM binding/credentials or dependent metadata produces PENDING. Failed auth/shape/transport produces FAIL. The summary reports only fixed failure categories (`http-error`, `network`, `invalid-json`, `response-too-large`, `redirect`, `response-shape`, `internal-error`) and a numeric HTTP status when available. An HTTP status identifies the protocol result, not a conclusion that a token is invalid; no response body or extra account/secret metadata is exposed. A metadata PASS does not prove write scopes, production telemetry authorization/isolation, complete setup, successful ingestion or Free eligibility. This workflow performs no AWS/model operation, production alert/telemetry query, token/app/rule/contact-point creation or other mutation.
 
 Primary contracts: [service-account permission debugging](https://grafana.com/docs/grafana/latest/administration/service-accounts/#debug-the-permissions-of-a-service-account-token), the [pinned provisioning client/runbook](../observability/grafana/cloud/README.md), and [Synthetic Monitoring API](https://github.com/grafana/synthetic-monitoring-api-go-client/blob/836cd7e209af74554519f5153d05d3990af5af2f/smapi.go). Legacy Grafana API compatibility still needs actual stack verification.
+## Controlled incident response
+
+<!-- actions-reference: incident-responder.yml; dispatch-inputs: environment,schema_version,alerts_json; call-inputs: - -->
+
+[incident-responder.yml](../.github/workflows/incident-responder.yml) accepts the receiver's normalized environment/schema/grouped alert input on trusted main. It is disabled and has no default model or budget. Trusted preflight claims/deduplicates a generation and reserves both model executions before exposing the API gateway. Separate isolated fixer/check/reviewer jobs bind a candidate; trusted jobs publish, authenticate actual PR CI, squash merge and promote the exact development-verified release. [The Actions runbook](../ops/incident-response/ACTIONS.md) documents credentials, quotas, deadlines, recovery and pending one-time activation.
+
+Matching on-call Environments provide public `PAWLOCAL_ONCALL_ENABLED`, `PAWLOCAL_ONCALL_MODEL_PROFILE`, `PAWLOCAL_ONCALL_QUOTA_ISSUE`, `PAWLOCAL_ONCALL_DISPATCH_ACTOR`, `PAWLOCAL_ONCALL_PUBLISHER_APP_ID`, `PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID`, `PAWLOCAL_GRAFANA_URL` and `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED`. Protected `OPENAI_API_KEY`, `PAWLOCAL_GRAFANA_QUERY_TOKEN` and `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` are scoped to trusted consumers; model processes receive none of the query/App credentials. The public recovery URLs reuse canonical `VITE_API_BASE_URL` and `PAWLOCAL_PUBLIC_BASE_URL` source mappings. Model, rates, spending authority, App permissions and privacy/live release acceptance remain unconfigured until reviewed setup.

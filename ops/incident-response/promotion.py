@@ -8,6 +8,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import receipts
 from admission import (
     GITHUB,
     INCIDENT_PREFIX,
@@ -17,10 +18,12 @@ from admission import (
     readiness,
 )
 from candidate import digest
+from control import LiveControl
 from deadline import arm
 from job import context, download
 from quota import Denied, integer, strict_json
 from quota_gateway import NoRedirect
+from recovery import configured_rule, observe
 from settings import runtime_ready
 
 CHECKS = {
@@ -239,6 +242,9 @@ def merge(client, token, value, metadata):
         pause(client.deadline)
     check_pr(client, value)
     check_incident(client, metadata)
+    LiveControl(
+        lambda path: client.request("GET", path), metadata, client.deadline
+    ).check()
     # No generic App request path: only this PR, candidate SHA, squash method.
     result = request(
         token,
@@ -267,6 +273,9 @@ def merge(client, token, value, metadata):
 
 
 def check_incident(client, metadata):
+    LiveControl(
+        lambda path: client.request("GET", path), metadata, client.deadline
+    ).check()
     issue = client.request("GET", f"/issues/{metadata['issue']}")
     if (
         issue.get("state") != "open"
@@ -311,9 +320,9 @@ def development_run(client, sha):
     return runs[0]["id"]
 
 
-def promote(client, sha):
-    runtime_ready(client)
+def wait_development(client, sha, control):
     while True:
+        control()
         run_id = development_run(client, sha)
         if run_id is not None:
             development = deployed_release(client, "development")
@@ -324,12 +333,31 @@ def promote(client, sha):
                 raise Denied(
                     "development release readback differs from the actual push run"
                 )
-            break
+            return development
         pause(client.deadline)
+
+
+def promote(client, sha, control=None, progress=None, expected_development=None):
+    control = control or (lambda: None)
+    progress = progress or (lambda _payload: None)
+    control()
+    runtime_ready(client)
+    development = wait_development(client, sha, control)
+    if expected_development is not None and development != expected_development:
+        raise Denied("observed development release changed before promotion")
     runtime_ready(client)
     if client.request("GET", "/git/ref/heads/main").get("object", {}).get("sha") != sha:
         raise Denied("main moved before exact verified production dispatch")
     image = "ghcr.io/alanlima/pawlocal-api@" + development["image_digest"]
+    control()
+    progress(
+        {
+            "state": "PRODUCTION_DISPATCH_INTENT",
+            "merged_sha": sha,
+            "image_digest": development["image_digest"],
+        }
+    )
+    control()
     dispatched = request(
         client.token,
         client.deadline,
@@ -349,9 +377,18 @@ def promote(client, sha):
         != f"https://github.com/alanlima/pawlocal/actions/runs/{run_id}"
     ):
         raise Denied("production dispatch uncertain; never automatically redeliver")
+    progress(
+        {
+            "state": "PRODUCTION_DISPATCH_ACCEPTED",
+            "merged_sha": sha,
+            "image_digest": development["image_digest"],
+            "production_run": run_id,
+        }
+    )
     while True:
+        control()
         run = client.request("GET", f"/actions/runs/{run_id}")
-        if not valid_run(run, "deploy-production.yml", "workflow_dispatch", sha):
+        if not valid_run(run, "deploy-production.yml", "workflow_dispatch"):
             raise Denied("production run provenance differs")
         if run.get("status") == "completed":
             if run.get("conclusion") != "success":
@@ -371,21 +408,82 @@ def promote(client, sha):
         pause(client.deadline)
 
 
+def verified_merge(client, metadata, value):
+    payload = receipts.read("merge", os.environ.get("MERGE_SHA256"), metadata, value)
+    expected = {
+        "candidate_sha": value["candidate_sha"],
+        "tree_sha": value["tree_sha"],
+        "base_sha": value["base_sha"],
+        "pr": value["pr"],
+    }
+    sha = payload.get("merged_sha", "")
+    if (
+        set(payload) != set(expected) | {"merged_sha"}
+        or any(payload[key] != item for key, item in expected.items())
+        or not re.fullmatch(r"[0-9a-f]{40}", str(sha))
+        or sha != os.environ.get("MERGED_SHA")
+    ):
+        raise Denied("merge receipt differs from exact published candidate")
+    pr = client.request("GET", f"/pulls/{value['pr']}")
+    commit = client.request("GET", "/git/commits/" + sha)
+    parents = commit.get("parents", [])
+    if (
+        pr.get("merged") is not True
+        or pr.get("merge_commit_sha") != sha
+        or pr.get("head", {}).get("sha") != value["candidate_sha"]
+        or pr.get("base", {}).get("ref") != "main"
+        or pr.get("base", {}).get("repo", {}).get("id") != 1423024931
+        or commit.get("tree", {}).get("sha") != value["tree_sha"]
+        or len(parents) != 1
+        or parents[0].get("sha") != value["base_sha"]
+    ):
+        raise Denied("actual squash merge provenance differs")
+    return sha
+
+
+def recover(client, environment, release, profile, metadata, control):
+    control()
+    if deployed_release(client, environment) != release:
+        raise Denied("release identity changed before observation")
+    proof = observe(
+        Path(os.environ["GITHUB_WORKSPACE"]),
+        environment,
+        release,
+        profile,
+        service=metadata["alert"]["service"],
+        api_base_url=os.environ.get("RECOVERY_API_BASE_URL", ""),
+        frontend_origin=os.environ.get("RECOVERY_FRONTEND_ORIGIN", ""),
+        stack_url=os.environ.get("GRAFANA_STACK_URL", ""),
+        query_token=os.environ.get("PAWLOCAL_GRAFANA_QUERY_TOKEN", ""),
+        deadline=client.deadline,
+        control=control,
+    )
+    control()
+    if deployed_release(client, environment) != release:
+        raise Denied("release identity changed during observation")
+    return proof
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=["merge", "promote"])
+    parser.add_argument("phase", choices=["merge", "development", "promote"])
     phase = parser.parse_args().phase
     arm(os.environ["PROMOTION_DEADLINE"], maximum=3600)
-    metadata, _, value = publication()
+    metadata, profile, value = publication()
     client = ReleaseClient(os.environ["GH_TOKEN"], value["promotion_deadline"])
     if os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true":
         raise Denied("incident automation disabled")
     if (
-        metadata["alert"]["environment"] == "production"
-        and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true"
-    ):
+        phase == "promote"
+        or phase == "merge"
+        and metadata["alert"]["environment"] == "production"
+    ) and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true":
         raise Denied("production telemetry-read authority revoked")
     root = Path(os.environ["RUNNER_TEMP"])
+    control = LiveControl(
+        lambda path: client.request("GET", path), metadata, client.deadline
+    ).check
+    control()
     if phase == "merge":
         token = root / "oncall-publisher-token.json"
         if (
@@ -395,24 +493,93 @@ def main():
         ):
             raise Denied("trusted merge credential handoff invalid")
         sha = merge(client, strict_json(token.read_bytes())["token"], value, metadata)
+        receipts.write(
+            "merge",
+            metadata,
+            value,
+            {
+                "candidate_sha": value["candidate_sha"],
+                "tree_sha": value["tree_sha"],
+                "base_sha": value["base_sha"],
+                "pr": value["pr"],
+                "merged_sha": sha,
+            },
+        )
         with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
             stream.write("merged_sha=" + sha + "\n")
     else:
-        sha = os.environ.get("MERGED_SHA", "")
-        if not re.fullmatch(r"[0-9a-f]{40}", sha):
-            raise Denied("trusted merge output required")
-        production = promote(client, sha)
-        if current_alert(
-            os.environ.get("GRAFANA_STACK_URL", ""),
-            os.environ.get("PAWLOCAL_GRAFANA_QUERY_TOKEN", ""),
-            metadata["alert"],
-            client.deadline,
-        ):
-            raise Denied("release succeeded but original incident remains active")
-        print(
-            "Production identity and original alert recovery verified: "
-            + production["affected_sha"]
-        )
+        sha = verified_merge(client, metadata, value)
+        if phase == "development":
+            release = wait_development(client, sha, control)
+            proof = recover(client, "development", release, profile, metadata, control)
+            receipts.validate_recovery(proof, release, profile, "development", value)
+            receipts.write(
+                "development",
+                metadata,
+                value,
+                {
+                    "merged_sha": sha,
+                    "merge_sha256": os.environ["MERGE_SHA256"],
+                    "release": release,
+                    "recovery": proof,
+                },
+            )
+        else:
+            development = receipts.read(
+                "development", os.environ.get("DEVELOPMENT_SHA256"), metadata, value
+            )
+            if (
+                development.get("merged_sha") != sha
+                or development.get("merge_sha256") != os.environ["MERGE_SHA256"]
+                or development.get("release", {}).get("affected_sha") != sha
+                or development.get("recovery", {}).get("profile_sha256")
+                != profile.digest
+                or development.get("recovery", {}).get("window_seconds")
+                != profile.recovery_seconds
+            ):
+                raise Denied("development recovery receipt differs")
+            receipts.validate_recovery(
+                development.get("recovery"),
+                development.get("release"),
+                profile,
+                "development",
+                value,
+            )
+            # A profile UID is not evidence that production monitoring exists.
+            # Check the configured production rule before any release dispatch.
+            configured_rule(
+                Path(os.environ["GITHUB_WORKSPACE"]),
+                "production",
+                profile,
+                service=metadata["alert"]["service"],
+                api_base_url=os.environ.get("RECOVERY_API_BASE_URL", ""),
+                frontend_origin=os.environ.get("RECOVERY_FRONTEND_ORIGIN", ""),
+                stack_url=os.environ.get("GRAFANA_STACK_URL", ""),
+                query_token=os.environ.get("PAWLOCAL_GRAFANA_QUERY_TOKEN", ""),
+                deadline=client.deadline,
+                control=control,
+            )
+            release = promote(
+                client,
+                sha,
+                control,
+                lambda payload: receipts.write("progress", metadata, value, payload),
+                development["release"],
+            )
+            proof = recover(client, "production", release, profile, metadata, control)
+            receipts.validate_recovery(proof, release, profile, "production", value)
+            receipts.write(
+                "production",
+                metadata,
+                value,
+                {
+                    "merged_sha": sha,
+                    "merge_sha256": os.environ["MERGE_SHA256"],
+                    "development_sha256": os.environ["DEVELOPMENT_SHA256"],
+                    "release": release,
+                    "recovery": proof,
+                },
+            )
 
 
 if __name__ == "__main__":

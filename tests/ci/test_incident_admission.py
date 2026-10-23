@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -70,6 +71,8 @@ def deployment():
 
 
 class FakeGitHub:
+    deadline = int(time.time()) + 1200
+
     def __init__(self, *_args):
         self.calls = []
         self.existing = []
@@ -94,6 +97,8 @@ class FakeGitHub:
 
     def request(self, method, path, data=None):
         self.calls.append((method, path, data))
+        if method == "PATCH" and path == "/issues/789":
+            return {"number": 789, "state": "closed"}
         if method == "POST" and path == "/issues":
             return {"number": 789, "user": {"login": "github-actions[bot]"}}
         if method == "POST" and path.endswith("/comments"):
@@ -104,7 +109,7 @@ class FakeGitHub:
             }
         if path == "/issues/456":
             return {
-                "state": "open",
+                "state": "closed" if getattr(self, "ledger_closed", False) else "open",
                 "body": admission.LEDGER_MARKER,
                 "user": {"login": "alanlima"},
             }
@@ -151,9 +156,15 @@ class AdmissionTests(unittest.TestCase):
                         "strict_required_status_checks_policy": True,
                         "required_status_checks": [
                             {"context": name}
+                            | (
+                                {"integration_id": 42}
+                                if name == "PawLocal change authorization"
+                                else {}
+                            )
                             for name in (
                                 "Backend checks / Backend checks",
                                 "Frontend checks and HTTP-mode build / frontend",
+                                "PawLocal change authorization",
                             )
                         ],
                     },
@@ -162,6 +173,8 @@ class AdmissionTests(unittest.TestCase):
         }
 
         class Rules:
+            deadline = int(time.time()) + 600
+
             def __init__(self, rows):
                 self.rows = rows
 
@@ -170,7 +183,11 @@ class AdmissionTests(unittest.TestCase):
                     return [{"id": index + 1} for index in range(len(self.rows))]
                 return self.rows[int(path.rsplit("/", 1)[1]) - 1]
 
-        with patch.object(admission, "runtime_ready") as environments:
+        with (
+            patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+            patch.object(admission, "runtime_ready") as environments,
+            patch.object(admission, "classic_absent"),
+        ):
             admission.readiness(Rules([rule]))
             environments.assert_called_once()
         human = copy.deepcopy(rule)
@@ -181,10 +198,24 @@ class AdmissionTests(unittest.TestCase):
         for second in (human, unknown):
             with (
                 self.subTest(second=second),
+                patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
                 patch.object(admission, "runtime_ready") as environments,
                 self.assertRaises(admission.Denied),
             ):
                 admission.readiness(Rules([rule, second]))
+            environments.assert_not_called()
+        for issuer in (None, 15368, "42", True):
+            bad = copy.deepcopy(rule)
+            bad["rules"][3]["parameters"]["required_status_checks"][-1][
+                "integration_id"
+            ] = issuer
+            with (
+                self.subTest(issuer=issuer),
+                patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+                patch.object(admission, "runtime_ready") as environments,
+                self.assertRaises(admission.Denied),
+            ):
+                admission.readiness(Rules([bad]))
             environments.assert_not_called()
 
     def test_grouped_schema_rejects_private_extra_generation_and_wrong_environment(
@@ -211,6 +242,7 @@ class AdmissionTests(unittest.TestCase):
             output.touch()
             profile = quota_fixtures.QuotaTests().profile()
             env = {
+                "INCIDENT_DEADLINE": str(int(time.time()) + 1200),
                 "GITHUB_REPOSITORY": "alanlima/pawlocal",
                 "GITHUB_REF": "refs/heads/main",
                 "GITHUB_EVENT_NAME": "workflow_dispatch",
@@ -235,6 +267,8 @@ class AdmissionTests(unittest.TestCase):
                 patch.dict(os.environ, env, clear=True),
                 patch.object(admission, "GitHub", return_value=fake),
                 patch.object(admission, "readiness"),
+                patch.object(admission, "bindings_ready"),
+                patch.object(admission, "arm"),
                 patch.object(admission, "current_alert", return_value=current),
                 patch.object(
                     admission,
@@ -270,6 +304,13 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(metadata["affected_sha"], "a" * 40)
         self.assertEqual(metadata["base_sha"], "f" * 40)
         self.assertEqual(metadata["reservation"]["run_id"], "777")
+
+    def test_live_global_stop_prevents_even_initial_claim_mutation(self):
+        fake = FakeGitHub()
+        fake.ledger_closed = True
+        with self.assertRaises(admission.Denied):
+            self.run_preflight(fake)
+        self.assertFalse(any(method != "GET" for method, _, _ in fake.calls))
 
     def test_closed_generation_and_late_firing_after_resolution_do_not_reserve(self):
         fake = FakeGitHub()

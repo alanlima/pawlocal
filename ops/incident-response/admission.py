@@ -11,10 +11,13 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from control import check_ledger
+from deadline import arm
 from diagnostics import gather
-from quota import Denied, Profile, reserve, strict_json
+from protection import classic_absent
+from quota import Denied, Profile, integer, reserve, strict_json
 from quota_gateway import NoRedirect
-from settings import runtime_ready
+from settings import bindings_ready, runtime_ready
 
 REPOSITORY = "alanlima/pawlocal"
 GITHUB = "https://api.github.com/repos/" + REPOSITORY
@@ -41,6 +44,11 @@ class GitHub:
             allowed
             or method == "POST"
             and re.fullmatch(r"/issues(?:/\d+/comments)?", path)
+        )
+        allowed = allowed or (
+            method == "PATCH"
+            and re.fullmatch(r"/issues/[1-9][0-9]*", path)
+            and data == {"state": "closed", "state_reason": "completed"}
         )
         if not allowed or time.time() >= self.deadline:
             raise Denied("unapproved GitHub operation/deadline")
@@ -377,6 +385,9 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
     body = (
         ENTRY_MARKER + "\n" + json.dumps(entry, sort_keys=True, separators=(",", ":"))
     )
+    check_ledger(
+        lambda path: github.request("GET", path), int(issue_number), github.deadline
+    )
     created = github.request("POST", f"/issues/{issue_number}/comments", {"body": body})
     if (
         created.get("body") != body
@@ -390,10 +401,12 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
 
 
 def readiness(github):
+    authorizer = integer(int(os.environ.get("PAWLOCAL_AUTHORIZER_APP_ID", "0")))
     summaries = github.request("GET", "/rulesets?per_page=100")
     if not isinstance(summaries, list) or len(summaries) >= 100:
         raise Denied("ruleset inventory unknown")
     required = {
+        "PawLocal change authorization",
         "Backend checks / Backend checks",
         "Frontend checks and HTTP-mode build / frontend",
     }
@@ -461,6 +474,14 @@ def readiness(github):
                     not isinstance(entry.get("context"), str) for entry in entries
                 ):
                     raise Denied("status policy inventory unknown")
+                for entry in entries:
+                    if entry["context"] == "PawLocal change authorization" and (
+                        type(entry.get("integration_id")) is not int
+                        or entry["integration_id"] != authorizer
+                    ):
+                        raise Denied(
+                            "ordinary change authorization must pin the trusted App source"
+                        )
                 checks.update(entry["context"] for entry in entries)
             protections.add(kind)
     if (
@@ -471,10 +492,13 @@ def readiness(github):
         raise Denied(
             "complete autonomous machine protections must be configured before admission"
         )
+    classic_absent(github.deadline)
     runtime_ready(github)
 
 
 def main():
+    deadline = int(os.environ["INCIDENT_DEADLINE"])
+    arm(deadline)
     if (
         os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
         or os.environ.get("GITHUB_REF") != "refs/heads/main"
@@ -494,6 +518,7 @@ def main():
     ):
         raise Denied("admission disabled or unsupported schema")
     profile = Profile.load(os.environ.get("PAWLOCAL_MODEL_PROFILE", ""))
+    bindings_ready(os.environ["GITHUB_WORKSPACE"])
     environment = os.environ.get("INCIDENT_ENVIRONMENT", "")
     if (
         environment == "production"
@@ -501,9 +526,10 @@ def main():
     ):
         raise Denied("production telemetry-read/privacy approval missing")
     received = alerts(os.environ.get("ALERTS_JSON", ""), environment)
-    deadline = int(time.time()) + 1200
     github = GitHub(os.environ.get("GH_TOKEN", ""), deadline)
     readiness(github)
+    quota_issue = integer(int(os.environ.get("PAWLOCAL_QUOTA_ISSUE", "0")))
+    check_ledger(lambda path: github.request("GET", path), quota_issue, deadline)
     existing = github.pages("/issues?state=all", maximum=100)
     selected = None
     for alert in received:
@@ -528,6 +554,7 @@ def main():
             if active and selected is None
             else ("ESCALATED_GROUP_LIMIT" if active else "RESOLVED")
         )
+        check_ledger(lambda path: github.request("GET", path), quota_issue, deadline)
         issue = github.request(
             "POST",
             "/issues",
@@ -538,8 +565,27 @@ def main():
                 "labels": ["stage-5", "bug"],
             },
         )
+        if (
+            type(issue.get("number")) is not int
+            or issue["number"] <= 0
+            or issue.get("user", {}).get("login") != "github-actions[bot]"
+        ):
+            raise Denied("incident claim acknowledgement uncertain")
+        if state == "RESOLVED":
+            check_ledger(
+                lambda path: github.request("GET", path), quota_issue, deadline
+            )
+            github.request(
+                "PATCH",
+                f"/issues/{issue['number']}",
+                {"state": "closed", "state_reason": "completed"},
+            )
         if active and selected is None:
             selected = {"alert": alert, "issue": issue["number"]}
+            with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+                output.write(
+                    f"issue={issue['number']}\nincident_key={alert['incident_key']}\n"
+                )
     if selected is None:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
             output.write("admitted=false\n")
@@ -580,6 +626,7 @@ def main():
                 "run_id": os.environ["GITHUB_RUN_ID"],
                 "profile": profile.digest,
                 "reservation": entry,
+                "quota_issue": int(os.environ["PAWLOCAL_QUOTA_ISSUE"]),
             }
         )
         output = Path(os.environ["RUNNER_TEMP"]) / "oncall-admission"
@@ -595,6 +642,9 @@ def main():
             )
     except Exception:
         if time.time() < deadline:
+            check_ledger(
+                lambda path: github.request("GET", path), quota_issue, deadline
+            )
             github.request(
                 "POST",
                 f"/issues/{selected['issue']}/comments",

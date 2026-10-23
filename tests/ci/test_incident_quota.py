@@ -24,6 +24,11 @@ class QuotaTests(unittest.TestCase):
             "monthly_microdollars": 20_000_000,
             "monthly_runs": 20,
             "promotion_seconds": 3600,
+            "recovery_seconds": 600,
+            "rule_uids": {
+                "development": "fixture-development",
+                "production": "fixture-production",
+            },
             "requests_per_role": 4,
             "input_per_request": 100_000,
             "output_per_request": 10_000,
@@ -127,6 +132,11 @@ class QuotaTests(unittest.TestCase):
             {"service_tier": "priority"},
             {"approval": ""},
             {"input_per_role": 400001},
+            {"promotion_seconds": 3601},
+            {"recovery_seconds": 599},
+            {"recovery_seconds": 901},
+            {"promotion_seconds": 1400},
+            {"rule_uids": {"development": "fixture"}},
         ):
             with self.subTest(changed=changed), self.assertRaises(quota.Denied):
                 self.profile(**changed)

@@ -20,6 +20,7 @@ from admission import (
     readiness,
 )
 from candidate import ALLOWED, digest, load
+from control import LiveControl
 from deadline import arm
 from job import context, download, remaining
 from quota import Denied, strict_json
@@ -27,12 +28,13 @@ from quota_gateway import NoRedirect
 
 
 class Broker:
-    def __init__(self, token, metadata, candidate_sha, opener=None):
+    def __init__(self, token, metadata, candidate_sha, opener=None, control=None):
         self.token = token
         self.metadata = metadata
         self.candidate_sha = candidate_sha
         self.branch = f"incident/{metadata['alert']['environment']}/{metadata['alert']['incident_key'][:16]}"
         self.opener = opener or urllib.request.build_opener(NoRedirect)
+        self.control = control
 
     def approved(self, method, path, body):
         if method == "GET":
@@ -89,6 +91,10 @@ class Broker:
     def request(self, method, path, body=None):
         if not self.approved(method, path, body):
             raise Denied("publisher operation denied")
+        if method != "GET":
+            if self.control is None:
+                raise Denied("live publication control required")
+            self.control()
         timeout = min(15, remaining(self.metadata))
         request = urllib.request.Request(
             GITHUB + path,
@@ -146,6 +152,9 @@ def can_publish(github, metadata):
     if os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true":
         raise Denied("emergency admission disabled")
     environment = metadata["alert"]["environment"]
+    LiveControl(
+        lambda path: github.request("GET", path), metadata, metadata["deadline"]
+    ).check()
     if (
         environment == "production"
         and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true"
@@ -257,7 +266,12 @@ def main():
         or token_path.stat().st_uid != os.getuid()
     ):
         raise Denied("private publisher token handoff invalid")
-    broker = Broker(strict_json(token_path.read_bytes())["token"], metadata, pinned)
+    control = LiveControl(
+        lambda path: github.request("GET", path), metadata, metadata["deadline"]
+    ).check
+    broker = Broker(
+        strict_json(token_path.read_bytes())["token"], metadata, pinned, control=control
+    )
     base = broker.request("GET", "/git/commits/" + metadata["base_sha"])
     tree = []
     for name, raw in sorted(files.items()):
@@ -301,6 +315,7 @@ def main():
     )
     body = f"Addresses incident #{metadata['issue']} in the search/detail journey. The identical regression reproduced on affected `{metadata['affected_sha']}` and current main `{metadata['base_sha']}`; candidate `{pinned}` passed trusted checks and fresh machine review.\n\nTrusted automation requires authentic candidate PR CI before squash merge, verifies the resulting development release, then promotes that exact verified release to production and checks recovery.\n\nWorkflow evidence: https://github.com/alanlima/pawlocal/actions/runs/{metadata['run_id']}\n\nCandidate artifact SHA256: `{digest(candidate)}`.\n\nRelated: #{metadata['issue']}, #42."
     can_publish(github, metadata)
+    published_at = int(time.time())
     result = broker.request(
         "POST",
         "/pulls",
@@ -320,6 +335,7 @@ def main():
         or result.get("state") != "open"
     ):
         raise Denied("PR acknowledgement uncertain; inspect owner-visible branch/run")
+    control()
     github.request(
         "POST",
         f"/issues/{metadata['issue']}/comments",
@@ -327,7 +343,6 @@ def main():
             "body": f"PR_OPEN: https://github.com/alanlima/pawlocal/pull/{number}. Candidate `{pinned}` awaits authentic candidate PR CI, followed by trusted automated squash merge and verified release promotion. Full monthly reservation remains consumed."
         },
     )
-    published_at = int(time.time())
     publication = {
         "schema": 1,
         "run_id": metadata["run_id"],

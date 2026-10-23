@@ -6,6 +6,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
@@ -81,6 +82,53 @@ class Client:
 
 
 class PromotionTests(unittest.TestCase):
+    def test_configured_production_rule_is_required_before_dispatch(self):
+        metadata = {"alert": {"environment": "development", "service": "pawlocal-api"}}
+        profile = SimpleNamespace(digest="d" * 64, recovery_seconds=600)
+        value = {"promotion_deadline": int(time.time()) + 600}
+        development = {
+            "merged_sha": "a" * 40,
+            "merge_sha256": "e" * 64,
+            "release": {"affected_sha": "a" * 40},
+            "recovery": {"profile_sha256": profile.digest, "window_seconds": 600},
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROMOTION_DEADLINE": str(value["promotion_deadline"]),
+                    "GH_TOKEN": "fixture",
+                    "PAWLOCAL_ONCALL_ENABLED": "true",
+                    "PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED": "true",
+                    "RUNNER_TEMP": "/fixture",
+                    "GITHUB_WORKSPACE": "/fixture",
+                    "MERGE_SHA256": "e" * 64,
+                    "DEVELOPMENT_SHA256": "f" * 64,
+                },
+                clear=True,
+            ),
+            patch.object(sys, "argv", ["promotion.py", "promote"]),
+            patch.object(promotion, "arm"),
+            patch.object(
+                promotion, "publication", return_value=(metadata, profile, value)
+            ),
+            patch.object(promotion, "ReleaseClient"),
+            patch.object(promotion, "LiveControl"),
+            patch.object(promotion, "verified_merge", return_value="a" * 40),
+            patch.object(promotion.receipts, "read", return_value=development),
+            patch.object(promotion.receipts, "validate_recovery"),
+            patch.object(
+                promotion,
+                "configured_rule",
+                side_effect=promotion.Denied("fixture production rule absent"),
+            ) as rule,
+            patch.object(promotion, "promote") as dispatch,
+        ):
+            with self.assertRaises(promotion.Denied):
+                promotion.main()
+            self.assertEqual(rule.call_args.args[1], "production")
+            dispatch.assert_not_called()
+
     def test_candidate_requires_both_authentic_jobs_from_fixed_pr_workflow(self):
         client = Client()
         self.assertTrue(promotion.candidate_ci(client, publication()))

@@ -8,6 +8,7 @@ import argparse
 import hmac
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -16,6 +17,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from control import LiveControl
 from quota import Denied, Profile, RequestBudget, strict_json
 
 ORIGIN = "https://api.openai.com/v1/responses"
@@ -187,7 +189,14 @@ def validate_request(body, profile):
 
 class Gateway:
     def __init__(
-        self, profile, key, local_token, deadline, upstream=None, clock=time.time
+        self,
+        profile,
+        key,
+        local_token,
+        deadline,
+        upstream=None,
+        clock=time.time,
+        control=None,
     ):
         if not key or len(local_token) < 32 or not clock() < deadline <= clock() + 1200:
             raise Denied("invalid gateway authorization/deadline")
@@ -199,6 +208,11 @@ class Gateway:
         self.budget = RequestBudget(profile)
         self.received = 0
         self.upstream = upstream or self.request
+        self.control = control
+
+    def ensure_live(self):
+        if self.control is not None:
+            self.control()
 
     def remaining(self):
         self.profile.valid_at(self.clock())
@@ -227,6 +241,7 @@ class Gateway:
         ):
             raise Denied("local authentication failed")
         self.remaining()
+        self.ensure_live()
         self.received += 1
         if self.received > self.profile.requests_per_role or len(raw) > MAX_BODY:
             raise Denied("request quota/body bound exceeded")
@@ -312,6 +327,7 @@ def serve(gateway, port):
                 if len(raw) != length:
                     raise Denied("incomplete body")
                 body = gateway.admit(self.headers.get("Authorization"), raw)
+                gateway.ensure_live()
                 with gateway.upstream("", body) as response:
                     if response.status != 200:
                         raise Denied("upstream inference failed")
@@ -378,8 +394,33 @@ def main():
     profile = Profile.load(Path(args.profile).read_text())
     # stdin avoids real API key in argv, candidate files or exported job env.
     credentials = strict_json(sys.stdin.readline(MAX_BODY))
+
+    def read_control(path):
+        if not re.fullmatch(r"/issues/[1-9][0-9]*", path):
+            raise Denied("unsupported live-control read")
+        request = urllib.request.Request(
+            "https://api.github.com/repos/alanlima/pawlocal" + path,
+            headers={
+                "Authorization": "Bearer " + credentials["github_token"],
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with urllib.request.build_opener(NoRedirect).open(
+            request, timeout=min(10, args.deadline - time.time())
+        ) as response:
+            raw = response.read(65537)
+            if response.status != 200 or len(raw) > 65536:
+                raise Denied("live-control read uncertain")
+            return strict_json(raw)
+
+    control = LiveControl(read_control, credentials["metadata"], args.deadline).check
     gateway = Gateway(
-        profile, credentials["api_key"], credentials["local_token"], args.deadline
+        profile,
+        credentials["api_key"],
+        credentials["local_token"],
+        args.deadline,
+        control=control,
     )
     serve(gateway, args.port)
 

@@ -35,7 +35,8 @@ class IncidentWorkflowTests(unittest.TestCase):
         for name in ("fixer", "reviewer"):
             job = jobs[name]
             self.assertEqual(
-                job["permissions"], {"contents": "read", "actions": "read"}
+                job["permissions"],
+                {"contents": "read", "actions": "read", "issues": "read"},
             )
             self.assertIn("INCIDENT_DEADLINE", job["env"])
             model = [
@@ -70,7 +71,7 @@ class IncidentWorkflowTests(unittest.TestCase):
             for name, job in jobs.items()
             if job.get("permissions", {}).get("issues") == "write"
         ]
-        self.assertEqual(writers, ["preflight", "publisher", "promote"])
+        self.assertEqual(writers, ["preflight", "publisher", "finalize"])
         for name in writers:
             self.assertFalse(
                 any(
@@ -108,6 +109,34 @@ class IncidentWorkflowTests(unittest.TestCase):
         self.assertIn("vars.PAWLOCAL_ONCALL_MODEL_PROFILE", self.raw)
         self.assertNotIn("gpt-", self.raw)
         self.assertNotIn("||", self.raw)
+
+    def test_recovery_receipts_gate_promotion_and_always_finalizer(self):
+        jobs = self.workflow["jobs"]
+        development, production, finalizer = (
+            jobs[name] for name in ("development_recovery", "promote", "finalize")
+        )
+        self.assertEqual(development["environment"], "oncall-development")
+        self.assertEqual(production["environment"], "oncall-production")
+        self.assertIn("development_recovery", production["needs"])
+        self.assertIn("development_sha256", production["if"])
+        self.assertIn("always()", finalizer["if"])
+        self.assertEqual(set(finalizer["needs"]), set(jobs) - {"finalize"})
+        for job in (development, production):
+            self.assertIn(
+                "needs.publisher.outputs.promotion_deadline",
+                job["env"]["PROMOTION_DEADLINE"],
+            )
+            self.assertEqual(
+                job["env"]["RECOVERY_API_BASE_URL"], "${{ vars.VITE_API_BASE_URL }}"
+            )
+            self.assertEqual(
+                job["env"]["RECOVERY_FRONTEND_ORIGIN"],
+                "${{ vars.PAWLOCAL_PUBLIC_BASE_URL }}",
+            )
+        self.assertIn("PRODUCTION_SHA256", finalizer["env"])
+        self.assertIn("DEVELOPMENT_SHA256", finalizer["env"])
+        self.assertNotIn("secrets.", str(finalizer))
+        self.assertNotIn("id-token", str(finalizer))
 
 
 if __name__ == "__main__":

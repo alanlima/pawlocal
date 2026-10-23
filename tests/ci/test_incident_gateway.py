@@ -157,6 +157,18 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(process.received, 1)
         self.assertEqual(process.budget.requests, 0)
 
+    def test_live_stop_prevents_token_count_or_inference(self):
+        process = self.fixture()
+
+        def stopped():
+            raise gateway.Denied("fixture owner stop")
+
+        process.control = stopped
+        with self.assertRaises(gateway.Denied):
+            process.admit("Bearer " + "x" * 32, json.dumps(self.body()).encode())
+        self.assertEqual(self.calls, [])
+        self.assertEqual(process.budget.requests, 0)
+
     @unittest.skipUnless(
         os.name == "posix", "POSIX signal enforcement exercised in Ubuntu CI"
     )
@@ -190,7 +202,16 @@ class GatewayTests(unittest.TestCase):
             try:
                 process.stdin.write(
                     json.dumps(
-                        {"api_key": "fixture-key", "local_token": "x" * 32}
+                        {
+                            "api_key": "fixture-key",
+                            "local_token": "x" * 32,
+                            "github_token": "fixture-only-no-actual-key",
+                            "metadata": {
+                                "quota_issue": 456,
+                                "issue": 789,
+                                "alert": {"incident_key": "a" * 64},
+                            },
+                        }
                     ).encode()
                     + b"\n"
                 )

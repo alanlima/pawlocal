@@ -11,6 +11,19 @@ import publisher
 
 
 class PublisherPolicyTests(unittest.TestCase):
+    def test_live_stop_prevents_even_git_object_publication(self):
+        broker = self.fixture()
+        body = {"content": "Zml4dHVyZQ==", "encoding": "base64"}
+        with patch.object(broker.opener, "open") as request:
+            with self.assertRaises(publisher.Denied):
+                broker.request("POST", "/git/blobs", body)
+            broker.control = lambda: (_ for _ in ()).throw(
+                publisher.Denied("fixture owner stop")
+            )
+            with self.assertRaises(publisher.Denied):
+                broker.request("POST", "/git/blobs", body)
+            request.assert_not_called()
+
     def fixture(self):
         metadata = {
             "base_sha": "a" * 40,

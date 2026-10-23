@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 import yaml
+from incident_process_contract import DIRECT, residual_source, validate_inventory
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -970,12 +971,16 @@ class AwsInfrastructureOwnershipTests(unittest.TestCase):
         self.assertEqual(set(client_method_calls), {"upload_file", "download_file"})
 
     def test_executable_automation_does_not_mutate_infrastructure_outside_terraform(self) -> None:
+        validate_inventory(ROOT)
         for path in EXECUTION_FILES:
             source = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(ROOT)):
                 if path == ROOT / "ops/iam-bootstrap/setup-bootstrap-identity.py":
                     self.assert_external_bootstrap_setup_is_scoped(source)
                     continue
+                if path.parent == ROOT / "ops/incident-response" and path.name in DIRECT:
+                    self.assertIsNone(AWS_SDK_USAGE.search(source))
+                    source = residual_source(ROOT, path, source)
                 self.assertFalse(contains_forbidden_terraform_state_change(source), "manual Terraform state changes are prohibited")
                 if path == ROOT / ".github/scripts/terraform-plan-transfer.py":
                     self.assert_plan_transfer_helper_is_s3_object_only(source)

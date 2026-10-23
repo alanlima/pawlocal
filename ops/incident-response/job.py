@@ -184,6 +184,27 @@ def quiesce():
     run(["sudo", "pkill", "-KILL", "-u", "oncall"], check=False)
 
 
+def writable_tool_caches(dependencies):
+    # Vite bundles config into .vite-temp and Vitest caches under .vite.
+    # Only these disposable cache directories are writable, never dependencies.
+    for name in (".vite", ".vite-temp"):
+        run(
+            [
+                "sudo",
+                "install",
+                "-d",
+                "-o",
+                "oncall",
+                "-g",
+                "oncall",
+                "-m",
+                "700",
+                str(dependencies / "frontend/node_modules" / name),
+            ],
+            check=True,
+        )
+
+
 def prepare(role):
     arm(os.environ["INCIDENT_DEADLINE"])
     metadata, profile = context()
@@ -193,6 +214,10 @@ def prepare(role):
     baseline = root / "baseline"
     trusted = Path(os.environ["GITHUB_WORKSPACE"])
     archive(trusted, metadata["base_sha"], baseline)
+    if (baseline / ".codex").exists():
+        raise Denied(
+            "repository Codex configuration requires separate trusted runner review"
+        )
     work = Path("/tmp/pawlocal-oncall-candidate")
     if work.exists():
         raise Denied("unexpected candidate survivor")
@@ -260,6 +285,7 @@ def prepare(role):
             check=True,
             timeout=remaining(metadata),
         )
+    writable_tool_caches(dependencies)
     (work / "frontend/node_modules").symlink_to(
         dependencies / "frontend/node_modules", target_is_directory=True
     )
@@ -317,11 +343,26 @@ def prepare(role):
     )
     run(["sudo", "chmod", "440", "/etc/sudoers.d/pawlocal-codex-home"], check=True)
     prompt = (trusted / "agents/prompts" / f"incident-{role}.md").read_text()
+    prompt += (
+        "\n\nTrusted local test tools (preinstalled from immutable main):\n"
+        "Backend: from the workspace root run PYTHONPATH=backend "
+        "/tmp/pawlocal-oncall-dependencies/venv/bin/python -m pytest "
+        "backend/tests/test_incident_regression.py.\n"
+        "Frontend: use npm scripts in frontend; its node_modules points to "
+        "the trusted dependency tree. Do not install/change dependencies.\n"
+    )
     context_value = {
         key: metadata[key]
         for key in ("alert", "affected_sha", "base_sha", "image_digest", "diagnostics")
     }
     if role == "reviewer":
+        schema = Path(identity.pw_dir) / "review-schema.json"
+        run(
+            ["sudo", "tee", str(schema)],
+            input=(trusted / "ops/incident-response/review-schema.json").read_bytes(),
+            check=True,
+        )
+        run(["sudo", "chmod", "644", str(schema)], check=True)
         context_value["candidate_artifact_sha256"] = os.environ["CANDIDATE_SHA256"]
         context_value["candidate_sha"] = os.environ["PINNED_CANDIDATE_SHA"]
         context_value["patch_path"] = str(Path(identity.pw_dir) / "candidate.diff")
@@ -358,7 +399,15 @@ def prepare(role):
         start_new_session=True,
     )
     process.stdin.write(
-        json.dumps({"api_key": key, "local_token": token}).encode() + b"\n"
+        json.dumps(
+            {
+                "api_key": key,
+                "local_token": token,
+                "github_token": os.environ["GH_TOKEN"],
+                "metadata": metadata,
+            }
+        ).encode()
+        + b"\n"
     )
     process.stdin.close()
     (root / "gateway.pid").write_text(str(process.pid))

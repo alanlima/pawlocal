@@ -9,7 +9,15 @@ from pathlib import Path
 
 from candidate import BACKEND, FRONTEND, bind_candidate, digest, git, load, materialize
 from deadline import arm, run
-from job import archive, context, download, quiesce, remaining, uid
+from job import (
+    archive,
+    context,
+    download,
+    quiesce,
+    remaining,
+    uid,
+    writable_tool_caches,
+)
 from quota import Denied
 
 
@@ -166,6 +174,7 @@ def main():
         check=True,
         timeout=remaining(metadata),
     )
+    writable_tool_caches(dependencies)
     work = Path("/tmp/pawlocal-oncall-check-work")
     work.mkdir(mode=0o755)
     sources = {}
