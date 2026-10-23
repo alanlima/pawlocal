@@ -22,8 +22,8 @@ export async function mint(environment = process.env, fetcher = fetch, writer = 
   const maximumLifetime = purpose === 'publish' ? 1200000 : (purpose === 'status' ? 600000 : 3600000);
   if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || environment.GITHUB_RUN_ATTEMPT !== '1' ||
       !Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + maximumLifetime) throw new Error('Trusted phase deadline required');
-  const appId = environment.PAWLOCAL_PUBLISHER_APP_ID;
-  const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID;
+  const appId = environment.PAWLOCAL_PUBLISHER_APP_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_APP_ID;
+  const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID;
   if (![appId, installationId].every(value => typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value) && Number.isSafeInteger(Number(value)))) throw new Error('Public publisher identities unconfigured');
   const key = createPrivateKey(environment.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY || '');
   if (key.asymmetricKeyType !== 'rsa' || key.asymmetricKeyDetails.modulusLength < 2048) throw new Error('Publisher RSA key invalid');
