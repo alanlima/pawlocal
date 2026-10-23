@@ -42,7 +42,7 @@
         }
       }
     },
-    "telemetry_enabled": { "const": false },
+    "telemetry_enabled": { "type": "boolean" },
     "frontend": {
       "type": "object",
       "additionalProperties": false,

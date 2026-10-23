@@ -166,7 +166,10 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(result, {"NEW_PUBLIC_SETTING": "enabled"})
             self.assertEqual(
                 module.configuration_outputs(result),
-                {"configuration": {}, "frontend_config": {}},
+                {
+                    "configuration": {"NEW_PUBLIC_SETTING": "enabled"},
+                    "frontend_config": {},
+                },
             )
             self.assertEqual(
                 api.variables[("development", "NEW_PUBLIC_SETTING")], "enabled"

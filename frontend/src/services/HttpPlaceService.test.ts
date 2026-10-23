@@ -8,6 +8,37 @@ afterEach(() => {
 })
 
 describe('HttpPlaceService', () => {
+  it('propagates hosted traceparent only to the configured API origin and omits tracestate', async () => {
+    vi.stubEnv('VITE_RELEASE_ENV', 'development')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api-dev.example.test/api/v1')
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockImplementation(
+        async () => new Response(JSON.stringify({ items: [], page: 1, page_size: 100, total: 0 })),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const context = {
+      traceparent: '00-' + 'a'.repeat(32) + '-' + 'b'.repeat(16) + '-01',
+      tracestate: 'private=sentinel',
+    }
+    await new HttpPlaceService('https://api-dev.example.test/api/v1').listPlaces(
+      {},
+      undefined,
+      context,
+    )
+    await new HttpPlaceService('https://foreign.example.test/api/v1').listPlaces(
+      {},
+      undefined,
+      context,
+    )
+    const approved = new Headers(fetchMock.mock.calls[0][1]?.headers)
+    const foreign = new Headers(fetchMock.mock.calls[1][1]?.headers)
+    expect(approved.get('traceparent')).toBe(context.traceparent)
+    expect(approved.has('tracestate')).toBe(false)
+    expect(foreign.has('traceparent')).toBe(false)
+    expect(foreign.has('tracestate')).toBe(false)
+  })
+
   it('follows the OpenAPI pagination until all results are loaded and ignores undefined review counts', async () => {
     const fetchMock = vi
       .fn()

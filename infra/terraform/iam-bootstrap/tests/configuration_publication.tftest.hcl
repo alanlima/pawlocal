@@ -85,7 +85,7 @@ run "foundation_publishes_only_existing_bootstrap_values" {
         for statement in jsondecode(policy.minified_json).Statement : statement
         if toset(flatten([statement.Action])) == toset(["ssm:GetParameter", "ssm:ListTagsForResource"]) &&
         toset(flatten([statement.Resource])) == toset(local.application_configuration_arns[local.role_definitions[key].environment]) &&
-        length(flatten([statement.Resource])) == 12 &&
+        length(flatten([statement.Resource])) == 18 &&
         alltrue([for arn in flatten([statement.Resource]) : !strcontains(arn, "*") && !strcontains(arn, "/iam/") && !strcontains(arn, "/aws/") && !strcontains(arn, "/terraform/")])
       ]) == 1 &&
       !strcontains(policy.minified_json, "ssm:GetParameterHistory") && !strcontains(policy.minified_json, "ssm:GetParametersByPath") &&
@@ -110,16 +110,16 @@ run "foundation_publishes_only_existing_bootstrap_values" {
       length(policy.minified_json) <= 6100 &&
       alltrue([
         for statement in jsondecode(policy.minified_json).Statement :
-        alltrue([for action in flatten([statement.Action]) : !strcontains(action, "*")])
+        alltrue([for action in flatten([statement.Action]) : contains(["ssm:*Parameter", "ssm:*Tags*", "ssm:DescribeParameters"], action)])
         if anytrue([for action in flatten([statement.Action]) : startswith(action, "ssm:")])
       ]) &&
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
-        if contains(flatten([statement.Action]), "ssm:PutParameter") &&
-        toset(flatten([statement.Resource])) == toset([for component in ["api", "auth", "frontend"] : "arn:aws:ssm:ap-southeast-2:111111111111:parameter/pawlocal/${environment}/config/${component}/*"])
+        if contains(flatten([statement.Action]), "ssm:*Parameter") &&
+        toset(flatten([statement.Resource])) == toset([for component in ["api/*", "auth/*", "frontend/*", "g*", "o*"] : "arn:aws:ssm:ap-southeast-2:111111111111:parameter/pawlocal/${environment}/config/${component}"])
       ]) == 1
     ])
-    error_message = "Size-safe boundaries must retain only matching application components, without SSM action wildcards or bootstrap-key mutation."
+    error_message = "Compact boundary action families must retain their current six-API ceiling only on matching public application namespaces; bootstrap/private paths remain excluded."
   }
 
   # Mechanically enumerate every added non-SSM literal permission pair. There

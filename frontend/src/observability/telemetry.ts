@@ -1,3 +1,4 @@
+import { cloudExporter, cloudOutcome, cloudSampler, stopCloudTelemetry } from './cloudTelemetry'
 import {
   context as otelContext,
   metrics,
@@ -31,41 +32,78 @@ export function initializeTelemetry() {
   if (!isEnabled() || initialized) return
   initialized = true
 
-  const resource = resourceFromAttributes({ 'service.name': 'pawlocal-frontend' })
-  const provider = new WebTracerProvider({
-    resource,
-    spanProcessors: [
-      new BatchSpanProcessor(new OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers: {} })),
-    ],
-  })
-  traceProvider = provider
-  trace.setGlobalTracerProvider(provider)
-  meterProvider = new MeterProvider({
-    resource,
-    readers: [
-      new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics`, headers: {} }),
-        exportIntervalMillis: 5000,
-      }),
-    ],
-  })
-  metrics.setGlobalMeterProvider(meterProvider)
+  try {
+    const hosted = Boolean(import.meta.env.VITE_RELEASE_ENV)
+    const resource = resourceFromAttributes({ 'service.name': 'pawlocal-frontend' })
+    const provider = new WebTracerProvider({
+      resource,
+      ...(hosted ? { sampler: cloudSampler() } : {}),
+      spanProcessors: [
+        new BatchSpanProcessor(
+          hosted
+            ? cloudExporter()
+            : new OTLPTraceExporter({ url: `${endpoint}/v1/traces`, headers: {} }),
+          {
+            maxQueueSize: 100,
+            maxExportBatchSize: 20,
+            scheduledDelayMillis: 1000,
+            exportTimeoutMillis: 2500,
+          },
+        ),
+      ],
+    })
+    traceProvider = provider
+    trace.setGlobalTracerProvider(provider)
+    if (hosted) return
+    meterProvider = new MeterProvider({
+      resource,
+      readers: [
+        new PeriodicExportingMetricReader({
+          exporter: new OTLPMetricExporter({ url: `${endpoint}/v1/metrics`, headers: {} }),
+          exportIntervalMillis: 5000,
+        }),
+      ],
+    })
+    metrics.setGlobalMeterProvider(meterProvider)
 
-  const meter = metrics.getMeter('pawlocal.frontend')
-  outcomeCounter = meter.createCounter('pawlocal.operations', {
-    description: 'Frontend journey outcomes, with bounded operation and outcome values.',
-  })
-  actionCounter = meter.createCounter('pawlocal.demo_actions', {
-    description: 'Demo contribution and report outcomes.',
-  })
-  searchDuration = meter.createHistogram('pawlocal.search.duration', {
-    unit: 'ms',
-    description: 'Mock-backed search duration.',
-  })
-  detailDuration = meter.createHistogram('pawlocal.detail.duration', {
-    unit: 'ms',
-    description: 'Mock-backed place detail duration.',
-  })
+    const meter = metrics.getMeter('pawlocal.frontend')
+    outcomeCounter = meter.createCounter('pawlocal.operations', {
+      description: 'Frontend journey outcomes, with bounded operation and outcome values.',
+    })
+    actionCounter = meter.createCounter('pawlocal.demo_actions', {
+      description: 'Demo contribution and report outcomes.',
+    })
+    searchDuration = meter.createHistogram('pawlocal.search.duration', {
+      unit: 'ms',
+      description: 'Mock-backed search duration.',
+    })
+    detailDuration = meter.createHistogram('pawlocal.detail.duration', {
+      unit: 'ms',
+      description: 'Mock-backed place detail duration.',
+    })
+  } catch {
+    // Initialization runs before React mounts; even partial SDK setup must fail open.
+    const partialTrace = traceProvider
+    const partialMeter = meterProvider
+    traceProvider = undefined
+    meterProvider = undefined
+    outcomeCounter = actionCounter = undefined
+    searchDuration = detailDuration = undefined
+    safelyRecord(() => {
+      if (partialTrace) {
+        trace.disable()
+        void partialTrace.shutdown().catch(() => undefined)
+      }
+    })
+    safelyRecord(() => {
+      if (partialMeter) {
+        metrics.disable()
+        void partialMeter.shutdown().catch(() => undefined)
+      }
+    })
+    safelyRecord(stopCloudTelemetry)
+    initialized = false
+  }
 }
 
 export async function flushTelemetry() {
@@ -74,6 +112,7 @@ export async function flushTelemetry() {
 
 export async function shutdownTelemetry() {
   await Promise.all([traceProvider?.shutdown(), meterProvider?.shutdown()])
+  stopCloudTelemetry()
 }
 
 export type Operation = 'search' | 'detail' | 'share' | 'favourite' | 'contribution' | 'report'
@@ -99,47 +138,80 @@ export async function recordOperation<T>(
   attributes: Attributes = {},
 ): Promise<T> {
   if (!isEnabled()) return run(undefined)
-  initializeTelemetry()
+  try {
+    initializeTelemetry()
+  } catch {
+    return run(undefined)
+  }
   const safeAttributes = boundedAttributes(attributes)
-  const span = trace.getTracer('pawlocal.frontend').startSpan(
-    `pawlocal.${operation}`,
-    {
-      attributes: { 'pawlocal.operation': operation, ...safeAttributes },
-    },
-    operation === 'detail' ||
-      operation === 'share' ||
-      operation === 'favourite' ||
-      operation === 'contribution' ||
-      operation === 'report'
-      ? (discoveryContext ?? otelContext.active())
-      : otelContext.active(),
-  )
-  if (operation === 'search') discoveryContext = trace.setSpan(otelContext.active(), span)
+  let span: Span
+  try {
+    span = trace.getTracer('pawlocal.frontend').startSpan(
+      `pawlocal.${operation}`,
+      {
+        attributes: { 'pawlocal.operation': operation, ...safeAttributes },
+      },
+      operation === 'detail' ||
+        operation === 'share' ||
+        operation === 'favourite' ||
+        operation === 'contribution' ||
+        operation === 'report'
+        ? (discoveryContext ?? otelContext.active())
+        : otelContext.active(),
+    )
+    if (operation === 'search') discoveryContext = trace.setSpan(otelContext.active(), span)
+  } catch {
+    return run(undefined)
+  }
   const started = performance.now()
   try {
     const value = await run(span)
     const outcome = getOutcome(value)
-    span.setAttribute('pawlocal.outcome', outcome)
-    outcomeCounter?.add(1, { operation, outcome, ...safeAttributes })
-    if (operation === 'search') searchDuration?.record(performance.now() - started, safeAttributes)
-    if (operation === 'detail') detailDuration?.record(performance.now() - started, safeAttributes)
-    writeSafeLog(span, operation, outcome)
+    safelyRecord(() => {
+      span.setAttribute('pawlocal.outcome', outcome)
+      outcomeCounter?.add(1, { operation, outcome, ...safeAttributes })
+      if (operation === 'search')
+        searchDuration?.record(performance.now() - started, safeAttributes)
+      if (operation === 'detail')
+        detailDuration?.record(performance.now() - started, safeAttributes)
+      writeSafeLog(span, operation, outcome, undefined, performance.now() - started)
+    })
     return value
   } catch (error) {
     if (isAbortError(error)) {
-      span.setAttribute('pawlocal.outcome', 'cancelled')
-      writeSafeLog(span, operation, 'cancelled')
+      safelyRecord(() => {
+        span.setAttribute('pawlocal.outcome', 'cancelled')
+        writeSafeLog(span, operation, 'cancelled', undefined, performance.now() - started)
+      })
       throw error
     }
-    span.setStatus({ code: SpanStatusCode.ERROR, message: 'operation_failed' })
-    span.setAttribute('pawlocal.outcome', 'error')
-    outcomeCounter?.add(1, { operation, outcome: 'error', ...safeAttributes })
-    if (operation === 'search') searchDuration?.record(performance.now() - started, safeAttributes)
-    if (operation === 'detail') detailDuration?.record(performance.now() - started, safeAttributes)
-    writeSafeLog(span, operation, 'error', 'PAWLOCAL_OPERATION_FAILED')
+    safelyRecord(() => {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: 'operation_failed' })
+      span.setAttribute('pawlocal.outcome', 'error')
+      outcomeCounter?.add(1, { operation, outcome: 'error', ...safeAttributes })
+      if (operation === 'search')
+        searchDuration?.record(performance.now() - started, safeAttributes)
+      if (operation === 'detail')
+        detailDuration?.record(performance.now() - started, safeAttributes)
+      writeSafeLog(
+        span,
+        operation,
+        'error',
+        'PAWLOCAL_OPERATION_FAILED',
+        performance.now() - started,
+      )
+    })
     throw error
   } finally {
-    span.end()
+    safelyRecord(() => span.end())
+  }
+}
+
+function safelyRecord(record: () => void) {
+  try {
+    record()
+  } catch {
+    /* SDK failures cannot change the visitor operation. */
   }
 }
 
@@ -153,26 +225,46 @@ export function recordDemoAction(
   kind?: string,
 ) {
   if (!isEnabled()) return
-  initializeTelemetry()
-  const attrs = boundedAttributes({ kind })
-  actionCounter?.add(1, { operation: action, outcome, ...attrs })
+  safelyRecord(() => {
+    initializeTelemetry()
+    const attrs = boundedAttributes({ kind })
+    actionCounter?.add(1, { operation: action, outcome, ...attrs })
+  })
 }
 
 export function traceContextForSpan(span: Span | undefined) {
   if (!isEnabled() || !span) return undefined
-  const headers: Record<string, string> = {}
-  new W3CTraceContextPropagator().inject(trace.setSpan(otelContext.active(), span), headers, {
-    set: (carrier, key, value) => {
-      carrier[key] = String(value)
-    },
-  })
-  return {
-    traceparent: headers.traceparent,
-    ...(headers.tracestate ? { tracestate: headers.tracestate } : {}),
+  try {
+    const headers: Record<string, string> = {}
+    new W3CTraceContextPropagator().inject(trace.setSpan(otelContext.active(), span), headers, {
+      set: (carrier, key, value) => {
+        carrier[key] = String(value)
+      },
+    })
+    return {
+      traceparent: headers.traceparent,
+      ...(headers.tracestate ? { tracestate: headers.tracestate } : {}),
+    }
+  } catch {
+    return undefined
   }
 }
 
-function writeSafeLog(span: Span, operation: Operation, outcome: Outcome, errorCode?: string) {
+function writeSafeLog(
+  span: Span,
+  operation: Operation,
+  outcome: Outcome,
+  errorCode?: string,
+  durationMs?: number,
+) {
+  if (import.meta.env.VITE_RELEASE_ENV) {
+    try {
+      cloudOutcome(span, operation, outcome, durationMs)
+    } catch {
+      /* Export cannot change the visitor operation. */
+    }
+    return
+  }
   const context = span.spanContext()
   const body = {
     resourceLogs: [

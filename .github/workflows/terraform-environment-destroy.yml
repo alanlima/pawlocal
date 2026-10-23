@@ -51,6 +51,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
       TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
+      TF_VAR_hosted_observability: ${{ vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -104,6 +105,9 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Validate public hosted bindings before Terraform planning
+        shell: bash
+        run: python .github/scripts/validate-hosted-observability.py
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v4
@@ -286,6 +290,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       COGNITO_TERRAFORM_PURPOSE: plan
       TF_VAR_oncall_receiver: ${{ vars.PAWLOCAL_ONCALL_RECEIVER_CONFIG || 'null' }}
+      TF_VAR_hosted_observability: ${{ vars.PAWLOCAL_HOSTED_OBSERVABILITY_CONFIG || 'null' }}
       PAWLOCAL_ENVIRONMENT: production
       PAWLOCAL_TF_STATE_BUCKET: ${{ vars.PAWLOCAL_TF_STATE_BUCKET }}
       PLAN_TRANSFER_BUCKET: ${{ vars.PAWLOCAL_TERRAFORM_PLAN_BUCKET }}
@@ -329,6 +334,9 @@ jobs:
       - name: Prepare optional on-call delegated profile
         shell: bash
         run: bash .github/scripts/configure-oncall-terraform-profile.sh
+      - name: Validate public hosted bindings before Terraform planning
+        shell: bash
+        run: python .github/scripts/validate-hosted-observability.py
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}

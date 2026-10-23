@@ -11,8 +11,31 @@ export function validateReleaseConfig() {
   if (releaseEnvironment !== 'development' && releaseEnvironment !== 'production') {
     throw new Error('VITE_RELEASE_ENV must be "development" or "production"')
   }
-  if (import.meta.env.VITE_TELEMETRY_ENABLED !== 'false') {
-    throw new Error('Cloud release builds require VITE_TELEMETRY_ENABLED=false')
+  if (
+    import.meta.env.VITE_TELEMETRY_ENABLED !== 'false' &&
+    import.meta.env.VITE_TELEMETRY_ENABLED !== 'true'
+  ) {
+    throw new Error('Cloud release builds require an explicit boolean VITE_TELEMETRY_ENABLED')
+  }
+  if (import.meta.env.VITE_TELEMETRY_ENABLED === 'true') {
+    let collector
+    try {
+      collector = new URL(import.meta.env.VITE_FARO_COLLECTOR_URL ?? '')
+    } catch {
+      throw new Error('Enabled cloud telemetry requires a verified public Faro collector URL')
+    }
+    if (
+      collector.protocol !== 'https:' ||
+      !collector.hostname.endsWith('.grafana.net') ||
+      collector.username ||
+      collector.password ||
+      collector.port ||
+      collector.search ||
+      collector.hash ||
+      !/^\/collect\/[A-Za-z0-9_-]+$/.test(collector.pathname)
+    ) {
+      throw new Error('Enabled cloud telemetry requires a verified public Faro collector URL')
+    }
   }
   if (import.meta.env.VITE_USE_MOCK_BACKEND !== 'false') {
     throw new Error('Cloud release builds require VITE_USE_MOCK_BACKEND=false')

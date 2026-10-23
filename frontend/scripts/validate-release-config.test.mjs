@@ -38,7 +38,7 @@ test('requires mock mode and telemetry to be explicitly disabled', () => {
   )
   assert.throws(
     () => validateReleaseSettings({ ...releaseSettings(), VITE_TELEMETRY_ENABLED: 'true' }),
-    /VITE_TELEMETRY_ENABLED=false/,
+    /verified public Faro collector URL/,
   )
 })
 
@@ -100,6 +100,29 @@ test('rejects malformed Cognito domain, callback, and logout URLs', () => {
     assert.throws(
       () => validateReleaseSettings({ ...releaseSettings(), VITE_COGNITO_LOGOUT_URI: value }),
       /VITE_COGNITO_LOGOUT_URI/,
+    )
+  }
+})
+
+test('accepts enabled public Faro bindings and rejects credentials or foreign collectors', () => {
+  assert.doesNotThrow(() =>
+    validateReleaseSettings({
+      ...releaseSettings(),
+      VITE_TELEMETRY_ENABLED: 'true',
+      VITE_FARO_COLLECTOR_URL: 'https://faro.grafana.net/collect/public-key',
+    }),
+  )
+  for (const value of [
+    'https://user:private@faro.grafana.net/collect/key',
+    'https://faro.grafana.net/collect/key?token=private',
+    'https://foreign.example.test/collect/key',
+  ]) {
+    assert.throws(() =>
+      validateReleaseSettings({
+        ...releaseSettings(),
+        VITE_TELEMETRY_ENABLED: 'true',
+        VITE_FARO_COLLECTOR_URL: value,
+      }),
     )
   }
 })

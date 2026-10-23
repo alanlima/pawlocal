@@ -68,7 +68,7 @@ jobs:
       cancel-in-progress: false
     outputs:
       configuration: ${{ steps.sync.outputs.configuration }}
-      frontend_config: ${{ steps.sync.outputs.frontend_config }}
+      frontend_config: ${{ steps.consumer.outputs.frontend_config }}
     permissions:
       contents: read
       id-token: write
@@ -109,6 +109,12 @@ jobs:
           CONFIG_SUMMARY_PATH: ${{ runner.temp }}/configuration-summary.md
           PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
         run: python ops/configuration/reconcile.py --environment "$SELECTED_ENVIRONMENT" --mode "$SELECTED_MODE"
+      - name: Prepare public release consumer snapshot
+        if: inputs.mode == 'enforce'
+        id: consumer
+        env:
+          RECONCILED_CONFIGURATION: ${{ steps.sync.outputs.configuration }}
+        run: python ops/configuration/release-config.py
       - name: Publish configuration job summary
         if: always()
         env:

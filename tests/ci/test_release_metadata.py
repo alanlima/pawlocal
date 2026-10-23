@@ -96,6 +96,19 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("running image digest", result.stderr)
 
+    def test_enabled_and_disabled_modes_require_matching_actual_evidence(self) -> None:
+        for enabled in (False, True):
+            manifest=release_manifest()
+            manifest["telemetry_enabled"]=enabled
+            evidence=deployment_evidence(manifest,"aurora_dsql")
+            evidence["telemetry_enabled"]=enabled
+            self.assertEqual(self.validate(manifest,evidence).returncode,0)
+            evidence["telemetry_enabled"]=not enabled
+            self.assertNotEqual(self.validate(manifest,evidence).returncode,0)
+        for invalid in (None,0,1,"true","false"):
+            manifest=release_manifest();manifest["telemetry_enabled"]=invalid
+            self.assertNotEqual(self.validate(manifest).returncode,0)
+
     def test_evidence_rejects_unhealthy_endpoints_and_enabled_telemetry(self) -> None:
         manifest = release_manifest()
         evidence = deployment_evidence(manifest, "postgresql")

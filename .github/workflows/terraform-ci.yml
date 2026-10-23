@@ -5,6 +5,10 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
+      - ".github/scripts/validate-hosted-observability.py"
+      - "tests/ci/test_hosted_observability_config.py"
+      - "tests/ci/test_monitoring_boundary.py"
+      - "tests/ci/fixtures/aws-ssm-action-catalog.json"
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"
@@ -35,6 +39,10 @@ on:
     paths:
       - "infra/terraform/**"
       - ".github/scripts/terraform-environment-plan.py"
+      - ".github/scripts/validate-hosted-observability.py"
+      - "tests/ci/test_hosted_observability_config.py"
+      - "tests/ci/test_monitoring_boundary.py"
+      - "tests/ci/fixtures/aws-ssm-action-catalog.json"
       - ".github/scripts/terraform-plan-metadata.py"
       - ".github/scripts/terraform-production-lifecycle.py"
       - ".github/scripts/configure-cognito-terraform-profile.sh"

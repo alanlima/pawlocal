@@ -6,6 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException, RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from starlette.routing import Match, Route
 
 from pawlocal.api.routes import router
 from pawlocal.config import settings
@@ -61,6 +63,18 @@ app.include_router(router, prefix=settings.api_prefix)
 add_cors_middleware(app, settings.cors_origins)
 
 
+# FastAPI may keep included routers behind lazy wrappers. Derive matching-only
+# Starlette routes from the configured API source so telemetry has full templates
+# before a synthetic response, without executing handlers or retaining raw URLs.
+_request_routes = tuple(
+    Route(
+        settings.api_prefix + entry.path, endpoint=entry.endpoint, methods=entry.methods
+    )
+    for entry in router.routes
+    if isinstance(entry, APIRoute)
+)
+
+
 @app.middleware("http")
 async def trace_and_log_request(request: Request, call_next):
     if request.url.path == "/health":
@@ -77,6 +91,8 @@ async def trace_and_log_request(request: Request, call_next):
             event_code="api.request.started",
             operation="http_request",
         )
+        error_code = None
+        exception_fields = {}
         failure = request.headers.get("x-pawlocal-demo-failure")
         if settings.demo_faults_enabled and failure in {"api", "database"}:
             code = (
@@ -97,30 +113,36 @@ async def trace_and_log_request(request: Request, call_next):
                 http_status=503,
                 error_code=code,
             )
-            span.set_attribute("http.response.status_code", 503)
-            return JSONResponse(
+            error_code = code
+            response = JSONResponse(
                 status_code=503,
                 content={"code": code, "message": "Service temporarily unavailable"},
             )
 
-        error_code = None
-        exception_fields = {}
-        try:
-            response = await call_next(request)
-        except Exception as exc:  # noqa: BLE001 - keep response and logs message-free
-            error_code = "unhandled_api_error"
-            exception_fields = safe_exception_log_fields(exc)
-            mark_failed(span, error_code)
-            response = JSONResponse(
-                status_code=500,
-                content={
-                    "code": "internal_error",
-                    "message": "Request could not be completed",
-                },
-            )
+        else:
+            try:
+                response = await call_next(request)
+            except Exception as exc:  # noqa: BLE001 - keep response and logs message-free
+                error_code = "unhandled_api_error"
+                exception_fields = safe_exception_log_fields(exc)
+                mark_failed(span, error_code)
+                response = JSONResponse(
+                    status_code=500,
+                    content={
+                        "code": "internal_error",
+                        "message": "Request could not be completed",
+                    },
+                )
 
-        route = request.scope.get("route")
-        operation = getattr(route, "path", "unmatched")
+        route = next(
+            (
+                candidate
+                for candidate in _request_routes
+                if candidate.matches(request.scope)[0] == Match.FULL
+            ),
+            None,
+        )
+        operation = getattr(route, "path_format", "unmatched")
         status_code = response.status_code
         outcome = "success" if status_code < 400 else "error"
         span.set_attribute("http.route", operation)
@@ -148,6 +170,9 @@ async def trace_and_log_request(request: Request, call_next):
             error_code=error_code if status_code >= 500 else None,
             **(exception_fields if error_code == "unhandled_api_error" else {}),
         )
+        from pawlocal.cloud_telemetry import record_request
+
+        record_request(operation, request.method, status_code, duration_ms / 1000)
         return response
 
 
@@ -174,9 +199,10 @@ async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, str | bool]:
     return {
         "status": "ok",
         "environment": settings.release_environment or "local",
         "image_digest": settings.release_image_digest or "unknown",
+        "telemetry_enabled": settings.telemetry_enabled,
     }

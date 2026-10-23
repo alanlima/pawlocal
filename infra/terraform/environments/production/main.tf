@@ -19,6 +19,7 @@ module "pawlocal" {
   frontend_publish_role_name  = "pawlocal-production-github-deploy"
   runtime_role_arn            = var.runtime_role_arn
   backend_image               = var.backend_image
+  hosted_observability        = var.hosted_observability
   cloudfront_distribution_arn = var.cloudfront_distribution_arn
   cloudfront_oac_arn          = var.cloudfront_oac_arn
   teardown_enabled            = var.teardown_enabled

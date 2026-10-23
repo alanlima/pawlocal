@@ -339,6 +339,7 @@ elif args[:2] == ['s3', 'cp'] and args[3].endswith('/index.html'):
                 "status": "ok",
                 "environment": "development",
                 "image_digest": digest,
+                "telemetry_enabled": False,
             }), encoding="utf-8")
 
             fake_bin = temp / "bin"

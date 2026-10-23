@@ -383,6 +383,24 @@ resource "aws_lightsail_container_service" "api" {
   depends_on = [aws_route53_record.api_certificate_validation]
 }
 
+locals {
+  backend_runtime_environment = local.deployment_enabled ? {
+    AWS_REGION                        = var.aws_region
+    PAWLOCAL_RELEASE_ENVIRONMENT      = var.environment
+    PAWLOCAL_RELEASE_IMAGE_DIGEST     = split("@", var.backend_image)[1]
+    PAWLOCAL_DATABASE_PROVIDER        = "aurora_dsql"
+    PAWLOCAL_DATABASE_URL             = "auroradsql+psycopg://${local.database_role}@${aws_dsql_cluster.application.identifier}.dsql.${var.aws_region}.on.aws/postgres?application_name=pawlocal-${var.environment}"
+    PAWLOCAL_DSQL_ASSUME_ROLE_ARN     = var.runtime_role_arn
+    PAWLOCAL_COGNITO_ISSUER           = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.application.id}"
+    PAWLOCAL_COGNITO_APP_CLIENT_ID    = aws_cognito_user_pool_client.browser.id
+    PAWLOCAL_CORS_ORIGINS             = jsonencode(["https://${local.frontend_hostname}"])
+    PAWLOCAL_TELEMETRY_ENABLED        = tostring(local.hosted_telemetry_enabled)
+    OTEL_SDK_DISABLED                 = tostring(!local.hosted_telemetry_enabled)
+    OTEL_EXPORTER_OTLP_ENDPOINT       = var.hosted_observability == null ? "" : var.hosted_observability.otlp_endpoint
+    PAWLOCAL_GRAFANA_OTLP_INSTANCE_ID = var.hosted_observability == null ? "" : var.hosted_observability.otlp_instance_id
+  } : {}
+}
+
 resource "aws_lightsail_container_service_deployment_version" "api" {
   count        = local.deployment_enabled ? 1 : 0
   service_name = aws_lightsail_container_service.api.name
@@ -390,20 +408,8 @@ resource "aws_lightsail_container_service_deployment_version" "api" {
   container {
     container_name = "pawlocal-api"
     image          = var.backend_image
-    environment = {
-      AWS_REGION                     = var.aws_region
-      PAWLOCAL_RELEASE_ENVIRONMENT   = var.environment
-      PAWLOCAL_RELEASE_IMAGE_DIGEST  = split("@", var.backend_image)[1]
-      PAWLOCAL_DATABASE_PROVIDER     = "aurora_dsql"
-      PAWLOCAL_DATABASE_URL          = "auroradsql+psycopg://${local.database_role}@${aws_dsql_cluster.application.identifier}.dsql.${var.aws_region}.on.aws/postgres?application_name=pawlocal-${var.environment}"
-      PAWLOCAL_DSQL_ASSUME_ROLE_ARN  = var.runtime_role_arn
-      PAWLOCAL_COGNITO_ISSUER        = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.application.id}"
-      PAWLOCAL_COGNITO_APP_CLIENT_ID = aws_cognito_user_pool_client.browser.id
-      PAWLOCAL_CORS_ORIGINS          = jsonencode(["https://${local.frontend_hostname}"])
-      PAWLOCAL_TELEMETRY_ENABLED     = "false"
-      OTEL_SDK_DISABLED              = "true"
-    }
-    ports = { "8000" = "HTTP" }
+    environment    = local.backend_runtime_environment
+    ports          = { "8000" = "HTTP" }
   }
 
   public_endpoint {

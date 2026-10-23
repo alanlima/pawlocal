@@ -184,11 +184,7 @@ def validate_values(values, environment):
 def configuration_outputs(values):
     # These projections are existing release consumer contracts, not mapping
     # inventories. Reconciliation does not require an unrelated consumer's keys.
-    configuration = {
-        name: value
-        for name, value in values.items()
-        if name in PREFLIGHT_FIELDS | FRONTEND_FIELDS
-    }
+    configuration = dict(values)
     frontend = (
         {name: values[name] for name in sorted(FRONTEND_FIELDS)}
         if FRONTEND_FIELDS <= values.keys()
