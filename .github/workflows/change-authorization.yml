@@ -1,0 +1,118 @@
+name: Change authorization
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pawlocal-change-authorization-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  classify:
+    name: Classify change authorization route
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      route: ${{ steps.classifier.outputs.route }}
+      pr_number: ${{ steps.classifier.outputs.pr_number }}
+      head_sha: ${{ steps.classifier.outputs.head_sha }}
+      base_sha: ${{ steps.classifier.outputs.base_sha }}
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Classify pull request
+        id: classifier
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+        run: python ops/change-authorization/authorizer.py --mode=classify
+
+  incident-authorize:
+    name: Authorize incident candidate
+    needs: classify
+    if: needs.classify.outputs.route == 'incident'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Mint status-only publisher token
+        env:
+          PAWLOCAL_CREDENTIAL_PHASE: status
+          INCIDENT_DEADLINE: ${{ github.event.pull_request.created_at }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+
+      - name: Verify candidate and post status
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+          PR_NUMBER: ${{ needs.classify.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+        run: python ops/change-authorization/authorizer.py --mode=incident
+
+  ordinary-approval:
+    name: Protected ordinary change approval
+    needs: classify
+    if: needs.classify.outputs.route == 'ordinary'
+    runs-on: ubuntu-24.04
+    environment: ordinary-change-approval
+    timeout-minutes: 15
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Mint status-only publisher token
+        env:
+          PAWLOCAL_CREDENTIAL_PHASE: status
+          INCIDENT_DEADLINE: ${{ github.event.pull_request.created_at }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID }}
+          PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
+        run: node ops/incident-response/publisher-token.mjs
+
+      - name: Verify head stability and post status
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+          PR_NUMBER: ${{ needs.classify.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.classify.outputs.head_sha }}
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+        run: python ops/change-authorization/authorizer.py --mode=ordinary
