@@ -559,12 +559,18 @@ class IntegrationTests(unittest.TestCase):
             with self.assertRaises(module.ReconciliationError):
                 collision.check(plan, client)
         with self.assertRaisesRegex(
-            module.ReconciliationError, "AccessDeniedException: ssm:GetParameter"
-        ):
+            module.ReconciliationError,
+            "ssm:GetParameter returned AccessDeniedException",
+        ) as caught:
+            detail = "Access denied by explicit deny in a permissions boundary"
+            denied = RuntimeError(detail)
+            denied.response = {"Error": {"Code": "AccessDeniedException"}}
             collision.check(
                 plan,
-                FakeSSM({key: RuntimeError("AccessDeniedException: ssm:GetParameter")}),
+                FakeSSM({key: denied}),
             )
+        self.assertIn(detail, str(caught.exception))
+        self.assertIn(key, str(caught.exception))
         for arbitrary_key in (
             "/unrelated/service/setting",
             "/pawlocal/development/config/oncall/webhook-url",
@@ -585,6 +591,41 @@ class IntegrationTests(unittest.TestCase):
         create["change"]["actions"] = ["no-op"]
         with self.assertRaises(module.ReconciliationError):
             collision.check(plan, FakeSSM())
+
+    def test_collision_diagnostics_precede_lookup_and_exclude_values(self):
+        key = "/pawlocal/development/config/observability/enabled"
+        plan = {
+            "resource_changes": [
+                {
+                    "type": "aws_ssm_parameter",
+                    "change": {"actions": ["create"], "after": {"name": key}},
+                }
+            ]
+        }
+        lookup_error = "Could not connect to the endpoint URL: https://ssm.example.test"
+        for stored in ({"Value": SENTINEL}, RuntimeError(lookup_error), None):
+            client = FakeSSM({key: stored})
+            lookup = client.get_parameter
+            with patch("builtins.print") as log:
+
+                def checked_lookup(lookup=lookup, **kwargs):
+                    log.assert_called_once_with(
+                        f"Checking Parameter Store key: {key!r}", flush=True
+                    )
+                    return lookup(**kwargs)
+
+                client.get_parameter = checked_lookup
+                if stored is None:
+                    collision.check(plan, client)
+                    self.assertIn("1 key(s) checked", log.call_args.args[0])
+                else:
+                    with self.assertRaises(module.ReconciliationError) as caught:
+                        collision.check(plan, client)
+                    self.assertIn(key, str(caught.exception))
+                    self.assertNotIn(SENTINEL, str(caught.exception))
+                    if isinstance(stored, Exception):
+                        self.assertIn(lookup_error, str(caught.exception))
+                self.assertNotIn(SENTINEL, str(log.call_args_list))
 
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(
