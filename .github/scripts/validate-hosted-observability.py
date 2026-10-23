@@ -9,8 +9,8 @@ import sys
 from urllib.parse import urlsplit
 
 _ALLOWED = {"enabled", "frontend_enabled", "stack_url", "stack_slug", "faro_app_name", "kms_key_arn"}
-_REQUIRED = {"stack_url"}
-# Fields that were valid in earlier schema versions but are now auto-discovered by Terraform (#260).
+# Fields removed in #260: now auto-discovered by Terraform via grafana_cloud_stack /
+# grafana_frontend_o11y_app data sources. Kept here to produce a specific error.
 _REMOVED = {"faro_collector_url", "otlp_endpoint", "otlp_instance_id"}
 
 
@@ -32,12 +32,6 @@ def validate(raw, account, region):
 
     if not isinstance(value, dict):
         raise ValueError("Hosted observability config must be a JSON object or null")
-
-    missing = _REQUIRED - value.keys()
-    if missing:
-        raise ValueError(
-            f"Missing required hosted field(s): {', '.join(sorted(missing))}"
-        )
 
     unknown = set(value) - _ALLOWED
     removed = unknown & _REMOVED
@@ -64,6 +58,14 @@ def validate(raw, account, region):
             f"'frontend_enabled' must be a boolean (true/false), got: {value['frontend_enabled']!r}"
         )
 
+    # stack_url is required only when telemetry is active (backend or frontend).
+    # A fully-disabled config object may omit it.
+    telemetry_active = value.get("enabled", False) or value.get("frontend_enabled", False)
+    if telemetry_active and "stack_url" not in value:
+        raise ValueError(
+            "'stack_url' is required when 'enabled' or 'frontend_enabled' is true"
+        )
+
     if "stack_slug" in value and (
         not isinstance(value["stack_slug"], str)
         or not re.fullmatch(r"[a-z0-9-]+", value["stack_slug"])
@@ -80,22 +82,22 @@ def validate(raw, account, region):
             f"'faro_app_name' must be lowercase alphanumeric with hyphens, got: {value['faro_app_name']!r}"
         )
 
-    for name, path in {"stack_url": r"/?"}.items():
-        text = value.get(name)
+    if "stack_url" in value:
+        text = value["stack_url"]
         if not isinstance(text, str) or any(c in text for c in "\r\n\x00"):
-            raise ValueError(f"'stack_url' must be a plain string with no control characters")
+            raise ValueError("'stack_url' must be a plain string with no control characters")
         url = urlsplit(text)
         if url.scheme != "https":
             raise ValueError(f"'stack_url' must use https, got scheme: {url.scheme!r}")
         if not url.hostname or not url.hostname.endswith(".grafana.net"):
             raise ValueError(f"'stack_url' hostname must end with .grafana.net, got: {url.hostname!r}")
         if url.username or url.password:
-            raise ValueError(f"'stack_url' must not include credentials")
+            raise ValueError("'stack_url' must not include credentials")
         if url.port is not None:
-            raise ValueError(f"'stack_url' must not include a port")
+            raise ValueError("'stack_url' must not include a port")
         if url.query or url.fragment:
-            raise ValueError(f"'stack_url' must not include a query string or fragment")
-        if not re.fullmatch(path, url.path):
+            raise ValueError("'stack_url' must not include a query string or fragment")
+        if not re.fullmatch(r"/?", url.path):
             raise ValueError(f"'stack_url' path must be empty or a single slash, got: {url.path!r}")
 
     key = value.get("kms_key_arn")
