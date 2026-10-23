@@ -23,11 +23,11 @@ def validate(raw, account, region):
     value = json.loads(raw, object_pairs_hook=unique)
     if value is None:
         return
-    required = {"stack_url", "faro_collector_url"}
+    required = {"stack_url"}
     if (
         not isinstance(value, dict)
         or not required <= value.keys()
-        or set(value) - required - {"enabled", "frontend_enabled", "stack_slug", "kms_key_arn"}
+        or set(value) - required - {"enabled", "frontend_enabled", "stack_slug", "faro_app_name", "kms_key_arn"}
     ):
         raise ValueError("Unknown or missing public hosted field")
     if type(value.get("enabled", False)) is not bool or (
@@ -39,9 +39,13 @@ def validate(raw, account, region):
         or not re.fullmatch(r"[a-z0-9-]+", value["stack_slug"])
     ):
         raise ValueError("Invalid Grafana stack slug")
+    if "faro_app_name" in value and (
+        not isinstance(value["faro_app_name"], str)
+        or not re.fullmatch(r"[a-z0-9-]+", value["faro_app_name"])
+    ):
+        raise ValueError("Invalid Faro application name")
     paths = {
         "stack_url": r"/?",
-        "faro_collector_url": r"/collect/[A-Za-z0-9_-]+",
     }
     for name, path in paths.items():
         text = value.get(name)

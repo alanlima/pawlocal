@@ -16,7 +16,6 @@ spec.loader.exec_module(module)
 PUBLIC = {
     "enabled": False,
     "stack_url": "https://fixture.grafana.net/",
-    "faro_collector_url": "https://faro.grafana.net/collect/public-key",
 }
 
 
@@ -39,9 +38,10 @@ class HostedOperatorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.validate(json.dumps(value | {"frontend_enabled": bad}), "111111111111", "ap-southeast-2")
 
-    def test_discovery_mode_allows_public_bindings_with_optional_slug(self):
+    def test_discovery_mode_allows_public_bindings_with_optional_slug_and_app_name(self):
         module.validate(json.dumps(PUBLIC | {"enabled": True}), "111111111111", "ap-southeast-2")
         module.validate(json.dumps(PUBLIC | {"enabled": True, "stack_slug": "fixture"}), "111111111111", "ap-southeast-2")
+        module.validate(json.dumps(PUBLIC | {"enabled": True, "faro_app_name": "pawlocal-dev"}), "111111111111", "ap-southeast-2")
 
     def test_private_or_inconsistent_bindings_are_denied_even_when_disabled(self):
         for override in (
@@ -53,7 +53,9 @@ class HostedOperatorTests(unittest.TestCase):
             {"otlp_endpoint": "https://gateway.grafana.net/otlp"},
             {"otlp_instance_id": "12345"},
             {"otlp_instance_id": "private-user-identity"},
+            {"faro_collector_url": "https://faro.grafana.net/collect/public-key"},
             {"faro_collector_url": "https://foreign.example.test/collect/public"},
+            {"faro_app_name": "invalid_name!"},
             {"stack_slug": "invalid_slug!"},
             {"stack_slug": "https://slug.grafana.net"},
             {

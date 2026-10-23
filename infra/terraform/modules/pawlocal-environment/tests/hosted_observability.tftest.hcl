@@ -39,6 +39,14 @@ override_data {
   }
 }
 
+override_data {
+  target = data.grafana_frontend_o11y_app.selected
+  values = {
+    id                 = 54321
+    collector_endpoint = "https://faro.grafana.net/collect/public-key"
+  }
+}
+
 override_resource {
   target          = random_id.cognito_domain_suffix
   override_during = plan
@@ -96,10 +104,9 @@ run "enabled_mode_exact_runtime_secret_and_public_bindings" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = true
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
-      kms_key_arn        = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      enabled     = true
+      stack_url   = "https://fixture.grafana.net/"
+      kms_key_arn = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     }
   }
   assert {
@@ -121,9 +128,8 @@ run "private_endpoint_input_denied" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = true
-      stack_url          = "https://private:credential@fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled   = true
+      stack_url = "https://private:credential@fixture.grafana.net/"
     }
   }
   expect_failures = [var.hosted_observability]
@@ -134,10 +140,9 @@ run "independent_backend_false_frontend_false" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = false
-      frontend_enabled   = false
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled          = false
+      frontend_enabled = false
+      stack_url        = "https://fixture.grafana.net/"
     }
   }
   assert {
@@ -149,8 +154,8 @@ run "independent_backend_false_frontend_false" {
     error_message = "Browser telemetry must not grant OTLP credential access."
   }
   assert {
-    condition     = !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-instance-id")
-    error_message = "Backend-disabled browser-only bindings need no OTLP parameters."
+    condition     = !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-endpoint") && !contains(keys(aws_ssm_parameter.configuration), "grafana/otlp-instance-id") && !contains(keys(aws_ssm_parameter.configuration), "grafana/faro-collector-url")
+    error_message = "Backend-disabled browser-disabled bindings need no OTLP or Faro parameters."
   }
 }
 
@@ -159,14 +164,13 @@ run "independent_backend_false_frontend_true" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = false
-      frontend_enabled   = true
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled          = false
+      frontend_enabled = true
+      stack_url        = "https://fixture.grafana.net/"
     }
   }
   assert {
-    condition     = local.application_configuration_values["observability/enabled"] == "false" && local.application_configuration_values["frontend/telemetry-enabled"] == "true" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "false"
+    condition     = local.application_configuration_values["observability/enabled"] == "false" && local.application_configuration_values["frontend/telemetry-enabled"] == "true" && local.application_configuration_values["grafana/faro-collector-url"] == "https://faro.grafana.net/collect/public-key" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "false"
     error_message = "Backend runtime and independent public browser mode must match their own inputs."
   }
   assert {
@@ -184,14 +188,13 @@ run "independent_backend_true_frontend_false" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = true
-      frontend_enabled   = false
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled          = true
+      frontend_enabled = false
+      stack_url        = "https://fixture.grafana.net/"
     }
   }
   assert {
-    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["frontend/telemetry-enabled"] == "false" && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "true"
+    condition     = local.application_configuration_values["observability/enabled"] == "true" && local.application_configuration_values["frontend/telemetry-enabled"] == "false" && !contains(keys(aws_ssm_parameter.configuration), "grafana/faro-collector-url") && local.backend_runtime_environment["PAWLOCAL_TELEMETRY_ENABLED"] == "true"
     error_message = "Backend runtime and independent public browser mode must match their own inputs."
   }
   assert {
@@ -210,10 +213,9 @@ run "independent_backend_true_frontend_true" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = true
-      frontend_enabled   = true
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled          = true
+      frontend_enabled = true
+      stack_url        = "https://fixture.grafana.net/"
     }
   }
   assert {
@@ -236,10 +238,9 @@ run "browser_only_public_metadata_does_not_change_backend_container" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = false
-      frontend_enabled   = true
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
+      enabled          = false
+      frontend_enabled = true
+      stack_url        = "https://fixture.grafana.net/"
     }
   }
   assert {
@@ -257,10 +258,9 @@ run "enabled_mode_discovery_omitted_otlp_bindings" {
   providers = { aws = aws.test, aws.cognito_deployment = aws.cognito_test, aws.oncall_deployment = aws.cognito_test }
   variables {
     hosted_observability = {
-      enabled            = true
-      stack_url          = "https://fixture.grafana.net/"
-      faro_collector_url = "https://faro.grafana.net/collect/public-key"
-      kms_key_arn        = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      enabled     = true
+      stack_url   = "https://fixture.grafana.net/"
+      kms_key_arn = "arn:aws:kms:ap-southeast-2:111111111111:key/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
     }
   }
   assert {
