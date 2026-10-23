@@ -30,6 +30,29 @@ class HostedOperatorTests(unittest.TestCase):
                     "ap-southeast-2",
                 )
 
+    def test_disabled_config_does_not_require_stack_url(self):
+        # stack_url is only required when enabled or frontend_enabled is true
+        module.validate(
+            json.dumps({"enabled": False}), "111111111111", "ap-southeast-2"
+        )
+        module.validate(
+            json.dumps({"enabled": False, "frontend_enabled": False}),
+            "111111111111",
+            "ap-southeast-2",
+        )
+        # enabled=true without stack_url must fail
+        with self.assertRaisesRegex(ValueError, "stack_url"):
+            module.validate(
+                json.dumps({"enabled": True}), "111111111111", "ap-southeast-2"
+            )
+        # frontend_enabled=true without stack_url must also fail
+        with self.assertRaisesRegex(ValueError, "stack_url"):
+            module.validate(
+                json.dumps({"enabled": False, "frontend_enabled": True}),
+                "111111111111",
+                "ap-southeast-2",
+            )
+
     def test_browser_only_needs_no_otlp_and_requires_strict_frontend_boolean(self):
         value = dict(PUBLIC)
         value["frontend_enabled"] = True
