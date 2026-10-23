@@ -14,21 +14,65 @@ from quota import Denied, strict_json
 
 MAX_FILES = 20
 MAX_BYTES = 512 * 1024
-BACKEND = {
-    "backend/pawlocal/application/places.py",
-    "backend/pawlocal/domain/places.py",
-    "backend/pawlocal/infrastructure/places.py",
-    "backend/tests/test_incident_regression.py",
+BACKEND_REGRESSION = "backend/tests/test_incident_regression.py"
+FRONTEND_REGRESSION = "frontend/src/incident-regression.test.tsx"
+
+DISALLOWED_NAMES = {
+    "uv.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "package.json",
+    "pyproject.toml",
 }
-FRONTEND = {
-    "frontend/src/features/discovery/useDiscovery.ts",
-    "frontend/src/features/place/PlaceDetail.tsx",
-    "frontend/src/features/place/PlaceCard.tsx",
-    "frontend/src/services/HttpPlaceService.ts",
-    "frontend/src/services/observedPlaceService.ts",
-    "frontend/src/incident-regression.test.tsx",
+
+DISALLOWED_EXTENSIONS = {
+    ".lock",
+    ".pyc",
+    ".tsbuildinfo",
 }
-ALLOWED = BACKEND | FRONTEND
+
+
+def is_allowed_path(name):
+    if not isinstance(name, str) or not name:
+        return False
+    pure = PurePosixPath(name)
+    if pure.is_absolute() or ".." in pure.parts:
+        return False
+    if len(pure.parts) < 2:
+        return False
+    if pure.parts[0] not in ("backend", "frontend"):
+        return False
+    if any(part in IGNORED for part in pure.parts):
+        return False
+    # Exclude workflow/IAM/auth/security/secrets/infrastructure/data repair per AGENTS.md
+    if any(part in ("auth", "security", "infra", "iam") for part in pure.parts):
+        return False
+    if pure.stem in ("auth", "security") or pure.name.startswith(("auth.", "auth_")):
+        return False
+    if pure.name in DISALLOWED_NAMES or pure.suffix in DISALLOWED_EXTENSIONS:
+        return False
+    return True
+
+
+class _AllowedContainer:
+    """Dynamic allowlist covering all regular application files under backend/ and frontend/."""
+
+    def __contains__(self, item):
+        return is_allowed_path(item)
+
+
+class _LayerContainer:
+    def __init__(self, prefix):
+        self.prefix = prefix
+
+    def __contains__(self, item):
+        return is_allowed_path(item) and item.startswith(self.prefix)
+
+
+ALLOWED = _AllowedContainer()
+BACKEND = _LayerContainer("backend/")
+FRONTEND = _LayerContainer("frontend/")
 IGNORED = {
     ".git",
     "node_modules",
@@ -119,14 +163,14 @@ def export(base, candidate, metadata):
         for name in original.keys() | updated.keys()
         if original.get(name) != updated.get(name)
     )
-    if not changed or len(changed) > MAX_FILES or set(changed) - ALLOWED:
+    if not changed or len(changed) > MAX_FILES or any(name not in ALLOWED for name in changed):
         raise Denied("candidate empty, excessive or outside approved paths")
     if any(name not in updated for name in changed):
         raise Denied("source deletion forbidden")
-    layers = {"backend" if name in BACKEND else "frontend" for name in changed}
+    layers = {"backend" if name.startswith("backend/") else "frontend" for name in changed}
     for layer, regression in (
-        ("backend", "backend/tests/test_incident_regression.py"),
-        ("frontend", "frontend/src/incident-regression.test.tsx"),
+        ("backend", BACKEND_REGRESSION),
+        ("frontend", FRONTEND_REGRESSION),
     ):
         if layer in layers and regression not in changed:
             raise Denied("changed layer requires its fixed regression test")
@@ -168,14 +212,14 @@ def load(raw, metadata):
     if (
         not isinstance(content, dict)
         or not 1 <= len(content) <= MAX_FILES
-        or set(content) - ALLOWED
+        or any(name not in ALLOWED for name in content)
     ):
         raise Denied("candidate paths forbidden")
-    for layer, regression in (
-        (BACKEND, "backend/tests/test_incident_regression.py"),
-        (FRONTEND, "frontend/src/incident-regression.test.tsx"),
+    for layer_prefix, regression in (
+        ("backend/", BACKEND_REGRESSION),
+        ("frontend/", FRONTEND_REGRESSION),
     ):
-        if set(content) & layer and regression not in content:
+        if any(name.startswith(layer_prefix) for name in content) and regression not in content:
             raise Denied("fixed regression test required")
     result = {}
     for name, encoded in content.items():

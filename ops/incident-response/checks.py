@@ -108,8 +108,8 @@ def main():
     content = load(raw, metadata)
     layers = [
         name
-        for name, paths in (("backend", BACKEND), ("frontend", FRONTEND))
-        if set(content) & paths
+        for name in ("backend", "frontend")
+        if any(path.startswith(f"{name}/") for path in content)
     ]
     # Clone only trusted metadata, with no agent-controlled .git/config/hooks.
     candidate = root / "git-candidate"

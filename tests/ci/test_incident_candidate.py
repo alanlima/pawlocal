@@ -90,5 +90,51 @@ class CandidateTests(unittest.TestCase):
                 candidate.safe_bytes(root / "candidate", "backend/tests/secret", 100)
 
 
+    def test_arbitrary_backend_and_frontend_files_allowed_with_regression(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base, edited = Path(directory) / "base", Path(directory) / "edited"
+            base.mkdir()
+            edited.mkdir()
+            files_to_test = {
+                "backend/pawlocal/api/places.py": b"# api places\n",
+                "backend/pawlocal/main.py": b"# main\n",
+                "backend/tests/test_incident_regression.py": b"def test_reg(): pass\n",
+            }
+            candidate.materialize(files_to_test, edited)
+            raw = candidate.export(base, edited, self.metadata())
+            loaded = candidate.load(raw, self.metadata())
+            self.assertEqual(loaded["backend/pawlocal/api/places.py"], b"# api places\n")
+            self.assertEqual(loaded["backend/pawlocal/main.py"], b"# main\n")
+
+        with tempfile.TemporaryDirectory() as directory:
+            base, edited = Path(directory) / "base", Path(directory) / "edited"
+            base.mkdir()
+            edited.mkdir()
+            frontend_files = {
+                "frontend/src/App.tsx": b"// app\n",
+                "frontend/src/components/Header.tsx": b"// header\n",
+                "frontend/src/incident-regression.test.tsx": b"test('reg', () => {});\n",
+            }
+            candidate.materialize(frontend_files, edited)
+            raw = candidate.export(base, edited, self.metadata())
+            loaded = candidate.load(raw, self.metadata())
+            self.assertEqual(loaded["frontend/src/App.tsx"], b"// app\n")
+            self.assertEqual(loaded["frontend/src/components/Header.tsx"], b"// header\n")
+
+    def test_cross_layer_requires_both_regressions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base, edited = Path(directory) / "base", Path(directory) / "edited"
+            base.mkdir()
+            edited.mkdir()
+            mixed = {
+                "backend/pawlocal/api/places.py": b"# api places\n",
+                "frontend/src/App.tsx": b"// app\n",
+                "backend/tests/test_incident_regression.py": b"def test_reg(): pass\n",
+            }
+            candidate.materialize(mixed, edited)
+            with self.assertRaises(candidate.Denied):
+                candidate.export(base, edited, self.metadata())
+
+
 if __name__ == "__main__":
     unittest.main()

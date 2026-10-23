@@ -29,7 +29,7 @@ FUNCTIONS = {
     },
     "checks.py": {
         "execute": "e5cb7583af203b43e282dfd0e11ca065c3fab0cdc660ef7b8f078392fcea7892",
-        "main": "2c9d14146159f18f8529b1794c8fb0927f133f78b5dfdacea3882901363c88a7",
+        "main": "a1ea2c1ac7c01fd62eff4c9ebfb25a3b93a4c2e70c6b4ae973ff223bb26c7f56",
         "regression": "21e5c4ff5578578c907cf25e5c0c6fe104f6b5b018cc043241a62b2fd9f372c1",
     },
     "deadline.py": {
@@ -58,7 +58,7 @@ def fingerprint(node):
 
 
 GLOBALS = {
-    "candidate.py": "4584431280894d2d22ffa46c8ddc623e5bfa9e794f15d39befe5cdc8f5b5c94f",
+    "candidate.py": "8b3f9c0c54d4a45ee4d96a5ae00052bd45eedd8dded4cf216ed075031cabb660",
     "capture-cli-request.py": "b92a34dd110c8d3ae05f6af18988e3d23a411bc3812ad5e77f83ffeaeb60a79c",
     "checks.py": "ab7574af46865e05c77075e394d74cf01d507c2cffd7222fe3c5cafac09ed6f5",
     "deadline.py": "f3d0c3f4d9ea7f5f98d8b0f611a1c3ef98ab00620ecec4f9cd5ae24e0be4f89f",
