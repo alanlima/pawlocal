@@ -44,6 +44,7 @@ jobs:
     needs: classify
     if: needs.classify.outputs.route == 'incident'
     runs-on: ubuntu-24.04
+    environment: incident-change-authorization
     timeout-minutes: 10
     steps:
       - name: Check out trusted main

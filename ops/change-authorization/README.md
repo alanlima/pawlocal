@@ -14,7 +14,11 @@ frontend verification can publish AWS assets. Both require authorization.
 1. A credential-free immutable-main classifier reads the actual PR and determines
    whether to verify incident receipts or enter protected ordinary approval.
    The privileged authorizer never checks out, imports, installs or executes PR
-   content. A status-only publisher App token posts `PawLocal change authorization`
+   content. Machine candidates execute under the protected main-only `incident-change-authorization`
+   environment without human approval; ordinary changes execute under `ordinary-change-approval`
+   requiring owner review. Both provision `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY`
+   for status token minting downscoped strictly to `{ statuses: 'write' }`.
+   A status-only publisher App token posts `PawLocal change authorization`
    only after rechecking exact head/base. The required status pins the App issuer.
 2. A trusted operation receipt proves actual entry workflow/run/attempt and
    immutable source, environment, operation and selected release. An incident
