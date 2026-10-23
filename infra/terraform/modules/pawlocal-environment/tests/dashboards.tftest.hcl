@@ -97,7 +97,7 @@ run "disabled_mode_creates_zero_dashboards" {
     hosted_observability = null
   }
   assert {
-    condition     = (
+    condition = (
       length(grafana_dashboard.journey) == 0 &&
       length(grafana_dashboard.application) == 0 &&
       length(grafana_dashboard.dependencies) == 0 &&
@@ -123,7 +123,7 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
     }
   }
   assert {
-    condition     = (
+    condition = (
       length(grafana_dashboard.journey) == 1 &&
       length(grafana_dashboard.application) == 1 &&
       length(grafana_dashboard.dependencies) == 1 &&
@@ -134,7 +134,7 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
     error_message = "Enabled development environment must create exactly 6 dashboards."
   }
   assert {
-    condition     = (
+    condition = (
       grafana_dashboard.journey[0].folder == "pawlocal-development" &&
       grafana_dashboard.application[0].folder == "pawlocal-development" &&
       grafana_dashboard.dependencies[0].folder == "pawlocal-development" &&
@@ -145,7 +145,7 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
     error_message = "All dashboards must be created in folder pawlocal-development."
   }
   assert {
-    condition     = (
+    condition = (
       jsondecode(grafana_dashboard.journey[0].config_json).uid == "pawlocal-development-journey" &&
       jsondecode(grafana_dashboard.application[0].config_json).uid == "pawlocal-development-application" &&
       jsondecode(grafana_dashboard.dependencies[0].config_json).uid == "pawlocal-development-dependencies" &&
@@ -156,7 +156,7 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
     error_message = "All dashboard UIDs must have the pawlocal-development-* prefix."
   }
   assert {
-    condition     = (
+    condition = (
       jsondecode(grafana_dashboard.journey[0].config_json).title == "PawLocal Development - Journey" &&
       jsondecode(grafana_dashboard.application[0].config_json).title == "PawLocal Development - Application" &&
       jsondecode(grafana_dashboard.dependencies[0].config_json).title == "PawLocal Development - Dependencies" &&
@@ -167,7 +167,7 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
     error_message = "All dashboard titles must be formatted as PawLocal Development - <Name>."
   }
   assert {
-    condition     = alltrue([
+    condition = alltrue([
       strcontains(grafana_dashboard.journey[0].config_json, "environment=\\\"development\\\""),
       strcontains(grafana_dashboard.application[0].config_json, "environment=\\\"development\\\""),
       strcontains(grafana_dashboard.dependencies[0].config_json, "environment=\\\"development\\\""),
@@ -176,6 +176,21 @@ run "development_environment_creates_six_dashboards_scoped_to_dev" {
       strcontains(grafana_dashboard.incidents[0].config_json, "environment=\\\"development\\\""),
     ])
     error_message = "All dashboards must contain queries with environment=\"development\"."
+  }
+  assert {
+    condition = alltrue([
+      grafana_dashboard.journey[0].overwrite == false,
+      grafana_dashboard.application[0].overwrite == false,
+      grafana_dashboard.dependencies[0].overwrite == false,
+      grafana_dashboard.releases[0].overwrite == false,
+      grafana_dashboard.telemetry[0].overwrite == false,
+      grafana_dashboard.incidents[0].overwrite == false,
+    ])
+    error_message = "Dashboards must have overwrite disabled to prevent foreign UID collision adoption."
+  }
+  assert {
+    condition     = strcontains(grafana_dashboard.telemetry[0].config_json, "grafanacloud-usage")
+    error_message = "Telemetry quota panels must bind to grafanacloud-usage datasource."
   }
 }
 
@@ -193,7 +208,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     }
   }
   assert {
-    condition     = (
+    condition = (
       length(grafana_dashboard.journey) == 1 &&
       length(grafana_dashboard.application) == 1 &&
       length(grafana_dashboard.dependencies) == 1 &&
@@ -204,7 +219,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "Enabled production environment must create exactly 6 dashboards."
   }
   assert {
-    condition     = (
+    condition = (
       grafana_dashboard.journey[0].folder == "pawlocal-production" &&
       grafana_dashboard.application[0].folder == "pawlocal-production" &&
       grafana_dashboard.dependencies[0].folder == "pawlocal-production" &&
@@ -215,7 +230,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "All dashboards must be created in folder pawlocal-production."
   }
   assert {
-    condition     = (
+    condition = (
       jsondecode(grafana_dashboard.journey[0].config_json).uid == "pawlocal-production-journey" &&
       jsondecode(grafana_dashboard.application[0].config_json).uid == "pawlocal-production-application" &&
       jsondecode(grafana_dashboard.dependencies[0].config_json).uid == "pawlocal-production-dependencies" &&
@@ -226,7 +241,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "All dashboard UIDs must have the pawlocal-production-* prefix."
   }
   assert {
-    condition     = (
+    condition = (
       jsondecode(grafana_dashboard.journey[0].config_json).title == "PawLocal Production - Journey" &&
       jsondecode(grafana_dashboard.application[0].config_json).title == "PawLocal Production - Application" &&
       jsondecode(grafana_dashboard.dependencies[0].config_json).title == "PawLocal Production - Dependencies" &&
@@ -237,7 +252,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "All dashboard titles must be formatted as PawLocal Production - <Name>."
   }
   assert {
-    condition     = alltrue([
+    condition = alltrue([
       strcontains(grafana_dashboard.journey[0].config_json, "environment=\\\"production\\\""),
       strcontains(grafana_dashboard.application[0].config_json, "environment=\\\"production\\\""),
       strcontains(grafana_dashboard.dependencies[0].config_json, "environment=\\\"production\\\""),
@@ -248,7 +263,7 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
     error_message = "All production dashboards must contain queries with environment=\"production\"."
   }
   assert {
-    condition     = alltrue([
+    condition = alltrue([
       !strcontains(grafana_dashboard.journey[0].config_json, "development"),
       !strcontains(grafana_dashboard.application[0].config_json, "development"),
       !strcontains(grafana_dashboard.dependencies[0].config_json, "development"),
@@ -257,5 +272,20 @@ run "production_environment_creates_six_dashboards_scoped_to_prod_never_dev" {
       !strcontains(grafana_dashboard.incidents[0].config_json, "development"),
     ])
     error_message = "Production dashboards must NEVER reference or display development data."
+  }
+  assert {
+    condition = alltrue([
+      grafana_dashboard.journey[0].overwrite == false,
+      grafana_dashboard.application[0].overwrite == false,
+      grafana_dashboard.dependencies[0].overwrite == false,
+      grafana_dashboard.releases[0].overwrite == false,
+      grafana_dashboard.telemetry[0].overwrite == false,
+      grafana_dashboard.incidents[0].overwrite == false,
+    ])
+    error_message = "Dashboards must have overwrite disabled to prevent foreign UID collision adoption."
+  }
+  assert {
+    condition     = strcontains(grafana_dashboard.telemetry[0].config_json, "grafanacloud-usage")
+    error_message = "Telemetry quota panels must bind to grafanacloud-usage datasource."
   }
 }
