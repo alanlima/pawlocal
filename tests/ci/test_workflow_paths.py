@@ -148,6 +148,8 @@ class WorkflowPathTests(unittest.TestCase):
             "infra/terraform/main.tf": "terraform-ci.yml",
             ".env.example": "compose-ci.yml",
             "observability/grafana/dashboard.json": "compose-ci.yml",
+            "observability/grafana/cloud/provision.py": "compose-ci.yml",
+            "observability/grafana/cloud/bindings.json": "compose-ci.yml",
         }
         workflows = (
             "frontend-deploy.yml",

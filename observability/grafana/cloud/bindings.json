@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "environments": {
+    "development": {"enabled": false, "stack": null, "frontend_origin": null, "datasources": null, "approval": null},
+    "production": {"enabled": false, "stack": null, "frontend_origin": null, "datasources": null, "approval": null}
+  }
+}

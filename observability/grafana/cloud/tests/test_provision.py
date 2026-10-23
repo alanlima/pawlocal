@@ -1,0 +1,311 @@
+import copy
+import importlib.util
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
+
+MODULE = Path(__file__).resolve().parents[1] / "provision.py"
+SPEC = importlib.util.spec_from_file_location("cloud_provision", MODULE)
+p = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(p)
+
+
+def configured():
+    return {
+        "enabled": True,
+        "stack": {
+            "id": 42,
+            "slug": "teststack",
+            "url": "https://teststack.grafana.net",
+            "region": "au",
+            "faro_api_url": "https://faro-api-prod-au-southeast-0.grafana.net/faro",
+            "otlp_endpoint": "https://otlp-gateway-prod-au-southeast-0.grafana.net/otlp",
+            "otlp_instance_id": "42",
+        },
+        "frontend_origin": "https://pawlocal-dev.test.org",
+        "datasources": {
+            signal: {"uid": signal, "name": f"cloud-{signal}"}
+            for signal in ("metrics", "logs", "traces")
+        },
+        "approval": {
+            "reference": "issue-224-reviewed",
+            "residency": "Australia reviewed",
+            "free_plan_verified": True,
+            "quota_review": "shared account quota reviewed",
+            "isolation_review": "dev-only scope; production still disabled",
+        },
+    }
+
+
+class FakeAPI:
+    def __init__(self):
+        self.calls = []
+        self.folder = None
+        self.apps = []
+        self.remote_region = "au"
+        self.datasource_type = None
+
+    def request(self, method, url, token, payload=None, stack_id=None, missing=False):
+        self.calls.append((method, url, token, payload, stack_id))
+        if url in (
+            "https://grafana.com/api/instances/42",
+            "https://grafana.com/api/instances/teststack",
+        ):
+            return {
+                "id": 42,
+                "slug": "teststack",
+                "url": "https://teststack.grafana.net",
+                "regionSlug": self.remote_region,
+            }
+        if url == "https://grafana.com/api/instances/teststack/connections":
+            return {
+                "otlpHttpUrl": "https://otlp-gateway-prod-au-southeast-0.grafana.net"
+            }
+        if url == "https://teststack.grafana.net/api/datasources":
+            return [
+                {
+                    "uid": key,
+                    "name": f"cloud-{key}",
+                    "type": kind,
+                    "arbitrary": "never-export",
+                }
+                for key, kind in (
+                    ("metrics", "prometheus"),
+                    ("logs", "loki"),
+                    ("traces", "tempo"),
+                )
+            ]
+        if "/datasources/uid/" in url:
+            signal = url.rsplit("/", 1)[1]
+            return {
+                "uid": signal,
+                "name": "cloud-" + signal,
+                "type": self.datasource_type
+                or {"metrics": "prometheus", "logs": "loki", "traces": "tempo"}[signal],
+                "secureJsonFields": {"password": True},
+                "unapproved": "should-never-export",
+            }
+        if "/api/folders" in url:
+            if method == "GET":
+                return self.folder
+            self.folder = copy.deepcopy(payload)
+            return self.folder
+        if method == "GET" and url.endswith("/app"):
+            return copy.deepcopy(self.apps)
+        if method in ("POST", "PUT"):
+            result = {
+                **copy.deepcopy(payload),
+                "id": 17,
+                "appKey": "public-app-key",
+                "collectEndpointURL": "https://faro-collector-prod-au-southeast-0.grafana.net/collect",
+            }
+            self.apps = [result]
+            return result
+        if method == "GET" and url.endswith("/app/17"):
+            return copy.deepcopy(self.apps[0])
+        raise AssertionError((method, url))
+
+    @property
+    def writes(self):
+        return [item for item in self.calls if item[0] != "GET"]
+
+
+class ProvisionTests(unittest.TestCase):
+    def setUp(self):
+        self.api = FakeAPI()
+        self.credentials = {
+            name: "private-" + name
+            for name in (
+                "GRAFANA_CLOUD_ACCESS_POLICY_TOKEN",
+                "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+                "GRAFANA_FARO_ACCESS_POLICY_TOKEN",
+            )
+        }
+        self.runner = p.Provisioner(self.api, self.credentials)
+        self.config = configured()
+
+    def test_discovery_needs_only_stack_url_region_and_two_credential_domains(self):
+        credentials = {
+            key: value
+            for key, value in self.credentials.items()
+            if key != "GRAFANA_FARO_ACCESS_POLICY_TOKEN"
+        }
+        result = p.Provisioner(self.api, credentials).discover(
+            "https://teststack.grafana.net", "au"
+        )
+        self.assertEqual(result["stack"]["otlp_instance_id"], "42")
+        self.assertEqual(
+            result["stack"]["faro_api_url"],
+            "https://faro-api-prod-au-southeast-0.grafana.net/faro",
+        )
+        self.assertEqual(result["datasources"]["traces"]["uid"], "traces")
+        self.assertEqual(result["status"], "discovered-not-approved")
+        self.assertNotIn("arbitrary", json.dumps(result))
+        self.assertEqual(self.api.writes, [])
+        with self.assertRaises(p.ProvisionError):
+            self.runner.discover("https://teststack.grafana.net", "eu")
+
+    def test_faro_endpoint_creation_cutoff_and_regional_exceptions(self):
+        self.assertEqual(
+            p.faro_management_url("prod-us-east-0", "2025-01-01T00:00:00Z"),
+            "https://faro-api-prod-us-east-2.grafana.net/faro",
+        )
+        self.assertEqual(
+            p.faro_management_url("prod-us-east-0", "2024-01-01T00:00:00Z"),
+            "https://faro-api-prod-us-east-0.grafana.net/faro",
+        )
+        self.assertEqual(
+            p.faro_management_url("azure-uaenorth-0", None),
+            "https://faro-api-prod-me-central-2.azure-uaenorth-0.grafana.net/faro",
+        )
+        with self.assertRaises(p.ProvisionError):
+            p.faro_management_url("prod-us-east-0", None)
+
+    def test_disabled_never_reads_credentials_or_calls_network(self):
+        disabled = json.loads(MODULE.with_name("bindings.json").read_text())[
+            "environments"
+        ]["development"]
+        self.assertEqual(
+            p.Provisioner(self.api, {}).reconcile("development", disabled, apply=True)[
+                "status"
+            ],
+            "disabled",
+        )
+        self.assertEqual(self.api.calls, [])
+
+    def test_manifest_rejects_unknown_fields_duplicate_keys_wildcards_and_secret_fields(
+        self,
+    ):
+        disabled = {
+            "enabled": False,
+            "stack": None,
+            "frontend_origin": None,
+            "datasources": None,
+            "approval": None,
+        }
+        document = {
+            "version": 1,
+            "environments": {"development": self.config, "production": disabled},
+        }
+        p.validate_manifest(document)
+        for key, value in [
+            ("frontend_origin", "https://*.test.org"),
+            ("frontend_origin", "https://test.org/path"),
+            ("approval", None),
+        ]:
+            broken = copy.deepcopy(document)
+            broken["environments"]["development"][key] = value
+            with self.assertRaises(p.ProvisionError):
+                p.validate_manifest(broken)
+        document["token"] = "secret"
+        with self.assertRaises(p.ProvisionError):
+            p.validate_manifest(document)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "bad.json"
+            path.write_text('{"version":1,"version":1,"environments":{}}')
+            with self.assertRaises(p.ProvisionError):
+                p.load_manifest(path)
+
+    def test_plan_is_read_only_and_create_then_second_apply_is_noop(self):
+        planned = self.runner.reconcile("development", self.config)
+        self.assertEqual(planned["operations"], ["create-folder", "create-faro"])
+        self.assertEqual(self.api.writes, [])
+        created = self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(len(self.api.writes), 2)
+        self.assertEqual(
+            created["public_handoff"][
+                "/pawlocal/development/config/grafana/faro-collector-url"
+            ],
+            "https://faro-collector-prod-au-southeast-0.grafana.net/collect/public-app-key",
+        )
+        for token in self.credentials.values():
+            self.assertNotIn(token, json.dumps(created))
+        self.assertNotIn("unapproved", json.dumps(created))
+        self.api.calls.clear()
+        self.assertEqual(
+            self.runner.reconcile("development", self.config, apply=True)["operations"],
+            [],
+        )
+        self.assertEqual(self.api.writes, [])
+
+    def test_updates_faro_in_place_without_delete_or_recreate(self):
+        self.runner.reconcile("development", self.config, apply=True)
+        self.api.calls.clear()
+        self.config["frontend_origin"] = "https://reviewed-new.test.org"
+        self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual([item[0] for item in self.api.writes], ["PUT"])
+        self.assertTrue(self.api.writes[0][1].endswith("/app/17"))
+
+    def test_foreign_folder_or_app_collision_blocks_all_writes(self):
+        self.api.folder = {"uid": "pawlocal-development", "title": "Unrelated folder"}
+        with self.assertRaises(p.ProvisionError):
+            self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(self.api.writes, [])
+        self.api.folder = None
+        self.api.apps = [
+            {"id": 17, "name": "pawlocal-development", "extraLogLabels": []}
+        ]
+        with self.assertRaises(p.ProvisionError):
+            self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(self.api.writes, [])
+
+    def test_region_or_datasource_mismatch_blocks_all_writes(self):
+        self.api.remote_region = "eu"
+        with self.assertRaises(p.ProvisionError):
+            self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(self.api.writes, [])
+        self.api.remote_region = "au"
+        self.api.datasource_type = "wrong-plugin"
+        with self.assertRaises(p.ProvisionError):
+            self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(self.api.writes, [])
+
+    def test_foreign_otlp_endpoint_blocks_mutation(self):
+        self.config["stack"]["otlp_endpoint"] = "https://other-stack.grafana.net/otlp"
+        with self.assertRaisesRegex(p.ProvisionError, "OTLP endpoint differs"):
+            self.runner.reconcile("development", self.config, apply=True)
+        self.assertEqual(self.api.writes, [])
+
+    def test_missing_credentials_fail_before_writes(self):
+        with self.assertRaisesRegex(p.ProvisionError, "Missing operator credential"):
+            p.Provisioner(self.api, {}).reconcile("development", self.config)
+        self.assertEqual(self.api.calls, [])
+
+    def test_real_transport_auth_shape_and_redirect_denial(self):
+        transport = p.Transport()
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"[]"
+        with patch.object(transport.opener, "open", return_value=response) as opening:
+            transport.request(
+                "GET", "https://test.grafana.net/faro/api/v1/app", "secret", stack_id=42
+            )
+            request = opening.call_args.args[0]
+            self.assertEqual(request.get_header("Authorization"), "Bearer 42:secret")
+            self.assertEqual(request.get_header("X-scope-orgid"), "42")
+        with self.assertRaises(p.ProvisionError):
+            p.NoRedirect().redirect_request(
+                None, None, 302, "", {}, "https://attacker.test"
+            )
+
+    def test_api_errors_never_echo_response_payload(self):
+        transport = p.Transport()
+        error = HTTPError(
+            "https://test.grafana.net",
+            403,
+            "denied",
+            {},
+            io.BytesIO(b"echoed-private-token"),
+        )
+        with patch.object(transport.opener, "open", side_effect=error):
+            with self.assertRaises(p.ProvisionError) as result:
+                transport.request("GET", "https://test.grafana.net", "private")
+            self.assertNotIn("echoed-private", str(result.exception))
+            self.assertIn("403", str(result.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()
