@@ -106,13 +106,45 @@ class QuotaTests(unittest.TestCase):
         budget = quota.RequestBudget(self.profile())
         with self.assertRaises(quota.Denied):
             budget.admit(100001)
-        self.assertEqual(budget.admit(100000), 10000)
-        self.assertEqual(budget.admit(100000), 10000)
+        self.assertEqual(budget.admit(100000), 5000)
+        self.assertEqual(budget.admit(100000), 5000)
         with self.assertRaises(quota.Denied):
             budget.admit(1)
         self.assertEqual(
-            (budget.requests, budget.inputs, budget.outputs), (2, 200000, 20000)
+            (budget.requests, budget.inputs, budget.outputs), (2, 200000, 10000)
         )
+
+    def test_existing_profile_allows_four_turns_without_increasing_any_envelope(self):
+        profile = self.profile(output_per_request=16000, output_per_role=32000)
+        reservation = profile.reservation
+        # The former full-per-request allocation exhausted this profile at turn 3.
+        self.assertEqual(profile.output_per_role // profile.output_per_request, 2)
+        for role in ("fixer", "reviewer"):
+            with self.subTest(role=role):
+                budget = quota.RequestBudget(profile)
+                for count in range(1, 5):
+                    self.assertEqual(budget.admit(1000), 8000)
+                    self.assertEqual(budget.outputs, count * 8000)
+                with self.assertRaises(quota.Denied):
+                    budget.admit(0)
+                self.assertEqual(budget.outputs, 32000)
+        self.assertEqual(profile.reservation, reservation)
+        self.assertEqual(
+            (profile.monthly_microdollars, profile.monthly_runs), (20000000, 20)
+        )
+        expected = 2 * (200000 * profile.input_rate + 32000 * profile.output_rate)
+        self.assertEqual(reservation, (expected + 999999) // 1000000)
+
+    def test_rounding_never_adds_tokens_and_tiny_envelope_fails_closed(self):
+        budget = quota.RequestBudget(self.profile(output_per_role=20003))
+        self.assertEqual([budget.admit(0) for _ in range(4)], [5000] * 4)
+        self.assertEqual(budget.outputs, 20000)
+        with self.assertRaises(quota.Denied):
+            budget.admit(0)
+        budget = quota.RequestBudget(self.profile(output_per_role=3))
+        with self.assertRaises(quota.Denied):
+            budget.admit(0)
+        self.assertEqual((budget.requests, budget.outputs), (0, 0))
 
     def test_request_count_cannot_be_bypassed_with_empty_inputs(self):
         budget = quota.RequestBudget(

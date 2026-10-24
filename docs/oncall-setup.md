@@ -593,6 +593,18 @@ The gateway validates these fields against hard coded bounds. Your profile value
 
 ---
 
+### Per-turn output allocation (#301)
+
+Each role reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens before every forwarded request. The existing `4` / `16000` / `32000` profile therefore supports four turns of at most **8,000 output tokens** within the same 32,000-token role envelope. Reasoning and answer output share that allowance. The input, request, deadline and monthly gates can still stop work earlier. Integer remainders stay unallocated. Failed, interrupted and unknown responses consume their full reservation; there is no automatic refund or inference retry.
+
+This allocation applies to existing approved profiles after the reviewed code is merged; no variable migration is needed for #301. The protected model/rate approval remains independent. Existing incident generations and monthly ledger reservations remain consumed: do not rerun or refund an escalated generation to activate the fix.
+
+### Switching the approved profile to `gpt-5.4-mini`
+
+A model-only edit does **not** update the rates in `generate-profile.py`. Before saving a newly approved profile, review its complete JSON and current official model pricing. For Standard global `gpt-5.4-mini`, the [official model page](https://developers.openai.com/api/docs/models/gpt-5.4-mini) lists input **$0.75/M** and output **$4.50/M** (reviewed 24 October 2026): set `"model":"gpt-5.4-mini"`, `"input_rate":750000`, and `"output_rate":4500000`. The former `1100000`/`4400000` values underestimate this model's output price. Verify the configured API project, entitlement and effort compatibility separately.
+
+Keep `requests_per_role=4`, `output_per_request=16000`, `output_per_role=32000`, `input_per_request=100000`, `input_per_role=200000`, `monthly_microdollars=20000000`, and `monthly_runs=20`. With those fields the two-role worst-case reservation is **$0.588 per incident**, or **$11.76 for 20 incidents**, within the same $20 monthly ceiling. This is conservative reservation arithmetic, not provider-billed usage. Refresh `rates_source`, `rates_reviewed_at`, `approved_month`, `expires_at` and the owner approval reference honestly when preparing the profile; never reuse an example's timestamps as a fresh review. These instructions do not change a live variable or authorize additional spending.
+
 ### Cost estimate
 
 With the recommended values and `o4-mini` pricing:

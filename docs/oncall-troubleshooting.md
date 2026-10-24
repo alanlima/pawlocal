@@ -177,6 +177,23 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 
 ## Layer 6 — Fixer, Candidate CI, and PR Publication
 
+### Symptom: model continuation fails with HTTP 403 or 429
+
+Check **Show quota gateway failure diagnostics** immediately after the fixer/reviewer model step. This always-run step reads at most 64 KiB from the fixed runner-owned diagnostic file, even when the model step failed or the gateway has stopped. An absent file means no diagnostic was recorded; it does not prove that no model request or reservation occurred.
+
+| Diagnostic | Meaning and next action |
+|---|---|
+| `origin=local`, `code=local_quota_exhausted`, HTTP 403 | Local request/input/output quota refused the call. Inspect `stage` and `reason`; adding API credits cannot change this limit. |
+| `origin=local`, `code=local_admission_denied`, HTTP 403 | Request schema, profile, deadline or live-control policy refused admission. Preserve the gate and inspect the reason. |
+| `origin=openai`, `code=upstream_http_error`, `upstream_status=429` | OpenAI returned 429. Inspect available `upstream_code`, `upstream_type` and `request_id` to distinguish billing quota from rate limits. The gateway preserves upstream HTTP status; it does not retry the call. |
+| `origin=github`, `stage=live_control` | A GitHub live-control read failed. This is not an OpenAI credit failure. |
+| `origin=transport`, `code=transport_uncertain`, HTTP 502 before streaming | A socket/network operation failed. `stage` distinguishes header reading, token count, live control and inference; usage may be uncertain. |
+| `response_started=true` | Streaming had already returned HTTP 200 before failing. The connection closes; no second HTTP response is appended. Treat partial delivery as uncertain. |
+
+Diagnostics contain fixed classifications and bounded upstream identifiers, not credentials, request/model contents or upstream error messages. Normal operational stdout/stderr is retained. The response carries the same structured classification for the model client. Reservations remain consumed on all failed/uncertain calls.
+
+Run [40080488159](https://github.com/alanlima/pawlocal/actions/runs/40080488159/job/120832914680) completed two model turns before continuation failed. The matching profile allowed 16,000 output tokens per request and 32,000 per role: the old allocator reserved 16,000 twice, then denied turn three locally. #301 allocates 8,000 per turn across four configured turns without increasing any ceiling. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Never automatically retry/refund this consumed incident generation.
+
 ### Symptom: `candidate changes touch non-allowlisted paths`
 
 * **Cause**: The Codex fixer agent generated diffs outside allowlisted application boundaries.

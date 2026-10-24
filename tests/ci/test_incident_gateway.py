@@ -1,3 +1,5 @@
+import contextlib
+import http.client
 import importlib.util
 import io
 import json
@@ -6,8 +8,10 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 
 DIRECTORY = Path(__file__).resolve().parents[2] / "ops/incident-response"
@@ -63,11 +67,11 @@ class GatewayTests(unittest.TestCase):
             "Bearer " + "x" * 32,
             json.dumps(self.body(max_output_tokens=9999999)).encode(),
         )
-        self.assertEqual(admitted["max_output_tokens"], 10000)
+        self.assertEqual(admitted["max_output_tokens"], 5000)
         self.assertEqual(self.calls[0][0], "/input_tokens")
         self.assertEqual(self.calls[0][1]["input"], self.body()["input"])
         self.assertEqual(self.calls[0][1]["tools"], self.body()["tools"])
-        self.assertEqual(process.budget.outputs, 10000)
+        self.assertEqual(process.budget.outputs, 5000)
 
     def test_actual_pinned_cli_wire_shape_and_omitted_tier_are_supported(self):
         raw = (
@@ -76,7 +80,7 @@ class GatewayTests(unittest.TestCase):
         process = self.fixture()
         admitted = process.admit("Bearer " + "x" * 32, raw)
         self.assertEqual(admitted["service_tier"], "default")
-        self.assertEqual(admitted["max_output_tokens"], 10000)
+        self.assertEqual(admitted["max_output_tokens"], 5000)
         self.assertNotIn("client_metadata", admitted)
         self.assertNotIn("prompt_cache_key", admitted)
 
@@ -168,6 +172,184 @@ class GatewayTests(unittest.TestCase):
             process.admit("Bearer " + "x" * 32, json.dumps(self.body()).encode())
         self.assertEqual(self.calls, [])
         self.assertEqual(process.budget.requests, 0)
+
+    @contextlib.contextmanager
+    def http_gateway(self, upstream, profile=None):
+        process = self.fixture()
+        if profile is not None:
+            process.profile = profile
+            process.budget = gateway.RequestBudget(profile)
+        process.clock = time.time
+        process.upstream = upstream
+        events = []
+        process.diagnostic = events.append
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        thread = threading.Thread(
+            target=gateway.serve, args=(process, port), daemon=True
+        )
+        thread.start()
+        for _ in range(100):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                    break
+            except OSError:
+                time.sleep(0.01)
+        try:
+            yield process, events, port
+        finally:
+            process.deadline = 0
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+
+    def post(self, port, body=None):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+        connection.request(
+            "POST",
+            "/v1/responses",
+            json.dumps(body or self.body()),
+            {"Authorization": "Bearer " + "x" * 32},
+        )
+        response = connection.getresponse()
+        result = (response.status, response.read())
+        connection.close()
+        return result
+
+    def test_http_local_quota_is_403_and_failed_inference_keeps_full_reservation(self):
+        calls = []
+
+        def upstream(suffix, body):
+            calls.append(suffix)
+            if suffix:
+                return Response(b'{"input_tokens":1000}')
+            raise OSError("fixture secret body must not be logged")
+
+        profile = quota_fixtures.QuotaTests().profile(
+            output_per_request=16000, output_per_role=32000
+        )
+        with self.http_gateway(upstream, profile) as (process, events, port):
+            for _ in range(4):
+                self.assertEqual(self.post(port)[0], 502)
+            status, raw = self.post(port)
+            self.assertEqual(status, 403)
+            self.assertEqual(json.loads(raw)["error"]["origin"], "local")
+            self.assertEqual(process.budget.outputs, 32000)
+            self.assertEqual(calls.count(""), 4)
+            self.assertEqual(events[-1]["reason"], "request quota/body bound exceeded")
+            self.assertNotIn("fixture secret body", json.dumps(events))
+
+    def test_http_upstream_status_and_id_are_distinct_from_local_and_transport(self):
+        for stage in ("input_token_count", "inference"):
+            for code in (400, 401, 429, 500):
+                calls = []
+
+                def upstream(suffix, body, calls=calls, stage=stage, code=code):
+                    calls.append(suffix)
+                    if suffix and stage == "inference":
+                        return Response(b'{"input_tokens":1000}')
+                    raise urllib.error.HTTPError(
+                        "https://fixture",
+                        code,
+                        "secret response",
+                        {"x-request-id": "req_fixture"},
+                        io.BytesIO(
+                            b'{"error":{"code":"insufficient_quota","type":"insufficient_quota","message":"secret response body"}}'
+                        ),
+                    )
+
+                with (
+                    self.subTest(stage=stage, code=code),
+                    self.http_gateway(upstream) as (process, events, port),
+                ):
+                    status, raw = self.post(port)
+                    event = json.loads(raw)["error"]
+                    self.assertEqual(status, code)
+                    self.assertEqual(
+                        (
+                            event["origin"],
+                            event["stage"],
+                            event["upstream_status"],
+                            event["request_id"],
+                        ),
+                        ("openai", stage, code, "req_fixture"),
+                    )
+                    self.assertEqual(
+                        len(calls), 1 if stage == "input_token_count" else 2
+                    )
+                    self.assertEqual(
+                        process.budget.requests,
+                        0 if stage == "input_token_count" else 1,
+                    )
+                    self.assertEqual(event["upstream_code"], "insufficient_quota")
+                    self.assertEqual(event["upstream_type"], "insufficient_quota")
+                    self.assertNotIn("secret", raw.decode())
+                    self.assertEqual(events, [event])
+
+    def test_http_schema_and_live_control_denial_prevent_upstream(self):
+        def upstream(*_):
+            self.fail("Denied request reached upstream")
+
+        with self.http_gateway(upstream) as (process, events, port):
+            status, _ = self.post(port, self.body(store=True))
+            self.assertEqual(status, 403)
+            self.assertEqual(events[-1]["stage"], "request_validation")
+
+            def stopped():
+                raise gateway.Denied("live incident lease closed or changed")
+
+            process.control = stopped
+            self.assertEqual(self.post(port)[0], 403)
+            self.assertEqual(events[-1]["stage"], "live_control")
+            self.assertEqual(process.budget.outputs, 0)
+
+    def test_live_control_http_error_identifies_github_not_openai(self):
+        def upstream(*_):
+            self.fail("Control denial must not reach OpenAI")
+
+        with self.http_gateway(upstream) as (process, events, port):
+
+            def stopped():
+                raise urllib.error.HTTPError(
+                    "https://api.github.com/fixture",
+                    403,
+                    "secret",
+                    {},
+                    io.BytesIO(b"{}"),
+                )
+
+            process.control = stopped
+            status, _ = self.post(port)
+            self.assertEqual(status, 403)
+            self.assertEqual(
+                (events[0]["origin"], events[0]["stage"]), ("github", "live_control")
+            )
+
+    def test_stream_failure_has_no_second_http_status_and_retains_charge(self):
+        class BrokenResponse(Response):
+            def __init__(self, raw):
+                super().__init__(raw)
+                self.headers = {"Content-Type": "text/event-stream"}
+
+            def read(self, size=-1):
+                if self.tell():
+                    raise OSError("secret transport details")
+                return super().read(size)
+
+        def upstream(suffix, body):
+            return (
+                Response(b'{"input_tokens":1000}')
+                if suffix
+                else BrokenResponse(b"data: fixture\n\n")
+            )
+
+        with self.http_gateway(upstream) as (process, events, port):
+            status, raw = self.post(port)
+            self.assertEqual(status, 200)
+            self.assertEqual(raw, b"data: fixture\n\n")
+            self.assertTrue(events[0]["response_started"])
+            self.assertEqual(events[0]["origin"], "transport")
+            self.assertEqual(process.budget.outputs, 5000)
 
     @unittest.skipUnless(
         os.name == "posix", "POSIX signal enforcement exercised in Ubuntu CI"
