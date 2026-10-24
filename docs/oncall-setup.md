@@ -534,10 +534,15 @@ Click **Save contact point**.
 
 1. Set `PAWLOCAL_ONCALL_ENABLED = true` in `oncall-development`.
 2. Set `PAWLOCAL_ONCALL_MODEL_PROFILE` to the owner-approved profile JSON.
-3. Manually POST a signed test payload to the DEV Function URL to verify the full dispatch path:
+3. POST a signed test payload to the DEV Function URL to verify the full dispatch path:
 
+**Bash / macOS / Linux:**
 ```bash
-# Read the HMAC secret
+# Read the Lambda Function URL and HMAC secret from SSM
+URL=$(aws ssm get-parameter \
+  --name "/pawlocal/development/config/oncall/webhook-url" \
+  --query Parameter.Value --output text)
+
 SECRET=$(aws ssm get-parameter \
   --name "/pawlocal/development/secrets/grafana/webhook-hmac" \
   --with-decryption --query Parameter.Value --output text)
@@ -547,11 +552,30 @@ BODY='{"receiver":"pawlocal-development-oncall","status":"firing","alerts":[{"st
 TS=$(date +%s)
 SIG=$(printf '%s:%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
 
-curl -s -X POST "<DEV_FUNCTION_URL>" \
+curl -i -X POST "$URL" \
   -H "Content-Type: application/json" \
   -H "x-grafana-alerting-timestamp: $TS" \
   -H "x-grafana-alerting-signature: $SIG" \
   -d "$BODY"
+```
+
+**PowerShell (Windows):**
+```powershell
+$Url = (aws ssm get-parameter --name "/pawlocal/development/config/oncall/webhook-url" --query Parameter.Value --output text)
+$Secret = (aws ssm get-parameter --name "/pawlocal/development/secrets/grafana/webhook-hmac" --with-decryption --query Parameter.Value --output text)
+
+$Body = '{"receiver":"pawlocal-development-oncall","status":"firing","alerts":[{"status":"firing","labels":{"alertname":"pawlocal-development-search-detail-failure","environment":"development","service":"pawlocal-api"},"startsAt":"2026-10-24T00:00:00Z","endsAt":"0001-01-01T00:00:00Z","fingerprint":"0123456789abcdef01234567"}]}'
+$Ts = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()
+
+$Hmac = New-Object System.Security.Cryptography.HMACSHA256
+$Hmac.Key = [System.Text.Encoding]::UTF8.GetBytes($Secret)
+$Bytes = [System.Text.Encoding]::UTF8.GetBytes("$Ts`:$Body")
+$Sig = [BitConverter]::ToString($Hmac.ComputeHash($Bytes)).Replace("-", "").ToLower()
+
+Invoke-RestMethod -Uri $Url -Method POST -Headers @{
+  "x-grafana-alerting-timestamp" = $Ts
+  "x-grafana-alerting-signature" = $Sig
+} -ContentType "application/json" -Body $Body
 ```
 
 Expected response: `204 No Content` (GitHub accepted dispatch) or `502` if the App credentials in SSM/Lambda config are not yet correct.
