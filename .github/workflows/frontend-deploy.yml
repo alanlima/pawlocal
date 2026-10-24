@@ -1,20 +1,6 @@
-name: Frontend pull request checks
+name: Quality · Validate frontend
 
 on:
-  pull_request:
-    paths:
-      - "frontend/**"
-      - "openapi.yaml"
-      - "package.json"
-      - "package-lock.json"
-      - "pnpm-lock.yaml"
-      - "yarn.lock"
-      - ".github/workflows/frontend-deploy.yml"
-      - ".github/workflows/frontend-production-deploy.yml"
-      - ".github/workflows/fullstack-release.yml"
-      - ".github/workflows/deploy-production.yml"
-      - '!**/*.md'
-      - '!**/*.mdx'
   workflow_call:
 
 permissions:
@@ -45,14 +31,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
+        uses: ./.github/actions/setup-frontend-toolchain
 
       - name: Format and lint
         run: npm run check

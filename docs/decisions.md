@@ -2,6 +2,15 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
+## DEC-014 — Purpose-based Actions catalogue and shared setup (#272)
+
+- **Status:** Owner approved through the 24 October 2026 orchestration request; implementation and independent/Codex review pending.
+- **Decision:** Group the 22 workflows by Quality, Release, Infrastructure, Operations, Automation and Retired. Use `<Purpose> · <Verb and object>` display names. Preserve filenames and job/check names during this migration. Platform owns delivery automation; domain scripts remain in their current homes.
+- **Boundaries:** Reusable workflows own jobs; two specific composite actions own repeated frontend and Terraform setup. Keep AWS authentication, approvals, permissions, lifecycle locks, plan/apply, provenance and evidence in callers. Compare Python and served verification before further extraction.
+- **Routing:** Keep `fullstack-release.yml` as the sole automatic frontend/backend check owner because trusted incident promotion authenticates that exact path and nested job names. Make component workflows callable-only; union their former paths into the release entrypoint for PR/main coverage. This deliberately adds main validation/release coverage for lockfiles, component workflow and shared frontend action changes. Keep Compose, offline Terraform and delivery validation independent. Manual Quality never reconciles; use the existing protected Operations dispatcher.
+- **Migration:** Atomically update literal release caller names in Terraform concurrency and destroy caller verification. Keep mutation locks non-cancelling and every retired stub non-deploying. Filenames, broad script moves, retired removal, runner changes, live protection changes and required-Quality-context remediation are deferred to separately reviewed decisions.
+- **Evidence:** The catalogue includes the actual/expected map, dependency inventory, before/after trigger matrix and action contracts. Read-only ruleset snapshot: active `25363056`, required issuer-bound `PawLocal change authorization` from App `5450140`, no bypass, squash/PR/thread resolution; Quality contexts absent and unchanged. Static checks are not deployment acceptance.
+
 ## DEC-013 — Proposed state-free monitoring secret setup
 
 - **Status:** PROPOSED under [#241](https://github.com/alanlima/pawlocal/issues/241), 2026-10-23; owner decision, independent review and live setup authorization pending.

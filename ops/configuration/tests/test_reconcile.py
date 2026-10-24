@@ -454,7 +454,7 @@ class ReconcileTests(unittest.TestCase):
 
     def test_workflow_protection_serialization_and_feature_harness(self):
         workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text(encoding="utf-8")
         )
         job = workflow["jobs"]["reconcile"]
         self.assertEqual(
@@ -471,12 +471,10 @@ class ReconcileTests(unittest.TestCase):
             workflow["concurrency"]["group"], job["concurrency"]["group"]
         )
         self.assertNotIn("PAWLOCAL_CONFIG_GITHUB_TOKEN", job["env"])
-        harness = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+        harness = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
         self.assertNotIn("concurrency", harness)
-        self.assertEqual(
-            harness["jobs"]["reconciliation-smoke"]["with"]["environment"],
-            "development",
-        )
+        self.assertNotIn("reconciliation-smoke", harness["jobs"])
+        self.assertIn("workflow_dispatch", workflow.get("on", workflow.get(True)))
         self.assertFalse(
             any("upload-artifact" in s.get("uses", "") for s in job["steps"])
         )
@@ -485,16 +483,13 @@ class ReconcileTests(unittest.TestCase):
         # GitHub resolves environment-only secrets to empty in reusable jobs
         # unless the caller explicitly passes the name (or inherits secrets).
         workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text(encoding="utf-8")
         )
         events = workflow.get("on", workflow.get(True))
         name = "PAWLOCAL_CONFIG_GITHUB_TOKEN"
         self.assertTrue(events["workflow_call"]["secrets"][name]["required"])
-        harness = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
-        self.assertEqual(
-            harness["jobs"]["reconciliation-smoke"]["secrets"],
-            {name: "${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}"},
-        )
+        caller = yaml.safe_load((ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8"))
+        self.assertEqual(caller["jobs"]["reconcile-preflight"]["secrets"], {name: "${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}"})
         steps = workflow["jobs"]["reconcile"]["steps"]
         guard_index = next(
             i

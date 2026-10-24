@@ -1,4 +1,4 @@
-name: Change authorization
+name: Automation · Authorize proposed changes
 
 on:
   pull_request_target:

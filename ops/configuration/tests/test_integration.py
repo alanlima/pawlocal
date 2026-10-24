@@ -172,9 +172,9 @@ class IntegrationTests(unittest.TestCase):
                     ),
                 ):
                     build.main()
-                self.assertEqual(output.read_text(), "prior-step-marker\n")
+                self.assertEqual(output.read_text(encoding="utf-8"), "prior-step-marker\n")
         for filename in ("fullstack-release.yml", "deploy-production.yml"):
-            source = (ROOT / ".github/workflows" / filename).read_text()
+            source = (ROOT / ".github/workflows" / filename).read_text(encoding="utf-8")
             self.assertLess(
                 source.index("build-config.py"),
                 source.index("role-to-assume: ${{ env.PAWLOCAL_DEPLOY_ROLE_ARN }}"),
@@ -426,7 +426,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_destroy_cleanup_retries_only_after_verified_present_empty_state(self):
         workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/terraform-environment-destroy.yml").read_text()
+            (ROOT / ".github/workflows/terraform-environment-destroy.yml").read_text(encoding="utf-8")
         )
         cleanup_job = workflow["jobs"]["cleanup-generated-targets"]
         self.assertEqual(cleanup_job["needs"], ["prepare-plan", "destroy-apply"])
@@ -468,7 +468,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_nested_lifecycle_lock_contract(self):
         def load(name):
-            return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+            return yaml.safe_load((ROOT / ".github/workflows" / name).read_text(encoding="utf-8"))
 
         terraform = load("terraform-environment.yml")
         reconcile = load("reconcile-environment.yml")
@@ -478,14 +478,14 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(
             parents,
             [
-                "Full-stack release to development",
-                "Promote verified release to production",
+                "Release · Publish and verify development",
+                "Release · Promote verified release to production",
             ],
         )
         self.assertEqual(
             group,
             "${{ contains(fromJSON('"
-            + json.dumps(parents, separators=(",", ":"))
+            + json.dumps(parents, separators=(",", ":"), ensure_ascii=False)
             + "'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment)"
             + " || format('pawlocal-lifecycle-{0}', inputs.environment) }}",
         )
@@ -511,14 +511,11 @@ class IntegrationTests(unittest.TestCase):
             destroy["jobs"]["cleanup-generated-targets"]["uses"],
             "./.github/workflows/cleanup-destroyed-configuration.yml",
         )
-        self.assertNotIn(
-            "caller_holds_lifecycle_lock",
-            load("ci.yml")["jobs"]["reconciliation-smoke"]["with"],
-        )
+        self.assertNotIn("reconciliation-smoke", load("ci.yml")["jobs"])
         # Pin the expression above, then exercise its caller cases. GitHub keeps
         # the original caller name in nested calls, including generic callers.
         for caller in (
-            "Terraform environment plan and apply",
+            "Infrastructure · Plan and apply environment",
             *parents,
             "Other automation",
         ):
@@ -595,7 +592,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_warning_only_workflow_keeps_setup_failures_from_running_sync(self):
         workflow = yaml.safe_load(
-            (ROOT / ".github/workflows/reconcile-environment.yml").read_text()
+            (ROOT / ".github/workflows/reconcile-environment.yml").read_text(encoding="utf-8")
         )
         events = workflow.get("on", workflow.get(True))
         self.assertIs(
@@ -628,7 +625,7 @@ class IntegrationTests(unittest.TestCase):
             "steps.sync.outputs.reconciled == 'true'", steps["consumer"]["if"]
         )
         terraform = yaml.safe_load(
-            (ROOT / ".github/workflows/terraform-environment.yml").read_text()
+            (ROOT / ".github/workflows/terraform-environment.yml").read_text(encoding="utf-8")
         )
         for job in ("reconcile-preflight", "reconcile-after-apply"):
             self.assertIs(terraform["jobs"][job]["with"]["fail_on_error"], False)
@@ -682,7 +679,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_pipeline_dependency_and_lock_order_prevents_failure_publication(self):
         load = lambda name: yaml.safe_load(
-            (ROOT / ".github/workflows" / name).read_text()
+            (ROOT / ".github/workflows" / name).read_text(encoding="utf-8")
         )
         tf = load("terraform-environment.yml")
         self.assertIn("reconcile-preflight", tf["jobs"]["plan"]["needs"])
@@ -700,7 +697,7 @@ class IntegrationTests(unittest.TestCase):
             ("fullstack-release.yml", "verify-development"),
             ("deploy-production.yml", "verify-production"),
         ):
-            source = (ROOT / ".github/workflows" / workflow).read_text()
+            source = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
             self.assertNotIn("vars.VITE_COGNITO_CLIENT_ID", source)
             self.assertIn("outputs.frontend_config", source)
             self.assertIn("terraform-", str(load(workflow)["jobs"][verify]["needs"]))
@@ -720,7 +717,7 @@ class IntegrationTests(unittest.TestCase):
             if "configure-aws-credentials" in step.get("uses", "")
         )
         self.assertFalse(reader["with"]["mask-aws-account-id"])
-        self.assertNotIn("CI manual full suite", reconcile["concurrency"]["group"])
+        self.assertNotIn("Quality · Run complete validation suite", reconcile["concurrency"]["group"])
         self.assertIn("pawlocal-lifecycle-", reconcile["concurrency"]["group"])
         self.assertNotEqual(
             reconcile["concurrency"]["group"],

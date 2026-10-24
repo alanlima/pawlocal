@@ -1,4 +1,4 @@
-name: Grafana production folder and Faro setup
+name: Operations · Configure production monitoring
 
 on:
   workflow_dispatch:

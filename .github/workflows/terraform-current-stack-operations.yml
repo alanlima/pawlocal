@@ -1,4 +1,4 @@
-name: Legacy combined-state Terraform operations (disabled)
+name: Retired · Combined-state infrastructure operations
 
 on:
   workflow_dispatch:

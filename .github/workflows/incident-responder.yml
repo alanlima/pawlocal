@@ -1,4 +1,5 @@
-name: Controlled incident response
+name: Automation · Recover from an application incident
+run-name: 'Automation · Recover from an application incident · ${{ github.ref_name }} · ${{ github.sha }}'
 
 on:
   workflow_dispatch:

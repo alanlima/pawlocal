@@ -1,4 +1,4 @@
-name: Seed development Aurora DSQL
+name: Operations · Seed development catalogue
 
 on:
   workflow_dispatch:

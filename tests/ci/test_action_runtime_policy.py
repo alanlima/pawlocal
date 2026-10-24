@@ -79,12 +79,14 @@ def workflow_files() -> list[Path]:
 def step_action_references(workflow: dict[str, Any]) -> Iterator[tuple[str, str]]:
     """Yield every step-level external action reference and its location.
 
-    Job-level ``uses`` entries call reusable workflows and are intentionally outside
-    this JavaScript action-runtime policy. Local actions are also repository-owned,
-    so only external step references are returned.
+    Job-level reusable calls remain outside this runtime policy. Composite action
+    metadata is scanned separately, including every nested external step.
     """
 
-    for job_name, job in workflow.get("jobs", {}).items():
+    jobs = dict(workflow.get("jobs", {}))
+    if workflow.get("runs", {}).get("using") == "composite":
+        jobs["composite"] = {"steps": workflow["runs"]["steps"]}
+    for job_name, job in jobs.items():
         if not isinstance(job, dict):
             continue
         for step_number, step in enumerate(job.get("steps", []), start=1):
@@ -152,7 +154,7 @@ class ActionRuntimePolicyTests(unittest.TestCase):
             action: [] for action in (REQUIRED_ACTION_MAJORS | PINNED_ACTIONS)
         }
 
-        for path in workflow_files():
+        for path in [*workflow_files(), *Path(".github/actions").rglob("action.yml"), *Path(".github/actions").rglob("action.yaml")]:
             workflow = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
             for uses, location in step_action_references(workflow):
                 action, actual_major = validate_action_reference(
@@ -166,7 +168,7 @@ class ActionRuntimePolicyTests(unittest.TestCase):
 
     def test_download_artifact_exception_remains_evidence_based(self) -> None:
         references = []
-        for path in workflow_files():
+        for path in [*workflow_files(), *Path(".github/actions").rglob("action.yml"), *Path(".github/actions").rglob("action.yaml")]:
             workflow = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
             for uses, _location in step_action_references(workflow):
                 if uses.startswith("actions/download-artifact@"):

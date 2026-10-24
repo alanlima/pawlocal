@@ -1,4 +1,4 @@
-name: Grafana development folder and Faro setup
+name: Operations · Configure development monitoring
 
 on:
   workflow_dispatch:

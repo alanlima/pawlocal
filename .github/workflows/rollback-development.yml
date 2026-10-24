@@ -1,4 +1,4 @@
-name: Legacy development rollback (disabled)
+name: Retired · Combined-state development rollback
 
 on:
   workflow_dispatch:

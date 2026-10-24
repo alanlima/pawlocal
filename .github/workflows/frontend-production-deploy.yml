@@ -1,4 +1,4 @@
-name: Deprecated mock-backed frontend deployment (disabled)
+name: Retired · Static frontend deployment
 
 on:
   push:

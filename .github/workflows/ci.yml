@@ -1,40 +1,19 @@
-name: CI manual full suite
+name: Quality · Run complete validation suite
 
 on:
   workflow_dispatch:
-    inputs:
-      reconciliation_smoke:
-        description: Run only protected development reconciliation from this reviewed ref
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
   frontend:
-    if: ${{ !inputs.reconciliation_smoke }}
     uses: ./.github/workflows/frontend-deploy.yml
   backend:
-    if: ${{ !inputs.reconciliation_smoke }}
     uses: ./.github/workflows/backend-ci.yml
   compose:
-    if: ${{ !inputs.reconciliation_smoke }}
     uses: ./.github/workflows/compose-ci.yml
   terraform:
-    if: ${{ !inputs.reconciliation_smoke }}
     uses: ./.github/workflows/terraform-ci.yml
   workflow-validation:
-    if: ${{ !inputs.reconciliation_smoke }}
     uses: ./.github/workflows/workflow-validation.yml
-  reconciliation-smoke:
-    if: ${{ inputs.reconciliation_smoke }}
-    permissions:
-      contents: read
-      id-token: write
-    uses: ./.github/workflows/reconcile-environment.yml
-    secrets:
-      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
-    with:
-      environment: development
-      mode: audit

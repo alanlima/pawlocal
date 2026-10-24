@@ -395,7 +395,7 @@ elif args[:2] == ['s3', 'cp'] and args[3].endswith('/index.html'):
 
     def test_development_rollback_requires_prior_verified_release(self) -> None:
         workflow = (ROOT / ".github/workflows/rollback-development.yml").read_text(encoding="utf-8")
-        self.assertIn("Legacy development rollback (disabled)", workflow)
+        self.assertIn("Retired · Combined-state development rollback", workflow)
         self.assertIn("Issue #44", workflow)
         self.assertNotIn("terraform apply", workflow)
         self.assertNotIn("run-deployment-adapter.sh", workflow)

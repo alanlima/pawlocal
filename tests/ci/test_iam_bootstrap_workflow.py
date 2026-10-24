@@ -726,7 +726,7 @@ class DiagnosticsTests(unittest.TestCase):
                  patch("sys.argv", [str(SCRIPT), "plan"]), contextlib.redirect_stdout(io.StringIO()) as console, \
                  contextlib.redirect_stderr(io.StringIO()) as stderr:
                 self.assertEqual(bootstrap.main(), 1)
-            text = summary.read_text() + console.getvalue()
+            text = summary.read_text(encoding="utf-8") + console.getvalue()
             self.assertIn("AccessDenied: missing s3:ListBucket", stderr.getvalue())
             self.assertIn("OPERATION_FAILED", text)
             self.assertIn("fresh **plan**", text)
@@ -748,8 +748,8 @@ class DiagnosticsTests(unittest.TestCase):
             with patch.object(bootstrap, "PRIVATE", Path(directory) / "private"), patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}):
                 bootstrap.save("apply-status.json", {"started": True, "applied": False})
                 bootstrap.failure_summary("apply", "COMMAND_FAILED")
-            self.assertIn("partially changed AWS", summary.read_text())
-            self.assertIn("Do not replay", summary.read_text())
+            self.assertIn("partially changed AWS", summary.read_text(encoding="utf-8"))
+            self.assertIn("Do not replay", summary.read_text(encoding="utf-8"))
 
 
     def test_collision_does_not_silently_adopt_existing_ssm_parameter(self):
@@ -773,13 +773,13 @@ class DiagnosticsTests(unittest.TestCase):
 class WorkflowContractTests(unittest.TestCase):
     def test_dependency_installation_finishes_before_aws_credentials_are_available(self):
         import yaml
-        workflow = yaml.safe_load(Path(".github/workflows/terraform-iam-bootstrap.yml").read_text())
+        workflow = yaml.safe_load(Path(".github/workflows/terraform-iam-bootstrap.yml").read_text(encoding="utf-8"))
         for name in ("plan", "apply"):
             job = workflow["jobs"][name]
             steps = job["steps"]
             setup_python = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("actions/setup-python@"))
             dependencies = next(index for index, step in enumerate(steps) if "pip install" in step.get("run", ""))
-            terraform = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("hashicorp/setup-terraform@"))
+            terraform = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("./.github/actions/setup-terraform-toolchain"))
             credentials = next(index for index, step in enumerate(steps) if step.get("uses", "").startswith("aws-actions/configure-aws-credentials@"))
             with self.subTest(job=name):
                 self.assertEqual(dependencies, setup_python + 1)
@@ -790,7 +790,7 @@ class WorkflowContractTests(unittest.TestCase):
                 self.assertNotIn("secrets.", json.dumps(steps[terraform]))
 
     def test_workflow_keeps_human_gate_and_noop_bypass(self):
-        text = Path(".github/workflows/terraform-iam-bootstrap.yml").read_text()
+        text = Path(".github/workflows/terraform-iam-bootstrap.yml").read_text(encoding="utf-8")
         self.assertIn("environment: iam-bootstrap-apply", text)
         self.assertIn("needs.plan.outputs.has_changes == 'true'", text)
         self.assertIn("environment: iam-bootstrap-plan", text)
@@ -807,7 +807,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(text.count("Report incomplete setup or execution"), 2)
 
     def test_runtime_never_replans_in_apply_and_never_uses_unsafe_flags(self):
-        text = SCRIPT.read_text()
+        text = SCRIPT.read_text(encoding="utf-8")
         apply_body = text.split("def apply_plan():", 1)[1].split("def failure_summary", 1)[0]
         self.assertNotIn('tf("plan"', apply_body)
         self.assertIn('tf("apply", "-input=false", "-lock-timeout=5m", str(path))', apply_body)
