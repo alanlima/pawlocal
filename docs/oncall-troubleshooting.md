@@ -273,4 +273,22 @@ After each regression process exits, trusted code quiesces residual test process
 
 Incident frontend validation uses the trusted `build:check` script for the same TypeScript/Vite compile used by ordinary `build`. Ordinary release `build` retains its cloud-configuration prebuild and release-bundle postbuild validators. The isolated compile needs no deployment identity or release credentials and publishes no artifact. A credential-free hosted fixture covers actual seal, fail on affected/current main, pass on candidate/full backend tests, real Vitest JSON reports, normal frontend checks/compile, and fresh review readback/binding.
 
-The separately approved temporary $300/40-run capacity context retains the $76.176 two-role envelope and all request/role/deadline limits. With $202.5592 already reserved, one further complete envelope would bring reservations to $278.7352; activation follows reviewed source merge separately. No consumed generation is retried or refunded.
+### Symptom: functional checks pass but required backend CI reports Ruff I001
+
+A generated regression can demonstrate the application failure yet fail required `ruff check .` because its imports are not formatted correctly. Trusted validation runs the required backend quality sequence **before any authentic regression executes**: Ruff, baseline DSQL lint, actual candidate search SQL rendering/lint, Alembic upgrade and complete pytest including PostgreSQL integration tests. This mirrors required CI's lint-before-test ordering; it does not claim candidate-owned sources remain immutable after arbitrary test code executes. A malformed-import candidate produces no eligible checks receipt.
+
+Tools and dependency metadata (`[test,dsql-prototype]`) come from immutable main. The fixer can run preinstalled Ruff and correct only its allowlisted files before sealing; the fresh reviewer runs check only and reports findings without changing the candidate. The printed model command includes `--no-cache` so checking also works in the reviewer's read-only sandbox without a workspace cache. Trusted validators never auto-fix sealed bytes. The actual pinned Codex sandbox fixture verifies Ruff I001, a scoped import fix with unchanged Python AST, and a clean recheck while external network sockets remain denied.
+
+### Disposable backend quality and release validation
+
+Only trusted check/review and quality-fixture jobs have a disposable PostgreSQL service bound to `127.0.0.1:5432`, using public test credentials. The harness projects only the exact fixed test URL into its unprivileged test process; cloud database URLs, host aliases and query overrides are rejected. Full-suite JUnit must show all three known PostgreSQL integration tests passed without skips. This requires no deployment, AWS, Grafana or production-database credentials and does not relax model sandbox isolation.
+
+Search SQL is rendered as the isolated UID through a runner-owned helper outside the candidate. Its stdout file is capped by a process/descendant kernel file-size limit, including Python, direct descriptor and subprocess writes. After quiescence, bounded regular/no-follow readback copies at most 1 MiB to a runner-owned read-only lint input. The generated SQL and full-suite XML have separate fixed paths; regression reports are not reused.
+
+Frontend disposable checks retain format/lint, tests and the real `build:check` TypeScript/Vite compile. Ordinary `build` still runs cloud release pre/post validators. Real required candidate PR CI remains the final independent gate; passing trusted checks never bypasses it. Record actual hosted fixture evidence for the implementation head before another paid attempt.
+
+### Provider usage and the proposed temporary capacity ceiling
+
+Provider usage and PawLocal reservations measure different things. The #329 numeric reports contain 27 inference requests, 799,764 input tokens and 9,679 output tokens; cached input and reasoning output are subsets, not extra tokens. Request budgeting reserved 3,402,000 output tokens, and admission separately reserved the full $76.176 two-role envelope. Neither lower actual usage nor a failed merge refunds these reservations or the consumed generation.
+
+The previously activated capacity context was $300/40 runs. Issue #331 proposes a temporary **$400 monthly ceiling with 40 runs**, keeping 126,000 output tokens per call, 64 calls and the $76.176 envelope unchanged. At the recorded October ledger total of $278.7352, one further full envelope would total $354.9112. The proposed profile is not activated by source or documentation changes: activation requires reviewed merge and separate protected-profile readback. No consumed generation is retried or refunded.

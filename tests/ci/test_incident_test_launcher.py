@@ -1,3 +1,4 @@
+import ast
 import errno
 import importlib.util
 import os
@@ -217,6 +218,80 @@ def test_external_socket_creation_remains_denied():
             self.assertEqual(passed.returncode, 0, passed.stdout + passed.stderr)
             self.assertIn("2 passed", passed.stdout)
             self.assertNotIn("skipped", passed.stdout)
+            # Same sandbox, authentic dirty generated imports; Ruff is a real
+            # preinstalled binary and only the named source file may be fixed.
+            dirty = work / "test_incident_regression.py"
+            dirty.write_bytes(
+                (
+                    ROOT
+                    / "tests/ci/fixtures/incident-handoff/backend-dirty-regression.py"
+                ).read_bytes()
+            )
+            before = ast.dump(ast.parse(dirty.read_text()))
+            lint_prefix = [
+                codex,
+                "sandbox",
+                "-P",
+                ":workspace",
+                "-C",
+                str(work),
+                "--",
+                sys.executable,
+                "-m",
+                "ruff",
+                "check",
+            ]
+            rejected = subprocess.run(
+                [*lint_prefix, str(dirty)],
+                cwd=work,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("I001", rejected.stdout)
+            fixed = subprocess.run(
+                [*lint_prefix, "--fix", str(dirty)],
+                cwd=work,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(fixed.returncode, 0, fixed.stdout + fixed.stderr)
+            clean = subprocess.run(
+                [*lint_prefix, str(dirty)],
+                cwd=work,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            self.assertEqual(before, ast.dump(ast.parse(dirty.read_text())))
+            review_prefix = list(lint_prefix)
+            review_prefix[review_prefix.index(":workspace")] = ":read-only"
+            reviewed = subprocess.run(
+                [*review_prefix, "--no-cache", str(dirty)],
+                cwd=work,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(reviewed.returncode, 0, reviewed.stdout + reviewed.stderr)
+            self.assertEqual(before, ast.dump(ast.parse(dirty.read_text())))
+            print(
+                "Pinned read-only reviewer sandbox: real Ruff --no-cache check passes without workspace writes"
+            )
+            print(
+                "Pinned workspace sandbox: real Ruff I001 -> allowlisted import fix -> clean check; AST and external-network denial unchanged"
+            )
 
 
 if __name__ == "__main__":

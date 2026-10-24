@@ -275,7 +275,7 @@ def prepare(role):
                 str(dependencies / "venv/bin/pip"),
                 "install",
                 "--disable-pip-version-check",
-                ".[test]",
+                ".[test,dsql-prototype]",
             ],
             cwd=backend_source,
             check=True,
@@ -385,6 +385,14 @@ def prepare(role):
         "/tmp/pawlocal-oncall-dependencies/venv/bin/python "
         "/tmp/pawlocal-oncall-dependencies/backend-test-launcher.py "
         "backend/tests/test_incident_regression.py.\n"
+        "Backend quality: from backend run "
+        "/tmp/pawlocal-oncall-dependencies/venv/bin/ruff check --no-cache .; "
+        "the fixer must correct diagnostics only in its allowlisted files before "
+        "completion (ruff check --fix may organize those named files). The fresh "
+        "reviewer must run check only and report findings without modifying the "
+        "candidate. Trusted checks also run SQL lint, migrations and full "
+        "PostgreSQL tests against a disposable local service outside this sandbox; "
+        "do not contact any database or change sandbox isolation.\n"
         "Frontend: from frontend run npm run check, npm test -- --run, and "
         "npm run build:check; node_modules points to "
         "the trusted dependency tree. Do not install/change dependencies.\n"

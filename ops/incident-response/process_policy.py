@@ -11,8 +11,18 @@ DEPENDENCIES = "/tmp/pawlocal-oncall-dependencies"
 CHECK_REPORTS = {
     f"/tmp/pawlocal-oncall-check-work/{source}/{report}"
     for source in ("affected", "main", "candidate")
-    for report in ("backend-regression.xml", "frontend-regression.json")
+    for report in (
+        "backend-regression.xml",
+        "frontend-regression.json",
+    )
 }
+CHECK_REPORTS |= {
+    "/tmp/pawlocal-oncall-check-work/candidate/backend-quality.xml",
+    "/tmp/pawlocal-oncall-check-work/candidate/backend-search.sql",
+}
+TEST_DATABASE_URL = (
+    "postgresql+psycopg://pawlocal:pawlocal-ci-password@127.0.0.1:5432/pawlocal_test"
+)
 HOME_FILES = {
     "/home/oncall/" + name
     for name in ("candidate.diff", "review-schema.json", "incident-prompt.md")
@@ -38,6 +48,24 @@ def unprivileged(command):
         ],
     ):
         return True
+    if command in (
+        [DEPENDENCIES + "/venv/bin/ruff", "check", "."],
+        [DEPENDENCIES + "/venv/bin/python", DEPENDENCIES + "/render-check-sql.py"],
+        [DEPENDENCIES + "/venv/bin/alembic", "-c", "alembic.ini", "upgrade", "head"],
+        [
+            DEPENDENCIES + "/venv/bin/python",
+            "-m",
+            "pytest",
+            "--junitxml=../backend-quality.xml",
+        ],
+        [DEPENDENCIES + "/venv/bin/dsql-lint", DEPENDENCIES + "/rendered-search.sql"],
+    ):
+        return True
+    if command[0] == DEPENDENCIES + "/venv/bin/dsql-lint":
+        return len(command) > 1 and all(
+            re.fullmatch(r"migrations/dsql/0001_initial/[a-zA-Z0-9_-]+\.sql", name)
+            for name in command[1:]
+        )
     if command[0] == "npm":
         return command in (
             ["npm", "run", "check"],
@@ -64,7 +92,11 @@ def approved(command, input_data):
     if executable == sys.executable:
         return args == ["-m", "venv", DEPENDENCIES + "/venv"]
     if executable == DEPENDENCIES + "/venv/bin/pip":
-        return args == ["install", "--disable-pip-version-check", ".[test]"]
+        return args == [
+            "install",
+            "--disable-pip-version-check",
+            ".[test,dsql-prototype]",
+        ]
     if executable == "git":
         if args[:4] == ["clone", "--no-hardlinks", "--shared", "--no-checkout"]:
             return len(args) == 6 and all(
@@ -128,7 +160,10 @@ def approved(command, input_data):
         }
         while child and "=" in child[0]:
             key, value = child.pop(0).split("=", 1)
-            if key not in allowed or not value or "\n" in value:
+            if key in {"PAWLOCAL_DATABASE_URL", "PAWLOCAL_TEST_DATABASE_URL"}:
+                if value != TEST_DATABASE_URL:
+                    return False
+            elif key not in allowed or not value or "\n" in value:
                 return False
         return bool(child) and unprivileged(child)
     if args[:1] == ["tee"] and len(args) == 2:
@@ -232,6 +267,34 @@ def validate(command, input_data, options=None):
     cwd = options.get("cwd")
     if cwd is not None and not isinstance(cwd, (str, PurePath)):
         raise Denied("trusted directory path required")
+    if command[:5] == ["sudo", "-u", "oncall", "env", "-i"]:
+        child = command[5:]
+        while child and "=" in child[0]:
+            child = child[1:]
+        quality = child and (
+            child[0]
+            in {
+                DEPENDENCIES + "/venv/bin/ruff",
+                DEPENDENCIES + "/venv/bin/dsql-lint",
+                DEPENDENCIES + "/venv/bin/alembic",
+            }
+            or child
+            == [
+                DEPENDENCIES + "/venv/bin/python",
+                DEPENDENCIES + "/render-check-sql.py",
+            ]
+            or child
+            == [
+                DEPENDENCIES + "/venv/bin/python",
+                "-m",
+                "pytest",
+                "--junitxml=../backend-quality.xml",
+            ]
+        )
+        if quality and str(cwd) != "/tmp/pawlocal-oncall-check-work/candidate/backend":
+            raise Denied(
+                "quality commands require the fixed candidate backend directory"
+            )
     if command[0] == DEPENDENCIES + "/venv/bin/pip":
         temporary = os.environ.get("RUNNER_TEMP", "")
         allowed_cwd = {
