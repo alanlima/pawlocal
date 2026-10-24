@@ -351,7 +351,7 @@ Once the environment variable is saved, run the Terraform environment workflow s
 2. Click **Run workflow**:
    - **Environment**: `development`
    - **Phase**: `converge`
-   - **Backend image**: Paste the current deployed backend image tag. 
+   - **Backend image**: Paste the current deployed backend image tag.
      *(Find it quickly via CLI: `gh api /repos/<org>/<repo>/deployments?environment=development --jq ".[0].payload.backend_image"`)*
 3. Click **Run workflow**.
 4. The **Plan** step will show only the Lambda environment variables changing from the placeholders (`100001`/`200001`) to your real Dispatch App ID and Installation ID.
@@ -579,6 +579,8 @@ The gateway validates these fields against hard coded bounds. Your profile value
 
 Each role reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens before every forwarded request. The existing `4` / `16000` / `32000` profile therefore supports four turns of at most **8,000 output tokens** within the same 32,000-token role envelope. Reasoning and answer output share that allowance. The input, request, deadline and monthly gates can still stop work earlier. Integer remainders stay unallocated. Failed, interrupted and unknown responses consume their full reservation; there is no automatic refund or inference retry.
 
+Tuning must keep `output_per_role <= output_per_request * requests_per_role`. With four requests and a 32,000-token role ceiling, setting `output_per_request=8000` is valid and still yields 8,000 per turn. Setting it to `4000` also requires reducing `output_per_role` to at most `16000`; lowering only the per-request field makes the profile invalid. Values at or above `8000` remain capped at 8,000 per turn when the role ceiling stays 32,000. Reducing both ceilings reduces the reserved envelope; it does not refund consumed reservations.
+
 This allocation applies to existing approved profiles after the reviewed code is merged; no variable migration is needed for #301. The protected model/rate approval remains independent. Existing incident generations and monthly ledger reservations remain consumed: do not rerun or refund an escalated generation to activate the fix.
 
 ### Switching the approved profile to `gpt-5.4-mini`
@@ -593,10 +595,10 @@ With the recommended values and `gpt-5.4-mini` Standard global pricing:
 
 | Item | Calculation | Cost |
 |---|---|---|
-| Input per role (2 roles) | 200,000 tokens × 2 × $0.75/M | **$0.30** |
-| Output per role (2 roles) | 32,000 tokens × 2 × $4.50/M | **$0.288** |
+| Input per role (2 roles) | 200,000 tokens * 2 * $0.75/M | **$0.30** |
+| Output per role (2 roles) | 32,000 tokens * 2 * $4.50/M | **$0.288** |
 | **Per incident (worst-case)** | | **$0.588** |
-| **Monthly ceiling (20 runs)** | $0.588 × 20 | **$11.76** |
+| **Monthly ceiling (20 runs)** | $0.588 * 20 | **$11.76** |
 
 Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroom over the 20-run worst case while keeping a hard stop well below \$30.
 
