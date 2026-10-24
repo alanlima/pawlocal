@@ -787,6 +787,9 @@ Expected response: `204 No Content` (GitHub accepted dispatch). A `502` indicate
 4. Watch [GitHub Actions](https://github.com/<org>/<repo>/actions/workflows/incident-responder.yml) for the dispatched run.
 5. Verify the development demonstration (G2 gate): preflight claim → fixer → checks → reviewer → candidate PR → CI → squash merge → development deployment → recovery verification.
 
+> [!TIP]
+> If testing with a synthetic test alert (such as the payload above with a non-firing fingerprint), preflight will log `no firing alerts selected for admission` and set `admitted=false`. This confirms dispatch, elevated ruleset verification, and Grafana Stack authentication without claiming an issue or spending model quota. If preflight fails with `HTTP Error 401: Unauthorized`, see [Layer 4 troubleshooting](oncall-troubleshooting.md#layer-4--preflight-admission--alert-verification).
+
 > [!NOTE]
 > If `oncall-production` is not yet enabled, the run will verify development recovery and cleanly stop before production promotion. To test the full autonomous loop through production recovery, enable `PAWLOCAL_ONCALL_ENABLED=true` and `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED=true` in `oncall-production` as well.
 
@@ -876,6 +879,8 @@ The Lambda re-reads the SSM parameter on every request, so there is no cache to 
 ---
 
 ## Related documentation
+
+- [On-call responder troubleshooting guide](oncall-troubleshooting.md)
 
 - [Incident responder specification](specs/incident-responder.md)
 - [Hosted telemetry operations](hosted-telemetry-operations.md)
