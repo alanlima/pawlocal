@@ -194,6 +194,12 @@ Diagnostics contain fixed classifications and bounded upstream identifiers, not 
 
 Run [40080488159](https://github.com/alanlima/pawlocal/actions/runs/40080488159/job/120832914680) completed two model turns before continuation failed. The matching profile allowed 16,000 output tokens per request and 32,000 per role: the old allocator reserved 16,000 twice, then denied turn three locally. #301 allocates 8,000 per turn across four configured turns without increasing any ceiling. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Never automatically retry/refund this consumed incident generation.
 
+### Switching the incident model to `gpt-5.4-mini`
+
+Changing only `model` to `gpt-5.4-mini` does not update token budgets or pricing fields. For Standard global pricing reviewed 24 October 2026, use `input_rate=750000` and `output_rate=4500000` (microdollars per million tokens); the former `1100000`/`4400000` values underestimate this model's output rate. Keep the monthly ceiling at `monthly_microdollars=20000000` ($20) and `monthly_runs=20`.
+
+The four 8,000-token turns require the #301 code fix in [PR #302](https://github.com/alanlima/pawlocal/pull/302) to be reviewed and merged. Updating protected profile model/rate fields is a separate owner-reviewed rollout; it does not activate an unmerged code fix or restore consumed incident reservations. See [the detailed profile instructions and official pricing source](oncall-setup.md#switching-the-approved-profile-to-gpt-54-mini) before preparing the complete profile. No live profile is changed by this documentation.
+
 ### Symptom: `candidate changes touch non-allowlisted paths`
 
 * **Cause**: The Codex fixer agent generated diffs outside allowlisted application boundaries.
