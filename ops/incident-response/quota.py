@@ -101,16 +101,20 @@ class Profile:
             or value["output_per_request"] > 32000
         ):
             raise Denied("request limits exceed reviewed gateway bounds")
-        if (
-            not isinstance(value["rule_uids"], dict)
-            or set(value["rule_uids"]) != {"development", "production"}
-            or any(
-                not isinstance(uid, str)
-                or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", uid)
-                for uid in value["rule_uids"].values()
-            )
-        ):
-            raise Denied("explicit per-environment recovery rule UIDs required")
+        rule_uids = value.get("rule_uids")
+        if rule_uids is not None and rule_uids != {}:
+            if (
+                not isinstance(rule_uids, dict)
+                or set(rule_uids) != {"development", "production"}
+                or any(
+                    not isinstance(uid, str)
+                    or (uid and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", uid))
+                    for uid in rule_uids.values()
+                )
+            ):
+                raise Denied("explicit per-environment recovery rule UIDs required")
+        else:
+            value["rule_uids"] = {}
         for prefix in ("input", "output"):
             if (
                 value[f"{prefix}_per_role"]

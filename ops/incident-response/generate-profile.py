@@ -32,13 +32,13 @@ def main():
     )
     parser.add_argument(
         "--dev-rule-uid",
-        default="pawlocal-development-search-detail",
-        help="Grafana alert rule UID for the development environment (default: pawlocal-development-search-detail)",
+        default="",
+        help="Optional Grafana alert rule UID for dev (default: empty, matches dynamically by alert_name)",
     )
     parser.add_argument(
         "--prod-rule-uid",
-        default="pawlocal-production-search-detail",
-        help="Grafana alert rule UID for the production environment (default: pawlocal-production-search-detail)",
+        default="",
+        help="Optional Grafana alert rule UID for prod (default: empty, matches dynamically by alert_name)",
     )
     parser.add_argument(
         "--approval",
@@ -85,10 +85,14 @@ def main():
         "monthly_runs": args.monthly_runs,
         "promotion_seconds": 3600,
         "recovery_seconds": 720,
-        "rule_uids": {
-            "development": args.dev_rule_uid,
-            "production": args.prod_rule_uid,
-        },
+        "rule_uids": (
+            {
+                "development": args.dev_rule_uid,
+                "production": args.prod_rule_uid,
+            }
+            if (args.dev_rule_uid or args.prod_rule_uid)
+            else {}
+        ),
         "requests_per_role": 4,
         "input_per_request": 100000,
         "output_per_request": 16000,

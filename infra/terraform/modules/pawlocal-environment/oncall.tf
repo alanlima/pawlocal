@@ -6,7 +6,7 @@ variable "oncall_receiver" {
     repository_id    = string
     repository       = string
     allowed_services = set(string)
-    allowed_alerts   = set(string)
+    allowed_alerts   = optional(set(string), [])
     kms_key_arn      = optional(string)
   })
   default = null
@@ -17,8 +17,8 @@ variable "oncall_receiver" {
       can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$", var.oncall_receiver.repository)) &&
       !contains([".", ".."], try(split("/", var.oncall_receiver.repository)[1], "")) &&
       length(var.oncall_receiver.allowed_services) >= 1 && length(var.oncall_receiver.allowed_services) <= 10 &&
-      length(var.oncall_receiver.allowed_alerts) >= 1 && length(var.oncall_receiver.allowed_alerts) <= 10 &&
-      alltrue([for value in setunion(var.oncall_receiver.allowed_services, var.oncall_receiver.allowed_alerts) : can(regex("^[a-z][a-z0-9-]{0,99}$", value))]) &&
+      try(length(var.oncall_receiver.allowed_alerts), 0) <= 20 &&
+      alltrue([for value in setunion(var.oncall_receiver.allowed_services, coalesce(var.oncall_receiver.allowed_alerts, [])) : can(regex("^[a-z0-9][a-z0-9-]{0,99}$", value))]) &&
       (var.oncall_receiver.kms_key_arn == null || can(regex("^arn:${data.aws_partition.current.partition}:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/[0-9a-f-]{36}$", var.oncall_receiver.kms_key_arn)))
     )
     error_message = "Receiver configuration needs safe numeric App/installation/repository IDs, bounded service/alert allow-lists and, when supplied, an exact existing KMS key in this account/region."
@@ -83,7 +83,7 @@ module "oncall_receiver" {
     PAWLOCAL_DISPATCH_REPOSITORY_ID   = var.oncall_receiver.repository_id
     PAWLOCAL_DISPATCH_REPOSITORY      = var.oncall_receiver.repository
     PAWLOCAL_ONCALL_ALLOWED_SERVICES  = jsonencode(sort(tolist(var.oncall_receiver.allowed_services)))
-    PAWLOCAL_ONCALL_ALLOWED_ALERTS    = jsonencode(sort(tolist(var.oncall_receiver.allowed_alerts)))
+    PAWLOCAL_ONCALL_ALLOWED_ALERTS    = var.oncall_receiver.allowed_alerts == null || length(var.oncall_receiver.allowed_alerts) == 0 ? "[]" : jsonencode(sort(tolist(var.oncall_receiver.allowed_alerts)))
   }
   tags       = local.common_tags
   depends_on = [aws_iam_role_policy.oncall_runtime]

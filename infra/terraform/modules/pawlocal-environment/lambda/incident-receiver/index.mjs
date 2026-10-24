@@ -48,10 +48,21 @@ export function configuration(env = process.env) {
       !/^[1-9][0-9]{0,15}$/.test(env.PAWLOCAL_DISPATCH_REPOSITORY_ID ?? '') ||
       !Number.isSafeInteger(Number(env.PAWLOCAL_DISPATCH_REPOSITORY_ID)) ||
       Number(env.PAWLOCAL_DISPATCH_REPOSITORY_ID) < 1) reject(503, 'unconfigured');
+  const parseAlerts = value => {
+    if (value === undefined || value === null || value === '' || value === 'null' || value === '[]') return null;
+    let list;
+    try { list = JSON.parse(value); } catch { reject(503, 'unconfigured'); }
+    if (!Array.isArray(list)) reject(503, 'unconfigured');
+    if (list.length === 0) return null;
+    if (list.length > 50 || !list.every(item => bounded(item, 100) && /^[a-z0-9][a-z0-9-]*$/i.test(item)) || new Set(list).size !== list.length) {
+      reject(503, 'unconfigured');
+    }
+    return new Set(list);
+  };
   return {
     environment, project, repository, repositoryOwner: repository.split('/')[0],
     services: parseList(env.PAWLOCAL_ONCALL_ALLOWED_SERVICES, /^[a-z][a-z0-9-]*$/),
-    alerts: parseList(env.PAWLOCAL_ONCALL_ALLOWED_ALERTS, /^[a-z][a-z0-9-]*$/),
+    alerts: parseAlerts(env.PAWLOCAL_ONCALL_ALLOWED_ALERTS),
     appId: env.PAWLOCAL_DISPATCH_APP_ID,
     installationId: env.PAWLOCAL_DISPATCH_INSTALLATION_ID,
     repositoryId: env.PAWLOCAL_DISPATCH_REPOSITORY_ID,
@@ -112,7 +123,9 @@ export function normalize(bytes, config) {
         Object.keys(alert.labels).length > 32 || !/^[a-f0-9]{16,64}$/.test(alert.fingerprint ?? '')) reject(400, 'invalid_alert');
     if (!Object.entries(alert.labels).every(([key, value]) => bounded(key, 64) && bounded(value, 256))) reject(400, 'invalid_labels');
     const { environment, service, alertname, release } = alert.labels;
-    if (environment !== config.environment || !config.services.has(service) || !config.alerts.has(alertname)) reject(403, 'alert_not_allowed');
+    if (environment !== config.environment || !config.services.has(service)) reject(403, 'alert_not_allowed');
+    if (!bounded(alertname, 100) || !/^[a-z0-9][a-z0-9-]*$/i.test(alertname)) reject(400, 'invalid_alert_name');
+    if (config.alerts && config.alerts.size > 0 && !config.alerts.has(alertname)) reject(403, 'alert_not_allowed');
     if (release !== undefined && !/^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$/.test(release)) reject(400, 'invalid_release');
     const startsAt = date(alert.startsAt);
     const endsAt = date(alert.endsAt, true);

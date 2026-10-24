@@ -113,11 +113,12 @@ def _scope(
         isinstance(service, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", service),
         "recovery service invalid",
     )
-    rule_uid = profile.rule_uids.get(environment, "")
-    _require(
-        isinstance(rule_uid, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", rule_uid),
-        "recovery rule unavailable",
-    )
+    rule_uid = profile.rule_uids.get(environment, "") if hasattr(profile, "rule_uids") and isinstance(profile.rule_uids, dict) else ""
+    if rule_uid:
+        _require(
+            re.fullmatch(r"[A-Za-z0-9_-]{1,40}", rule_uid),
+            "recovery rule unavailable",
+        )
     stack = _origin(stack_url)
     _require(
         re.fullmatch(r"https://[a-z0-9-]+\.grafana\.net", stack) and query_token,
@@ -135,7 +136,7 @@ def _scope(
     return rule_uid, stack, frontend, api_origin
 
 
-def _rule(rules, environment, service, rule_uid, metrics_uid):
+def _rule(rules, environment, service, rule_uid, metrics_uid, alert_name=None):
     _require(
         isinstance(rules, dict) and isinstance(rules.get("data"), dict),
         "recovery rule schema invalid",
@@ -156,13 +157,30 @@ def _rule(rules, environment, service, rule_uid, metrics_uid):
         ),
         "recovery rule group schema invalid",
     )
-    matches = [
-        rule
-        for group in groups
-        for rule in group.get("rules", [])
-        if rule.get("uid") == rule_uid
-    ]
-    _require(len(matches) == 1, "recovery exact rule unavailable")
+    if rule_uid:
+        matches = [
+            rule
+            for group in groups
+            for rule in group.get("rules", [])
+            if rule.get("uid") == rule_uid
+        ]
+    elif alert_name:
+        matches = [
+            rule
+            for group in groups
+            for rule in group.get("rules", [])
+            if rule.get("name") == alert_name
+            or (rule.get("labels") or {}).get("alertname") == alert_name
+        ]
+    else:
+        matches = [
+            rule
+            for group in groups
+            for rule in group.get("rules", [])
+            if (rule.get("labels") or {}).get("environment") == environment
+            and (rule.get("labels") or {}).get("service") == service
+        ]
+    _require(len(matches) >= 1, "recovery exact rule unavailable")
     rule = matches[0]
     sources = rule.get("queriedDatasourceUIDs")
     _require(
@@ -205,6 +223,7 @@ def observe(
     profile,
     *,
     service,
+    alert_name=None,
     api_base_url,
     frontend_origin,
     stack_url,
@@ -335,7 +354,7 @@ def observe(
             "recovery detail mismatch",
         )
         rules = request(stack + "/api/prometheus/grafana/api/v1/rules", secret=True)
-        rule = _rule(rules, environment, service, rule_uid, uid)
+        rule = _rule(rules, environment, service, rule_uid, uid, alert_name=alert_name)
         instances = rule["alerts"]
         # Grafana retains Normal instances on inactive healthy rules; an empty
         # list is not the only healthy API shape (official api_prometheus_test).

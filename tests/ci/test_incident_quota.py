@@ -141,6 +141,10 @@ class QuotaTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(quota.Denied):
                 self.profile(**changed)
 
+    def test_empty_or_omitted_rule_uids_is_valid(self):
+        empty_profile = self.profile(rule_uids={})
+        self.assertEqual(empty_profile.rule_uids, {})
+
     def test_stale_future_missing_or_unapproved_rate_provenance_denies(self):
         for changes in (
             {"approved_month": "2000-01"},
