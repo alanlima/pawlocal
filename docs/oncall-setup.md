@@ -42,37 +42,123 @@ Confirm each item is complete before continuing:
 
 ## Step 1 — Create the Dispatch GitHub App
 
-The Dispatch App allows the Lambda receiver to trigger `incident-responder.yml` on `main`.
+The Dispatch App allows the Lambda receiver to trigger `incident-responder.yml` on `main`. Fill in every field exactly as shown below.
 
-1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**.
-2. Set **App name** (e.g. `pawlocal-incident-dispatcher`).
-3. Set **Homepage URL** to your deployment URL (e.g. `https://pawlocal.example.com`).
-4. Uncheck **Webhook → Active** (no webhooks needed).
-5. Under **Repository permissions**, set **Actions → Read and write**.
-6. Click **Create GitHub App** and note the **App ID** shown on the app's settings page.
-7. Scroll to **Private keys** and click **Generate a private key**. Save the downloaded `.pem` file securely.
-8. Click **Install App** (left sidebar), click **Install** under your account, choose **Only select repositories**, and pick `<your-org>/<your-repo>`.
-9. After installing, note the **Installation ID** from the URL bar (the number at the end of `github.com/settings/installations/<id>`).
+### 1a. Register the App
+
+Go to [github.com/settings/apps/new](https://github.com/settings/apps/new).
+
+| Field | Value |
+|---|---|
+| **GitHub App name** | `pawlocal-incident-dispatcher` |
+| **Description** | Dispatches the PawLocal automated incident-response workflow when a signed Grafana alert is received by the Lambda receiver. Holds only Actions write on the configured repository; no content, PR or merge authority. |
+| **Homepage URL** | `https://pawlocal.alanlima.cloud` *(replace with your production domain)* |
+
+### 1b. Webhook section
+
+Uncheck **Active** under the **Webhook** section. Leave the Webhook URL field empty. The Dispatch App does not receive webhooks — it only calls the GitHub API to dispatch a workflow.
+
+### 1c. Repository permissions
+
+Expand **Repository permissions** and set:
+
+| Permission | Level |
+|---|---|
+| **Actions** | Read and write |
+
+Leave every other repository and account permission as **No access**.
+
+### 1d. Where can this GitHub App be installed?
+
+Select **Only on this account**. This prevents the App from being installed on other accounts.
+
+### 1e. Create and note the App ID
+
+Click **Create GitHub App**. On the App settings page that opens:
+
+- Copy the **App ID** (shown near the top, e.g. `1234567`). You will use it in Step 5.
+
+### 1f. Generate a private key
+
+Scroll to the **Private keys** section and click **Generate a private key**. A `.pem` file downloads automatically. Store it securely — you will need it in Step 3.
+
+> [!CAUTION]
+> Never commit the `.pem` file to the repository. Treat it like a password.
+
+### 1g. Install the App on your repository
+
+1. In the left sidebar click **Install App**.
+2. Click **Install** next to your account (`alanlima`).
+3. Select **Only select repositories**, then choose `alanlima/pawlocal`.
+4. Click **Install**.
+5. After installing, look at the browser URL bar. It will read something like `github.com/settings/installations/12345678`. The number at the end is the **Installation ID**. Copy it.
+
+You now have three values needed later:
+- App ID (from 1e)
+- Installation ID (from 1g)
+- Private key `.pem` file (from 1f)
 
 ---
 
 ## Step 2 — Create the Publisher GitHub App
 
-The Publisher App allows trusted workflow jobs to create PRs, post status checks, and squash-merge incident fixes.
+The Publisher App is used exclusively by trusted workflow jobs to create the incident PR, post commit status checks, and perform the squash merge. It never executes candidate code or holds deployment credentials.
 
-1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**.
-2. Set **App name** (e.g. `pawlocal-incident-publisher`).
-3. Set **Homepage URL** to your deployment URL.
-4. Uncheck **Webhook → Active**.
-5. Under **Repository permissions**, set:
-   - **Contents → Read and write**
-   - **Pull requests → Read and write**
-   - **Issues → Read and write**
-   - **Commit statuses → Read and write**
-   - **Administration → Read-only**
-6. Click **Create GitHub App** and note the **App ID**.
-7. Generate a **Private key** and save the `.pem` file.
-8. Install the app on your repository (same steps as the Dispatch App). Note the **Installation ID**.
+### 2a. Register the App
+
+Go to [github.com/settings/apps/new](https://github.com/settings/apps/new).
+
+| Field | Value |
+|---|---|
+| **GitHub App name** | `pawlocal-incident-publisher` |
+| **Description** | Creates and merges PawLocal automated incident-fix pull requests after independent machine review. Holds content, PR, issue and status-check write access plus Administration read (to verify branch protection rules). No deployment or infrastructure authority. |
+| **Homepage URL** | `https://pawlocal.alanlima.cloud` *(replace with your production domain)* |
+
+### 2b. Webhook section
+
+Uncheck **Active** under the **Webhook** section. Leave the Webhook URL field empty.
+
+### 2c. Repository permissions
+
+Expand **Repository permissions** and set:
+
+| Permission | Level |
+|---|---|
+| **Administration** | Read-only |
+| **Commit statuses** | Read and write |
+| **Contents** | Read and write |
+| **Issues** | Read and write |
+| **Pull requests** | Read and write |
+
+Leave every other permission as **No access**.
+
+> [!NOTE]
+> **Administration read-only** is required so trusted preflight and publisher jobs can read the active branch ruleset and verify that no human-bypass actors or unexpected protections exist before creating or merging a PR. Administration **write** is explicitly not granted.
+
+### 2d. Where can this GitHub App be installed?
+
+Select **Only on this account**.
+
+### 2e. Create and note the App ID
+
+Click **Create GitHub App** and copy the **App ID** from the settings page.
+
+### 2f. Generate a private key
+
+Scroll to **Private keys** and click **Generate a private key**. Save the downloaded `.pem` file securely.
+
+### 2g. Install the App on your repository
+
+1. Click **Install App** in the left sidebar.
+2. Click **Install** next to your account.
+3. Select **Only select repositories** → `alanlima/pawlocal`.
+4. Click **Install**.
+5. Note the **Installation ID** from the URL bar.
+
+You now have three values:
+- App ID (from 2e)
+- Installation ID (from 2g)
+- Private key `.pem` file (from 2f)
 
 ---
 
