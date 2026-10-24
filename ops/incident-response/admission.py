@@ -459,7 +459,12 @@ def readiness(github):
         excluded = [matches(pattern) for pattern in names["exclude"]]
         if not any(included) or any(excluded):
             continue
-        if rule.get("bypass_actors") != [] or not isinstance(rule.get("rules"), list):
+        bypass = rule.get("bypass_actors")
+        if (
+            (bypass is not None and bypass != [])
+            or rule.get("current_user_can_bypass", "never") != "never"
+            or not isinstance(rule.get("rules"), list)
+        ):
             raise Denied("applicable bypass or policy inventory unsupported")
         for item in rule["rules"]:
             kind = item.get("type")

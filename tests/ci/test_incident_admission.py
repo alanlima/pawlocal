@@ -218,6 +218,93 @@ class AdmissionTests(unittest.TestCase):
                 admission.readiness(Rules([bad]))
             environments.assert_not_called()
 
+    def test_ruleset_bypass_actors_readiness_handling(self):
+        rule = {
+            "enforcement": "active",
+            "target": "branch",
+            "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
+            "rules": [
+                {"type": "deletion"},
+                {"type": "non_fast_forward"},
+                {
+                    "type": "pull_request",
+                    "parameters": {
+                        "required_approving_review_count": 0,
+                        "require_code_owner_review": False,
+                        "required_review_thread_resolution": True,
+                        "allowed_merge_methods": ["squash"],
+                    },
+                },
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "strict_required_status_checks_policy": True,
+                        "required_status_checks": [
+                            {"context": name}
+                            | (
+                                {"integration_id": 42}
+                                if name == "PawLocal change authorization"
+                                else {}
+                            )
+                            for name in (
+                                "Backend checks / Backend checks",
+                                "Frontend checks and HTTP-mode build / frontend",
+                                "PawLocal change authorization",
+                            )
+                        ],
+                    },
+                },
+            ],
+        }
+
+        class Rules:
+            deadline = int(time.time()) + 600
+
+            def __init__(self, rows):
+                self.rows = rows
+
+            def request(self, _method, path):
+                if path == "/rulesets?per_page=100":
+                    return [{"id": index + 1} for index in range(len(self.rows))]
+                return self.rows[int(path.rsplit("/", 1)[1]) - 1]
+
+        # When bypass_actors is omitted (None) and current_user_can_bypass is "never", it passes.
+        omitted_never = copy.deepcopy(rule)
+        omitted_never["current_user_can_bypass"] = "never"
+        self.assertNotIn("bypass_actors", omitted_never)
+        with (
+            patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+            patch.object(admission, "runtime_ready") as environments,
+            patch.object(admission, "classic_absent"),
+        ):
+            admission.readiness(Rules([omitted_never]))
+            environments.assert_called_once()
+
+        # When bypass_actors is omitted (None) and current_user_can_bypass is "always", it raises Denied.
+        omitted_always = copy.deepcopy(rule)
+        omitted_always["current_user_can_bypass"] = "always"
+        with (
+            patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+            patch.object(admission, "runtime_ready") as environments,
+            patch.object(admission, "classic_absent"),
+            self.assertRaises(admission.Denied),
+        ):
+            admission.readiness(Rules([omitted_always]))
+        environments.assert_not_called()
+
+        # When bypass_actors is non-empty ([{"actor_id": 1}]), it raises Denied.
+        non_empty = copy.deepcopy(rule)
+        non_empty["bypass_actors"] = [{"actor_id": 1}]
+        non_empty["current_user_can_bypass"] = "never"
+        with (
+            patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+            patch.object(admission, "runtime_ready") as environments,
+            patch.object(admission, "classic_absent"),
+            self.assertRaises(admission.Denied),
+        ):
+            admission.readiness(Rules([non_empty]))
+        environments.assert_not_called()
+
     def test_readiness_uses_oncall_readiness_token_when_present(self):
         rule = {
             "enforcement": "active",
