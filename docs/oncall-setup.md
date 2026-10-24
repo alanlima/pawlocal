@@ -566,7 +566,7 @@ The gateway validates these fields against hard coded bounds. Your profile value
 |---|---|---|
 | `requests_per_role` | 64 | `4` |
 | `input_per_request` | 250 000 tokens | `100000` |
-| `output_per_request` | 64 000 tokens | `16000` |
+| `output_per_request` | 128 000 tokens | `16000` |
 | `input_per_role` | ≤ `input_per_request × requests_per_role` | `200000` |
 | `output_per_role` | ≤ `output_per_request × requests_per_role` | `32000` |
 | `promotion_seconds` | 3 600 s (1 h) | `3600` |
@@ -583,11 +583,13 @@ Tuning must keep `output_per_role <= output_per_request * requests_per_role`. Wi
 
 This allocation applies to existing approved profiles after the reviewed code is merged; no variable migration is needed for #301. The protected model/rate approval remains independent. Existing incident generations and monthly ledger reservations remain consumed: do not rerun or refund an escalated generation to activate the fix.
 
-### Owner-approved runtime capacity bounds (#313)
+### Owner-approved runtime capacity bounds (#313, #315)
 
-The reviewed upper bounds are 64 requests per role and 64,000 output tokens per request. A 64,000-token request ceiling alone does not grant that allocation: for 64 calls at 64,000 each, the approved profile must also set `output_per_role=4096000`. With only `output_per_role=512000`, the same 64 requests receive 8,000 each. These are ceilings; the model need not emit the full allowance, but the gateway conservatively reserves it before each call.
+The reviewed upper bounds are 64 requests per role and 128,000 output tokens per request, matching the [official gpt-5.4-mini output maximum](https://developers.openai.com/api/docs/models/gpt-5.4-mini). The separately approved development allocation uses 126,000 per call to leave a 2,000-token buffer. The gateway does not subtract this buffer automatically.
 
-For the separately owner-approved development profile with 200,000 input tokens per request, 2,400,000 cumulative input tokens per role, 64 requests, and 4,096,000 output tokens per role, Standard global `gpt-5.4-mini` rates reserve **$40.464 per incident across fixer and reviewer**. Monthly admission and spend ceilings still independently stop new admissions; a $200 monthly ceiling does not guarantee 40 full-envelope incidents. The unchanged 20-minute deadline and per-operation timeouts still apply. This source change updates accepted bounds, not live variables or spending approval.
+A per-request ceiling alone does not grant that allocation: for 64 calls at 126,000 each, the approved profile must also set `output_per_role=8064000`. With only `output_per_role=4096000`, the same 64 requests receive 64,000 each. These are ceilings; the model need not emit the full allowance, but the gateway conservatively reserves it before each call. The existing 64,000-token allocation remains valid.
+
+For the separately owner-approved development profile with 200,000 input tokens per request, 2,400,000 cumulative input tokens per role, 64 requests, and 8,064,000 output tokens per role, Standard global `gpt-5.4-mini` rates reserve **$76.176 per incident across fixer and reviewer**. Monthly admission and spend ceilings still independently stop new admissions; a $200 monthly ceiling does not guarantee 40 full-envelope incidents. The unchanged 20-minute deadline and per-operation timeouts still apply. This source change updates accepted bounds, not live variables or spending approval.
 
 ### Switching the approved profile to `gpt-5.4-mini`
 
