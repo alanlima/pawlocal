@@ -1,7 +1,73 @@
 {
   "version": 1,
   "environments": {
-    "development": {"enabled": false, "stack": null, "frontend_origin": null, "datasources": null, "approval": null},
-    "production": {"enabled": false, "stack": null, "frontend_origin": null, "datasources": null, "approval": null}
+    "development": {
+      "enabled": true,
+      "stack": {
+        "id": 1880841,
+        "slug": "alanlima",
+        "url": "https://alanlima.grafana.net",
+        "region": "prod-au-southeast-1",
+        "faro_api_url": "https://faro-api-prod-au-southeast-1.grafana.net/faro",
+        "otlp_endpoint": "https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp",
+        "otlp_instance_id": "1880841"
+      },
+      "frontend_origin": "https://pawlocal-dev.alanlima.cloud",
+      "datasources": {
+        "metrics": {
+          "uid": "grafanacloud-prom",
+          "name": "grafanacloud-alanlima-prom"
+        },
+        "logs": {
+          "uid": "grafanacloud-logs",
+          "name": "grafanacloud-alanlima-logs"
+        },
+        "traces": {
+          "uid": "grafanacloud-traces",
+          "name": "grafanacloud-alanlima-traces"
+        }
+      },
+      "approval": {
+        "reference": "alanlima/pawlocal/issues/59",
+        "residency": "Australia (Sydney) prod-au-southeast-1",
+        "free_plan_verified": true,
+        "quota_review": "Reviewed on 2026-10-24",
+        "isolation_review": "Reviewed on 2026-10-24"
+      }
+    },
+    "production": {
+      "enabled": true,
+      "stack": {
+        "id": 1880841,
+        "slug": "alanlima",
+        "url": "https://alanlima.grafana.net",
+        "region": "prod-au-southeast-1",
+        "faro_api_url": "https://faro-api-prod-au-southeast-1.grafana.net/faro",
+        "otlp_endpoint": "https://otlp-gateway-prod-au-southeast-1.grafana.net/otlp",
+        "otlp_instance_id": "1880841"
+      },
+      "frontend_origin": "https://pawlocal.alanlima.cloud",
+      "datasources": {
+        "metrics": {
+          "uid": "grafanacloud-prom",
+          "name": "grafanacloud-alanlima-prom"
+        },
+        "logs": {
+          "uid": "grafanacloud-logs",
+          "name": "grafanacloud-alanlima-logs"
+        },
+        "traces": {
+          "uid": "grafanacloud-traces",
+          "name": "grafanacloud-alanlima-traces"
+        }
+      },
+      "approval": {
+        "reference": "alanlima/pawlocal/issues/59",
+        "residency": "Australia (Sydney) prod-au-southeast-1",
+        "free_plan_verified": true,
+        "quota_review": "Reviewed on 2026-10-24",
+        "isolation_review": "Reviewed on 2026-10-24"
+      }
+    }
   }
 }

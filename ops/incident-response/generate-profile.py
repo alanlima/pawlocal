@@ -17,6 +17,13 @@ import argparse
 import datetime as dt
 import json
 import sys
+from pathlib import Path
+
+# Add current directory for quota import
+current_dir = Path(__file__).resolve().parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+from quota import Profile
 
 
 def main():
@@ -98,9 +105,6 @@ def main():
     print(output)
 
     # Validate it actually passes the gate
-    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
-    from quota import Profile
-
     Profile.load(output, now=now.timestamp())
     print("\n✓ Profile passes quota.py validation", file=sys.stderr)
 
