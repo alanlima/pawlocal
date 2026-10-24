@@ -257,9 +257,13 @@ class ProvisionTests(unittest.TestCase):
                 self.assertEqual(self.api.writes, [])
 
     def test_disabled_never_reads_credentials_or_calls_network(self):
-        disabled = json.loads(MODULE.with_name("bindings.json").read_text())[
-            "environments"
-        ]["development"]
+        disabled = {
+            "enabled": False,
+            "stack": None,
+            "frontend_origin": None,
+            "datasources": None,
+            "approval": None,
+        }
         self.assertEqual(
             p.Provisioner(self.api, {}).reconcile("development", disabled, apply=True)[
                 "status"
@@ -292,6 +296,14 @@ class ProvisionTests(unittest.TestCase):
             broken["environments"]["development"][key] = value
             with self.assertRaises(p.ProvisionError):
                 p.validate_manifest(broken)
+        with_disclaimer = copy.deepcopy(document)
+        with_disclaimer["disclaimer"] = "Architectural review note."
+        p.validate_manifest(with_disclaimer)
+        for invalid_disclaimer in [123, "", "x" * 2001, None]:
+            bad_disclaimer = copy.deepcopy(document)
+            bad_disclaimer["disclaimer"] = invalid_disclaimer
+            with self.assertRaises(p.ProvisionError):
+                p.validate_manifest(bad_disclaimer)
         document["token"] = "secret"
         with self.assertRaises(p.ProvisionError):
             p.validate_manifest(document)

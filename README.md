@@ -19,6 +19,7 @@ Issue #43's release path runs applicable PR checks, publishes an immutable backe
 - [Decisions](docs/decisions.md)
 - [Testing approach](docs/testing.md)
 - [GitHub Actions workflow reference](docs/github-actions.md)
+- [On-call responder setup guide](docs/oncall-setup.md)
 - [Issue #135 Terraform operator guide](docs/terraform-greenfield-operations.md)
 - [Historical AWS deployment record](docs/deployment-aws-frontend.md)
 - [AI usage report](docs/ai-usage-report.md)
