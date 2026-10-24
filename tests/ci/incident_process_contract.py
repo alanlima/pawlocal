@@ -28,9 +28,10 @@ FUNCTIONS = {
         "main": "9990bee5b4b2ccc14b97e7e9c6cc94efb1dec01279cec30a288eb7c7a3dcfc66"
     },
     "checks.py": {
+        "share_check_source": "420ab56b7609de0e9c7068b51ff81a5fc54f8972377ba46e5232c75eeb863978",
         "execute": "e5cb7583af203b43e282dfd0e11ca065c3fab0cdc660ef7b8f078392fcea7892",
-        "main": "a1ea2c1ac7c01fd62eff4c9ebfb25a3b93a4c2e70c6b4ae973ff223bb26c7f56",
-        "regression": "21e5c4ff5578578c907cf25e5c0c6fe104f6b5b018cc043241a62b2fd9f372c1",
+        "main": "0537b25f8cc0acef629e214bc7435754def282dd62b1b2e413eb4901edf2c256",
+        "regression": "7195586699cff52a9d3b6c240ef10c2b537d95dbb4a0e117394de5c44b4f81e5",
     },
     "deadline.py": {
         "run": "5093d4f55b56dccd98c7f017e8e000daa73d49a3453f62558710406925796b3b"
@@ -38,19 +39,19 @@ FUNCTIONS = {
     "job.py": {
         "review_seal": "194299317a3f964f900310879adb3b0d8281cec6d16bb87d29241800a9a3dd2f",
         "seal": "072a7a25c9f40c39b1cd745fe3620446819686898610a611ca57a581404bfbeb",
-        "reclaim_model_output": "0b20bc8c567b5138892d7e577a7fe467dc6b8300ab79e9e9e8f992cbdefa563a",
+        "reclaim_model_output": "1b9068c2da92898e38a6f6dac7359500be73664e1a8f43b3c2111a3f69964321",
         "archive": "4cb6d3e3ec09d85929d60fe9dd8a687898bcc1780fadcbf41807a2feb7a0bd29",
         "download": "e5f20c0dd06f004baf551352c8f5ea5216331d77415a69aa44a1a93e58df7ad3",
         "main": "61930aba768d1763b49c2f1ddcbeae651c59b3474a6749ed9b10451e7d0821c2",
-        "prepare": "19361878a0f29a1342ba7683ce5fe2222386a41d747ebdc70b1f1368af7c3d06",
+        "prepare": "ffeafd7c2edfc2c42c25eec31bbe15856721d89fd9a952bfd2ecdd56af600d9d",
         "quiesce": "340951b162cef3a91b8baf1bb8f0e0342ae27bdae8ae8d5cfc7844d6775f5efa",
         "uid": "70fa3cbd5291221adea58c1be77e48794dbf3d45e3181c0a21734ab4a3fbeacc",
         "writable_tool_caches": "88c28e4bc71d939be736c2f410c7fe38f5df71b9757f6cfd94b8feefb968e53c",
     },
     "process_policy.py": {
-        "approved": "404d29e92f92de6609f832661c62720862af8230569b8f6f72623d13499ea789",
+        "approved": "e8ac1036eaa3030e4325a01303150cdee8a9e52d26d7d206b94cc8b23f896799",
         "path": "4d97180285e9f90428b934131176143d46328dd68c11ecb8760724243dfa059b",
-        "unprivileged": "586a994c027c4d0e933d62637ccd6f9ba9715b4a366b75d4683a90345bc44bb3",
+        "unprivileged": "5291b6793f1871cfdae7b59f30037672fd9b6dda80655e8103c8af62f2b2b8e2",
         "validate": "78232d88029fe84081de700e21f284344d39553e0d01e5a9e82a63b1532f9612",
     },
 }
@@ -63,10 +64,10 @@ def fingerprint(node):
 GLOBALS = {
     "candidate.py": "75ef4d8c0e19a4d222ea5b3b892e437d76130b605ce45d64426934527cf137de",
     "capture-cli-request.py": "b92a34dd110c8d3ae05f6af18988e3d23a411bc3812ad5e77f83ffeaeb60a79c",
-    "checks.py": "ab7574af46865e05c77075e394d74cf01d507c2cffd7222fe3c5cafac09ed6f5",
+    "checks.py": "5018480a2508618d2e2f2d8d9c97b255378ad232defdb8a23548cc2a0e1c9cd8",
     "deadline.py": "f3d0c3f4d9ea7f5f98d8b0f611a1c3ef98ab00620ecec4f9cd5ae24e0be4f89f",
-    "job.py": "afdc26e3b673d22b0f680ea5d2705297c6a466c8ea7f9625998f1c7c7279022b",
-    "process_policy.py": "fe451a62948669ded19f3cfc61d8233129fc2496fe984ed3881c63c85149be62",
+    "job.py": "c2f8486330d2fe109280214664ae20d5498297ac772591849983caeabc227189",
+    "process_policy.py": "83a2c714a309a365778293235aff81e8df02b0602b4c8e91d64b6ad561e1cc3b",
 }
 DYNAMIC_READERS = {
     "ops/configuration/tests/test_integration.py": "a2d921d98b186ddf53f6ed705e52b2a476d0fcdba1902237594114cbe2d6b06d",
