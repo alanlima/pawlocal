@@ -218,14 +218,11 @@ def validate(command, input_data, options=None):
     if command[0] == DEPENDENCIES + "/venv/bin/pip":
         temporary = os.environ.get("RUNNER_TEMP", "")
         allowed_cwd = {
-            str(Path(temporary) / suffix)
-            for suffix in (
-                "oncall-trusted/baseline/backend",
-                "oncall-checks/dependency-source/backend",
-            )
+            DEPENDENCIES + "/backend-source",
+            str(Path(temporary) / "oncall-checks/dependency-source/backend"),
         }
         if not temporary or str(cwd) not in allowed_cwd:
-            raise Denied("dependency metadata must come from immutable baseline")
+            raise Denied("dependency metadata must come from trusted build source")
     if command[0] == "npm" and str(cwd) != DEPENDENCIES + "/frontend":
         raise Denied("npm install must use immutable dependency directory")
     if not approved(command, input_data):
