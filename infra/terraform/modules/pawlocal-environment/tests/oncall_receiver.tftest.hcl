@@ -56,6 +56,13 @@ run "receiver_has_exact_runtime_sources_and_url_only_invoke" {
     }
   }
   assert {
+    condition = (
+      !contains(keys(local.oncall_environment_variables), "PAWLOCAL_ONCALL_ALLOWED_ALERTS") &&
+      jsondecode(local.oncall_environment_variables.PAWLOCAL_ONCALL_ALLOWED_SERVICES) == ["pawlocal-api"]
+    )
+    error_message = "Receiver environment must omit the alert-name filter even with populated compatibility allowed_alerts, while preserving service validation."
+  }
+  assert {
     condition     = module.oncall_receiver[0].lambda_function_name == "pawlocal-development-oncall-receiver" && aws_iam_role_policy.oncall_runtime[0].role == "pawlocal-development-oncall-receiver"
     error_message = "Environment owns resources and policy only on its fixed bootstrap-owned role."
   }
