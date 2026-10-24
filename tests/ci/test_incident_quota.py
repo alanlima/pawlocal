@@ -102,6 +102,58 @@ class QuotaTests(unittest.TestCase):
             quota.reserve(profile, [entry], "2026-10", "2", 1)
         self.assertLess(entry["microdollars"], profile.monthly_microdollars)
 
+    def test_explicit_unlimited_spending_preserves_reservations_and_other_controls(self):
+        finite = self.profile(monthly_microdollars=1_200_000)
+        unlimited = self.profile(monthly_microdollars=None)
+        first = quota.reserve(finite, [], "2026-10", "123", 1)
+        ledger = [first]
+        second = quota.reserve(unlimited, ledger, "2026-10", "124", 1)
+        self.assertEqual(second["microdollars"], unlimited.reservation)
+        self.assertIs(type(second["microdollars"]), int)
+        self.assertEqual(ledger, [first])
+        self.assertNotEqual(unlimited.digest, finite.digest)
+        self.assertEqual(quota.Profile.load(json.dumps(unlimited.__dict__)).digest, unlimited.digest)
+        for ledger, run, attempt, profile in (
+            ([first], "123", 1, unlimited),
+            ([first], "124", 2, unlimited),
+            ([{}], "124", 1, unlimited),
+            ([first], "124", 1, self.profile(monthly_microdollars=None, monthly_runs=1)),
+        ):
+            with self.subTest(run=run, attempt=attempt), self.assertRaises(quota.Denied):
+                quota.reserve(profile, ledger, "2026-10", run, attempt)
+        budget = quota.RequestBudget(unlimited)
+        with self.assertRaisesRegex(quota.Denied, "per-request input"):
+            budget.admit(unlimited.input_per_request + 1)
+        budget.admit(100000)
+        budget.admit(100000)
+        with self.assertRaisesRegex(quota.Denied, "cumulative input"):
+            budget.admit(1)
+        budget = quota.RequestBudget(unlimited)
+        for _ in range(unlimited.requests_per_role):
+            budget.admit(0)
+        with self.assertRaisesRegex(quota.Denied, "request count"):
+            budget.admit(0)
+        with self.assertRaises(quota.Denied):
+            self.profile(monthly_microdollars=None, expires_at="2000-01-01T00:00:00Z")
+
+    def test_owner_approved_unlimited_profile_keeps_finite_100_run_limit(self):
+        profile = self.profile(monthly_microdollars=None, monthly_runs=100)
+        ledger = []
+        for run in range(1, 101):
+            ledger.append(quota.reserve(profile, ledger, "2026-10", str(run), 1))
+        self.assertEqual(len(ledger), 100)
+        with self.assertRaisesRegex(quota.Denied, "exhausted monthly admission"):
+            quota.reserve(profile, ledger, "2026-10", "101", 1)
+
+    def test_only_explicit_null_or_positive_finite_integer_spending_is_valid(self):
+        for value in (True, False, -1, 0, 1.5, "unlimited", "null", [], {}, float("inf")):
+            with self.subTest(value=value), self.assertRaises(quota.Denied):
+                self.profile(monthly_microdollars=value)
+        missing = dict(self.profile().__dict__)
+        del missing["monthly_microdollars"]
+        with self.assertRaises(quota.Denied):
+            quota.Profile.load(json.dumps(missing))
+
     def test_per_request_and_cumulative_bounds_charge_before_forward(self):
         budget = quota.RequestBudget(self.profile())
         with self.assertRaisesRegex(quota.Denied, "per-request input quota exhausted"):

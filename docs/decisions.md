@@ -2,6 +2,13 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
+## DEC-016 — Temporary unlimited monthly incident spending (#351)
+
+- **Status:** Owner approved on 2026-10-25 through [#351](https://github.com/alanlima/pawlocal/issues/351): disable the monthly spending cap now; review accounting separately in [#352](https://github.com/alanlima/pawlocal/issues/352).
+- **Decision:** Explicit JSON `null` for `monthly_microdollars` means unlimited monthly spending. Positive finite integer values preserve the dollar ceiling; missing, boolean, negative or malformed values remain invalid. Generation requires the explicit `--unlimited-monthly-spending` option; defaults remain finite. Usage summaries display `Unlimited`.
+- **Consequences:** With this mode enabled, accumulated monthly dollar reservations no longer deny admission. Reservations remain conservative, numeric, append-only audit entries and are never automatically reconciled against actual provider spend. This overrides only the mandatory monthly dollar-ceiling requirement in DEC-012 and the incident/model policy; provider billing can exceed the former ceiling.
+- **Boundaries:** Preserve monthly run-count limits, per-request/per-role token/request controls, deadlines, duplicate-generation/run protection, live emergency stop, pricing validity and all publication/release trust controls. The owner authorizes activation in the existing development and production on-call profiles after reviewed implementation and checks, setting the separately owner-approved monthly run-count to 100 and updating the approval reference while preserving every other setting. No ledger deletion/refund, consumed-generation retry or AWS change is authorized.
+
 ## DEC-015 — Temporary disabling of shared strict release-plan invocation (#305)
 
 - **Status:** Owner approved on 2026-10-24: "For now, implement the guard removal and continue the goal." Differentiated ordinary/incident plan policies are deferred for grooming and implementation in [#308](https://github.com/alanlima/pawlocal/issues/308).

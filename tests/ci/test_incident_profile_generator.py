@@ -68,6 +68,15 @@ class ProfileGeneratorTests(unittest.TestCase):
             value["rates_source"], "https://developers.openai.com/api/docs/pricing"
         )
 
+    def test_unlimited_spending_is_explicit_and_keeps_other_limits(self):
+        finite = self.generate()
+        unlimited = self.generate("--unlimited-monthly-spending", "--approval", "alanlima/pawlocal/issues/351")
+        self.assertIsNone(unlimited["monthly_microdollars"])
+        for key in ("monthly_runs", "requests_per_role", "input_per_request", "output_per_request", "input_per_role", "output_per_role", "promotion_seconds", "recovery_seconds"):
+            self.assertEqual(unlimited[key], finite[key])
+        self.assertEqual(unlimited["approval"], "alanlima/pawlocal/issues/351")
+        self.assertEqual(self.generate("--monthly-budget-usd", "25")["monthly_microdollars"], 25000000)
+
     def test_nondefault_model_uses_only_explicit_paired_rates(self):
         value = self.generate(
             "--model",
@@ -89,6 +98,12 @@ class ProfileGeneratorTests(unittest.TestCase):
 
     def test_model_without_rates_and_partial_or_invalid_rates_emit_no_profile(self):
         for arguments in (
+            ("--unlimited-monthly-spending", "--monthly-budget-usd", "25"),
+            ("--monthly-budget-usd", "nan"),
+            ("--monthly-budget-usd", "inf"),
+            ("--monthly-budget-usd", "1e308"),
+            ("--monthly-budget-usd", "0"),
+            ("--monthly-budget-usd", "-1"),
             ("--model", "fixture-model"),
             ("--input-rate", "1"),
             ("--output-rate", "2"),

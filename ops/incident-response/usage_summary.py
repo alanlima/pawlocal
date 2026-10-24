@@ -82,7 +82,7 @@ def validate_limits(value):
             return None
         if value["effort"] not in {"minimal", "low", "medium", "high", "xhigh"} or value["service_tier"] != "default":
             return None
-        return {key: integer(value[key]) for key in LIMIT_FIELDS} | {key: value[key] for key in PROFILE_FIELDS}
+        return {key: None if key == "monthly_microdollars" and value[key] is None else integer(value[key]) for key in LIMIT_FIELDS} | {key: value[key] for key in PROFILE_FIELDS}
     except (Denied, TypeError):
         return None
 
@@ -103,12 +103,18 @@ def money(tokens_in, tokens_out, limits):
 def render(reports, limits, states=None, admitted=None, preview=False):
     lines = ["## Incident responder token usage", "", "Provider usage is observed usage. Charged allocation includes the full output allowance; neither report refunds quota. Costs use approved worst-case rates, ignore cache discounts, and are estimates, not invoices.", ""]
     if limits:
+        monthly_spending = "Unlimited" if limits["monthly_microdollars"] is None else f"${limits['monthly_microdollars'] / 1000000:.6f}"
+        monthly_audit = (
+            "Reservations remain recorded for audit; no monthly spending ceiling is enforced."
+            if limits["monthly_microdollars"] is None
+            else "Remaining monthly balance requires the protected ledger; these observations do not settle it."
+        )
         lines += [f"Model `{limits['model']}`; reasoning `{limits['effort']}`; service tier `{limits['service_tier']}`.", ""]
     if admitted is False:
         lines += ["**No model admission recorded.** Inspect preflight output for disabled configuration, a no-op, or admission failure. Missing observations are not zero usage.", ""]
     if preview:
         if limits:
-            lines += [f"Configured full incident token ceiling: {2 * (limits['input_per_role'] + limits['output_per_role']):,} across fixer and reviewer.", f"Monthly reservation per admitted incident: {money(2 * limits['input_per_role'], 2 * limits['output_per_role'], limits)}. Per execution: {limits['requests_per_role']:,} requests; {limits['input_per_role']:,} input and {limits['output_per_role']:,} output tokens."]
+            lines += [f"Configured full incident token ceiling: {2 * (limits['input_per_role'] + limits['output_per_role']):,} across fixer and reviewer.", f"Monthly spending ceiling {monthly_spending}; monthly run limit {limits['monthly_runs']:,}.", f"Monthly reservation per admitted incident: {money(2 * limits['input_per_role'], 2 * limits['output_per_role'], limits)}. Per execution: {limits['requests_per_role']:,} requests; {limits['input_per_role']:,} input and {limits['output_per_role']:,} output tokens."]
         else:
             lines += ["Configured limits unavailable; inspect admission output. No usage measurement is available at preflight."]
         lines += ["", "This is an admission preview. Final usage and job outcomes appear in Record incident outcome after the execution jobs finish."]
@@ -174,7 +180,7 @@ def render(reports, limits, states=None, admitted=None, preview=False):
     lines[table_start:table_start] = summary + [""]
     if limits:
         cap = min(limits["output_per_request"], limits["output_per_role"] // limits["requests_per_role"])
-        lines += ["", f"Per request: input cap {limits['input_per_request']:,}; configured output cap {limits['output_per_request']:,}; effective output allowance {cap:,}. Per execution: input {limits['input_per_role']:,}, output {limits['output_per_role']:,}, requests {limits['requests_per_role']:,}.", f"Monthly admission reserves both complete execution envelopes: {money(2 * limits['input_per_role'], 2 * limits['output_per_role'], limits)} per admitted run. Monthly ceiling ${limits['monthly_microdollars'] / 1000000:.6f} and {limits['monthly_runs']:,} runs. Remaining monthly balance requires the protected ledger; these observations do not settle it."]
+        lines += ["", f"Per request: input cap {limits['input_per_request']:,}; configured output cap {limits['output_per_request']:,}; effective output allowance {cap:,}. Per execution: input {limits['input_per_role']:,}, output {limits['output_per_role']:,}, requests {limits['requests_per_role']:,}.", f"Monthly admission reserves both complete execution envelopes: {money(2 * limits['input_per_role'], 2 * limits['output_per_role'], limits)} per admitted run. Monthly ceiling {monthly_spending} and {limits['monthly_runs']:,} runs. {monthly_audit}"]
     if not complete:
         lines += ["", "Missing, interrupted or malformed usage stays unknown. Charged reservations remain consumed. Headroom shown against observed usage is provisional; use charged allocation and gateway denials to troubleshoot enforcement."]
     lines += request_tables

@@ -538,7 +538,13 @@ Set `PAWLOCAL_ONCALL_QUOTA_ISSUE` in both `oncall-development` and `oncall-produ
 
 ## Step 8 — Approve and configure the model profile
 
-The `quota.py` admission gate enforces a fully populated, owner-approved JSON profile before any model call is made. The profile must name a real model, carry current pricing from an official source, and specify hard numeric ceilings that fit within the gateway's enforced limits.
+The `quota.py` admission gate enforces a fully populated, owner-approved JSON profile before any model call is made. The profile must name a real model, carry current pricing from an official source, and specify hard numeric token/request/run ceilings that fit within the gateway's enforced limits. Monthly spending requires an explicit positive integer ceiling or the owner-approved unlimited mode below.
+
+### Explicit unlimited monthly spending
+
+Under [DEC-016 / #351](decisions.md#dec-016--temporary-unlimited-monthly-incident-spending-351), JSON `"monthly_microdollars": null` disables only the monthly dollar ceiling. Omission, strings such as `"unlimited"`, booleans, zero and negative values are invalid. Positive integer microdollars retain a finite ceiling. Summaries show `Unlimited` in both admission preview and final outcome.
+
+For the existing profiles, set `monthly_microdollars` to JSON `null`, `monthly_runs` to `100`, and `approval` to `alanlima/pawlocal/issues/351` in `PAWLOCAL_ONCALL_MODEL_PROFILE` on both `oncall-development` and `oncall-production`; read back and compare all other fields. The owner-approved monthly run-count is 100 and remains enforced. Preserve token/request settings, rates, timestamps and rule UIDs. This operator-managed profile is outside configuration reconciliation. Existing ledger reservations and consumed generations remain unchanged. Accounting review is deferred to [#352](https://github.com/alanlima/pawlocal/issues/352).
 
 ### Default model: `gpt-5.4-mini`
 
@@ -623,6 +629,14 @@ You can generate the complete, validated JSON string using the repository helper
 ```bash
 python ops/incident-response/generate-profile.py
 ```
+
+To generate a new profile with explicit unlimited monthly spending:
+
+```bash
+python ops/incident-response/generate-profile.py --unlimited-monthly-spending --approval alanlima/pawlocal/issues/351
+```
+
+`--unlimited-monthly-spending` and finite `--monthly-budget-usd` are mutually exclusive. Generating a new profile uses the defaults below; use a field-preserving update for existing profiles.
 
 This helper:
 - Uses the owner-selected `gpt-5.4-mini` model, `medium` effort, matching rates `750000`/`4500000`, and \$20.00 monthly budget ceiling.

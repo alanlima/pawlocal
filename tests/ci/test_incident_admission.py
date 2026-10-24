@@ -403,11 +403,11 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(admission.Denied):
             admission.alerts(json.dumps([alert(), alert()]), "development")
 
-    def run_preflight(self, fake, current=True, reserve_error=False):
+    def run_preflight(self, fake, current=True, reserve_error=False, profile_changes=None):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             output.touch()
-            profile = quota_fixtures.QuotaTests().profile()
+            profile = quota_fixtures.QuotaTests().profile(**(profile_changes or {}))
             env = {
                 "INCIDENT_DEADLINE": str(int(time.time()) + 1200),
                 "GITHUB_REPOSITORY": "alanlima/pawlocal",
@@ -477,6 +477,13 @@ class AdmissionTests(unittest.TestCase):
         fake.ledger_closed = True
         with self.assertRaises(admission.Denied):
             self.run_preflight(fake)
+        self.assertFalse(any(method != "GET" for method, _, _ in fake.calls))
+
+    def test_unlimited_spending_preserves_live_emergency_stop(self):
+        fake = FakeGitHub()
+        fake.ledger_closed = True
+        with self.assertRaises(admission.Denied):
+            self.run_preflight(fake, profile_changes={"monthly_microdollars": None})
         self.assertFalse(any(method != "GET" for method, _, _ in fake.calls))
 
     def test_closed_generation_and_late_firing_after_resolution_do_not_reserve(self):
