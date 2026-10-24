@@ -17,7 +17,7 @@ testEnv.VITE_TELEMETRY_ENABLED = 'false'
 
 for (const args of [
   ['node_modules/vitest/vitest.mjs', 'run'],
-  ['--test', 'scripts/validate-release-config.test.mjs'],
+  ['--test', 'scripts/validate-release-config.test.mjs', 'scripts/build-check.test.mjs'],
 ]) {
   const [command, ...commandArgs] = args
   const result = spawnSync(process.execPath, [command, ...commandArgs], {
