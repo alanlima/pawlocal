@@ -238,7 +238,7 @@ Explicit legacy cleanup checks the active release/recovery consumers and exact c
 
 <!-- actions-reference: fullstack-release.yml; dispatch-inputs: -; call-inputs: - -->
 
-`fullstack-release.yml` performs checks on relevant pull requests. A relevant push to `main`, or a manual dispatch from `main`, additionally:
+`fullstack-release.yml` performs checks on relevant pull requests, including changes to `docs/oncall-setup.md` or `docs/oncall-troubleshooting.md`. These two operator-guide exceptions apply only to pull-request paths so their required frontend/backend checks run; guide-only pushes remain excluded from automatic publication/deployment. A relevant push to `main`, or a manual dispatch from `main`, additionally:
 
 1. builds and publishes the backend image to GHCR;
 2. binds it to its immutable registry digest;
