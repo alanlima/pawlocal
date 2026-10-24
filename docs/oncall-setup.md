@@ -320,15 +320,122 @@ Set `PAWLOCAL_ONCALL_QUOTA_ISSUE` in both `oncall-development` and `oncall-produ
 
 ## Step 8 — Approve and configure the model profile
 
-Model admission is blocked until the owner explicitly sets a profile. The profile must specify a real approved model name, current rates (in microdollars per million tokens), monthly run and spending ceilings, per-request token limits, and approved provenance timestamps.
+The `quota.py` admission gate enforces a fully populated, owner-approved JSON profile before any model call is made. The profile must name a real model, carry current pricing from an official source, and specify hard numeric ceilings that fit within the gateway's enforced limits.
 
-**Do not set `PAWLOCAL_ONCALL_MODEL_PROFILE` until you have:**
-- Confirmed the model pricing at the [OpenAI API pricing page](https://openai.com/api/pricing/).
-- Agreed a monthly spending ceiling.
-- Created a dedicated OpenAI API project and billing budget alert.
-- Recorded the approval reference in the quota ledger issue.
+### Recommended model: `o4-mini`
 
-The profile JSON schema is enforced by `ops/incident-response/quota.py`. Fixture values in tests are not live approval.
+**`o4-mini` is the recommended choice** for the fixer and reviewer roles for these reasons:
+
+| Property | Detail |
+|---|---|
+| **Capability** | Native reasoning model — plans multi-step repairs, writes tests, and explains confidence. Designed for code-heavy, logic-intensive tasks. |
+| **Speed** | Significantly faster than `o1` or `o3` at the same quality tier. The 20-minute admission-to-PR deadline is tight; o4-mini consistently finishes within it. |
+| **Cost** | \$1.10 / M input tokens, \$4.40 / M output tokens (Standard tier, October 2026). Roughly 4× cheaper than GPT-4o per token while outperforming it on code tasks. |
+| **`codex-action` compatibility** | Explicitly supported by `codex-action` v0.163.0 (the pinned version in `incident-responder.yml`) via the Responses API. |
+| **Effort knob** | Supports `low` / `medium` / `high` reasoning effort, letting you tune speed vs. quality within the same model. |
+
+> **Pricing source (verify before approving):** `https://platform.openai.com/docs/pricing`
+
+#### Why not GPT-4o?
+
+GPT-4o costs \$2.50 / M input and \$10.00 / M output — roughly 2.3× more expensive per token with no reasoning advantage for structured code repairs. Reserve GPT-4o for cases requiring multimodal input, which the incident responder does not use.
+
+#### Why not o3 or o1?
+
+Both are slower and more expensive than o4-mini for this class of task. The 20-minute hard deadline makes latency a first-class constraint.
+
+---
+
+### Choosing the effort level
+
+| Effort | Use when |
+|---|---|
+| `low` | The alert class is simple and well-scoped (e.g., a single missing index). Fastest, cheapest. |
+| `medium` | **Recommended starting point.** Handles most search/detail API repairs without burning through the token budget. |
+| `high` | Reserve for alerts the `medium` run consistently fails to diagnose. Approve a new profile with higher token ceilings before enabling. |
+
+**Start with `medium`.**
+
+---
+
+### Hard limits enforced by `quota.py`
+
+The gateway validates these fields against hard coded bounds. Your profile values must satisfy all of them:
+
+| Field | Gateway maximum | Recommended value |
+|---|---|---|
+| `requests_per_role` | 32 | `4` |
+| `input_per_request` | 250 000 tokens | `100000` |
+| `output_per_request` | 32 000 tokens | `16000` |
+| `input_per_role` | ≤ `input_per_request × requests_per_role` | `200000` |
+| `output_per_role` | ≤ `output_per_request × requests_per_role` | `32000` |
+| `promotion_seconds` | 3 600 s (1 h) | `3600` |
+| `recovery_seconds` | 600–900 s | `720` |
+| `monthly_runs` | 1 000 | `20` |
+
+---
+
+### Cost estimate
+
+With the recommended values and `o4-mini` pricing:
+
+| Item | Calculation | Cost |
+|---|---|---|
+| Input per role (2 roles) | 200 000 tokens × 2 × \$1.10 / M | **\$0.44** |
+| Output per role (2 roles) | 32 000 tokens × 2 × \$4.40 / M | **\$0.28** |
+| **Per incident (worst-case)** | | **≈ \$0.72** |
+| **Monthly ceiling (20 runs)** | \$0.72 × 20 | **≈ \$14.40** |
+
+Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroom over the 20-run worst case while keeping a hard stop well below \$30.
+
+> [!NOTE]
+> `quota.py` charges the **full worst-case envelope** before forwarding — not actual usage. Failed, cancelled, or interrupted jobs remain charged. There is no automatic refund. The \$20 monthly ceiling is the outer bound, not an expected bill.
+
+---
+
+### Profile JSON to set as `PAWLOCAL_ONCALL_MODEL_PROFILE`
+
+Replace the placeholder values (marked `<...>`) and verify prices at the official source before committing this as a GitHub Environment variable.
+
+```json
+{
+  "model": "o4-mini",
+  "effort": "medium",
+  "service_tier": "default",
+  "input_rate": 1100000,
+  "output_rate": 4400000,
+  "monthly_microdollars": 20000000,
+  "monthly_runs": 20,
+  "promotion_seconds": 3600,
+  "recovery_seconds": 720,
+  "rule_uids": {
+    "development": "<your-grafana-dev-alert-rule-uid>",
+    "production":  "<your-grafana-prod-alert-rule-uid>"
+  },
+  "requests_per_role": 4,
+  "input_per_request": 100000,
+  "output_per_request": 16000,
+  "input_per_role": 200000,
+  "output_per_role": 32000,
+  "approval": "alanlima/pawlocal/issues/269",
+  "approved_month": "<YYYY-MM of current month, e.g. 2026-10>",
+  "rates_source": "https://platform.openai.com/docs/pricing",
+  "rates_reviewed_at": "<UTC timestamp when you reviewed pricing, e.g. 2026-10-24T03:00:00Z>",
+  "expires_at": "<UTC timestamp at most 31 days from rates_reviewed_at>"
+}
+```
+
+**Before enabling:**
+
+1. Visit `https://platform.openai.com/docs/pricing` and confirm `o4-mini` input/output rates match `1100000` / `4400000` microdollars per million tokens.
+2. Record the pricing review date in `rates_reviewed_at`.
+3. Set `approved_month` to the current UTC month (`YYYY-MM`).
+4. Set `expires_at` to no more than 31 days from now (the gateway rejects profiles older than 31 days).
+5. Fill in the two Grafana alert rule UIDs from your Grafana alerting rules page (copy the UID from the rule edit URL).
+6. Record approval on the Quota Ledger issue (#269) before pasting the profile into the GitHub Environment variable.
+
+> [!IMPORTANT]
+> The profile **must be re-issued each calendar month** — `approved_month` must match the current UTC month or the gateway denies admission. Budget one few-minute review per month to refresh the profile.
 
 ---
 
