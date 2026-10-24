@@ -16,6 +16,7 @@ EXPECTED_HOSTED_JOBS = {
     ("change-authorization.yml", "incident-authorize"),
     ("change-authorization.yml", "ordinary-approval"),
     ("grafana-development-setup.yml", "development-setup"),
+    ("grafana-production-setup.yml", "production-setup"),
     ("grafana-access-check.yml", "validate-access"),
     ("incident-responder.yml", "preflight"),
     ("incident-responder.yml", "fixer"),

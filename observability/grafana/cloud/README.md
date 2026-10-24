@@ -91,6 +91,10 @@ No automatic retry of a mutation follows a timeout. A request might have succeed
 - **Measure usage** in the actual account Usage/Billing views per signal and account. Track active series, logs/traces GB, Faro sessions and synthetic executions; two environments share applicable allowances. New frontend accounts may count sessions, logs and traces independently. Review quota/no-data/outage evidence before G1; lower SDK sample/label volume through #225 before a quota is exhausted. Responder model/admission quotas require separate owner approval and are not Grafana quota enforcement.
 - **Close only with evidence:** record actual account/region/Free setup, credentials/scope review (metadata only), origins, repeat plan/apply/noop evidence, public handoff, isolation limitations and independent review. Missing account credentials blocks live activation/closure, not this mock-tested implementation delivery. Production remains separately approved under #230/#231.
 
+## Production hosted launcher
+
+grafana-production-setup.yml runs this provisioner on GitHub-hosted Ubuntu from trusted main, under the existing protected production-apply Environment requiring explicit approval. It uses existing Cloud/Faro policy and stack service-account secrets; credentials are never dispatch inputs. For plan or pply, supply reviewed manifest JSON as public_bindings_json, the reviewed origin as rontend_origin (https://pawlocal.alanlima.cloud). It creates the folder pawlocal-production and matching Faro app pawlocal-production before Terraform dashboard deployment.
+
 ## Development-only hosted launcher
 
 `grafana-development-setup.yml` runs this provisioner on GitHub-hosted Ubuntu
