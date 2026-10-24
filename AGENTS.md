@@ -317,6 +317,10 @@ Models hold no publication, merge, production query or deployment credentials. T
 
 One admission-to-PR deadline is 20 minutes across all model/test/review/publication jobs. A separate proposed 60-minute deadline spans CI/merge/dev/prod/recovery without increasing model quota. Exhaustion, failed checks, unsupported repairs or uncertain release outcomes stop new mutations and record escalation; no approval-wait state or new coding attempt is added. See DEC-012 and the incident-responder specification. This amendment authorizes the documented runtime design; it does not itself activate live settings or provision infrastructure.
 
+### Temporary shared release-plan exception — Issue #305
+
+Owner direction on 2026-10-24 removes the blocking strict release-plan invocation from `terraform-environment.yml` pending deferred Issue #308. This explicitly supersedes the release-only plan rejection requirements above and below for that shared workflow: ordinary and incident releases can both include non-release infrastructure changes that this validator previously rejected. See DEC-015. Existing authorization/provenance checks, exact saved-plan integrity, Terraform state ownership, raw logs and infrastructure approval requirements remain in force. This exception changes no IAM permissions or live Environment settings and grants no unrelated infrastructure or production authorization.
+
 ## 10. Cost management
 
 Issue #191's owner-approved account-bootstrap exception permits the separately operated, documented `ops/iam-bootstrap/` setup tool to manage only the single `pawlocal-terraform-bootstrap-actions` user, its dedicated permission policies/boundary, access-key lifecycle and matching protected GitHub setup. The lifecycle owner is `alanlima`. Independently review its scoped permissions before attachment; never use root credentials or steady-state AdministratorAccess. This external identity is not managed by the IAM Terraform workflow or adopted into application/bootstrap state. Record rotation, audit, revocation and retirement procedures in `docs/iam-bootstrap-actions.md`.
