@@ -1,3 +1,4 @@
+import sys
 """Read-only verification of one-time autonomous runtime settings."""
 
 import importlib.util
@@ -18,21 +19,27 @@ RUNTIME_ENVIRONMENTS = (
 )
 
 
-def environment_ready(client, name):
+def check_environment(client, name):
     if name not in RUNTIME_ENVIRONMENTS:
-        raise Denied("unsupported runtime environment")
+        return False, "unsupported runtime environment"
     environment = client.request("GET", "/environments/" + name)
-    # A one-time reviewed setup must remove runtime human review and constrain
-    # deployment branches. Do not silently bypass or edit those settings.
     rules = environment.get("protection_rules")
-    if (
-        not isinstance(rules, list)
-        or any(rule.get("type") != "branch_policy" for rule in rules)
-        or len(rules) > 1
-        or environment.get("deployment_branch_policy")
-        != {"protected_branches": False, "custom_branch_policies": True}
-    ):
-        raise Denied("automatic production environment protection setup missing")
+    dbp = environment.get("deployment_branch_policy")
+    reasons = []
+    if not isinstance(rules, list):
+        reasons.append("protection_rules is not a list")
+    else:
+        reviewers = [r for r in rules if r.get("type") == "required_reviewers"]
+        other_rules = [r for r in rules if r.get("type") not in ("branch_policy", "required_reviewers")]
+        if reviewers:
+            reasons.append("Has Required Reviewers (must be removed for unattended release per Step 4e)")
+        if other_rules:
+            reasons.append(f"Unexpected protection rules: {[r.get('type') for r in other_rules]}")
+        if len(rules) > 1:
+            reasons.append(f"Multiple protection rules configured (count={len(rules)})")
+    if dbp != {"protected_branches": False, "custom_branch_policies": True}:
+        reasons.append(f"deployment_branch_policy mismatch: {dbp} (must be 'Selected branches')")
+
     policies = client.request(
         "GET", "/environments/" + name + "/deployment-branch-policies?per_page=100"
     )
@@ -43,7 +50,19 @@ def environment_ready(client, name):
         or rows[0].get("name") != "main"
         or rows[0].get("type") != "branch"
     ):
-        raise Denied("production environment must admit only the main branch")
+        reasons.append("Deployment branches must allow only 'main'")
+
+    if reasons:
+        return False, "; ".join(reasons)
+    return True, "Branch: main, 0 reviewers"
+
+
+def environment_ready(client, name):
+    ok, details = check_environment(client, name)
+    if not ok:
+        msg = f"automatic production environment protection setup missing for {name!r}: {details}"
+        print(f"[runtime_ready] FAIL: {msg}", file=sys.stderr)
+        raise Denied(msg)
 
 
 def production_ready(client):
@@ -51,10 +70,29 @@ def production_ready(client):
 
 
 def runtime_ready(client):
-    # Never inspect or weaken separately gated bootstrap, destroy or setup
-    # targets. Every target actually entered by automated release is checked.
+    results = []
+    failed = []
     for name in RUNTIME_ENVIRONMENTS:
-        environment_ready(client, name)
+        ok, details = check_environment(client, name)
+        status = "OK" if ok else "FAIL"
+        results.append((name, status, details))
+        if not ok:
+            failed.append(name)
+
+    # Format and print the environment audit table
+    table_lines = [
+        "\n[runtime_ready] Environment Protection Audit:",
+        "| Environment | Status | Details |",
+        "|---|---|---|",
+    ]
+    for name, status, details in results:
+        table_lines.append(f"| {name} | {status} | {details} |")
+    print("\n".join(table_lines) + "\n", file=sys.stderr)
+
+    if failed:
+        raise Denied(
+            f"automatic production environment protection setup missing for: {', '.join(failed)}. See audit table above."
+        )
 
 
 def bindings_ready(trusted):

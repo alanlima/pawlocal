@@ -69,7 +69,7 @@ DYNAMIC_READERS = {
     "ops/configuration/tests/test_integration.py": "a2d921d98b186ddf53f6ed705e52b2a476d0fcdba1902237594114cbe2d6b06d",
     "ops/configuration/tests/test_job_summary.py": "bdbac3edd26f3b5dc889ff3aacee998bcd39e68669949fa2541185825a0f96e5",
     "ops/configuration/tests/test_reconcile.py": "98dcf2e0764a561fc641b90f4763e1d052201f5a2d0bf71a5b4af30c19612c9a",
-    "ops/incident-response/settings.py": "aa1b6fcff93ed7b23112b56a51de2a88bf7079e406c2e693cfd2353593dac208",
+    "ops/incident-response/settings.py": "37918ab67a346d6e8e5ae2a002e8dd161f3d247d110a09ac6aa4cac8ec6c13b7",
     "ops/tests/test_validate_seeded_places.py": "8a4e16668d014e543e4e73ce7f903a33316d39eb9aed1f7b39a444b2135b3f71",
 }
 
