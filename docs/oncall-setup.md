@@ -361,7 +361,7 @@ Once the environment variable is saved, run the Terraform environment workflow s
 
 ## Step 6 — Update the branch ruleset
 
-The automated incident responder verifies the repository ruleset during preflight (`admission.readiness()`). It requires strict status checks, the three required candidate checks, and no bypass actors.
+The automated incident responder verifies the repository ruleset during preflight (`admission.readiness()`). It requires strict status checks, the three required candidate checks, and no bypass actors (`current_user_can_bypass == "never"`). Note that GitHub's REST API omits `bypass_actors` from GET responses for tokens with read-only administration permissions; preflight accepts omitted `bypass_actors` while strictly confirming `current_user_can_bypass == "never"`, relying on the owner's initial setup below to configure and verify `bypass_actors: []`.
 
 ### Option A — Automated via GitHub CLI (Recommended)
 
@@ -373,13 +373,64 @@ PUBLISHER_APP_ID="<your-publisher-app-id>"
 
 RULESET_ID=$(gh api repos/:owner/:repo/rulesets --jq '.[] | select(.name=="Protect Main Branch") | .id')
 
-gh api -X PUT "repos/:owner/:repo/rulesets/$RULESET_ID" \
-  -H "Accept: application/vnd.github+json" \
-  -f name="Protect Main Branch" \
-  -f enforcement="active" \
-  --raw-field 'conditions={"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}' \
-  --raw-field "rules=[{\"type\":\"deletion\"},{\"type\":\"non_fast_forward\"},{\"type\":\"pull_request\",\"parameters\":{\"required_approving_review_count\":0,\"dismiss_stale_reviews_on_push\":false,\"required_reviewers\":[],\"require_code_owner_review\":false,\"require_last_push_approval\":false,\"required_review_thread_resolution\":true,\"require_extra_approval_for_unattributed_changes\":true,\"allowed_merge_methods\":[\"squash\"]}},{\"type\":\"required_status_checks\",\"parameters\":{\"strict_required_status_checks_policy\":true,\"do_not_enforce_on_create\":false,\"required_status_checks\":[{\"context\":\"PawLocal change authorization\",\"integration_id\":$PUBLISHER_APP_ID},{\"context\":\"Backend checks / Backend checks\"},{\"context\":\"Frontend checks and HTTP-mode build / frontend\"}]}}]" \
-  --raw-field 'bypass_actors=[]'
+cat <<EOF | gh api -X PUT "repos/:owner/:repo/rulesets/$RULESET_ID" -H "Accept: application/vnd.github+json" --input -
+{
+  "name": "Protect Main Branch",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "PawLocal change authorization",
+            "integration_id": $PUBLISHER_APP_ID
+          },
+          {
+            "context": "Backend checks / Backend checks"
+          },
+          {
+            "context": "Frontend checks and HTTP-mode build / frontend"
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}
+EOF
 ```
 
 **PowerShell (Windows):**
@@ -436,23 +487,27 @@ This automatically configures the active `Protect Main Branch` ruleset to:
 
 ### Option B — Manual configuration via GitHub Web UI
 
+> [!CAUTION]
+> Under project rules (`AGENTS.md` line 314), never reduce required approvals or disable Code Owner review before the replacement `PawLocal change authorization` status check (pinned to the verified Publisher App ID) is added and verified. Disabling human reviews before machine authorization is active leaves the target branch unprotected against unreviewed changes.
+
 Navigate to **Repository → Settings → Rules → Rulesets → Protect Main Branch**:
 
-1. Under **Rules**:
+1. Under **Require status checks to pass** (configure and verify this FIRST):
+   - Check **Require branches to be up to date before merging** (strict policy).
+   - Add check: `PawLocal change authorization` (select your Publisher App as the status source so it is pinned to your Publisher App ID).
+   - Add check: `Backend checks / Backend checks`.
+   - Add check: `Frontend checks and HTTP-mode build / frontend`.
+   - Independently verify that `PawLocal change authorization` is saved and pinned to the Publisher App before proceeding.
+2. Under **Rules**:
    - Ensure **Restrict deletions** is checked.
    - Ensure **Block force pushes** is checked.
-2. Under **Require a pull request before merging**:
-   - **Required approvals**: `0` (replaced by machine authorization).
+3. Under **Require a pull request before merging** (only after step 1 is verified):
+   - **Required approvals**: `0` (machine authorization replaces human review gate).
    - **Dismiss stale pull request approvals when new commits are pushed**: Unchecked.
    - **Require review from Code Owners**: Unchecked (disabled).
    - **Require approval of the most recent push**: Unchecked.
    - **Require conversation resolution before merging**: Checked.
    - **Allowed merge methods**: Only **Squash merge**.
-3. Under **Require status checks to pass**:
-   - Check **Require branches to be up to date before merging** (strict policy).
-   - Add check: `PawLocal change authorization` (select your Publisher App as the status source).
-   - Add check: `Backend checks / Backend checks`.
-   - Add check: `Frontend checks and HTTP-mode build / frontend`.
 4. Under **Bypass list**:
    - Ensure no bypass actors are added (leave completely empty).
 
