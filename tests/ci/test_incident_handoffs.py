@@ -178,6 +178,21 @@ class HandoffTests(unittest.TestCase):
             )
             self.assertEqual((command[4], command[6]), ("oncall", "oncall"))
 
+    def test_private_report_umask_is_set_after_sudo_before_real_command(self):
+        model = types.SimpleNamespace(pw_uid=12001, pw_gid=12002)
+        with patch.object(subprocess, "Popen") as process:
+            adapter = FixtureLaunches(Path("trusted"), "a" * 40, Path("home"), model)
+            command = ["sudo", "-u", "oncall", "env", "-i", "PATH=/bin", "pytest"]
+            adapter(command, start_new_session=True)
+            actual = process.call_args.args[0]
+            self.assertEqual(actual[:3], ["sudo", "-u", "nobody"])
+            self.assertEqual(actual[3:5], [sys.executable, "-c"])
+            self.assertIn("os.umask(0o077)", actual[5])
+            self.assertIn("os.execvp(sys.argv[1],sys.argv[1:])", actual[5])
+            self.assertEqual(actual[6:], command[3:])
+            self.assertNotIn("preexec_fn", process.call_args.kwargs)
+            self.assertEqual(command[2], "oncall")
+
     @unittest.skipUnless(
         sys.platform == "linux"
         and os.environ.get("PAWLOCAL_INCIDENT_HANDOFF_FIXTURE") == "1",
@@ -262,8 +277,13 @@ class FixtureLaunches:
                 "HOME=" + str(self.home) if value == "HOME=/home/oncall" else value
                 for value in argv
             ]
-            # Produce genuine private XML/JSON/cache files, not fixture reports.
-            options["preexec_fn"] = lambda: os.umask(0o077)
+            # sudo resets an inherited umask. Set it as the model user before
+            # exec of the unchanged env-i command and real test/compiler.
+            argv[3:3] = [
+                sys.executable,
+                "-c",
+                "import os,sys; os.umask(0o077); os.execvp(sys.argv[1],sys.argv[1:])",
+            ]
             process = self.original(argv, **options)
             self.groups.append(process.pid)
             return process
