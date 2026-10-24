@@ -393,9 +393,59 @@ Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroo
 
 ---
 
-### Profile JSON to set as `PAWLOCAL_ONCALL_MODEL_PROFILE`
+---
 
-Replace the placeholder values (marked `<...>`) and verify prices at the official source before committing this as a GitHub Environment variable.
+### How to get the Grafana Alert Rule UIDs (`rule_uids`)
+
+In PawLocal, `rule_uids` identifies the synthetic search-to-detail journey alert rule for each environment that the incident responder observes during recovery.
+
+#### Option A: Use the canonical repository defaults (Recommended)
+If you provision alert rules using the repository tools (`observability/grafana/cloud/experience.py`), the predefined UIDs are:
+
+| Environment | Canonical Rule UID |
+|---|---|
+| **Development** | `pawlocal-development-search-detail` |
+| **Production** | `pawlocal-production-search-detail` |
+
+#### Option B: Find the Rule UID in Grafana Cloud UI
+If you create alert rules manually or customize their names:
+1. Log in to your Grafana Cloud stack (e.g. `https://<stack>.grafana.net`).
+2. In the left navigation, go to **Alerts & IRM** (or **Alerting**) → **Alert rules**.
+3. Expand folder **`pawlocal-development`** or **`pawlocal-production`**.
+4. Click on your search-detail journey failure alert rule.
+5. In your browser URL bar, copy the identifier after `/alerting/`:
+   ```
+   https://<stack>.grafana.net/alerting/<RULE_UID>/view
+   ```
+   *(The UID is also displayed under the rule details section as **Rule UID**).*
+
+---
+
+### Generating the Profile JSON
+
+You can generate the complete, validated JSON string using the repository helper script without manual JSON formatting or timestamp math:
+
+```bash
+python ops/incident-response/generate-profile.py
+```
+
+This helper:
+- Uses the recommended `o4-mini` model, `medium` effort, and \$20.00 monthly budget ceiling.
+- Automatically sets the canonical rule UIDs (`pawlocal-development-search-detail` and `pawlocal-production-search-detail`). (Pass `--dev-rule-uid <uid>` and `--prod-rule-uid <uid>` if you use custom UIDs).
+- Automatically calculates the current UTC month (`approved_month`), UTC review timestamp (`rates_reviewed_at`), and 30-day expiration timestamp (`expires_at`).
+- Runs the output through `quota.py` validation to guarantee it passes the gateway checks.
+
+**Example output ready to paste into `PAWLOCAL_ONCALL_MODEL_PROFILE`:**
+
+```json
+{"model":"o4-mini","effort":"medium","service_tier":"default","input_rate":1100000,"output_rate":4400000,"monthly_microdollars":20000000,"monthly_runs":20,"promotion_seconds":3600,"recovery_seconds":720,"rule_uids":{"development":"pawlocal-development-search-detail","production":"pawlocal-production-search-detail"},"requests_per_role":4,"input_per_request":100000,"output_per_request":16000,"input_per_role":200000,"output_per_role":32000,"approval":"alanlima/pawlocal/issues/269","approved_month":"2026-10","rates_source":"https://platform.openai.com/docs/pricing","rates_reviewed_at":"2026-10-24T03:04:03Z","expires_at":"2026-11-23T03:04:03Z"}
+```
+
+---
+
+### Manual Profile JSON Reference
+
+If you prefer to construct the JSON manually, satisfy all fields below:
 
 ```json
 {
@@ -409,8 +459,8 @@ Replace the placeholder values (marked `<...>`) and verify prices at the officia
   "promotion_seconds": 3600,
   "recovery_seconds": 720,
   "rule_uids": {
-    "development": "<your-grafana-dev-alert-rule-uid>",
-    "production":  "<your-grafana-prod-alert-rule-uid>"
+    "development": "pawlocal-development-search-detail",
+    "production":  "pawlocal-production-search-detail"
   },
   "requests_per_role": 4,
   "input_per_request": 100000,
@@ -431,11 +481,11 @@ Replace the placeholder values (marked `<...>`) and verify prices at the officia
 2. Record the pricing review date in `rates_reviewed_at`.
 3. Set `approved_month` to the current UTC month (`YYYY-MM`).
 4. Set `expires_at` to no more than 31 days from now (the gateway rejects profiles older than 31 days).
-5. Fill in the two Grafana alert rule UIDs from your Grafana alerting rules page (copy the UID from the rule edit URL).
+5. Ensure `rule_uids` match your Grafana alert rule UIDs.
 6. Record approval on the Quota Ledger issue (#269) before pasting the profile into the GitHub Environment variable.
 
 > [!IMPORTANT]
-> The profile **must be re-issued each calendar month** — `approved_month` must match the current UTC month or the gateway denies admission. Budget one few-minute review per month to refresh the profile.
+> The profile **must be re-issued each calendar month** — `approved_month` must match the current UTC month or the gateway denies admission. Budget a quick monthly run of `python ops/incident-response/generate-profile.py` to refresh the variable.
 
 ---
 
