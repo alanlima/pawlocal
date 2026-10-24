@@ -2,11 +2,11 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
-## DEC-015 — Temporary removal of shared strict release-plan invocation (#305)
+## DEC-015 — Temporary disabling of shared strict release-plan invocation (#305)
 
 - **Status:** Owner approved on 2026-10-24: "For now, implement the guard removal and continue the goal." Differentiated ordinary/incident plan policies are deferred for grooming and implementation in [#308](https://github.com/alanlima/pawlocal/issues/308).
 - **Context:** Release run 40082400071 planned the receiver source change from #294 and was rejected by the shared strict validator. Both package filenames reproduce deterministically from their source commits; the failure was an unconverged infrastructure change, not packaging instability.
-- **Decision:** Remove the `guards.py --mode=validate-plan` invocation from `terraform-environment.yml`. Do not add route-specific conditions or replacement enforcement. Retain the unused validator and its unit tests for later policy work.
+- **Decision:** Comment out the original `guards.py --mode=validate-plan` step from `terraform-environment.yml`. Do not add route-specific conditions or replacement enforcement. Retain the unused validator and its unit tests for later policy work.
 - **Consequences:** Both ordinary and authenticated incident releases lose this automated rejection of non-release infrastructure changes, including Lambda updates. This is an explicit temporary exception to DEC-012 and the incident specification's strict release-plan requirement; the `release_only` input still declares intent but does not enforce it. Do not describe incident plans as machine-validated release-only while this exception is active.
 - **Boundaries:** Preserve existing authorization/provenance checks, exact saved-plan metadata/digest/source/state checks, Terraform ownership and raw operational logs. No IAM permissions, live Environment settings, unrelated infrastructure approval or production authorization are changed by this decision. Code merge and live recovery require separate evidence; #305 remains open until development acceptance is verified.
 

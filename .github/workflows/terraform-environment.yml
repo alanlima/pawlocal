@@ -436,8 +436,13 @@ jobs:
             "${release_flag[@]}" >> "$GITHUB_STEP_SUMMARY"
 
       # Owner-directed temporary exception (#305 / DEC-015): the shared strict
-      # release-plan invocation is removed for ordinary and incident releases.
+      # release-plan invocation is commented out for ordinary and incident releases.
       # Differentiated plan policies are deferred to #308.
+      # - name: Validate strict release plan guards
+      #   if: inputs.phase == 'release'
+      #   env:
+      #     PYTHONPATH: ops/change-authorization:ops/incident-response
+      #   run: python ops/change-authorization/guards.py --mode=validate-plan --plan-file="$RUNNER_TEMP/terraform-plan.json"
 
       - name: Bind exact plan metadata
         id: metadata

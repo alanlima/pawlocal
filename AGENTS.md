@@ -319,7 +319,7 @@ One admission-to-PR deadline is 20 minutes across all model/test/review/publicat
 
 ### Temporary shared release-plan exception — Issue #305
 
-Owner direction on 2026-10-24 removes the blocking strict release-plan invocation from `terraform-environment.yml` pending deferred Issue #308. This explicitly supersedes the release-only plan rejection requirements above and below for that shared workflow: ordinary and incident releases can both include non-release infrastructure changes that this validator previously rejected. See DEC-015. Existing authorization/provenance checks, exact saved-plan integrity, Terraform state ownership, raw logs and infrastructure approval requirements remain in force. This exception changes no IAM permissions or live Environment settings and grants no unrelated infrastructure or production authorization.
+Owner direction on 2026-10-24 disables the blocking strict release-plan invocation by commenting out the original step from `terraform-environment.yml` pending deferred Issue #308. This explicitly supersedes the release-only plan rejection requirements above and below for that shared workflow: ordinary and incident releases can both include non-release infrastructure changes that this validator previously rejected. See DEC-015. Existing authorization/provenance checks, exact saved-plan integrity, Terraform state ownership, raw logs and infrastructure approval requirements remain in force. This exception changes no IAM permissions or live Environment settings and grants no unrelated infrastructure or production authorization.
 
 ## 10. Cost management
 
