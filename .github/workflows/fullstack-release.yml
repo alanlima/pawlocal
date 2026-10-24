@@ -26,6 +26,8 @@ on:
       - "ops/**"
       - "!**/*.md"
       - "!**/*.mdx"
+      - "docs/oncall-setup.md"
+      - "docs/oncall-troubleshooting.md"
   push:
     branches: [main]
     paths:
