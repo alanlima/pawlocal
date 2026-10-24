@@ -238,12 +238,12 @@ class RequestBudget:
     def admit(self, input_tokens):
         p = self.profile
         integer(input_tokens, 0)
-        if (
-            input_tokens > p.input_per_request
-            or self.requests >= p.requests_per_role
-            or self.inputs + input_tokens > p.input_per_role
-        ):
-            raise Denied("request or cumulative input quota exhausted")
+        if input_tokens > p.input_per_request:
+            raise Denied("per-request input quota exhausted")
+        if self.requests >= p.requests_per_role:
+            raise Denied("request count quota exhausted")
+        if self.inputs + input_tokens > p.input_per_role:
+            raise Denied("cumulative input quota exhausted")
         # A full reservation per turn must leave room for every configured turn.
         # Keep any integer remainder unallocated; never refund earlier calls.
         output_cap = min(

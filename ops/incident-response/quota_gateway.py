@@ -208,12 +208,37 @@ class Gateway:
         self.clock = clock
         self.budget = RequestBudget(profile)
         self.received = 0
+        self.counted_input_tokens = None
+        self.request_body_bytes = None
         self.upstream = upstream or self.request
         self.control = control
         self.stage = "request_headers"
         self.diagnostic = diagnostic or (
             lambda event: print(json.dumps(event), file=sys.stderr, flush=True)
         )
+
+    def accounting(self):
+        # Numeric accounting only: never request text, headers or credentials.
+        p = self.profile
+        return {
+            "counted_input_tokens": self.counted_input_tokens,
+            "requests_received": self.received,
+            "requests_reserved": self.budget.requests,
+            "input_tokens_reserved": self.budget.inputs,
+            "output_tokens_reserved": self.budget.outputs,
+            "request_body_bytes": self.request_body_bytes,
+            "limits": {
+                "requests_per_role": p.requests_per_role,
+                "input_per_request": p.input_per_request,
+                "input_per_role": p.input_per_role,
+                "output_per_request": p.output_per_request,
+                "output_per_role": p.output_per_role,
+                "effective_output_per_request": min(
+                    p.output_per_request, p.output_per_role // p.requests_per_role
+                ),
+                "request_body_bytes": MAX_BODY,
+            },
+        }
 
     def ensure_live(self):
         if self.control is not None:
@@ -241,6 +266,8 @@ class Gateway:
         )
 
     def admit(self, authorization, raw):
+        self.counted_input_tokens = None
+        self.request_body_bytes = len(raw)
         if not isinstance(authorization, str) or not hmac.compare_digest(
             authorization, "Bearer " + self.local_token
         ):
@@ -250,8 +277,10 @@ class Gateway:
         self.ensure_live()
         self.stage = "request_quota"
         self.received += 1
-        if self.received > self.profile.requests_per_role or len(raw) > MAX_BODY:
-            raise Denied("request quota/body bound exceeded")
+        if self.received > self.profile.requests_per_role:
+            raise Denied("request count quota exhausted")
+        if len(raw) > MAX_BODY:
+            raise Denied("request body bound exceeded")
         self.stage = "request_validation"
         body = strict_json(raw)
         if isinstance(body, dict):
@@ -282,7 +311,8 @@ class Gateway:
             ):
                 raise Denied("token count missing")
         self.stage = "quota_reservation"
-        cap = self.budget.admit(count["input_tokens"])
+        self.counted_input_tokens = count["input_tokens"]
+        cap = self.budget.admit(self.counted_input_tokens)
         body["max_output_tokens"] = cap
         self.remaining()
         # Conservative charged allocation, not a claim of provider-billed
@@ -291,19 +321,15 @@ class Gateway:
             self.budget.inputs * self.profile.input_rate
             + self.budget.outputs * self.profile.output_rate
         )
-        print(
-            json.dumps(
-                {
-                    "event": "oncall_quota_reserved",
-                    "profile": self.profile.digest,
-                    "model": self.profile.model,
-                    "requests": self.budget.requests,
-                    "input_tokens_reserved": self.budget.inputs,
-                    "output_tokens_reserved": self.budget.outputs,
-                    "upper_cost_microdollars": (numerator + 999999) // 1000000,
-                }
-            ),
-            flush=True,
+        self.diagnostic(
+            {
+                "event": "oncall_quota_reserved",
+                "profile": self.profile.digest,
+                "model": self.profile.model,
+                "requests": self.budget.requests,
+                "upper_cost_microdollars": (numerator + 999999) // 1000000,
+                **self.accounting(),
+            }
         )
         return body
 
@@ -319,6 +345,8 @@ def serve(gateway, port):
         def do_POST(self):
             started = False
             gateway.stage = "request_headers"
+            gateway.counted_input_tokens = None
+            gateway.request_body_bytes = None
             try:
                 if (
                     self.path != "/v1/responses"
@@ -332,8 +360,9 @@ def serve(gateway, port):
                 ):
                     raise Denied("ambiguous request headers")
                 length = int(self.headers.get("Content-Length", "-1"))
+                gateway.request_body_bytes = length
                 if not 0 < length <= MAX_BODY:
-                    raise Denied("body length bound")
+                    raise Denied("request body bound exceeded")
                 self.connection.settimeout(min(gateway.remaining(), 10))
                 raw = self.rfile.read(length)
                 if len(raw) != length:
@@ -387,6 +416,7 @@ def serve(gateway, port):
                     if isinstance(error, Denied)
                     else "invalid_request",
                     "response_started": started,
+                    **gateway.accounting(),
                 }
                 if isinstance(error, urllib.error.HTTPError):
                     status = error.code if 400 <= error.code <= 599 else 502

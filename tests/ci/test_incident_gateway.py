@@ -236,7 +236,7 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(json.loads(raw)["error"]["origin"], "local")
             self.assertEqual(process.budget.outputs, 32000)
             self.assertEqual(calls.count(""), 4)
-            self.assertEqual(events[-1]["reason"], "request quota/body bound exceeded")
+            self.assertEqual(events[-1]["reason"], "request count quota exhausted")
             self.assertNotIn("fixture secret body", json.dumps(events))
 
     def test_http_upstream_status_and_id_are_distinct_from_local_and_transport(self):
@@ -284,7 +284,7 @@ class GatewayTests(unittest.TestCase):
                     self.assertEqual(event["upstream_code"], "insufficient_quota")
                     self.assertEqual(event["upstream_type"], "insufficient_quota")
                     self.assertNotIn("secret", raw.decode())
-                    self.assertEqual(events, [event])
+                    self.assertEqual(events[-1], event)
 
     def test_http_schema_and_live_control_denial_prevent_upstream(self):
         def upstream(*_):
@@ -302,6 +302,93 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(self.post(port)[0], 403)
             self.assertEqual(events[-1]["stage"], "live_control")
             self.assertEqual(process.budget.outputs, 0)
+
+    def test_http_first_input_denial_preserves_exact_accounting_and_no_payloads(self):
+        for counts, reason, reserved in (
+            ([100001], "per-request input quota exhausted", 0),
+            ([100000, 100000, 1], "cumulative input quota exhausted", 2),
+        ):
+            pending = iter(counts)
+            inference = []
+
+            def upstream(suffix, body, pending=pending, inference=inference):
+                if suffix:
+                    return Response(
+                        json.dumps({"input_tokens": next(pending)}).encode()
+                    )
+                inference.append(body)
+                response = Response(b"{}")
+                response.headers = {"Content-Type": "application/json"}
+                return response
+
+            with (
+                self.subTest(reason=reason),
+                self.http_gateway(upstream) as (_process, events, port),
+            ):
+                sensitive = self.body(
+                    input="private-model-text", instructions="private-instructions"
+                )
+                for _ in range(reserved):
+                    self.assertEqual(self.post(port, sensitive)[0], 200)
+                status, raw = self.post(port, sensitive)
+                self.assertEqual(status, 403)
+                event = json.loads(raw)["error"]
+                self.assertEqual(event["reason"], reason)
+                self.assertEqual(event["counted_input_tokens"], counts[-1])
+                self.assertEqual(event["requests_received"], reserved + 1)
+                self.assertEqual(event["requests_reserved"], reserved)
+                self.assertEqual(event["input_tokens_reserved"], reserved * 100000)
+                self.assertEqual(event["output_tokens_reserved"], reserved * 5000)
+                self.assertEqual(event["limits"]["input_per_request"], 100000)
+                self.assertEqual(event["limits"]["input_per_role"], 200000)
+                self.assertEqual(event["limits"]["effective_output_per_request"], 5000)
+                self.assertEqual(len(inference), reserved)
+                self.assertEqual(len(events), reserved + 1)
+                self.assertEqual(events[-1], event)
+                for count, success in enumerate(events[:-1], 1):
+                    self.assertEqual(success["event"], "oncall_quota_reserved")
+                    self.assertEqual(success["counted_input_tokens"], 100000)
+                    self.assertEqual(success["requests_reserved"], count)
+                    self.assertEqual(success["input_tokens_reserved"], count * 100000)
+                    self.assertEqual(success["output_tokens_reserved"], count * 5000)
+                serialized = json.dumps(events)
+                for secret in (
+                    "private-model-text",
+                    "private-instructions",
+                    "upstream-secret",
+                    "x" * 32,
+                    "Authorization",
+                ):
+                    self.assertNotIn(secret, serialized)
+
+    def test_http_body_limit_and_reset_count_never_reuse_previous_request_input(self):
+        def upstream(suffix, body):
+            if suffix:
+                return Response(b'{"input_tokens":1000}')
+            response = Response(b"{}")
+            response.headers = {"Content-Type": "application/json"}
+            return response
+
+        with self.http_gateway(upstream) as (_process, events, port):
+            self.assertEqual(self.post(port)[0], 200)
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            connection.putrequest("POST", "/v1/responses")
+            connection.putheader("Authorization", "Bearer " + "x" * 32)
+            connection.putheader("Content-Length", str(gateway.MAX_BODY + 1))
+            connection.endheaders()
+            response = connection.getresponse()
+            event = json.loads(response.read())["error"]
+            self.assertEqual(response.status, 403)
+            connection.close()
+            self.assertEqual(event["reason"], "request body bound exceeded")
+            self.assertIsNone(event["counted_input_tokens"])
+            self.assertEqual(event["request_body_bytes"], gateway.MAX_BODY + 1)
+            self.assertEqual(event["limits"]["request_body_bytes"], gateway.MAX_BODY)
+            self.assertEqual(
+                (event["requests_received"], event["requests_reserved"]), (1, 1)
+            )
+            self.assertEqual(event["input_tokens_reserved"], 1000)
+            self.assertEqual(events[-1], event)
 
     def test_live_control_http_error_identifies_github_not_openai(self):
         def upstream(*_):
@@ -347,8 +434,8 @@ class GatewayTests(unittest.TestCase):
             status, raw = self.post(port)
             self.assertEqual(status, 200)
             self.assertEqual(raw, b"data: fixture\n\n")
-            self.assertTrue(events[0]["response_started"])
-            self.assertEqual(events[0]["origin"], "transport")
+            self.assertTrue(events[-1]["response_started"])
+            self.assertEqual(events[-1]["origin"], "transport")
             self.assertEqual(process.budget.outputs, 5000)
 
     @unittest.skipUnless(

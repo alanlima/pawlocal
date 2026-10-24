@@ -190,6 +190,20 @@ Check **Show quota gateway failure diagnostics** immediately after the fixer/rev
 | `origin=transport`, `code=transport_uncertain`, HTTP 502 before streaming | A socket/network operation failed. `stage` distinguishes header reading, token count, live control and inference; usage may be uncertain. |
 | `response_started=true` | Streaming had already returned HTTP 200 before failing. The connection closes; no second HTTP response is appended. Treat partial delivery as uncertain. |
 
+Both successful `oncall_quota_reserved` records and failure records are written to the existing runner-owned diagnostic file and operational stderr. Each record includes `counted_input_tokens` (null before a count is available), `requests_received`, `requests_reserved`, `input_tokens_reserved`, `output_tokens_reserved`, request-body bytes and a `limits` object with the active request/input/output/body ceilings and effective per-turn output cap. A success snapshot includes that call's full conservative reservation; a refusal snapshot leaves prior charges unchanged.
+
+Use the **first** refusal, before client reconnect attempts, to identify the original bound:
+
+| Reason | Exact comparison |
+|---|---|
+| `per-request input quota exhausted` | `counted_input_tokens > limits.input_per_request` |
+| `cumulative input quota exhausted` | `input_tokens_reserved + counted_input_tokens > limits.input_per_role` |
+| `request count quota exhausted` | Received requests exceed `limits.requests_per_role`, or all reserved requests are consumed. |
+| `request body bound exceeded` | Declared/received body bytes are outside the accepted positive size bound. |
+| `cumulative output quota exhausted` | No positive per-turn output allocation remains within the role ceiling. |
+
+Rejected header/body requests can have null counted input and do not imply an upstream model call. Reconnect attempts can reach a later request-count refusal after an earlier input refusal; inspect the first record and the counters, not only the client's final error. These are reservations, not provider-billed usage. CLI token summaries and account-wide usage totals cannot replace per-request accounting. An unexplained test exit 130 is not proof of an application deadlock or a sandbox defect; preserve its actual command, elapsed time and output for separate investigation.
+
 Diagnostics contain fixed classifications and bounded upstream identifiers, not credentials, request/model contents or upstream error messages. Normal operational stdout/stderr is retained. The response carries the same structured classification for the model client. Reservations remain consumed on all failed/uncertain calls.
 
 The allocator reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. A profile with four requests, a 16,000-token per-request ceiling and a 32,000-token role ceiling therefore permits four 8,000-token turns without increasing the envelope. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Consumed incident generations and ledger reservations are not automatically retried or refunded.
