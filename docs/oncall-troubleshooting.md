@@ -9,16 +9,16 @@ For step-by-step onboarding and setup instructions, see the [On-call responder s
 ## Incident lifecycle at a glance
 
 ```text
-Layer 1: Webhook Ingress (Grafana alert â†’ Lambda Function URL)
-    â†“
-Layer 2: Workflow Trigger (Lambda â†’ GitHub Actions Dispatch App)
-    â†“
+Layer 1: Webhook Ingress (Grafana alert → Lambda Function URL)
+    ↓
+Layer 2: Workflow Trigger (Lambda → GitHub Actions Dispatch App)
+    ↓
 Layer 3: Preflight Readiness (Readiness token, main branch ruleset policy)
-    â†“
+    ↓
 Layer 4: Preflight Admission (Grafana Alertmanager check, ledger quota, issue claim)
-    â†“
+    ↓
 Layer 5: Remediation Loop (Codex fixer, candidate CI, fresh review, publisher PR)
-    â†“
+    ↓
 Layer 6: Deployment & Recovery (Squash merge, DEV deployment, Prometheus recovery, PROD promotion)
 ```
 
@@ -42,7 +42,7 @@ Layer 6: Deployment & Recovery (Squash merge, DEV deployment, Prometheus recover
 
 ---
 
-## Layer 1 â€” Webhook Ingress (Lambda Receiver)
+## Layer 1 — Webhook Ingress (Lambda Receiver)
 
 The Lambda receiver validates HMAC signatures, checks alert allowlists, and mints an installation token to dispatch `incident-responder.yml`.
 
@@ -54,7 +54,7 @@ The Lambda receiver validates HMAC signatures, checks alert allowlists, and mint
     ```powershell
     $Secret = aws ssm get-parameter --name "/pawlocal/development/secrets/grafana/webhook-hmac" --with-decryption --query Parameter.Value --output text
     ```
-    Confirm that the same 32-byte hex secret is entered in the Grafana Contact Point under **Optional Webhook settings** â†’ **HMAC setup** â†’ **Secret**.
+    Confirm that the same 32-byte hex secret is entered in the Grafana Contact Point under **Optional Webhook settings** → **HMAC setup** → **Secret**.
 * **Cause 2: Timestamp header skew.**
   The Lambda receiver enforces a 300-second window on `x-grafana-alerting-timestamp`. Skewed clocks or stale timestamps result in `401`.
   * **Diagnosis**: Verify system clock uses UTC:
@@ -71,7 +71,7 @@ The Lambda receiver validates HMAC signatures, checks alert allowlists, and mint
 
 ---
 
-## Layer 2 â€” GitHub Workflow Dispatch
+## Layer 2 — GitHub Workflow Dispatch
 
 ### Symptom: `HTTP 502 Bad Gateway`
 
@@ -84,7 +84,7 @@ The Lambda receiver validates HMAC signatures, checks alert allowlists, and mint
 
 ---
 
-## Layer 3 â€” Preflight Readiness & Ruleset Validation
+## Layer 3 — Preflight Readiness & Ruleset Validation
 
 Preflight runs inside GitHub Actions on `main`. It mints an elevated readiness token via the Publisher App (`ops/incident-response/publisher-token.mjs`) to inspect repository rulesets, ensuring that automated squash-merging can occur without human bypass or branch protection circumvention.
 
@@ -117,7 +117,7 @@ Preflight runs inside GitHub Actions on `main`. It mints an elevated readiness t
 
 ---
 
-## Layer 4 â€” Preflight Admission & Alert Verification
+## Layer 4 — Preflight Admission & Alert Verification
 
 Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/alerts`) using `PAWLOCAL_GRAFANA_QUERY_TOKEN` to verify that the reported incident alert is actively firing.
 
@@ -125,12 +125,12 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 
 * **Cause 1: Environment Secret Precedence (Repository vs. Environment Secret)**
   * In GitHub Actions, secrets defined on an Environment (e.g. `oncall-development`) **override** repository-level secrets of the same name.
-  * If `Operations Â· Verify Grafana access` passes using the repository secret, but `incident-responder.yml` fails with `401`, check the environment secret in **Settings** â†’ **Environments** â†’ **`oncall-development`** â†’ **`PAWLOCAL_GRAFANA_QUERY_TOKEN`**.
+  * If `Operations · Verify Grafana access` passes using the repository secret, but `incident-responder.yml` fails with `401`, check the environment secret in **Settings** → **Environments** → **`oncall-development`** → **`PAWLOCAL_GRAFANA_QUERY_TOKEN`**.
 * **Cause 2: Wrong Token Type (Cloud Access Policy vs. Stack Service Account Token)**
   * As documented in `docs/specs/monitoring-secret-lifecycle.md`, Grafana Cloud Access Policy tokens (`glc_...` created in `grafana.com`) are for Cloud Portal management and telemetry ingestion. They **cannot** authenticate against Grafana Stack API endpoints (`https://<stack>.grafana.net/api/...`).
   * The query token **must** be a Grafana Stack Service Account token (`glsa_...`), created inside the Grafana web instance:
     1. Log in to `https://alanlima.grafana.net`.
-    2. Go to **Administration** â†’ **Users and access** â†’ **Service accounts**.
+    2. Go to **Administration** → **Users and access** → **Service accounts**.
     3. Select or create a service account with the **Viewer** role.
     4. Generate a token (starts with `glsa_`).
 * **Verification**:
@@ -150,7 +150,7 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 
 ---
 
-## Layer 5 â€” Quota Ledger and Monthly Profile
+## Layer 5 — Quota Ledger and Monthly Profile
 
 ### Symptom: `trusted ledger issue missing`
 
@@ -175,7 +175,7 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 
 ---
 
-## Layer 6 â€” Fixer, Candidate CI, and PR Publication
+## Layer 6 — Fixer, Candidate CI, and PR Publication
 
 ### Symptom: model continuation fails with HTTP 403 or 429
 
@@ -232,11 +232,11 @@ Credential-free verification runs real TestClient requests under the pinned CLI 
 ### Symptom: `403 Resource not accessible by integration` during PR creation
 
 * **Cause**: The Publisher App installation token does not have write permissions for pull requests or issues.
-* **Fix**: Verify in **GitHub App Settings** â†’ **Permissions** that `Pull requests` and `Issues` are set to **Read and write**.
+* **Fix**: Verify in **GitHub App Settings** → **Permissions** that `Pull requests` and `Issues` are set to **Read and write**.
 
 ---
 
-## Layer 7 â€” Deployment, Promotion, and Recovery Verification
+## Layer 7 — Deployment, Promotion, and Recovery Verification
 
 ### Symptom: Recovery verification timeout (`recovery rule settling` or `stale evaluation`)
 
