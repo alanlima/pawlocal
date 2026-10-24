@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "disclaimer": "This file contains public environment identifiers and datasource metadata only (no secrets, tokens, or credentials). Committed to the repository to prevent untrusted AI incident models from tampering with telemetry endpoints during automated recovery, and to avoid granting AWS SSM credentials to incident-response runners (least privilege). Tracked for further architectural review in backlog issue #273.",
   "environments": {
     "development": {
       "enabled": true,

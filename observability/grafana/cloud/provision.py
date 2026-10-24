@@ -124,7 +124,18 @@ def otlp_http_endpoint(value):
 
 
 def validate_manifest(document):
-    exact_keys(document, ("version", "environments"), "manifest")
+    allowed_keys = (
+        ("version", "environments", "disclaimer")
+        if "disclaimer" in document
+        else ("version", "environments")
+    )
+    exact_keys(document, allowed_keys, "manifest")
+    if "disclaimer" in document:
+        require(
+            type(document["disclaimer"]) is str
+            and 0 < len(document["disclaimer"]) <= 2000,
+            "disclaimer must be a string up to 2000 characters",
+        )
     require(
         type(document["version"]) is int and document["version"] == 1,
         "Unsupported manifest version",

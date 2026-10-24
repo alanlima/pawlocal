@@ -296,6 +296,14 @@ class ProvisionTests(unittest.TestCase):
             broken["environments"]["development"][key] = value
             with self.assertRaises(p.ProvisionError):
                 p.validate_manifest(broken)
+        with_disclaimer = copy.deepcopy(document)
+        with_disclaimer["disclaimer"] = "Architectural review note."
+        p.validate_manifest(with_disclaimer)
+        for invalid_disclaimer in [123, "", "x" * 2001, None]:
+            bad_disclaimer = copy.deepcopy(document)
+            bad_disclaimer["disclaimer"] = invalid_disclaimer
+            with self.assertRaises(p.ProvisionError):
+                p.validate_manifest(bad_disclaimer)
         document["token"] = "secret"
         with self.assertRaises(p.ProvisionError):
             p.validate_manifest(document)
