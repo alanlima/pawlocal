@@ -144,6 +144,40 @@ class HandoffTests(unittest.TestCase):
                 job.reclaim_model_output(path)
             launch.assert_not_called()
 
+    def test_cache_install_maps_distinct_numeric_user_and_group(self):
+        model = types.SimpleNamespace(pw_uid=12001, pw_gid=12002)
+        with patch.object(subprocess, "Popen") as process:
+            adapter = FixtureLaunches(Path("trusted"), "a" * 40, Path("home"), model)
+            command = [
+                "sudo",
+                "install",
+                "-d",
+                "-o",
+                "oncall",
+                "-g",
+                "oncall",
+                "-m",
+                "700",
+                str(DEPS / "frontend/node_modules/.vite"),
+            ]
+            adapter(command, start_new_session=True)
+            process.assert_called_once_with(
+                [
+                    "sudo",
+                    "install",
+                    "-d",
+                    "-o",
+                    "12001",
+                    "-g",
+                    "12002",
+                    "-m",
+                    "700",
+                    command[-1],
+                ],
+                start_new_session=True,
+            )
+            self.assertEqual((command[4], command[6]), ("oncall", "oncall"))
+
     @unittest.skipUnless(
         sys.platform == "linux"
         and os.environ.get("PAWLOCAL_INCIDENT_HANDOFF_FIXTURE") == "1",
@@ -187,9 +221,10 @@ class FixtureLaunches:
     Tests/compilers/reporters themselves execute unchanged and credential-free.
     """
 
-    def __init__(self, trusted, base_sha, home):
+    def __init__(self, trusted, base_sha, home, model):
         self.original = subprocess.Popen
         self.trusted, self.base_sha, self.home = trusted, base_sha, home
+        self.model = model
         self.groups = []
         self.events = []
 
@@ -209,7 +244,15 @@ class FixtureLaunches:
                 ["sudo", "-n", sys.executable, "-c", cleanup], **options
             )
         if argv[:3] == ["sudo", "install", "-d"]:
-            argv = ["nobody" if value == "oncall" else value for value in argv]
+            # Ubuntu nobody's primary group is nogroup, not nobody. Preserve
+            # ownership semantics using its actual separate numeric identities.
+            for option, identity in (
+                ("-o", self.model.pw_uid),
+                ("-g", self.model.pw_gid),
+            ):
+                index = argv.index(option) + 1
+                if argv[index] == "oncall":
+                    argv[index] = str(identity)
         if argv[:3] == ["sudo", "chown", "--no-dereference"]:
             self.events.append("reclaim:" + argv[-1])
         if argv[:3] == ["sudo", "-u", "oncall"]:
@@ -323,7 +366,7 @@ def complete_fixture(test):
         }
         trusted_root = runner_temp / "oncall-trusted"
         trusted_root.mkdir(mode=0o700)
-        launches = FixtureLaunches(trusted, base_sha, home)
+        launches = FixtureLaunches(trusted, base_sha, home, model)
         values = {
             "RUNNER_TEMP": str(runner_temp),
             "GITHUB_WORKSPACE": str(trusted),
