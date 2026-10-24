@@ -474,6 +474,34 @@ class GatewayTests(unittest.TestCase):
             self.assertEqual(events[-1]["origin"], "transport")
             self.assertEqual(process.budget.outputs, 5000)
 
+    def test_trusted_usage_observation_does_not_change_reservation(self):
+        response_value = {
+            "status": "completed",
+            "usage": {"input_tokens": 1000, "output_tokens": 32, "total_tokens": 1032,
+                      "input_tokens_details": {"cached_tokens": 800},
+                      "output_tokens_details": {"reasoning_tokens": 20}},
+            "output": "private-upstream-content",
+        }
+        for streaming in (False, True):
+            def upstream(suffix, body):
+                if suffix:
+                    return Response(b'{"input_tokens":1000}')
+                raw = json.dumps(response_value).encode()
+                if streaming:
+                    raw = b'data: ' + json.dumps({"type":"response.completed", "response":response_value}).encode() + b'\n\n'
+                result = Response(raw)
+                result.headers = {"Content-Type": "text/event-stream" if streaming else "application/json"}
+                return result
+
+            with self.http_gateway(upstream) as (process, events, port):
+                self.assertEqual(self.post(port)[0], 200)
+                report = process.usage.snapshot()
+                self.assertEqual(report["requests"][0]["actual"]["total_tokens"], 1032)
+                self.assertEqual(process.budget.outputs, 5000)
+                self.assertEqual(report["requests"][0]["output_cap"], 5000)
+                self.assertNotIn("private-upstream-content", json.dumps(report))
+                self.assertEqual(len(events), 1)
+
     @unittest.skipUnless(
         os.name == "posix", "POSIX signal enforcement exercised in Ubuntu CI"
     )

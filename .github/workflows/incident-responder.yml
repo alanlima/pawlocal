@@ -42,6 +42,7 @@ jobs:
       deployments: read
       issues: write
     outputs:
+      usage_limits: ${{ steps.usage.outputs.limits }}
       admitted: ${{ steps.admit.outputs.admitted }}
       admission_sha256: ${{ steps.admit.outputs.metadata_sha256 }}
       profile_sha256: ${{ steps.admit.outputs.profile_sha256 }}
@@ -94,6 +95,12 @@ jobs:
           path: ${{ runner.temp }}/oncall-admission/*.json
           if-no-files-found: error
           retention-days: 7
+      - name: Summarize admission and configured usage limits
+        id: usage
+        if: always()
+        env:
+          ADMITTED: ${{ steps.admit.outputs.admitted }}
+        run: python ops/incident-response/usage_summary.py preflight
 
   fixer:
     name: Fix search/detail
@@ -111,6 +118,7 @@ jobs:
       ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
       PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
     outputs:
+      usage: ${{ steps.usage.outputs.usage }}
       candidate_sha256: ${{ steps.seal.outputs.candidate_sha256 }}
     steps:
       - uses: actions/checkout@v7
@@ -168,6 +176,10 @@ jobs:
           path: ${{ runner.temp }}/oncall-trusted/export/candidate.json
           if-no-files-found: error
           retention-days: 7
+      - name: Summarize fixer token usage and quota headroom
+        id: usage
+        if: always()
+        run: python ops/incident-response/usage_summary.py fixer
 
   checks:
     name: Validate candidate
@@ -228,6 +240,7 @@ jobs:
       PINNED_CANDIDATE_SHA: ${{ needs.checks.outputs.candidate_sha }}
       CHECKS_SHA256: ${{ needs.checks.outputs.checks_sha256 }}
     outputs:
+      usage: ${{ steps.usage.outputs.usage }}
       review_sha256: ${{ steps.seal.outputs.review_sha256 }}
     steps:
       - uses: actions/checkout@v7
@@ -291,6 +304,10 @@ jobs:
           path: ${{ runner.temp }}/oncall-trusted/review-export/review.json
           if-no-files-found: error
           retention-days: 7
+      - name: Summarize reviewer token usage and quota headroom
+        id: usage
+        if: always()
+        run: python ops/incident-response/usage_summary.py reviewer
 
   publisher:
     name: Publish incident PR
@@ -537,7 +554,7 @@ jobs:
   finalize:
     name: Record incident outcome
     needs: [preflight, fixer, checks, reviewer, publisher, merge, development_recovery, promote]
-    if: always() && needs.preflight.outputs.issue != ''
+    if: always() && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: oncall-${{ inputs.environment }}
@@ -572,4 +589,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Preserve uncertain lease or verify complete recovery and close incident
+        if: needs.preflight.outputs.issue != ''
         run: python ops/incident-response/finalize.py
+      - name: Summarize overall token usage and limits
+        if: always()
+        env:
+          USAGE_LIMITS: ${{ needs.preflight.outputs.usage_limits }}
+          FIXER_USAGE: ${{ needs.fixer.outputs.usage }}
+          REVIEWER_USAGE: ${{ needs.reviewer.outputs.usage }}
+          FIXER_RESULT: ${{ needs.fixer.result }}
+          REVIEWER_RESULT: ${{ needs.reviewer.result }}
+        run: python ops/incident-response/usage_summary.py overall

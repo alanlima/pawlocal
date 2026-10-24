@@ -183,3 +183,19 @@ class IncidentWorkflowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IncidentUsageWorkflowTests(unittest.TestCase):
+    def test_always_reports_no_claim_failures_and_skipped_models_without_mutation(self):
+        jobs = yaml.safe_load((ROOT / ".github/workflows/incident-responder.yml").read_text())["jobs"]
+        self.assertEqual(len(jobs), 9)
+        self.assertEqual(jobs["finalize"]["if"], "always() && github.ref == 'refs/heads/main' && github.run_attempt == 1")
+        finalizer = next(step for step in jobs["finalize"]["steps"] if step.get("run") == "python ops/incident-response/finalize.py")
+        self.assertEqual(finalizer["if"], "needs.preflight.outputs.issue != ''")
+        for name in ("preflight", "fixer", "reviewer", "finalize"):
+            step = next(step for step in jobs[name]["steps"] if "usage_summary.py" in step.get("run", ""))
+            self.assertEqual(step["if"], "always()")
+        summary = jobs["finalize"]["steps"][-1]
+        self.assertIn("needs.preflight.outputs.usage_limits", summary["env"]["USAGE_LIMITS"])
+        self.assertIn("needs.fixer.outputs.usage", summary["env"]["FIXER_USAGE"])
+        self.assertIn("needs.reviewer.result", summary["env"]["REVIEWER_RESULT"])
