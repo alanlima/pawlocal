@@ -1,5 +1,7 @@
 # On-call responder troubleshooting guide
 
+Production initial readiness is tracked in the [proposed setup and recovery plan](specs/production-recovery-readiness.md). Its production SecureString decision remains unaccepted; missing telemetry or a rule must stop readiness rather than be treated as healthy.
+
 This guide documents verified failure modes, root causes, diagnosis commands, and resolutions across the automated incident responder lifecycle (`incident-responder.yml`).
 
 For step-by-step onboarding and setup instructions, see the [On-call responder setup guide](oncall-setup.md).

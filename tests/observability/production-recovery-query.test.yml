@@ -1,0 +1,74 @@
+evaluation_interval: 1m
+tests:
+  - name: healthy production with no 5xx series
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0+60x5'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m]))'
+        eval_time: 3m
+        exp_samples: []
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 0
+  - name: production errors stay positive
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0+60x5'
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/places",status_class="5xx"}'
+        values: '0+6x5'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 3m
+        exp_samples:
+          - labels: '{}'
+            value: 0.1
+  - name: missing production stays absent despite development traffic
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="development",service="pawlocal-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0+60x5'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 3m
+        exp_samples: []
+  - name: one sample is insufficient
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 0m
+        exp_samples: []
+  - name: stale production traffic stays absent
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0 60 120 stale _ _'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 5m
+        exp_samples: []
+  - name: other service cannot synthesize zero
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="other-api",route="/api/v1/places",status_class="2xx"}'
+        values: '0+60x5'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 3m
+        exp_samples: []
+  - name: other route cannot synthesize zero
+    interval: 1m
+    input_series:
+      - series: 'pawlocal_api_requests_total{environment="production",service="pawlocal-api",route="/api/v1/health",status_class="2xx"}'
+        values: '0+60x5'
+    promql_expr_test:
+      - expr: 'sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))'
+        eval_time: 3m
+        exp_samples: []

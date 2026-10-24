@@ -27,6 +27,8 @@ Record accepted decisions with date, status, context, decision and consequences.
 - **Conditions:** Both plan/apply roles need newly reviewed exact decrypted reads and applicable KMS authority. Preserve nonempty write-only configuration through refresh. Guard metadata updates that need a write-revision advance; fail closed on missing/empty/stale inputs and unmanaged collisions. Saved-plan integrity does not bind ephemeral re-supply, so a lost input session requires a fresh reviewed operation. Runtime incidents gain no setup/write credentials or new approval state.
 - **Evidence and limits:** [Lifecycle proposal and local real-provider fixture](specs/monitoring-secret-lifecycle.md) define reproducible synthetic tests and remaining secure-runner/IAM/KMS/Grafana/live requirements. This entry implements no AWS resource, IAM grant, protected input channel or credential population. Existing secret-input restrictions remain effective until the proposal is accepted and implemented.
 
+The [production-specific decision packet](specs/production-otlp-source-proposal.md) under #241/#333 selects an exact proposed target, ownership gates, protected input, IAM/KMS scope and cost/rollback checks. It remains PROPOSED; no AWS implementation or saved plan is included. The [production recovery readiness plan](specs/production-recovery-readiness.md) records the separate ingestion and rule prerequisites.
+
 ## DEC-012 — Fully unattended incident remediation MVP
 
 - **Status:** Owner-approved design amendment, 23 October 2026, [#239](https://github.com/alanlima/pawlocal/issues/239). Implementation/setup and live acceptance remain pending. Supersedes DEC-011's runtime human merge/production-approval clauses. The optional approval switch is deferred.

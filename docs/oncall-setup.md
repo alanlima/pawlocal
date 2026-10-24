@@ -1,5 +1,7 @@
 # On-call responder setup guide
 
+Production initial readiness is tracked in the [proposed setup and recovery plan](specs/production-recovery-readiness.md). Its production SecureString decision remains unaccepted; missing telemetry or a rule must stop readiness rather than be treated as healthy.
+
 This guide covers every step required to activate the automated incident responder from scratch for canonical deployments of this repository (`alanlima/pawlocal`). It describes the exact manual operations that cannot be automated, and the sequence in which to do them.
 
 > [!NOTE]
