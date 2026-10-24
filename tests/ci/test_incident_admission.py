@@ -222,6 +222,7 @@ class AdmissionTests(unittest.TestCase):
         rule = {
             "enforcement": "active",
             "target": "branch",
+            "bypass_actors": [],
             "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
             "rules": [
                 {"type": "deletion"},
@@ -268,20 +269,35 @@ class AdmissionTests(unittest.TestCase):
                     return [{"id": index + 1} for index in range(len(self.rows))]
                 return self.rows[int(path.rsplit("/", 1)[1]) - 1]
 
-        # When bypass_actors is omitted (None) and current_user_can_bypass is "never", it passes.
-        omitted_never = copy.deepcopy(rule)
-        omitted_never["current_user_can_bypass"] = "never"
-        self.assertNotIn("bypass_actors", omitted_never)
+        # 1. When bypass_actors is explicitly empty ([]) and current_user_can_bypass is "never", it passes.
+        valid_empty = copy.deepcopy(rule)
+        valid_empty["current_user_can_bypass"] = "never"
         with (
             patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
             patch.object(admission, "runtime_ready") as environments,
             patch.object(admission, "classic_absent"),
         ):
-            admission.readiness(Rules([omitted_never]))
+            admission.readiness(Rules([valid_empty]))
             environments.assert_called_once()
 
-        # When bypass_actors is omitted (None) and current_user_can_bypass is "always", it raises Denied.
+        # 2. When bypass_actors is omitted (None) even with current_user_can_bypass "never",
+        # it raises Denied (preserves fail-closed behavior per AGENTS.md line 314:
+        # read-only tokens cannot prove bypass inventory is empty).
+        omitted_never = copy.deepcopy(rule)
+        del omitted_never["bypass_actors"]
+        omitted_never["current_user_can_bypass"] = "never"
+        with (
+            patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
+            patch.object(admission, "runtime_ready") as environments,
+            patch.object(admission, "classic_absent"),
+            self.assertRaises(admission.Denied),
+        ):
+            admission.readiness(Rules([omitted_never]))
+        environments.assert_not_called()
+
+        # 3. When bypass_actors is omitted (None) and current_user_can_bypass is "always", it raises Denied.
         omitted_always = copy.deepcopy(rule)
+        del omitted_always["bypass_actors"]
         omitted_always["current_user_can_bypass"] = "always"
         with (
             patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
@@ -292,7 +308,7 @@ class AdmissionTests(unittest.TestCase):
             admission.readiness(Rules([omitted_always]))
         environments.assert_not_called()
 
-        # When bypass_actors is non-empty ([{"actor_id": 1}]), it raises Denied.
+        # 4. When bypass_actors is non-empty ([{"actor_id": 1}]), it raises Denied.
         non_empty = copy.deepcopy(rule)
         non_empty["bypass_actors"] = [{"actor_id": 1}]
         non_empty["current_user_can_bypass"] = "never"

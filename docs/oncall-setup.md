@@ -361,7 +361,7 @@ Once the environment variable is saved, run the Terraform environment workflow s
 
 ## Step 6 — Update the branch ruleset
 
-The automated incident responder verifies the repository ruleset during preflight (`admission.readiness()`). It requires strict status checks, the three required candidate checks, and no bypass actors.
+The automated incident responder verifies the repository ruleset during preflight (`admission.readiness()`). It requires strict status checks, the three required candidate checks, and no bypass actors (`current_user_can_bypass == "never"`). Note that GitHub's REST API omits `bypass_actors` from GET responses for tokens with read-only administration permissions; preflight accepts omitted `bypass_actors` while strictly confirming `current_user_can_bypass == "never"`, relying on the owner's initial setup below to configure and verify `bypass_actors: []`.
 
 ### Option A — Automated via GitHub CLI (Recommended)
 

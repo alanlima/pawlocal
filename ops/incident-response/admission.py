@@ -501,12 +501,14 @@ def readiness(github):
         current_bypass = rule.get("current_user_can_bypass", "never")
         rules_list = rule.get("rules")
         if (
-            (bypass is not None and bypass != [])
+            bypass != []
             or current_bypass != "never"
             or not isinstance(rules_list, list)
         ):
             reasons = []
-            if bypass is not None and bypass != []:
+            if bypass is None:
+                reasons.append("bypass_actors is omitted (fail-closed: proof of complete empty bypass inventory required)")
+            elif bypass != []:
                 reasons.append(f"bypass_actors is non-empty: {bypass!r}")
             if current_bypass != "never":
                 reasons.append(f"current_user_can_bypass is {current_bypass!r} (must be 'never')")
