@@ -754,7 +754,9 @@ def real_negative_handoffs(test, root, model, launches):
             + ")"
         )
     # A symlink in a fixed ancestor must not redirect privileged chown.
-    moved = root / "saved-affected"
+    # Same-parent rename needs only the runner-owned parent permission; a
+    # cross-parent move would require changing the model-owned directory's '..'.
+    moved = source.with_name(".saved-affected")
     source.rename(moved)
     outside = root / "outside-reports"
     outside.mkdir(mode=0o750)
