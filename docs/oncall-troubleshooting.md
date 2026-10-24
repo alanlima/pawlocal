@@ -192,7 +192,7 @@ Check **Show quota gateway failure diagnostics** immediately after the fixer/rev
 
 Diagnostics contain fixed classifications and bounded upstream identifiers, not credentials, request/model contents or upstream error messages. Normal operational stdout/stderr is retained. The response carries the same structured classification for the model client. Reservations remain consumed on all failed/uncertain calls.
 
-Run [40080488159](https://github.com/alanlima/pawlocal/actions/runs/40080488159/job/120832914680) completed two model turns before continuation failed. The matching profile allowed 16,000 output tokens per request and 32,000 per role: the old allocator reserved 16,000 twice, then denied turn three locally. #301 allocates 8,000 per turn across four configured turns without increasing any ceiling. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Never automatically retry/refund this consumed incident generation.
+The allocator reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. A profile with four requests, a 16,000-token per-request ceiling and a 32,000-token role ceiling therefore permits four 8,000-token turns without increasing the envelope. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Consumed incident generations and ledger reservations are not automatically retried or refunded.
 
 ### Switching the incident model to `gpt-5.4-mini`
 
