@@ -24,7 +24,14 @@ def path(value, roots):
 
 
 def unprivileged(command):
-    if command == [DEPENDENCIES + "/venv/bin/python", "-m", "pytest", "--version"]:
+    if command in (
+        [DEPENDENCIES + "/venv/bin/python", "-m", "pytest", "--version"],
+        [
+            DEPENDENCIES + "/venv/bin/python",
+            DEPENDENCIES + "/backend-test-launcher.py",
+            "--version",
+        ],
+    ):
         return True
     if command[0] == "npm":
         return command in (

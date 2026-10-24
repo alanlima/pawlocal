@@ -214,6 +214,14 @@ The profile generator defaults to `gpt-5.4-mini` with matching `750000`/`4500000
 
 The four 8,000-token turns require the #301 code fix in [PR #302](https://github.com/alanlima/pawlocal/pull/302) to be reviewed and merged. Updating protected profile model/rate fields is a separate owner-reviewed rollout; it does not activate an unmerged code fix or restore consumed incident reservations. See [the detailed profile instructions and official pricing source](oncall-setup.md#switching-the-approved-profile-to-gpt-54-mini) before preparing the complete profile. No live profile is changed by this documentation.
 
+### Symptom: TestClient or asyncio test hangs inside the model sandbox
+
+The [pinned Codex Linux sandbox source](https://github.com/openai/codex/blob/rust-v0.163.0/codex-rs/linux-sandbox/src/seccomp.rs) blocks `sendto`, including `socket.send` on asyncio's existing local self-pipe. This can leave AnyIO/FastAPI TestClient's portal thread asleep while the calling thread waits. The trusted backend test launcher replaces only this wakeup operation on an existing AF_UNIX/SOCK_STREAM descriptor with `os.write`. It does not enable networking, patch general socket functions, change tests/assertions, or install global Python hooks.
+
+Use the exact backend test command printed in the trusted incident prompt: its immutable launcher lives in the runner-owned dependency directory outside the candidate workspace. The adapter affects only that pytest process. Closed-loop/full-buffer error behavior is preserved; unknown socket types use the original implementation. Independent candidate regression and full-suite checks continue to invoke ordinary pytest outside Codex's sandbox as the isolated model UID. No test is skipped or its outcome altered.
+
+Credential-free verification runs real TestClient requests under the pinned CLI `:workspace` profile on hosted Python 3.12 and confirms AF_INET creation remains denied. Local diagnosis additionally proved the same unmodified PawLocal regression fails on the original sort bug and passes with the candidate sort correction. An exit 130 alone remains insufficient evidence: inspect the actual command, output, stack and counters before attributing a new failure.
+
 ### Symptom: `candidate changes touch non-allowlisted paths`
 
 * **Cause**: The Codex fixer agent generated diffs outside allowlisted application boundaries.

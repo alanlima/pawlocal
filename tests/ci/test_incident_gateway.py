@@ -361,6 +361,42 @@ class GatewayTests(unittest.TestCase):
                 ):
                     self.assertNotIn(secret, serialized)
 
+    def test_first_refusal_remains_visible_with_64_maximum_accounting_records(self):
+        profile = quota_fixtures.QuotaTests().profile(
+            model="x" * 160,
+            requests_per_role=64,
+            input_per_request=250000,
+            input_per_role=16000000,
+            output_per_request=64000,
+            output_per_role=4096000,
+            input_rate=10**12,
+            output_rate=10**12,
+        )
+
+        def upstream(suffix, body):
+            if suffix:
+                return Response(b'{"input_tokens":250000}')
+            response = Response(b"{}")
+            response.headers = {"Content-Type": "application/json"}
+            return response
+
+        with self.http_gateway(upstream, profile) as (_process, events, port):
+            for _ in range(64):
+                self.assertEqual(
+                    self.post(port, self.body(model=profile.model))[0], 200
+                )
+            self.assertEqual(self.post(port, self.body(model=profile.model))[0], 403)
+            self.assertEqual(len(events), 65)
+            # Worst-case printable body-counter width, without 256 MiB of test payloads.
+            records = [
+                event | {"request_body_bytes": gateway.MAX_BODY} for event in events
+            ]
+            raw = "".join(json.dumps(event) + "\n" for event in records).encode()
+            self.assertLessEqual(len(raw), 65536)
+            self.assertEqual(events[-1]["reason"], "request count quota exhausted")
+            self.assertEqual(events[-1]["requests_reserved"], 64)
+            self.assertEqual(events[-1]["output_tokens_reserved"], 4096000)
+
     def test_http_body_limit_and_reset_count_never_reuse_previous_request_input(self):
         def upstream(suffix, body):
             if suffix:

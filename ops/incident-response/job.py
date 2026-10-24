@@ -281,6 +281,12 @@ def prepare(role):
             check=True,
             timeout=remaining(metadata),
         )
+    # Immutable main supplies this test-only launcher outside the model workspace.
+    launcher = dependencies / "backend-test-launcher.py"
+    shutil.copyfile(
+        trusted / "ops/incident-response/backend-test-launcher.py", launcher
+    )
+    launcher.chmod(0o444)
     writable_tool_caches(dependencies)
     # Prove actual setup-python/venv ancestor and pytest readability before any
     # model gateway starts. The child receives no runner/API/GitHub credentials.
@@ -294,8 +300,7 @@ def prepare(role):
             "PATH=" + os.environ["PATH"],
             "HOME=/home/oncall",
             str(dependencies / "venv/bin/python"),
-            "-m",
-            "pytest",
+            str(launcher),
             "--version",
         ],
         cwd="/tmp",
@@ -366,7 +371,8 @@ def prepare(role):
     prompt += (
         "\n\nTrusted local test tools (preinstalled from immutable main):\n"
         "Backend: from the workspace root run PYTHONPATH=backend "
-        "/tmp/pawlocal-oncall-dependencies/venv/bin/python -m pytest "
+        "/tmp/pawlocal-oncall-dependencies/venv/bin/python "
+        "/tmp/pawlocal-oncall-dependencies/backend-test-launcher.py "
         "backend/tests/test_incident_regression.py.\n"
         "Frontend: use npm scripts in frontend; its node_modules points to "
         "the trusted dependency tree. Do not install/change dependencies.\n"
