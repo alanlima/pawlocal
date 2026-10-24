@@ -32,15 +32,6 @@ locals {
   oncall_secret_arns = [for suffix in ["grafana/webhook-hmac", "oncall/dispatch-app-private-key"] :
     "arn:${data.aws_partition.current.partition}:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/${var.environment}/secrets/${suffix}"
   ]
-  oncall_environment_variables = local.oncall_enabled ? {
-    PAWLOCAL_PROJECT_NAME             = var.project_name
-    PAWLOCAL_ONCALL_ENVIRONMENT       = var.environment
-    PAWLOCAL_DISPATCH_APP_ID          = var.oncall_receiver.app_id
-    PAWLOCAL_DISPATCH_INSTALLATION_ID = var.oncall_receiver.installation_id
-    PAWLOCAL_DISPATCH_REPOSITORY_ID   = var.oncall_receiver.repository_id
-    PAWLOCAL_DISPATCH_REPOSITORY      = var.oncall_receiver.repository
-    PAWLOCAL_ONCALL_ALLOWED_SERVICES  = jsonencode(sort(tolist(var.oncall_receiver.allowed_services)))
-  } : {}
 }
 
 resource "aws_iam_role_policy" "oncall_runtime" {
@@ -84,9 +75,17 @@ module "oncall_receiver" {
   cloudwatch_logs_retention_in_days = 14
   create_sam_metadata               = false
   allowed_triggers                  = {}
-  environment_variables             = local.oncall_environment_variables
-  tags                              = local.common_tags
-  depends_on                        = [aws_iam_role_policy.oncall_runtime]
+  environment_variables = {
+    PAWLOCAL_PROJECT_NAME             = var.project_name
+    PAWLOCAL_ONCALL_ENVIRONMENT       = var.environment
+    PAWLOCAL_DISPATCH_APP_ID          = var.oncall_receiver.app_id
+    PAWLOCAL_DISPATCH_INSTALLATION_ID = var.oncall_receiver.installation_id
+    PAWLOCAL_DISPATCH_REPOSITORY_ID   = var.oncall_receiver.repository_id
+    PAWLOCAL_DISPATCH_REPOSITORY      = var.oncall_receiver.repository
+    PAWLOCAL_ONCALL_ALLOWED_SERVICES  = jsonencode(sort(tolist(var.oncall_receiver.allowed_services)))
+  }
+  tags       = local.common_tags
+  depends_on = [aws_iam_role_policy.oncall_runtime]
 }
 
 resource "aws_lambda_function_url" "oncall_receiver" {
