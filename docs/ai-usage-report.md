@@ -2,6 +2,9 @@
 
 ## Current work
 
+- **Task (#272):** Platform Engineer implemented the owner-approved purpose catalogue/DEC-014, shared frontend and Terraform setup, quality-only manual validation and duplicate candidate-check routing. Orchestrator inspected trigger/provenance/lock dependencies and live protection metadata; independent and GitHub Codex reviews are required on the exact PR head before owner-controlled merge.
+- **Verification boundary:** Local actionlint, policy/runtime/path/reference/lifecycle/change-authorization/incident tests, configuration fixtures and JavaScript trust tests validate the refactor. Windows/POSIX and opt-in integration skips are listed in the PR. No live workflow dispatch, deployment, AWS/state change or protection-setting mutation was performed; no deployment acceptance is claimed.
+
 - **Task (#214):** After owner review of a synthetic summary draft, the platform engineer added value-free reconciliation and cleanup job summaries. Tests cover full mapping/selection, verified variables versus accepted secrets, partial failures/retries, uncertain writes, escaping and setup/cancellation fallback. Existing permissions, approvals, locks and publication gates are unchanged; live verification is recorded separately in the issue/PR.
 
 - **Task (#206, Terraform publication):** Platform engineer added state-owned generated Strings and exact-key permissions. Senior escalation resolved provider metadata authorization and boundary-size constraints; native tests enumerate the reviewed permission-pair delta.

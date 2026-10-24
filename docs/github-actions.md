@@ -20,24 +20,42 @@ The workflow files remain authoritative. The synchronization test in `tests/ci/t
 
 [#203](https://github.com/alanlima/pawlocal/issues/203) delivers the [mapping contract](configuration-management.md) and [inventory](configuration-inventory.md). Foundation uses post-apply audit. Converge/Release use preflight enforce, then post-apply enforce before building/publishing from the same verified public snapshot. Failures block publication. Existing saved-plan review and production promotion gates remain unchanged. See the guide for setup, cleanup and recovery.
 
+## Find the workflow for your task
+
+| I want to... | Entry point | Accountable owner |
+|---|---|---|
+| Validate a PR | Automatic `fullstack-release.yml`, `compose-ci.yml`, `terraform-ci.yml`, `workflow-validation.yml`, according to paths below | Platform; Frontend/Backend own their checks |
+| Run all checks | `ci.yml` manual | Platform |
+| Release development | `fullstack-release.yml` on main/manual main | Platform |
+| Promote production | `deploy-production.yml` with exact verified commit/image | Platform; owner approval |
+| Provision or converge | `terraform-environment.yml` with environment/phase | Platform; owner approval |
+| Reconcile configuration | `reconcile-environment.yml` | Platform; matching apply approval |
+| Configure monitoring | Separate `grafana-development-setup.yml` / `grafana-production-setup.yml` | Platform; matching apply approval |
+| Seed development | `development-dsql-seed.yml` | Backend/Platform; protected seed approval |
+| Investigate/recover an incident | `incident-responder.yml`; see responder runbook | Platform; trusted controller |
+| Destroy production | `terraform-environment-destroy.yml` | Platform; separate saved-plan approvals |
+
+All current filenames are tracked Stage A exceptions under #272/DEC-014. New filenames use `<purpose>-<task>.yml`; workflows remain flat. The machine-readable [catalogue](../.github/workflow-catalogue.json) pins the exact display name per workflow. Navigation categories do not replace trust gates. The observed active ruleset `25363056` requires issuer-bound `PawLocal change authorization` from App `5450140`, with no bypass and PR/squash/thread resolution. Quality CI contexts were absent in that read-only snapshot; addressing that protection gap is separately scoped. No live settings are changed by this migration.
+
 ## Workflow map
 
 ```mermaid
 flowchart TD
-  PR["Pull request"] --> FE["Frontend pull request checks"]
-  PR --> BE["Backend CI"]
-  PR --> CO["Compose CI"]
-  PR --> TCI["Terraform CI"]
-  PR --> WV["Workflow validation"]
+  PR["Pull request"] --> DEV
+  FE["Quality · Validate frontend"]
+  BE["Quality · Validate backend"]
+  PR --> CO["Quality · Validate Compose"]
+  PR --> TCI["Quality · Validate Terraform"]
+  PR --> WV["Quality · Validate delivery automation"]
 
-  MANUAL_CI["Manual full-suite dispatch"] --> CI["CI manual full suite"]
+  MANUAL_CI["Manual full-suite dispatch"] --> CI["Quality · Run complete validation suite"]
   CI --> FE
   CI --> BE
   CI --> CO
   CI --> TCI
   CI --> WV
 
-  MAIN["Application change on main or manual main dispatch"] --> DEV["Full-stack release to development"]
+  MAIN["Application change on main or manual main dispatch"] --> DEV["Release · Publish and verify development"]
   BOOT_MAIN["Bootstrap change on reviewed main or manual main dispatch"] --> BOOT_PLAN["IAM bootstrap: refreshed saved plan + summary"]
   BOOT_PLAN --> BOOT_CHANGE{"Complete no-op?"}
   BOOT_CHANGE -->|yes| BOOT_DONE["Success; no approval or apply"]
@@ -47,7 +65,7 @@ flowchart TD
   BOOT_SETUP -. authentication prerequisite .-> RECONCILE
   DEV --> FE
   DEV --> BE
-  DEV --> IMAGE["Publish immutable backend image"]
+  DEV -->|main push/manual only| IMAGE["Publish immutable backend image"]
   IMAGE --> TF_RELEASE_DEV["Reviewed Terraform + enforced config: development"]
   TF_RELEASE_DEV -->|verified public config| VERIFY_DEV["Build, publish and verify development"]
 
@@ -55,14 +73,14 @@ flowchart TD
   TF_FOUNDATION --> HANDOFF["Audit config + reviewed bootstrap runtime trust"]
   HANDOFF --> TF_CONVERGE["Terraform environment: converge"]
 
-  VERIFY_DEV --> PROD["Promote verified release to production"]
+  VERIFY_DEV --> PROD["Release · Promote verified release to production"]
   PROD --> TF_RELEASE_PROD["Reviewed Terraform + enforced config: production"]
   TF_RELEASE_PROD -->|verified public config| VERIFY_PROD["Build, publish and verify production"]
 
   OPERATOR --> GRAFANA_ACCESS["Read-only Grafana credential metadata"]
   OPERATOR --> RECONCILE["Protected configuration audit/enforce"]
-  OPERATOR --> SEED["Seed development Aurora DSQL"]
-  OPERATOR --> DESTROY["Terraform production destroy"]
+  OPERATOR --> SEED["Operations · Seed development catalogue"]
+  OPERATOR --> DESTROY["Infrastructure · Destroy production environment"]
   DESTROY -->|confirmed empty state| CLEANUP["Exact generated-target cleanup"]
 
   RETIRED["Retired entry points"] -. no-op .-> LEGACY_TF["Legacy combined-state Terraform operations"]
@@ -74,26 +92,34 @@ Foundation and Converge are one provisioning lifecycle but separate Terraform tr
 
 ## Workflow inventory
 
-| Workflow | Trigger | Purpose | Manual or reusable inputs |
-|---|---|---|---|
-| [`grafana-access-check.yml`](../.github/workflows/grafana-access-check.yml) | Manual from main only | Bounded GET-only credential/metadata checks; no telemetry queries or mutations. | `stack_url`, `region`, optional `sm_backend_url` |
-| [`terraform-iam-bootstrap.yml`](../.github/workflows/terraform-iam-bootstrap.yml) | Relevant pushes to `main`, manual from `main` | Normal-refresh bootstrap plan, no-op completion and owner-approved exact-plan apply. | None |
-| [`backend-ci.yml`](../.github/workflows/backend-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Lint and test the backend against disposable PostgreSQL. | None |
-| [`ci.yml`](../.github/workflows/ci.yml) | Manual | Run all CI suites, or the protected development reconciliation smoke call. | `reconciliation_smoke` |
-| [`compose-ci.yml`](../.github/workflows/compose-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate, build, start, smoke-test, and tear down the local Compose stack. | None |
-| [`deploy-production.yml`](../.github/workflows/deploy-production.yml) | Manual | Promote one development-verified commit and immutable image to production, publish the frontend, and verify the release. | `release_commit`, `backend_image` |
-| [`development-dsql-seed.yml`](../.github/workflows/development-dsql-seed.yml) | Manual from `main` | Seed the fixed development-only DSQL catalog and verify it through the development API. | None; uses protected secrets |
-| [`frontend-deploy.yml`](../.github/workflows/frontend-deploy.yml) | Relevant pull requests, reusable call | Check, test, and build the HTTP-mode frontend. | None |
-| [`frontend-production-deploy.yml`](../.github/workflows/frontend-production-deploy.yml) | Relevant pushes to `main`, manual | Retained no-op for historical links; never deploys. | None |
-| [`fullstack-release.yml`](../.github/workflows/fullstack-release.yml) | Relevant pull requests, relevant pushes to `main`, manual | Run frontend/backend checks; on `main`, publish an immutable backend image, deploy development, publish the frontend, verify it, and record deployment evidence. | None |
-| [`rollback-development.yml`](../.github/workflows/rollback-development.yml) | Manual | Retained no-op for the retired combined-state rollback path. | None |
-| [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml) | Manual, reusable call | Synchronize the exact Parameter Store mapping through matching protected approval; audit does not establish release readiness. | `environment`, `mode`, `fail_on_error` |
-| [`cleanup-destroyed-configuration.yml`](../.github/workflows/cleanup-destroyed-configuration.yml) | Reusable protected destroy call | Delete exact generated GitHub settings only after verified destroy; no manual entry point. | None |
-| [`terraform-ci.yml`](../.github/workflows/terraform-ci.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Format, initialize without a backend, validate, and test every active Terraform root/module. | None |
-| [`terraform-current-stack-operations.yml`](../.github/workflows/terraform-current-stack-operations.yml) | Manual | Retained no-op for the retired combined-state Terraform path. | None |
-| [`terraform-environment-destroy.yml`](../.github/workflows/terraform-environment-destroy.yml) | Manual | Prepare, approve, plan, approve again, and destroy the complete production application state. | `environment`, `backend_image`, `confirmation` |
-| [`terraform-environment.yml`](../.github/workflows/terraform-environment.yml) | Manual, reusable call | Plan and apply one environment's Foundation, Converge, or Release phase through protected environments. | `environment`, `phase`, `backend_image`, `release_commit`, `release_only` |
-| [`workflow-validation.yml`](../.github/workflows/workflow-validation.yml) | Relevant pull requests, relevant pushes to `main`, reusable call | Validate workflow syntax, action-runtime policy, path behavior, and CI policy tests. | None |
+All workflow YAML, authentication/approval steps and domain scripts remain authoritative. Inputs are public operator values; detailed accepted values and recovery procedures follow below. `call:` denotes internal reusable inputs, not a dispatch button.
+
+| Workflow / display name | Trigger and callers | Exact inputs | Mutation / Environment / lock | Evidence and recovery |
+|---|---|---|---|---|
+| [`backend-ci.yml`](../.github/workflows/backend-ci.yml)<br>Quality · Validate backend<br>Previously: Backend CI | workflow_call; callers `ci.yml`, `fullstack-release.yml` | None | Disposable CI PostgreSQL only; no Environment; caller-specific cancellable backend lock | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`frontend-deploy.yml`](../.github/workflows/frontend-deploy.yml)<br>Quality · Validate frontend<br>Previously: Frontend pull request checks | workflow_call; callers `ci.yml`, `fullstack-release.yml` | None | Validation only; no Environment; caller-specific cancellable frontend lock | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`compose-ci.yml`](../.github/workflows/compose-ci.yml)<br>Quality · Validate Compose<br>Previously: Compose CI | pull_request, push, workflow_call; callers `ci.yml` | None | Disposable local Docker stack; no Environment; cancellable Compose lock | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`terraform-ci.yml`](../.github/workflows/terraform-ci.yml)<br>Quality · Validate Terraform<br>Previously: Terraform CI | pull_request, push, workflow_call; callers `ci.yml` | None | Offline validation; no Environment; cancellable Terraform CI lock | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`workflow-validation.yml`](../.github/workflows/workflow-validation.yml)<br>Quality · Validate delivery automation<br>Previously: Workflow validation | pull_request, push, workflow_call; callers `ci.yml` | None | Offline tests and disposable fixture/image; no Environment; cancellable validation lock | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`ci.yml`](../.github/workflows/ci.yml)<br>Quality · Run complete validation suite<br>Previously: CI manual full suite | workflow_dispatch | None | Quality only; no Environment/outer lock; component locks apply | Job logs/summary and test artifacts where declared; correct cause and rerun applicable validation |
+| [`fullstack-release.yml`](../.github/workflows/fullstack-release.yml)<br>Release · Publish and verify development<br>Previously: Full-stack release to development | pull_request, push, workflow_dispatch | None | PR: checks only; main: image/frontend release + Terraform development; development/child plan/apply; lifecycle-development (PR cancellable, mutation non-cancelling) | Immutable image, manifest, validated verification + deployment record; failed/unknown release stops promotion |
+| [`deploy-production.yml`](../.github/workflows/deploy-production.yml)<br>Release · Promote verified release to production<br>Previously: Promote verified release to production | workflow_dispatch | dispatch: `release_commit`, `backend_image`, `expected_workflow_sha` | Exact verified release only; production/child plan/apply and ordinary or authenticated incident approval; lifecycle-production non-cancelling | Production manifest/verification + deployment record; stop on eligibility/source mismatch |
+| [`terraform-iam-bootstrap.yml`](../.github/workflows/terraform-iam-bootstrap.yml)<br>Infrastructure · Reconcile bootstrap identities<br>Previously: Terraform IAM bootstrap plan and apply | push, workflow_dispatch | None | IAM exact saved plan; iam-bootstrap-plan/apply, changed plan owner approval; bootstrap lock non-cancelling | Private digest-bound saved plan + manifest/summary; stale/failed/partial requires fresh plan/approval |
+| [`terraform-environment.yml`](../.github/workflows/terraform-environment.yml)<br>Infrastructure · Plan and apply environment<br>Previously: Terraform environment plan and apply | workflow_dispatch, workflow_call; callers `fullstack-release.yml`, `deploy-production.yml` | dispatch: `environment`, `phase`, `backend_image`, `release_commit`, `release_only`; call: `environment`, `phase`, `backend_image`, `release_commit`, `release_only` | Exact saved plan/apply; matching plan/apply or authenticated release incident route; lifecycle-environment, nested release uses terraform-environment; non-cancelling | Private digest-bound saved plan and public same-run config; fresh exact plan after stale/partial failure |
+| [`terraform-environment-destroy.yml`](../.github/workflows/terraform-environment-destroy.yml)<br>Infrastructure · Destroy production environment<br>Previously: Terraform production destroy | workflow_dispatch | dispatch: `environment`, `backend_image`, `confirmation` | Production teardown only; production-plan, production-destroy-prepare, production-destroy; child cleanup production-apply; lifecycle-production non-cancelling | Reviewed preparation + delete-only plans; verify empty state before cleanup; fresh plan on failure |
+| [`development-dsql-seed.yml`](../.github/workflows/development-dsql-seed.yml)<br>Operations · Seed development catalogue<br>Previously: Seed development Aurora DSQL | workflow_dispatch | None | Fixed development catalogue data; development-seed; seed lock non-cancelling | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`reconcile-environment.yml`](../.github/workflows/reconcile-environment.yml)<br>Operations · Reconcile environment configuration<br>Previously: Reconcile Environment configuration | workflow_dispatch, workflow_call; callers `terraform-environment.yml` | dispatch: `environment`, `fail_on_error`, `mode`; call: `environment`, `fail_on_error`, `mode`, `caller_holds_lifecycle_lock` | Exact mapped GitHub configuration; matching apply Environment; lifecycle-environment + configuration-environment, nested call group; non-cancelling | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`cleanup-destroyed-configuration.yml`](../.github/workflows/cleanup-destroyed-configuration.yml)<br>Operations · Clean up destroyed environment configuration<br>Previously: Clean up destroyed environment configuration | workflow_call; callers `terraform-environment-destroy.yml` | call: `environment`, `confirmation`, `destroy_confirmed` | Exact generated-setting deletion after confirmed destroy; matching apply Environment; configuration-environment non-cancelling | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`grafana-access-check.yml`](../.github/workflows/grafana-access-check.yml)<br>Operations · Verify Grafana access<br>Previously: Grafana read-only access check | workflow_dispatch | dispatch: `stack_url`, `region`, `sm_backend_url` | Bounded GET-only metadata; no Environment; no mutation lock | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`grafana-development-setup.yml`](../.github/workflows/grafana-development-setup.yml)<br>Operations · Configure development monitoring<br>Previously: Grafana development folder and Faro setup | workflow_dispatch | dispatch: `mode`, `stack_url`, `region`, `public_bindings_json`, `datasource_uids_json`, `frontend_origin` | Grafana folder/Faro discover/plan/apply; development-apply; Grafana development lock non-cancelling | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`grafana-production-setup.yml`](../.github/workflows/grafana-production-setup.yml)<br>Operations · Configure production monitoring<br>Previously: Grafana production folder and Faro setup | workflow_dispatch | dispatch: `mode`, `stack_url`, `region`, `public_bindings_json`, `datasource_uids_json`, `frontend_origin` | Grafana folder/Faro discover/plan/apply; production-apply; Grafana production lock non-cancelling | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`change-authorization.yml`](../.github/workflows/change-authorization.yml)<br>Automation · Authorize proposed changes<br>Previously: Change authorization | pull_request_target | None | Issuer-bound status only; incident-change-authorization or ordinary-change-approval; per-PR cancellable authorization lock | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`incident-responder.yml`](../.github/workflows/incident-responder.yml)<br>Automation · Recover from an application incident<br>Previously: Controlled incident response | workflow_dispatch | dispatch: `environment`, `schema_version`, `alerts_json` | Bounded application candidate/publication/merge/exact release; oncall/incident protected environments; serialized global non-cancelling queue | Bound receipts, authentic CI and deadline/recovery evidence; stop/escalate unsupported or uncertain outcomes |
+| [`frontend-production-deploy.yml`](../.github/workflows/frontend-production-deploy.yml)<br>Retired · Static frontend deployment<br>Previously: Deprecated mock-backed frontend deployment (disabled) | push, workflow_dispatch | None | Retired no-op; no credentials, Environment or deployment; keep fail-closed stub | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`rollback-development.yml`](../.github/workflows/rollback-development.yml)<br>Retired · Combined-state development rollback<br>Previously: Legacy development rollback (disabled) | workflow_dispatch | None | Retired no-op; no credentials, Environment or deployment; keep fail-closed stub | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+| [`terraform-current-stack-operations.yml`](../.github/workflows/terraform-current-stack-operations.yml)<br>Retired · Combined-state infrastructure operations<br>Previously: Legacy combined-state Terraform operations (disabled) | workflow_dispatch | None | Retired no-op; no credentials, Environment or deployment; keep fail-closed stub | Existing job summary/receipt or public handoff; follow domain recovery guidance below, preserve gates |
+
+Ownership: Platform Engineer owns these workflows and setup actions; Frontend and Backend Engineers own their domain validation, Backend owns seed data. Orchestrator owns coordination and acceptance; independent Reviewer assesses the change and owner controls ordinary merge/approval.
 
 ## Running manual workflows with GitHub CLI
 
@@ -139,43 +165,43 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 ## CI and validation workflows
 
-### Backend CI
+### Quality · Validate backend
 
 <!-- actions-reference: backend-ci.yml; dispatch-inputs: -; call-inputs: - -->
 
-`backend-ci.yml` runs for backend, API-contract, or Python dependency changes and can be called by another workflow. It starts PostgreSQL 17.6, applies migrations, lints Python and DSQL SQL, and runs backend unit and PostgreSQL integration tests. It accepts no operator inputs and creates no deployment.
+`backend-ci.yml` is callable by `fullstack-release.yml` for automatic source/contract/dependency validation and by `ci.yml` for the manual full suite. It starts PostgreSQL 17.6, applies migrations, lints Python and DSQL SQL, and runs backend unit and PostgreSQL integration tests. It accepts no operator inputs and creates no deployment.
 
-### Frontend pull request checks
+### Quality · Validate frontend
 
 <!-- actions-reference: frontend-deploy.yml; dispatch-inputs: -; call-inputs: - -->
 
-`frontend-deploy.yml` runs for frontend, contract, package-lock, or release-workflow changes and can be called by another workflow. It installs the pinned frontend dependencies, checks formatting/linting, runs unit tests, and builds the frontend in HTTP mode with non-live CI values. It accepts no operator inputs and publishes nothing.
+`frontend-deploy.yml` is callable by `fullstack-release.yml` for automatic source/contract/dependency validation and by `ci.yml` for the manual full suite. It installs the pinned frontend dependencies, checks formatting/linting, runs unit tests, and builds the frontend in HTTP mode with non-live CI values. It accepts no operator inputs and publishes nothing.
 
-### Compose CI
+### Quality · Validate Compose
 
 <!-- actions-reference: compose-ci.yml; dispatch-inputs: -; call-inputs: - -->
 
 `compose-ci.yml` runs for Compose, container, observability, environment-example, or API-contract changes and can be called by another workflow. It validates the Compose model, builds the full stack, waits for declared health checks, smoke-checks the frontend/API/Grafana endpoints, and always removes the CI stack and volumes. It accepts no operator inputs.
 
-### Terraform CI
+### Quality · Validate Terraform
 
 <!-- actions-reference: terraform-ci.yml; dispatch-inputs: -; call-inputs: - -->
 
 `terraform-ci.yml` runs for Terraform, lifecycle-helper, and matching CI-test changes and can be called by another workflow. Its matrix covers the bootstrap root, both environment roots, the DSQL setup module, and the shared environment module. It performs formatting, backend-free initialization, validation, rendered-policy tests, and DSQL lifecycle tests. It never plans or applies live infrastructure.
 
-### Workflow validation
+### Quality · Validate delivery automation
 
 <!-- actions-reference: workflow-validation.yml; dispatch-inputs: -; call-inputs: - -->
 
 `workflow-validation.yml` runs for workflow, local-action, CI-script, policy-test, and deployment-adapter changes and can be called by another workflow. It runs an external-action runtime smoke test, pins and runs `actionlint`, and executes the repository's workflow/path/security tests. Changes to this reference also trigger it so the workflow/input inventory cannot silently drift.
 
-### CI manual full suite
+### Quality · Run complete validation suite
 
-<!-- actions-reference: ci.yml; dispatch-inputs: reconciliation_smoke; call-inputs: - -->
+<!-- actions-reference: ci.yml; dispatch-inputs: -; call-inputs: - -->
 
-`ci.yml` is the manual umbrella workflow. With `reconciliation_smoke=false` (default) it calls the frontend, backend, Compose, Terraform, and workflow-validation reusable workflows. Set the boolean `reconciliation_smoke=true` to run only the protected development audit reconciliation call from the selected reviewed ref. This CI-only harness permits an open-PR feature-branch test before the new workflow is registered on main; temporarily allowlist only that exact ref in `development-apply`, preserve reviewer approval, and remove it after merge. It calls no deployment pipeline and its caller holds no reconciliation concurrency lock.
+`ci.yml` runs all five reusable Quality suites. It has no reconciliation input, credentials or operational job. For configuration synchronization, dispatch the existing `reconcile-environment.yml` Operations workflow with the matching environment, mode and strictness; its protected apply Environment, audit/enforce behavior and lifecycle lock remain authoritative. The temporary pre-registration feature-branch harness has been retired now that the operational dispatcher exists on main.
 
-### Reconcile Environment configuration
+### Operations · Reconcile environment configuration
 
 <!-- actions-reference: reconcile-environment.yml; dispatch-inputs: environment,fail_on_error,mode; call-inputs: environment,fail_on_error,mode,caller_holds_lifecycle_lock -->
 
@@ -202,13 +228,13 @@ Use the [setup guide](configuration-management.md#set-up-access), then dispatch:
 gh workflow run reconcile-environment.yml --repo alanlima/pawlocal --ref main -f environment=development -f mode=enforce
 ```
 
-A reviewed open-PR development smoke call remains available through `ci.yml` with `reconciliation_smoke=true` on the exact allowed branch. On-demand/CI calls take the same environment lifecycle lock as apply/publication. The four outer pipeline callers hold that lock themselves; nested reconciliation uses a separate call group and its per-environment mutation lock, preventing deadlock. All mutation locks disable cancellation of an active run.
+Manual Operations reconciliation takes the same environment lifecycle lock as apply/publication. The outer pipeline callers hold that lock themselves; nested reconciliation uses a separate call group and its per-environment mutation lock, preventing deadlock. All mutation locks disable cancellation of an active run.
 
 Explicit legacy cleanup checks the active release/recovery consumers and exact configured adapter before deleting only the approved release-Environment names. Removing a mapping or missing a source never deletes anything. See the [inventory](configuration-inventory.md) for history and the [recovery guide](configuration-management.md#values-and-recovery) for retry/destroy/reapply rules.
 
 ## Deployment and operations workflows
 
-### Full-stack release to development
+### Release · Publish and verify development
 
 <!-- actions-reference: fullstack-release.yml; dispatch-inputs: -; call-inputs: - -->
 
@@ -225,7 +251,7 @@ It accepts no manual inputs because the commit is the selected `main` revision a
 
 Development verification is produced after this run's Terraform Release apply and public checks. The development Release therefore uses the current run's full commit SHA and freshly published immutable image; it does not require a previously verified development deployment. Only production Converge and Release require a commit/image pair from a prior successful verified-development deployment.
 
-### Terraform environment plan and apply
+### Infrastructure · Plan and apply environment
 
 <!-- actions-reference: terraform-environment.yml; dispatch-inputs: environment,phase,backend_image,release_commit,release_only; call-inputs: environment,phase,backend_image,release_commit,release_only -->
 
@@ -251,7 +277,7 @@ Valid combinations:
 
 Converge and Release enforce required handoff inputs before planning. The preflight output supplies the current generated values directly to the plan/apply jobs; successful post-apply enforce supplies the public build snapshot. Foundation audit warns about expected missing runtime values and cannot authorize publication. A green apply still requires the existing live release verification.
 
-### Promote verified release to production
+### Release · Promote verified release to production
 
 <!-- actions-reference: deploy-production.yml; dispatch-inputs: release_commit,backend_image,expected_workflow_sha; call-inputs: - -->
 
@@ -266,7 +292,7 @@ Do not independently choose a commit and an image. They are one verified pair.
 
 The Release contract intends to change only the Lightsail container deployment version. During the accepted Issue #148 MVP gap, `--skip-enforcement` keeps the automated ownership/release-only rejection disabled. The protected reviewer must therefore inspect the exact rendered plan and reject any additional resource change.
 
-### Terraform production destroy
+### Infrastructure · Destroy production environment
 
 <!-- actions-reference: terraform-environment-destroy.yml; dispatch-inputs: environment,backend_image,confirmation; call-inputs: - -->
 
@@ -280,7 +306,7 @@ The Release contract intends to change only the Lightsail container deployment v
 
 Destroy is not a rollback and does not select a previous release.
 
-### Seed development Aurora DSQL
+### Operations · Seed development catalogue
 
 <!-- actions-reference: development-dsql-seed.yml; dispatch-inputs: -; call-inputs: - -->
 
@@ -614,7 +640,7 @@ Only bounded GETs to fixed API paths on validated Grafana hosts are permitted; r
 
 Primary contracts: [service-account permission debugging](https://grafana.com/docs/grafana/latest/administration/service-accounts/#debug-the-permissions-of-a-service-account-token), the [pinned provisioning client/runbook](../observability/grafana/cloud/README.md), and [Synthetic Monitoring API](https://github.com/grafana/synthetic-monitoring-api-go-client/blob/836cd7e209af74554519f5153d05d3990af5af2f/smapi.go). Legacy Grafana API compatibility still needs actual stack verification.
 
-## Controlled incident response
+## Automation · Recover from an application incident
 
 <!-- actions-reference: incident-responder.yml; dispatch-inputs: environment,schema_version,alerts_json; call-inputs: - -->
 
@@ -623,8 +649,60 @@ Primary contracts: [service-account permission debugging](https://grafana.com/do
 Matching on-call Environments provide public `PAWLOCAL_ONCALL_ENABLED`, `PAWLOCAL_ONCALL_MODEL_PROFILE`, `PAWLOCAL_ONCALL_QUOTA_ISSUE`, `PAWLOCAL_ONCALL_DISPATCH_ACTOR`, `PAWLOCAL_ONCALL_PUBLISHER_APP_ID`, `PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID`, `PAWLOCAL_GRAFANA_URL` and `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED`. Protected `OPENAI_API_KEY`, `PAWLOCAL_GRAFANA_QUERY_TOKEN` and `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` are scoped to trusted consumers; model processes receive none of the query/App credentials. The public recovery URLs reuse canonical `VITE_API_BASE_URL` and `PAWLOCAL_PUBLIC_BASE_URL` source mappings. Model, rates, spending authority, App permissions and privacy/live release acceptance remain unconfigured until reviewed setup.
 
 
-## Change authorization
+## Automation · Authorize proposed changes
 
 <!-- actions-reference: change-authorization.yml; dispatch-inputs: -; call-inputs: - -->
 
 [change-authorization.yml](../.github/workflows/change-authorization.yml) runs on trusted `main` in response to pull request target events. It classifies pull requests into authenticated machine incident candidates or ordinary pull requests. Machine incident candidates execute under the protected main-only `incident-change-authorization` environment (with zero human approval gate) and are strictly verified against allowlisted application paths and cryptographic publication receipts before posting `PawLocal change authorization`. Ordinary pull requests enter the protected `ordinary-change-approval` environment requiring owner approval, then verify unchanged head and base SHAs before posting `PawLocal change authorization`. Both authorization environments provide `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` for status token minting, strictly downscoped to `{ statuses: 'write' }`.
+
+## Migration dependency map (#272)
+
+| Boundary | Consumers retained or updated atomically | Verification |
+|---|---|---|
+| Display names | Catalogue, workflow map and detailed headings; Terraform `github.workflow` parent-name list; cleanup destroy `CALLER_WORKFLOW` | Catalogue policy and configuration nested-lock/caller tests |
+| Filenames | All 22 retain names; local `uses`, incident admission `fullstack-release.yml`, production dispatch `deploy-production.yml`, release eligibility APIs and historical links unchanged | Path/reference and incident promotion suites |
+| Job/status contexts | `Backend checks / Backend checks`, `Frontend checks and HTTP-mode build / frontend`; App-issued `PawLocal change authorization` | Catalogue pins nested names; incident candidate authenticity and authorization tests |
+| Triggers | Sole automatic frontend/backend owner is release candidate route; source/contract/dependency path union; shared action paths included in validation and relevant consumers | Trigger matrix tests; component workflows callable-only |
+| Lifecycle | Development/production release outer lifecycle locks; Terraform nested distinct group keyed by exact caller names; reconcile nested/per-environment lock; destroy caller name and cleanup lock | Configuration integration exercises nested parent/generic callers and non-cancellation |
+| Source/evidence | Production selects verified release source at root, current trusted tools/action under `.configuration-tools`; no filename/source or evidence schema migration | Production action-source regression, eligibility, receipt and provenance tests |
+| Script ownership | `.github/scripts/` holds existing Terraform workflow helpers; `scripts/ci/` is a reserved filter/home with no tracked baseline files; `ops/configuration/`, `ops/change-authorization/`, `ops/incident-response/`, `ops/deployment-adapters/` retain domain logic | Ownership/runtime scans include composite metadata and action helpers |
+
+The existing `.github/scripts/` and `ops/` inventory found distinct domain owners and strong path/provenance consumers; `scripts/ci/` currently has no tracked files. No broad relocation is justified here. Workflow job dependencies, permissions, Environments, credentials, saved-plan operations, approval gates and evidence handoffs stay visible in YAML.
+
+## Automatic trigger matrix and duplicate resolution
+
+Before this migration, a frontend-only PR ran frontend validation directly **and** through `fullstack-release.yml` (two frontend jobs), plus its backend candidate check. A backend-only PR similarly ran backend validation twice plus its frontend candidate check. API changes duplicated both. Relevant main backend changes also ran direct backend validation plus release validation. Component workflows now run only when called: the automatic release candidate route owns each check exactly once. `ci.yml` remains an intentional manual rerun of all suites.
+
+| Representative change | Before: automatic PR owners | After: automatic PR owners | Coverage and exceptions |
+|---|---|---|---|
+| `frontend/src/App.tsx` | Frontend + Release (frontend twice) | Release (frontend + backend once each) | Main release also checks both |
+| `backend/pawlocal/main.py` | Backend + Release (backend twice) | Release (frontend + backend once each) | Main duplicate backend validation removed |
+| `openapi.yaml` | Frontend + Backend + Release + Compose | Release + Compose | Both candidate checks plus cross-layer Compose |
+| `docker-compose.yml` | Release + Compose | Release + Compose | Intentional candidate/build and integrated stack checks |
+| `infra/terraform/main.tf` | Terraform | Terraform | Offline validation; no release just for Terraform source |
+| `.github/workflows/fullstack-release.yml` | Frontend + Release + delivery validation | Release + delivery validation | Candidate contract and YAML/security checks |
+| `.github/workflows/backend-ci.yml` | Backend + delivery validation | Release + delivery validation | Both candidate checks; main release gains equivalent check coverage |
+| `ops/configuration/reconcile.py` | Release + delivery validation | Release + delivery validation | Operational fixture validation remains separate |
+| `package-lock.json`, `poetry.lock`, `uv.lock` | Component only | Release | Union preserved for PR/main; main frontend lockfiles now also trigger verified development release |
+| `.github/actions/setup-frontend-toolchain/action.yml` | No previous action | Release + delivery validation | Exercises consumer build/checks; same coverage on main |
+| `.github/actions/setup-terraform-toolchain/action.yml` | No previous action | Terraform + delivery validation | Offline toolchain validation; apply/bootstrap remain gated entrypoints |
+| `README.md`, `docs/testing.md`, component Markdown | None | None | Approved docs-only exclusions retained |
+| `docs/github-actions.md`, `docs/terraform-greenfield-operations.md`, `docs/iam-bootstrap-actions.md`, `ops/iam-bootstrap/README.md` | Delivery validation | Delivery validation | Existing explicit guide exceptions retained |
+
+Quality delivery validation intentionally exercises fixtures and policies also used by Terraform/Compose; they validate different integration boundaries. Its disposable Docker runtime smoke is distinct from the Compose journey. These are retained, intentional checks. No required status is removed or renamed. Real candidate CI remains bound to the exact workflow/job contract authenticated by the incident controller.
+
+## Shared action contracts and extraction evidence
+
+Platform Engineer owns both actions. They accept no credentials, approvals, environment selectors or Terraform operation commands and define no output/evidence schema. Caller step failures propagate normally, and stdout/stderr remain operational logs. Actions require a completed checkout.
+
+| Action | Contract | Consumers and before/after duplication |
+|---|---|---|
+| [`setup-frontend-toolchain`](../.github/actions/setup-frontend-toolchain/action.yml) | No inputs/outputs. Node `22`, `actions/setup-node@v7`, npm cache keyed by `frontend/package-lock.json`; `npm ci` explicitly in `frontend` (caller defaults do not propagate) | Frontend checks, development build, production build, configuration-recovery fixture: four identical Node/cache/install sequences become four calls to one definition. Builds, Playwright install and caller-specific configuration stay in workflows. Production calls current trusted `.configuration-tools/.github/actions/...` so old verified release source need not contain this action. |
+| [`setup-terraform-toolchain`](../.github/actions/setup-terraform-toolchain/action.yml) | Required `terraform-version`: exact reviewed pin supplied by caller (`1.14.3` or matching `TERRAFORM_VERSION`); `hashicorp/setup-terraform@v4`, wrapper always `false`. No outputs | Offline Terraform matrix, delivery fixture, environment plan/apply, bootstrap plan/apply, production prepare plan/apply and destroy plan/apply: ten repeated setup blocks become ten calls. Existing caller version pins and all plan/credential/gate steps stay explicit. |
+
+Frontend and Terraform were extracted first. Subsequent comparison supports two deferrals:
+
+- **Python:** Backend uses Python 3.12 plus pip caching against `backend/pyproject.toml` and editable test/DSQL dependencies. Workflow fixtures install configuration requirements, bootstrap installs its pinned HCL/transfer requirements, and incident jobs deliberately bind interpreter paths and isolated execution. Most share only a single setup-python invocation. Wrapping that one step adds indirection or unrelated cache/dependency options; retain explicit setup and domain installations. No unused `setup-python-toolchain/` directory is added.
+- **Served frontend verification:** Both release workflows install Chromium and call the existing `ops/configuration/verify-served-auth.mjs` domain script. Development uses same-run current source/configuration and `github.sha`; production selects an older verified checkout, current trusted tools and `inputs.release_commit`. Evidence recording, adapter verification and promotion eligibility remain caller-specific. The script already shares substantive browser logic; wrapping two steps would require source/config/evidence routing inputs and obscure the trusted-source split. Retain the domain script and explicit steps; no unused `verify-served-frontend/` directory is added.
+
+Retired workflows remain exactly the three non-deploying stubs; no removal or trigger retirement is included. Recovery follows their existing deferred-issue message, never reactivation of combined-state operations. Grafana setup emits its existing public-only discovery/setup handoff and uses the [hosted setup runbook](../observability/grafana/cloud/README.md); discovery failures require correcting approved metadata/credentials before a new protected run. Grafana access emits fixed capability results only. Configuration publishes verified public snapshots or warnings without secret artifacts; use the [configuration recovery guide](configuration-management.md#values-and-recovery). Incident receipts and escalation follow the [controller runbook](../ops/incident-response/ACTIONS.md). These are documented evidence contracts, not live acceptance from this refactor.

@@ -116,7 +116,7 @@ class MonitoringTests(unittest.TestCase):
     def test_workflow_copy_only_interface_and_internal_destroy_boundary(self):
         root = Path(__file__).resolve().parents[3]
         workflow = yaml.safe_load(
-            (root / ".github/workflows/reconcile-environment.yml").read_text()
+            (root / ".github/workflows/reconcile-environment.yml").read_text(encoding="utf-8")
         )
         triggers = workflow.get("on", workflow.get(True))
         self.assertEqual(
@@ -128,15 +128,15 @@ class MonitoringTests(unittest.TestCase):
             {"environment", "mode", "caller_holds_lifecycle_lock", "fail_on_error"},
         )
         cleanup = yaml.safe_load(
-            (root / ".github/workflows/cleanup-destroyed-configuration.yml").read_text()
+            (root / ".github/workflows/cleanup-destroyed-configuration.yml").read_text(encoding="utf-8")
         )
         self.assertEqual(set(cleanup.get("on", cleanup.get(True))), {"workflow_call"})
         guard = cleanup["jobs"]["cleanup"]["steps"][0]["run"]
-        self.assertIn("Terraform production destroy", guard)
+        self.assertIn("Infrastructure · Destroy production environment", guard)
         self.assertIn('"$DESTROY_CONFIRMED" == true', guard)
         self.assertIn("DESTROY production", guard)
         destroy = yaml.safe_load(
-            (root / ".github/workflows/terraform-environment-destroy.yml").read_text()
+            (root / ".github/workflows/terraform-environment-destroy.yml").read_text(encoding="utf-8")
         )
         caller = destroy["jobs"]["cleanup-generated-targets"]
         self.assertEqual(

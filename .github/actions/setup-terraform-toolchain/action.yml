@@ -1,0 +1,13 @@
+name: Set up Terraform toolchain
+description: Install the caller-selected pinned Terraform version without the output wrapper.
+inputs:
+  terraform-version:
+    description: Exact reviewed Terraform version; no floating ranges.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: ${{ inputs.terraform-version }}
+        terraform_wrapper: false

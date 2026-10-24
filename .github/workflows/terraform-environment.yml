@@ -1,4 +1,5 @@
-name: Terraform environment plan and apply
+name: Infrastructure · Plan and apply environment
+run-name: 'Infrastructure · Plan and apply environment · ${{ github.ref_name }} · ${{ github.sha }}'
 
 on:
   workflow_dispatch:
@@ -67,7 +68,7 @@ permissions:
   deployments: read
 
 concurrency:
-  group: ${{ contains(fromJSON('["Full-stack release to development","Promote verified release to production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
+  group: ${{ contains(fromJSON('["Release · Publish and verify development","Release · Promote verified release to production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 env:
@@ -297,10 +298,9 @@ jobs:
         run: python .github/scripts/validate-hosted-observability.py
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: ./.github/actions/setup-terraform-toolchain
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Initialize the matching clean state
         shell: bash
@@ -545,10 +545,9 @@ jobs:
           test "$actual" = "$EXPECTED_SHA256"
 
       - name: Set up Terraform and initialize matching state
-        uses: hashicorp/setup-terraform@v4
+        uses: ./.github/actions/setup-terraform-toolchain
         with:
-          terraform_version: ${{ env.TERRAFORM_VERSION }}
-          terraform_wrapper: false
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Initialize matching state and apply only the reviewed plan
         shell: bash

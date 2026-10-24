@@ -1,4 +1,4 @@
-name: Clean up destroyed environment configuration
+name: Operations · Clean up destroyed environment configuration
 
 on:
   workflow_call:
@@ -36,7 +36,7 @@ jobs:
       - name: Validate protected destroy caller
         run: |
           [[ "$SELECTED_ENVIRONMENT" == production ]]
-          [[ "$DESTROY_CONFIRMED" == true && "$CALLER_WORKFLOW" == 'Terraform production destroy' ]]
+          [[ "$DESTROY_CONFIRMED" == true && "$CALLER_WORKFLOW" == 'Infrastructure · Destroy production environment' ]]
           [[ "$CLEANUP_CONFIRMATION" == 'DESTROY production' ]]
       - uses: actions/checkout@v7
         with:

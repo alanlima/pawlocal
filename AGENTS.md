@@ -219,6 +219,14 @@ Do not close an issue simply because code has been written. Verify its acceptanc
 
 ---
 
+### GitHub Actions conventions
+
+When adding or changing workflows, follow the purpose-based catalogue in `docs/github-actions.md`. Use Quality, Release, Infrastructure, Operations, Automation or Retired and display names `<Purpose> · <Verb and object>`. New filenames use lowercase `<purpose>-<task>.yml` with kebab-case tasks. Workflow files, including reusable workflows, remain directly under `.github/workflows/`. Classify by responsibility, not reuse. Keep domain logic in its existing module; introduce specifically named composite actions only for demonstrated repeated steps.
+
+Issue #272 temporarily preserves the exact existing filenames listed in `.github/workflow-catalogue.json`; changing those requires a coordinated dependency migration. Before changing names, filenames, jobs/checks, triggers, inputs or actions, inspect and update callers, dispatch targets, path filters, concurrency expressions, incident/release provenance, tests and documentation atomically. Preserve permissions, protected Environments, approvals, lifecycle locks and exact saved-plan/release checks. Maintain the catalogue and applicable configuration mappings/inventory in the same PR. Automated policy checks enforce naming, structure and tracked legacy exceptions.
+
+---
+
 ## 7. Architecture and coding standards
 
 ### General

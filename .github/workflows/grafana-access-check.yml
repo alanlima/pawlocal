@@ -1,4 +1,4 @@
-name: Grafana read-only access check
+name: Operations · Verify Grafana access
 
 on:
   workflow_dispatch:

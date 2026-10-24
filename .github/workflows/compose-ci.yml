@@ -1,4 +1,4 @@
-name: Compose CI
+name: Quality · Validate Compose
 
 on:
   pull_request:

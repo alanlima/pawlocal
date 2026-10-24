@@ -154,8 +154,8 @@ class WorkflowPathTests(unittest.TestCase):
 
     def test_component_paths_trigger_only_their_component_workflow(self) -> None:
         cases = {
-            "frontend/src/App.tsx": "frontend-deploy.yml",
-            "backend/app/main.py": "backend-ci.yml",
+            "frontend/src/App.tsx": "fullstack-release.yml",
+            "backend/app/main.py": "fullstack-release.yml",
             "infra/terraform/main.tf": "terraform-ci.yml",
             ".env.example": "compose-ci.yml",
             "observability/grafana/dashboard.json": "compose-ci.yml",
@@ -163,8 +163,7 @@ class WorkflowPathTests(unittest.TestCase):
             "observability/grafana/cloud/bindings.json": "compose-ci.yml",
         }
         workflows = (
-            "frontend-deploy.yml",
-            "backend-ci.yml",
+            "fullstack-release.yml",
             "compose-ci.yml",
             "terraform-ci.yml",
         )
@@ -174,18 +173,17 @@ class WorkflowPathTests(unittest.TestCase):
 
     def test_shared_root_inputs_trigger_relevant_checks(self) -> None:
         expected = {
-            "openapi.yaml": {"frontend-deploy.yml", "backend-ci.yml", "compose-ci.yml"},
-            "package-lock.json": {"frontend-deploy.yml"},
-            "pyproject.toml": {"backend-ci.yml"},
+            "openapi.yaml": {"fullstack-release.yml", "fullstack-release.yml", "compose-ci.yml"},
+            "package-lock.json": {"fullstack-release.yml"},
+            "pyproject.toml": {"fullstack-release.yml"},
             ".dockerignore": {"compose-ci.yml"},
-            "frontend/Dockerfile": {"frontend-deploy.yml", "compose-ci.yml"},
-            "frontend/.dockerignore": {"frontend-deploy.yml", "compose-ci.yml"},
-            "backend/Dockerfile": {"backend-ci.yml", "compose-ci.yml"},
-            "backend/.dockerignore": {"backend-ci.yml", "compose-ci.yml"},
+            "frontend/Dockerfile": {"fullstack-release.yml", "compose-ci.yml"},
+            "frontend/.dockerignore": {"fullstack-release.yml", "compose-ci.yml"},
+            "backend/Dockerfile": {"fullstack-release.yml", "compose-ci.yml"},
+            "backend/.dockerignore": {"fullstack-release.yml", "compose-ci.yml"},
         }
         workflows = (
-            "frontend-deploy.yml",
-            "backend-ci.yml",
+            "fullstack-release.yml",
             "compose-ci.yml",
             "terraform-ci.yml",
         )
@@ -211,7 +209,7 @@ class WorkflowPathTests(unittest.TestCase):
     def test_workflow_changes_trigger_validation_and_affected_frontend_check(self) -> None:
         path = ".github/workflows/frontend-production-deploy.yml"
         self.assertTrue(matches("workflow-validation.yml", path))
-        self.assertTrue(matches("frontend-deploy.yml", path))
+        self.assertTrue(matches("fullstack-release.yml", path))
 
     def test_production_deploy_is_scoped_to_frontend_related_inputs(self) -> None:
         self.assertTrue(matches("frontend-production-deploy.yml", "frontend/src/App.tsx"))

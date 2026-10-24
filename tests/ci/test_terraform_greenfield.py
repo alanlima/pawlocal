@@ -41,7 +41,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         )
         ci_workflow = (ROOT / ".github/workflows/terraform-ci.yml").read_text(encoding="utf-8")
         self.assertIn(f"TERRAFORM_VERSION: {version}", environment_workflow)
-        self.assertIn(f"terraform_version: {version}", ci_workflow)
+        self.assertIn(f"terraform-version: {version}", ci_workflow)
 
     def test_roots_and_backend_keys_are_explicit_and_distinct(self) -> None:
         for environment in ("development", "production"):
