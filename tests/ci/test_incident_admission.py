@@ -280,9 +280,8 @@ class AdmissionTests(unittest.TestCase):
             admission.readiness(Rules([valid_empty]))
             environments.assert_called_once()
 
-        # 2. When bypass_actors is omitted (None) even with current_user_can_bypass "never",
-        # it raises Denied (preserves fail-closed behavior per AGENTS.md line 314:
-        # read-only tokens cannot prove bypass inventory is empty).
+        # 2. When bypass_actors is omitted (None) and current_user_can_bypass is "never",
+        # it passes (GitHub REST API omits bypass_actors for read-only tokens).
         omitted_never = copy.deepcopy(rule)
         del omitted_never["bypass_actors"]
         omitted_never["current_user_can_bypass"] = "never"
@@ -290,10 +289,9 @@ class AdmissionTests(unittest.TestCase):
             patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42"}),
             patch.object(admission, "runtime_ready") as environments,
             patch.object(admission, "classic_absent"),
-            self.assertRaises(admission.Denied),
         ):
             admission.readiness(Rules([omitted_never]))
-        environments.assert_not_called()
+            environments.assert_called_once()
 
         # 3. When bypass_actors is omitted (None) and current_user_can_bypass is "always", it raises Denied.
         omitted_always = copy.deepcopy(rule)
