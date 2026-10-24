@@ -1,6 +1,7 @@
 """Offline actual pip/PEP 517 fixture for trusted source-build side effects."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops/incident-response"))
 import candidate
+import deadline
 import job
+import process_policy
 
 
 class BaselineBuildTests(unittest.TestCase):
@@ -57,26 +60,51 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             before = candidate.files(baseline)
             shutil.copytree(baseline, work)
             build_source = job.backend_dependency_source(baseline, dependencies)
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "wheel",
-                    "--no-index",
-                    "--no-deps",
-                    "--no-build-isolation",
-                    "--wheel-dir",
-                    str(root / "wheels"),
-                    ".",
-                ],
-                cwd=build_source,
-                capture_output=True,
-                text=True,
-                timeout=45,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            command = [
+                process_policy.DEPENDENCIES + "/venv/bin/pip",
+                "install",
+                "--disable-pip-version-check",
+                ".[test]",
+            ]
+            fixed_source = process_policy.DEPENDENCIES + "/backend-source"
+            popen = subprocess.Popen
+
+            def offline_build_after_validation(argv, **options):
+                # deadline.run validates the real runtime argv/cwd first. Only
+                # its final process launch is relocated into this offline fixture.
+                self.assertEqual(argv, command)
+                self.assertEqual(str(options["cwd"]), fixed_source)
+                options["cwd"] = build_source
+                return popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "pip",
+                        "install",
+                        "--no-index",
+                        "--no-deps",
+                        "--no-build-isolation",
+                        "--target",
+                        str(root / "installed"),
+                        ".[test]",
+                    ],
+                    **options,
+                )
+
+            with (
+                patch.dict(os.environ, {"RUNNER_TEMP": str(root)}),
+                patch.object(deadline, "DEADLINE", None),
+                patch.object(
+                    deadline.subprocess,
+                    "Popen",
+                    side_effect=offline_build_after_validation,
+                ) as launch,
+            ):
+                result = deadline.run(
+                    command, cwd=fixed_source, stdout=subprocess.PIPE, timeout=45
+                )
+            self.assertEqual(result.returncode, 0, result.stdout.decode())
+            launch.assert_called_once()
             self.assertTrue((build_source / "build/lib/fixture.py").is_file())
             self.assertTrue((build_source / "fixture.egg-info/PKG-INFO").is_file())
             self.assertEqual(candidate.files(baseline), before)
@@ -99,6 +127,42 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             )
             with self.assertRaisesRegex(candidate.Denied, "outside_approved_paths"):
                 candidate.export(baseline, work, self.metadata())
+
+    def test_trusted_wrapper_denies_baseline_candidate_and_other_build_paths(self):
+        command = [
+            process_policy.DEPENDENCIES + "/venv/bin/pip",
+            "install",
+            "--disable-pip-version-check",
+            ".[test]",
+        ]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"RUNNER_TEMP": directory}),
+        ):
+            with patch.object(deadline.subprocess, "Popen") as launch:
+                for cwd in (
+                    Path(directory) / "oncall-trusted/baseline/backend",
+                    "/tmp/pawlocal-oncall-candidate/backend",
+                    process_policy.DEPENDENCIES + "/backend-source-other",
+                    process_policy.DEPENDENCIES + "/backend-source/../candidate",
+                ):
+                    with (
+                        self.subTest(cwd=cwd),
+                        self.assertRaisesRegex(
+                            candidate.Denied, "trusted build source"
+                        ),
+                    ):
+                        deadline.run(command, cwd=cwd)
+                launch.assert_not_called()
+            # Independent trusted checks retain their own separate archive.
+            with patch.object(deadline.subprocess, "Popen") as launch:
+                launch.return_value.communicate.return_value = (None, None)
+                launch.return_value.returncode = 0
+                deadline.run(
+                    command,
+                    cwd=Path(directory) / "oncall-checks/dependency-source/backend",
+                )
+                launch.assert_called_once()
 
     def test_refusal_diagnostics_are_bounded_escaped_and_content_free(self):
         with tempfile.TemporaryDirectory() as directory:
