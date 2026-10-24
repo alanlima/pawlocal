@@ -489,18 +489,30 @@ If you prefer to construct the JSON manually, satisfy all fields below:
 
 ---
 
-## Step 9 — Enable Grafana alerting contact point
+## Step 9 — Create the Grafana alerting contact point (DEV)
 
-Configure a Grafana alerting contact point of type **Webhook** targeting the Lambda Function URL for your environment:
+In Grafana Cloud, navigate to:
+**Alerts & IRM** → **Alerting** → **Notification configuration** → **Contact points** tab (first tab) → **+ Add contact point**.
 
-- **DEV contact point URL**: value of SSM parameter `/pawlocal/development/config/oncall/webhook-url`
-- **HMAC signing secret**: value of SSM parameter `/pawlocal/development/secrets/grafana/webhook-hmac`
+| Field | Value |
+|---|---|
+| **Name** | `pawlocal-development-oncall` |
+| **Integration** | `Webhook` |
+| **URL** | Value of SSM parameter `/pawlocal/development/config/oncall/webhook-url` (your DEV Lambda Function URL) |
+| **HTTP Method** | `POST` |
 
-In the Grafana alerting contact point settings, enable:
-- **HTTP Method**: POST
-- **Authentication**: Custom header `X-Grafana-Alerting-Signature` and `X-Grafana-Alerting-Timestamp` (Grafana sets these automatically when an HMAC secret is configured).
+Under **Optional Webhook settings**, expand **HMAC setup**:
+1. Check **Enable HMAC setup**.
+2. **Secret**: Decrypted value of SSM parameter `/pawlocal/development/secrets/grafana/webhook-hmac` (32-byte hex string).
+3. **Header**: `X-Grafana-Alerting-Signature`
+4. **Timestamp header**: `X-Grafana-Alerting-Timestamp`
 
-Keep the contact point **disabled or unassigned** to any notification policy until Step 11.
+Click **Save contact point**.
+
+> [!NOTE]
+> Keep this contact point **unassigned** to any notification policy rule until Step 11. Do not route live alerts to it until after the controlled manual test in Step 10 succeeds.
+>
+> *(Why not Terraform? In PawLocal, the contact point is created via the Grafana UI because Terraform state must never store runtime secret payloads such as the HMAC secret, and Grafana Cloud uses a single shared notification policy tree across both DEV and PROD).*
 
 ---
 
@@ -538,11 +550,15 @@ Expected response: `204 No Content` (GitHub accepted dispatch) or `502` if the A
 
 ## Step 11 — Activate the Grafana contact point (DEV)
 
-Once G2 passes:
+Once the controlled test in Step 10 passes (G2):
 
-1. Assign the DEV contact point to a notification policy that matches `environment=development` alerts.
-2. Verify deduplication (posting the same alert twice within the window produces only one workflow run due to the incident issue claim).
-3. Verify a resolution event closes the incident cleanly.
+1. Go to **Alerts & IRM** → **Alerting** → **Notification configuration** → **Notification policies** tab.
+2. Under your notification routing tree, add a nested policy (or edit the policy for development):
+   - **Matching labels**: `environment = development`, `service = pawlocal-api`
+   - **Contact point**: `pawlocal-development-oncall`
+   - Click **Save policy**.
+3. Verify deduplication: firing the alert twice within the settling window triggers only one workflow run due to the preflight incident issue claim.
+4. Verify a resolution event closes the incident issue cleanly.
 
 ---
 
