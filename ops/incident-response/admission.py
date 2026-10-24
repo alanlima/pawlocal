@@ -406,6 +406,15 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
 
 def readiness(github):
     authorizer = integer(int(os.environ.get("PAWLOCAL_AUTHORIZER_APP_ID", "0")))
+    path = Path(os.environ.get("RUNNER_TEMP", "")) / "oncall-readiness-token.json"
+    if path.is_file():
+        try:
+            capability = strict_json(path.read_bytes())
+            token = capability.get("token")
+            if token and isinstance(token, str):
+                github = GitHub(token, github.deadline, github.opener)
+        except Exception:
+            pass
     summaries = github.request("GET", "/rulesets?per_page=100")
     if not isinstance(summaries, list) or len(summaries) >= 100:
         raise Denied("ruleset inventory unknown")

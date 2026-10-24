@@ -361,14 +361,103 @@ Once the environment variable is saved, run the Terraform environment workflow s
 
 ## Step 6 — Update the branch ruleset
 
-Navigate to **Repository → Settings → Rules → Rulesets → Protect Main Branch** and:
+The automated incident responder verifies the repository ruleset during preflight (`admission.readiness()`). It requires strict status checks, the three required candidate checks, and no bypass actors.
 
-1. Set **Require a review from Code Owners** to **disabled** (code-owner review is now replaced by machine authorization).
-2. Under **Required status checks**, add `PawLocal change authorization` and pin it to the **Publisher App ID** as the expected status source.
-3. Verify that squash merge, no-force-push, and no-deletion protections remain enabled.
+### Option A — Automated via GitHub CLI (Recommended)
+
+Run the following command using the GitHub CLI (`gh`) and your Publisher App ID from Step 2.
+
+**Bash (Linux / macOS):**
+```bash
+PUBLISHER_APP_ID="<your-publisher-app-id>"
+
+RULESET_ID=$(gh api repos/:owner/:repo/rulesets --jq '.[] | select(.name=="Protect Main Branch") | .id')
+
+gh api -X PUT "repos/:owner/:repo/rulesets/$RULESET_ID" \
+  -H "Accept: application/vnd.github+json" \
+  -f name="Protect Main Branch" \
+  -f enforcement="active" \
+  --raw-field 'conditions={"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}}' \
+  --raw-field "rules=[{\"type\":\"deletion\"},{\"type\":\"non_fast_forward\"},{\"type\":\"pull_request\",\"parameters\":{\"required_approving_review_count\":0,\"dismiss_stale_reviews_on_push\":false,\"required_reviewers\":[],\"require_code_owner_review\":false,\"require_last_push_approval\":false,\"required_review_thread_resolution\":true,\"require_extra_approval_for_unattributed_changes\":true,\"allowed_merge_methods\":[\"squash\"]}},{\"type\":\"required_status_checks\",\"parameters\":{\"strict_required_status_checks_policy\":true,\"do_not_enforce_on_create\":false,\"required_status_checks\":[{\"context\":\"PawLocal change authorization\",\"integration_id\":$PUBLISHER_APP_ID},{\"context\":\"Backend checks / Backend checks\"},{\"context\":\"Frontend checks and HTTP-mode build / frontend\"}]}}]" \
+  --raw-field 'bypass_actors=[]'
+```
+
+**PowerShell (Windows):**
+```powershell
+$PublisherAppId = <your-publisher-app-id>
+
+$RulesetId = (gh api repos/:owner/:repo/rulesets | ConvertFrom-Json | Where-Object { $_.name -eq "Protect Main Branch" }).id
+
+$Payload = @{
+    name = "Protect Main Branch"
+    target = "branch"
+    enforcement = "active"
+    conditions = @{ ref_name = @{ include = @("~DEFAULT_BRANCH"); exclude = @() } }
+    rules = @(
+        @{ type = "deletion" },
+        @{ type = "non_fast_forward" },
+        @{
+            type = "pull_request"
+            parameters = @{
+                required_approving_review_count = 0
+                dismiss_stale_reviews_on_push = $false
+                required_reviewers = @()
+                require_code_owner_review = $false
+                require_last_push_approval = $false
+                required_review_thread_resolution = $true
+                require_extra_approval_for_unattributed_changes = $true
+                allowed_merge_methods = @("squash")
+            }
+        },
+        @{
+            type = "required_status_checks"
+            parameters = @{
+                strict_required_status_checks_policy = $true
+                do_not_enforce_on_create = $false
+                required_status_checks = @(
+                    @{ context = "PawLocal change authorization"; integration_id = [int]$PublisherAppId },
+                    @{ context = "Backend checks / Backend checks" },
+                    @{ context = "Frontend checks and HTTP-mode build / frontend" }
+                )
+            }
+        }
+    )
+    bypass_actors = @()
+} | ConvertTo-Json -Depth 10
+
+$Payload | gh api -X PUT "repos/:owner/:repo/rulesets/$RulesetId" --input -
+```
+
+This automatically configures the active `Protect Main Branch` ruleset to:
+- Pin `PawLocal change authorization` to your Publisher App ID.
+- Include candidate checks `Backend checks / Backend checks` and `Frontend checks and HTTP-mode build / frontend`.
+- Enable strict status check policy (`strict_required_status_checks_policy: true`).
+- Enforce squash-only merging, no force-push, no deletion, and no bypass actors.
+
+### Option B — Manual configuration via GitHub Web UI
+
+Navigate to **Repository → Settings → Rules → Rulesets → Protect Main Branch**:
+
+1. Under **Rules**:
+   - Ensure **Restrict deletions** is checked.
+   - Ensure **Block force pushes** is checked.
+2. Under **Require a pull request before merging**:
+   - **Required approvals**: `0` (replaced by machine authorization).
+   - **Dismiss stale pull request approvals when new commits are pushed**: Unchecked.
+   - **Require review from Code Owners**: Unchecked (disabled).
+   - **Require approval of the most recent push**: Unchecked.
+   - **Require conversation resolution before merging**: Checked.
+   - **Allowed merge methods**: Only **Squash merge**.
+3. Under **Require status checks to pass**:
+   - Check **Require branches to be up to date before merging** (strict policy).
+   - Add check: `PawLocal change authorization` (select your Publisher App as the status source).
+   - Add check: `Backend checks / Backend checks`.
+   - Add check: `Frontend checks and HTTP-mode build / frontend`.
+4. Under **Bypass list**:
+   - Ensure no bypass actors are added (leave completely empty).
 
 > [!IMPORTANT]
-> Do not disable Code Owners until the `PawLocal change authorization` status check is pinned to the correct Publisher App ID and independently verified. Removing Code Owners before the replacement gate is active removes all merge protection.
+> `admission.readiness()` validates that all three status checks exist, that strict checks are enabled, and that no bypass actors exist. If any of these differ, preflight fails closed before any incident model is admitted.
 
 ---
 
