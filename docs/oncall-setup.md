@@ -253,10 +253,61 @@ Add:
 
 ### 4d. `ordinary-change-approval` environment
 
-Add yourself (or the team lead) as a required **Reviewer** so that ordinary (non-incident) PRs require human approval before the `PawLocal change authorization` status check can pass.
+Navigate to **Repository → Settings → Environments → ordinary-change-approval**.
+
+This environment gates ordinary (non-incident) pull requests. Under the repository ruleset, `main` requires the `PawLocal change authorization` commit status check. For ordinary PRs raised by developers, GitHub Actions enters this environment and pauses for your approval before minting the status token and marking the check as `success`.
+
+1. **Environment protection rules**:
+   - Add yourself (or the repository owner) under **Required reviewers**.
+   - Leave **Wait timer** disabled.
+
+2. **Secrets**:
+
+   | Secret name | Value |
+   |---|---|
+   | `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` | Same Publisher App `.pem` as above. |
+
+3. **Variables**:
+
+   | Variable name | Value |
+   |---|---|
+   | `PAWLOCAL_ONCALL_PUBLISHER_APP_ID` | Publisher App ID. |
+   | `PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID` | Publisher App Installation ID. |
 
 > [!NOTE]
-> This is the gate that preserves human oversight for all non-automated changes. Incident PRs bypass it only through cryptographic lineage verification — not by removing it.
+> **How ordinary PR approval works:**
+> When an ordinary PR is opened or synchronized, `.github/workflows/change-authorization.yml` classifies it as `route: ordinary` and starts the `ordinary-approval` job.
+> 1. The job pauses with a pending status waiting for deployment approval in `ordinary-change-approval`.
+> 2. You go to the GitHub Actions run and click **Review deployments → Approve and deploy**.
+> 3. The job resumes, mints a status token via the Publisher App, verifies that the PR head SHA hasn't changed, and posts `success` to the `PawLocal change authorization` status check.
+> 4. Once this check passes, GitHub allows the PR to be squash-merged into `main`.
+
+### 4e. Runtime environment protection rules and branch policies
+
+The automated incident responder includes a strict preflight check (`admission.readiness()` calling `settings.runtime_ready()`) that validates all 8 runtime deployment environments via the GitHub API before admitting any automated incident run:
+- `development`
+- `development-plan`
+- `development-apply`
+- `production`
+- `production-plan`
+- `production-apply`
+- `oncall-development`
+- `oncall-production`
+
+Configure **each** of these 8 environments with the following settings:
+
+1. **Deployment branches**:
+   - Select **Selected branches**.
+   - Add rule: `main` (only the `main` branch is permitted).
+2. **Environment protection rules**:
+   - **Required reviewers**: Ensure **no reviewers** are configured (remove any existing reviewers).
+   - **Wait timer**: Ensure **no wait timer** is configured (0 minutes).
+
+> [!IMPORTANT]
+> **Why reviewers are removed from runtime environments:**
+> Under the unattended incident recovery model (Issue #239), emergency fixes deploy from `main` to development and production automatically without interactive human approvals in the deployment pipeline.
+> Human oversight for human changes is preserved by the change authorization workflow at **PR merge time** (`ordinary-change-approval`), rather than inside the downstream deployment environments.
+> Separately gated workflows—such as account bootstrap (`iam-bootstrap-apply`), environment setup, and infrastructure teardown (`destroy`)—retain their existing manual approval gates and are not part of this runtime environment group.
 
 ---
 
