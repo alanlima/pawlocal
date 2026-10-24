@@ -197,3 +197,16 @@ for (const repository of ['', 'https://github.com/example/repo', '../repo', 'exa
     assert.deepEqual(h.calls, []);
   });
 }
+
+test('unrestricted alert allowlist admits any valid alert name routed by Grafana', async () => {
+  for (const emptyVal of ['[]', '', undefined]) {
+    const environment = { ...env, PAWLOCAL_ONCALL_ALLOWED_ALERTS: emptyVal };
+    const h = harness({ environment });
+    for (const alertname of ['places-5xx-error', 'custom-latency-alert', 'pawlocal-development-search-detail-failure']) {
+      const e = event(payload([alert({ labels: { ...alert().labels, alertname } })]));
+      assert.equal((await h.handler(e)).statusCode, 204);
+      const dispatched = JSON.parse(h.calls.at(-1).options.body);
+      assert.equal(JSON.parse(dispatched.inputs.alerts_json)[0].alert_name, alertname);
+    }
+  }
+});

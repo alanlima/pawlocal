@@ -25,8 +25,9 @@ def validate(raw: str, account: str, region: str) -> None:
         raise ValueError("ONCALL_INVALID_JSON") from error
     if value is None:
         return
-    required = {"app_id", "installation_id", "repository_id", "repository", "allowed_services", "allowed_alerts"}
-    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - {"kms_key_arn"}:
+    required = {"app_id", "installation_id", "repository_id", "repository", "allowed_services"}
+    optional = {"kms_key_arn", "allowed_alerts"}
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - optional:
         raise ValueError("ONCALL_UNKNOWN_OR_MISSING_FIELDS")
     repository = value["repository"]
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}", repository) or repository.split("/")[1] in {".", ".."}:
@@ -37,13 +38,21 @@ def validate(raw: str, account: str, region: str) -> None:
             raise ValueError("ONCALL_INVALID_NUMERIC_ID")
     if int(value["repository_id"]) > 9007199254740991:
         raise ValueError("ONCALL_UNSAFE_REPOSITORY_ID")
-    for name in ("allowed_services", "allowed_alerts"):
-        items = value[name]
-        if not isinstance(items, list) or not 1 <= len(items) <= 10:
+    services = value["allowed_services"]
+    if not isinstance(services, list) or not 1 <= len(services) <= 10:
+        raise ValueError("ONCALL_INVALID_ALLOWLIST")
+    if not all(isinstance(item, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", item) for item in services):
+        raise ValueError("ONCALL_INVALID_ALLOWLIST")
+    if len(services) != len(set(services)):
+        raise ValueError("ONCALL_DUPLICATE_ALLOWLIST")
+
+    alerts = value.get("allowed_alerts")
+    if alerts is not None:
+        if not isinstance(alerts, list) or len(alerts) > 20:
             raise ValueError("ONCALL_INVALID_ALLOWLIST")
-        if not all(isinstance(item, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", item) for item in items):
+        if not all(isinstance(item, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", item) for item in alerts):
             raise ValueError("ONCALL_INVALID_ALLOWLIST")
-        if len(items) != len(set(items)):
+        if len(alerts) != len(set(alerts)):
             raise ValueError("ONCALL_DUPLICATE_ALLOWLIST")
     key = value.get("kms_key_arn")
     if key is not None and (not isinstance(key, str) or not re.fullmatch(

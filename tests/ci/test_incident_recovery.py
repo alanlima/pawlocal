@@ -81,7 +81,7 @@ class RecoveryTests(unittest.TestCase):
             )
             if parsed.path.endswith("/rules"):
                 rule = {
-                    "uid": self.profile.rule_uids[self.scenario_environment],
+                    "uid": self.profile.rule_uids.get(self.scenario_environment, "default-uid"),
                     "queriedDatasourceUIDs": ["metrics1"],
                     "type": "alerting",
                     "isPaused": False,
@@ -427,6 +427,17 @@ class RecoveryTests(unittest.TestCase):
                     self.configured()
                 self.assertEqual(len(self.calls), 1)
                 self.assertNotIn("query?", self.calls[0][0])
+
+    def test_dynamic_alert_name_matching_without_rule_uid(self):
+        self.profile.rule_uids = {}
+        def mutate(value, url):
+            if url.endswith("/rules"):
+                value["data"]["groups"][0]["rules"][0]["uid"] = "random-generated-uid"
+                value["data"]["groups"][0]["rules"][0]["name"] = "places-5xx-error"
+            return value
+        self.mutate = mutate
+        proof = self.observe(alert_name="places-5xx-error")
+        self.assertEqual(proof["samples"], 21)
 
     def test_full_window_and_redacted_receipt(self):
         proof = self.observe()

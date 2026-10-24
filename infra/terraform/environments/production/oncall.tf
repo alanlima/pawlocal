@@ -6,7 +6,7 @@ variable "oncall_receiver" {
     repository_id    = string
     repository       = string
     allowed_services = set(string)
-    allowed_alerts   = set(string)
+    allowed_alerts   = optional(set(string), [])
     kms_key_arn      = optional(string)
   })
   default = null

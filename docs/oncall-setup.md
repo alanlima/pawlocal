@@ -613,29 +613,20 @@ Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroo
 
 ---
 
-### How to get the Grafana Alert Rule UIDs (`rule_uids`)
+### Grafana Alert Rules and `rule_uids` (Decoupled & Dynamic)
 
-In PawLocal, `rule_uids` identifies the synthetic search-to-detail journey alert rule for each environment that the incident responder observes during recovery.
+Grafana notification policies and alert rules are the authoritative source of truth for which alerts should trigger on-call support.
 
-#### Option A: Use the canonical repository defaults (Recommended)
-If you provision alert rules using the repository tools (`observability/grafana/cloud/experience.py`), the predefined UIDs are:
+In PawLocal, `rule_uids` in the profile is **optional** (`"rule_uids": {}`). When omitted or empty:
+- The recovery observer dynamically matches the active alert rule by its `alert_name` (or alert labels) during post-incident verification.
+- You can create any alert rule in the Grafana UI without needing to know or pre-configure its auto-generated Rule UID in repository logic.
+- Multiple and arbitrary alert rules can be configured in Grafana and routed to the on-call contact point.
 
-| Environment | Canonical Rule UID |
+If you explicitly wish to pin an exact canonical Rule UID for automated synthetic journey rules, you can optionally supply:
+| Environment | Canonical Rule UID (Optional) |
 |---|---|
 | **Development** | `pawlocal-development-search-detail` |
 | **Production** | `pawlocal-production-search-detail` |
-
-#### Option B: Find the Rule UID in Grafana Cloud UI
-If you create alert rules manually or customize their names:
-1. Log in to your Grafana Cloud stack (e.g. `https://<stack>.grafana.net`).
-2. In the left navigation, go to **Alerts & IRM** (or **Alerting**) → **Alert rules**.
-3. Expand folder **`pawlocal-development`** or **`pawlocal-production`**.
-4. Click on your search-detail journey failure alert rule.
-5. In your browser URL bar, copy the identifier after `/alerting/`:
-   ```
-   https://<stack>.grafana.net/alerting/<RULE_UID>/view
-   ```
-   *(The UID is also displayed under the rule details section as **Rule UID**).*
 
 ---
 
