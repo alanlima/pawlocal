@@ -25,6 +25,7 @@ from pathlib import Path
 from admission import GITHUB, GitHub
 from candidate import digest, export, git, load, materialize
 from deadline import arm, run
+from process_policy import CHECK_REPORTS
 from quota import Denied, Profile, strict_json
 from quota_gateway import NoRedirect
 
@@ -384,7 +385,8 @@ def prepare(role):
         "/tmp/pawlocal-oncall-dependencies/venv/bin/python "
         "/tmp/pawlocal-oncall-dependencies/backend-test-launcher.py "
         "backend/tests/test_incident_regression.py.\n"
-        "Frontend: use npm scripts in frontend; its node_modules points to "
+        "Frontend: from frontend run npm run check, npm test -- --run, and "
+        "npm run build:check; node_modules points to "
         "the trusted dependency tree. Do not install/change dependencies.\n"
     )
     context_value = {
@@ -465,8 +467,25 @@ def prepare(role):
 
 def reclaim_model_output(path):
     directory = path == Path("/tmp/pawlocal-oncall-candidate")
+    maximum = 16384
     if not directory and path != Path("/tmp/pawlocal-oncall-review.json"):
-        raise Denied("fixed model output path required")
+        if path not in {Path(name) for name in CHECK_REPORTS}:
+            raise Denied("fixed model output path required")
+        maximum = 1024 * 1024
+        # --no-dereference protects the final inode, not symlink ancestors.
+        # Both fixed check-work components must be actual directories first.
+        try:
+            for parent in (path.parent, path.parent.parent):
+                if not stat.S_ISDIR(parent.lstat().st_mode):
+                    raise Denied("real check report ancestors required")
+            container = path.parent.parent.lstat()
+            if (
+                container.st_uid != os.getuid()
+                or stat.S_IMODE(container.st_mode) & 0o022
+            ):
+                raise Denied("private runner-owned check container required")
+        except OSError as error:
+            raise Denied("check report ancestor unavailable") from error
     try:
         before = path.lstat()
     except OSError as error:
@@ -474,7 +493,9 @@ def reclaim_model_output(path):
     if not (
         stat.S_ISDIR(before.st_mode)
         if directory
-        else stat.S_ISREG(before.st_mode) and before.st_size <= 16384
+        else stat.S_ISREG(before.st_mode)
+        and before.st_size <= maximum
+        and before.st_nlink == 1
     ):
         raise Denied(
             "real candidate directory or bounded regular review output required"
@@ -492,11 +513,16 @@ def reclaim_model_output(path):
         check=True,
     )
     after = path.lstat()
-    if (after.st_dev, after.st_ino, after.st_mode) != (
-        before.st_dev,
-        before.st_ino,
-        before.st_mode,
-    ) or (after.st_uid, after.st_gid) != (os.getuid(), os.getgid()):
+    if (
+        (after.st_dev, after.st_ino, after.st_mode)
+        != (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+        )
+        or (after.st_uid, after.st_gid) != (os.getuid(), os.getgid())
+        or after.st_nlink != before.st_nlink
+    ):
         raise Denied("model output identity changed during readback")
 
 

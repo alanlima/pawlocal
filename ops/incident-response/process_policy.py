@@ -8,6 +8,11 @@ from pathlib import Path, PurePath
 from quota import Denied
 
 DEPENDENCIES = "/tmp/pawlocal-oncall-dependencies"
+CHECK_REPORTS = {
+    f"/tmp/pawlocal-oncall-check-work/{source}/{report}"
+    for source in ("affected", "main", "candidate")
+    for report in ("backend-regression.xml", "frontend-regression.json")
+}
 HOME_FILES = {
     "/home/oncall/" + name
     for name in ("candidate.diff", "review-schema.json", "incident-prompt.md")
@@ -38,6 +43,7 @@ def unprivileged(command):
             ["npm", "run", "check"],
             ["npm", "test", "--", "--run"],
             ["npm", "run", "build"],
+            ["npm", "run", "build:check"],
         )
     if command[:3] == [DEPENDENCIES + "/venv/bin/python", "-m", "pytest"]:
         return len(command) >= 4 and command[3] in {
@@ -142,7 +148,8 @@ def approved(command, input_data):
             len(args) == 4
             and args[2] == f"{os.getuid()}:{os.getgid()}"
             and args[3]
-            in {
+            in CHECK_REPORTS
+            | {
                 "/tmp/pawlocal-oncall-candidate",
                 "/tmp/pawlocal-oncall-review.json",
             }

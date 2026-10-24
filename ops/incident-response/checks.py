@@ -3,17 +3,26 @@
 import json
 import os
 import shutil
+import stat
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from candidate import BACKEND, FRONTEND, bind_candidate, digest, git, load, materialize
+from candidate import (
+    bind_candidate,
+    digest,
+    git,
+    load,
+    materialize,
+    safe_bytes,
+)
 from deadline import arm, run
 from job import (
     archive,
     context,
     download,
     quiesce,
+    reclaim_model_output,
     remaining,
     uid,
     writable_tool_caches,
@@ -49,6 +58,27 @@ def execute(command, cwd, metadata, environment):
     ).returncode
 
 
+def share_check_source(destination, identity):
+    allowed = {
+        Path("/tmp/pawlocal-oncall-check-work") / name
+        for name in ("affected", "main", "candidate")
+    }
+    info = destination.lstat()
+    if (
+        destination not in allowed
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.getuid()
+    ):
+        raise Denied("trusted fixed check source required")
+    # Tests keep their existing model UID privileges; only the runner group gains
+    # traversal/read access. The source root is never world accessible.
+    destination.chmod(0o750)
+    run(
+        ["sudo", "chown", "-R", f"{identity.pw_uid}:{os.getgid()}", str(destination)],
+        check=True,
+    )
+
+
 def regression(root, layer, metadata, dependencies, expect_failure):
     output = root / (
         "backend-regression.xml" if layer == "backend" else "frontend-regression.json"
@@ -72,9 +102,14 @@ def regression(root, layer, metadata, dependencies, expect_failure):
         ]
     cwd = root if layer == "backend" else root / "frontend"
     environment = {"PATH": str(dependencies / "venv/bin") + ":" + os.environ["PATH"]}
-    code = execute(command, cwd, metadata, environment)
+    try:
+        code = execute(command, cwd, metadata, environment)
+    finally:
+        quiesce()
+    reclaim_model_output(output)
+    raw = safe_bytes(root, output.name, 1024 * 1024)
     if layer == "backend":
-        document = ET.parse(output).getroot()
+        document = ET.fromstring(raw)
         suites = list(document.iter("testsuite"))
         count = sum(int(suite.get("tests", "0")) for suite in suites)
         failures = sum(int(suite.get("failures", "0")) for suite in suites)
@@ -82,7 +117,7 @@ def regression(root, layer, metadata, dependencies, expect_failure):
         if count < 1 or errors:
             raise Denied("regression did not collect cleanly")
     else:
-        document = json.loads(output.read_text())
+        document = json.loads(raw)
         count = document.get("numTotalTests", 0)
         failures = document.get("numFailedTests", 0)
         if count < 1 or document.get("numRuntimeErrorTestSuites", 0):
@@ -201,16 +236,7 @@ def main():
         (destination / "frontend/node_modules").symlink_to(
             dependencies / "frontend/node_modules", target_is_directory=True
         )
-        run(
-            [
-                "sudo",
-                "chown",
-                "-R",
-                f"{identity.pw_uid}:{identity.pw_gid}",
-                str(destination),
-            ],
-            check=True,
-        )
+        share_check_source(destination, identity)
         sources[name] = destination
     try:
         for layer in layers:
@@ -245,7 +271,7 @@ def main():
             for command in (
                 ["npm", "run", "check"],
                 ["npm", "test", "--", "--run"],
-                ["npm", "run", "build"],
+                ["npm", "run", "build:check"],
             ):
                 if execute(
                     command, sources["candidate"] / "frontend", metadata, environment

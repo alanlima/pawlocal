@@ -53,6 +53,7 @@ class ReadbackTests(unittest.TestCase):
             st_uid=123,
             st_gid=456,
             st_size=0,
+            st_nlink=1,
         )
         with self.identity(), patch.object(job, "run") as run:
             for mode in (stat.S_IFLNK | 0o777, stat.S_IFREG | 0o600):
