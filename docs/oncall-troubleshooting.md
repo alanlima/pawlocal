@@ -169,7 +169,7 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 * **Fix**:
   Re-generate the monthly profile and update `PAWLOCAL_ONCALL_MODEL_PROFILE` in GitHub Environments:
   ```powershell
-  python ops/incident-response/generate-profile.py --issue 269
+  python ops/incident-response/generate-profile.py --approval alanlima/pawlocal/issues/269
   ```
   Record the approval comment on the Quota Ledger issue as required by DEC-012.
 
@@ -196,7 +196,7 @@ The allocator reserves `min(output_per_request, output_per_role // requests_per_
 
 ### Switching the incident model to `gpt-5.4-mini`
 
-Changing only `model` to `gpt-5.4-mini` does not update token budgets or pricing fields. For Standard global pricing reviewed 24 October 2026, use `input_rate=750000` and `output_rate=4500000` (microdollars per million tokens); the former `1100000`/`4400000` values underestimate this model's output rate. Keep the monthly ceiling at `monthly_microdollars=20000000` ($20) and `monthly_runs=20`.
+The profile generator defaults to `gpt-5.4-mini` with matching `750000`/`4500000` rates. Changing only `model` in an existing protected JSON profile does not update token budgets or pricing fields. For another model, the generator requires both reviewed `--input-rate` and `--output-rate` with `--model`; it never silently reuses the default rates. For Standard global pricing reviewed 24 October 2026, use `input_rate=750000` and `output_rate=4500000` (microdollars per million tokens); the former `1100000`/`4400000` values underestimate this model's output rate. Keep the monthly ceiling at `monthly_microdollars=20000000` ($20) and `monthly_runs=20`.
 
 The four 8,000-token turns require the #301 code fix in [PR #302](https://github.com/alanlima/pawlocal/pull/302) to be reviewed and merged. Updating protected profile model/rate fields is a separate owner-reviewed rollout; it does not activate an unmerged code fix or restore consumed incident reservations. See [the detailed profile instructions and official pricing source](oncall-setup.md#switching-the-approved-profile-to-gpt-54-mini) before preparing the complete profile. No live profile is changed by this documentation.
 
