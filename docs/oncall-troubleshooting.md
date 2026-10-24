@@ -252,3 +252,9 @@ Credential-free verification runs real TestClient requests under the pinned CLI 
   * In `oncall-production`, variable `PAWLOCAL_ONCALL_ENABLED` must be `true`.
   * In `oncall-production`, variable `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` must be `true`.
   * If either is absent or false, the incident workflow verifies development recovery and safely terminates without performing production promotion.
+
+### Symptom: candidate seal rejects otherwise approved edits
+
+Backend package builds create `build/` and egg-info metadata beside their source. The trusted runner installs from a separate runner-owned backend source copy, preserving the archived comparison baseline. Independent checks already use a separate dependency-source archive. These build outputs are not added to the candidate allowlist or ignored by the exporter.
+
+An export refusal reports a fixed reason (`empty`, `excessive_files`, `outside_approved_paths` or `source_deletion`), total changed/outside/deleted counts, and at most 20 escaped relative paths of 240 characters each. Inspect that inventory before attributing the failure to model edits or test caches. Contents and model payloads are never included. An excessive candidate can also contain outside/deleted paths; the separate counts preserve that evidence. Symlink and source-deletion guards remain enforced.

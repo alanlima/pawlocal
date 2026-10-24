@@ -205,6 +205,14 @@ def writable_tool_caches(dependencies):
         )
 
 
+def backend_dependency_source(baseline, dependencies):
+    # Package builders write build/ and egg-info beside pyproject.toml.
+    # Keep those writes outside the immutable comparison tree.
+    source = dependencies / "backend-source"
+    shutil.copytree(baseline / "backend", source)
+    return source
+
+
 def prepare(role):
     arm(os.environ["INCIDENT_DEADLINE"])
     metadata, profile = context()
@@ -254,6 +262,7 @@ def prepare(role):
     dependencies = Path("/tmp/pawlocal-oncall-dependencies")
     if not dependencies.exists():
         dependencies.mkdir(mode=0o755)
+        backend_source = backend_dependency_source(baseline, dependencies)
         run(
             [sys.executable, "-m", "venv", str(dependencies / "venv")],
             check=True,
@@ -266,7 +275,7 @@ def prepare(role):
                 "--disable-pip-version-check",
                 ".[test]",
             ],
-            cwd=baseline / "backend",
+            cwd=backend_source,
             check=True,
             timeout=remaining(metadata),
         )

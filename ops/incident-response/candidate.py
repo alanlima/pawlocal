@@ -180,11 +180,35 @@ def export(base, candidate, metadata):
         for name in original.keys() | updated.keys()
         if original.get(name) != updated.get(name)
     )
-    if not changed or len(changed) > MAX_FILES or any(name not in ALLOWED for name in changed):
-        raise Denied("candidate empty, excessive or outside approved paths")
-    if any(name not in updated for name in changed):
-        raise Denied("source deletion forbidden")
-    layers = {"backend" if name.startswith("backend/") else "frontend" for name in changed}
+    outside = [name for name in changed if name not in ALLOWED]
+    deleted = [name for name in changed if name not in updated]
+    reason = None
+    if not changed:
+        reason = "empty"
+    elif len(changed) > MAX_FILES:
+        reason = "excessive_files"
+    elif outside:
+        reason = "outside_approved_paths"
+    elif deleted:
+        reason = "source_deletion"
+    if reason:
+        # Bounded, escaped filenames only; never candidate contents or payloads.
+        report = {
+            "reason": reason,
+            "changed_count": len(changed),
+            "outside_count": len(outside),
+            "deleted_count": len(deleted),
+            "paths": [name[:240] for name in changed[:MAX_FILES]],
+            "paths_truncated": len(changed) > MAX_FILES
+            or any(len(name) > 240 for name in changed[:MAX_FILES]),
+        }
+        raise Denied(
+            "candidate export refused: "
+            + json.dumps(report, ensure_ascii=True, separators=(",", ":"))
+        )
+    layers = {
+        "backend" if name.startswith("backend/") else "frontend" for name in changed
+    }
     for layer, regression in (
         ("backend", BACKEND_REGRESSION),
         ("frontend", FRONTEND_REGRESSION),
