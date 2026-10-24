@@ -104,11 +104,11 @@ class QuotaTests(unittest.TestCase):
 
     def test_per_request_and_cumulative_bounds_charge_before_forward(self):
         budget = quota.RequestBudget(self.profile())
-        with self.assertRaises(quota.Denied):
+        with self.assertRaisesRegex(quota.Denied, "per-request input quota exhausted"):
             budget.admit(100001)
         self.assertEqual(budget.admit(100000), 5000)
         self.assertEqual(budget.admit(100000), 5000)
-        with self.assertRaises(quota.Denied):
+        with self.assertRaisesRegex(quota.Denied, "cumulative input quota exhausted"):
             budget.admit(1)
         self.assertEqual(
             (budget.requests, budget.inputs, budget.outputs), (2, 200000, 10000)
@@ -142,7 +142,7 @@ class QuotaTests(unittest.TestCase):
         with self.assertRaises(quota.Denied):
             budget.admit(0)
         budget = quota.RequestBudget(self.profile(output_per_role=3))
-        with self.assertRaises(quota.Denied):
+        with self.assertRaisesRegex(quota.Denied, "cumulative output quota exhausted"):
             budget.admit(0)
         self.assertEqual((budget.requests, budget.outputs), (0, 0))
 
@@ -154,6 +154,22 @@ class QuotaTests(unittest.TestCase):
             self.assertEqual(budget.admit(0), 1)
         with self.assertRaises(quota.Denied):
             budget.admit(0)
+
+    def test_exact_output_and_request_boundaries_remain_charged_on_denial(self):
+        budget = quota.RequestBudget(
+            self.profile(output_per_request=1, output_per_role=4)
+        )
+        for _ in range(4):
+            self.assertEqual(budget.admit(0), 1)
+        self.assertEqual((budget.requests, budget.outputs), (4, 4))
+        with self.assertRaisesRegex(quota.Denied, "request count quota exhausted"):
+            budget.admit(0)
+        self.assertEqual((budget.requests, budget.outputs), (4, 4))
+        # Output cannot be reserved when even a single fair-share token is unavailable.
+        tiny = quota.RequestBudget(self.profile(output_per_role=3))
+        with self.assertRaisesRegex(quota.Denied, "cumulative output quota exhausted"):
+            tiny.admit(0)
+        self.assertEqual((tiny.requests, tiny.inputs, tiny.outputs), (0, 0, 0))
 
     def test_boolean_negative_and_unreviewed_limits_deny(self):
         for changed in (
