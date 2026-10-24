@@ -1,6 +1,9 @@
 # On-call responder setup guide
 
-This guide covers every step required to activate the automated incident responder from scratch — whether you are deploying PawLocal yourself or have forked this repository. It describes the exact manual operations that cannot be automated, and the sequence in which to do them.
+This guide covers every step required to activate the automated incident responder from scratch for canonical deployments of this repository (`alanlima/pawlocal`). It describes the exact manual operations that cannot be automated, and the sequence in which to do them.
+
+> [!NOTE]
+> Running the responder on a forked repository requires adapting pinned repository and owner identities in trusted incident code (`publisher-token.mjs`, `admission.py`, `protection.py`, `control.py`). This multi-repository enhancement is tracked in backlog issue #275.
 
 > [!IMPORTANT]
 > Infrastructure provisioning and model spending require explicit owner approval at each stage. Do not provision AWS resources or enable the OpenAI API key until the corresponding authorisation step is complete.
@@ -188,6 +191,9 @@ Run the above for **both** `development` and `production`. Do not store private 
 
 > [!CAUTION]
 > Never commit PEM files or hex secrets to the repository. Never store them in Terraform state. AWS SSM SecureString is the only authorised storage.
+>
+> **Why these secrets are provisioned directly in SSM instead of Terraform:**
+> Under project rules (`AGENTS.md`), runtime secret payloads must never be stored in Terraform state or committed to source control. Terraform provisions the Lambda role and IAM policies granting `ssm:GetParameter` access to these exact parameter ARNs, while the secret payloads themselves must be provisioned directly in SSM SecureString. A separately automated secret lifecycle remains tracked in the project backlog.
 
 Verify the parameters exist (no decrypted value read-back):
 ```bash
@@ -232,7 +238,10 @@ Add the following **Secret**:
 Mirror the setup above for `oncall-production`, except:
 
 - `OPENAI_API_KEY` is configured in this environment too (used by the production recovery phase).
-- `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` must remain **unset** until G2 (DEV demonstration) passes.
+- `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` must remain **unset** until G2 (DEV demonstration) passes, unless demonstrating the full end-to-end promotion loop.
+
+> [!NOTE]
+> Under the full autonomous loop design (DEC-012 / `ops/incident-response/ACTIONS.md`), `promotion.main()` and `bindings_ready()` require approved bindings for both environments in `bindings.json`. When running a development incident test, if `PAWLOCAL_ONCALL_ENABLED` or `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` remains disabled in `oncall-production`, the workflow verifies recovery in development and then cleanly stops at the production promotion step. To demonstrate the complete loop through production recovery, configure and approve both environments.
 
 ### 4c. `incident-change-authorization` environment
 
@@ -629,11 +638,13 @@ Invoke-RestMethod -Uri $Url -Method POST -Headers @{
 } -ContentType "application/json" -Body $Body
 ```
 
-Expected response: `204 No Content` (GitHub accepted dispatch) or `502` if the App credentials in SSM/Lambda config are not yet correct.
+Expected response: `204 No Content` (GitHub accepted dispatch). A `502` indicates that GitHub App credentials in SSM or the Lambda receiver configuration are invalid or unauthorized; a `401` indicates an HMAC signature or timestamp verification mismatch.
 
 4. Watch [GitHub Actions](https://github.com/<org>/<repo>/actions/workflows/incident-responder.yml) for the dispatched run.
-5. Verify the full loop: preflight claim → fixer → checks → reviewer → candidate PR → CI → squash merge → development deployment → recovery verification.
-6. This is the **G2 gate** (development incident demonstration acceptance).
+5. Verify the development demonstration (G2 gate): preflight claim → fixer → checks → reviewer → candidate PR → CI → squash merge → development deployment → recovery verification.
+
+> [!NOTE]
+> If `oncall-production` is not yet enabled, the run will verify development recovery and cleanly stop before production promotion. To test the full autonomous loop through production recovery, enable `PAWLOCAL_ONCALL_ENABLED=true` and `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED=true` in `oncall-production` as well.
 
 ---
 
@@ -692,14 +703,15 @@ The Lambda re-reads the SSM parameter on every request, so there is no cache to 
 ### Rotate the Dispatch App private key
 
 1. Generate a new private key in the GitHub App settings.
-2. Update the SSM parameter for **both** environments.
-3. Test that a signed alert reaches GitHub (expected: 502 if App is otherwise correctly configured; 401 means the key is wrong).
-4. Delete the old private key from the GitHub App settings.
+2. Update the SSM parameter `/pawlocal/<env>/secrets/oncall/dispatch-app-private-key` for **both** environments.
+3. Test that a signed alert reaches GitHub and dispatches a workflow run (the receiver must return HTTP `204 No Content`; an HTTP `502` means the App key or permissions are invalid; an HTTP `401` indicates an HMAC signature or timestamp mismatch).
+4. Verify that a test workflow run is dispatched in GitHub Actions.
+5. Only after confirming a successful 204 response and dispatched run, delete the old private key from the GitHub App settings.
 
 ### Rotate the Publisher App private key
 
 1. Generate a new private key in the GitHub App settings.
-2. Update `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` in all affected GitHub Environments (`oncall-development`, `oncall-production`, `incident-change-authorization`).
+2. Update `PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY` in all affected GitHub Environments (`oncall-development`, `oncall-production`, `incident-change-authorization`, `ordinary-change-approval`).
 3. Trigger a test workflow run to confirm the new key mints a valid token.
 4. Delete the old key.
 
@@ -711,10 +723,10 @@ The Lambda re-reads the SSM parameter on every request, so there is no cache to 
 |---|---|
 | Unsigned POST → 401 | `curl -X POST <function-url> -H "Content-Type: application/json" -d '{}'` |
 | Unauthorized service → 403 | Signed POST with service not in `allowed_services` |
-| Valid alert → 204 (or 502 if App config pending) | Signed POST with correct alert shape |
+| Valid alert → 204 | Signed POST with correct alert shape dispatches workflow (502 indicates App auth/dispatch failure) |
 | Missing `OPENAI_API_KEY` → workflow fails closed | Remove the secret, dispatch a test, confirm job exits without calling OpenAI |
 | Ledger issue closed → admission denied | Close the quota issue, send a valid alert, confirm the workflow exits at preflight |
-| Ordinary PR still requires human approval | Open a normal PR and confirm `ordinary-change-approval` gate requires a reviewer |
+| Ordinary PR change authorization | Open a normal PR and confirm change authorization workflow passes |
 | DEV dashboards show 0 PROD data | Run dashboard test: `terraform test -filter=dashboards.tftest.hcl` |
 
 ---
