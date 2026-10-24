@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -413,40 +414,67 @@ def readiness(github):
             token = capability.get("token")
             if token and isinstance(token, str):
                 github = GitHub(token, github.deadline, github.opener)
-        except Exception:
-            pass
+                print(f"[readiness] Loaded elevated readiness token from {path}", file=sys.stderr)
+            else:
+                print(f"[readiness] Warning: {path} found but missing valid 'token' string", file=sys.stderr)
+        except Exception as exc:
+            print(f"[readiness] Warning: Failed to parse readiness token from {path}: {exc}", file=sys.stderr)
+    else:
+        print(f"[readiness] No oncall-readiness-token.json found at {path}; using default GitHub token", file=sys.stderr)
     summaries = github.request("GET", "/rulesets?per_page=100")
     if not isinstance(summaries, list) or len(summaries) >= 100:
-        raise Denied("ruleset inventory unknown")
+        msg = f"ruleset inventory unknown (type={type(summaries).__name__}, count={len(summaries) if isinstance(summaries, list) else 'N/A'})"
+        print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+        raise Denied(msg)
     required = {
         "PawLocal change authorization",
         "Backend checks / Backend checks",
         "Frontend checks and HTTP-mode build / frontend",
     }
     protections, checks = set(), set()
+    active_rulesets = []
 
     def matches(pattern):
         if not isinstance(pattern, str):
-            raise Denied("unknown ruleset branch pattern")
+            msg = f"unknown ruleset branch pattern: {pattern!r}"
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
         if pattern in {"~ALL", "~DEFAULT_BRANCH"}:
             return True
         if not pattern.startswith("refs/heads/"):
-            raise Denied("unsupported branch ruleset selector")
+            msg = f"unsupported branch ruleset selector: {pattern!r}"
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
         # A conservative over-match denies uncertain protection configurations;
         # it can never ignore a potentially applicable approval requirement.
         return fnmatch.fnmatchcase("refs/heads/main", pattern)
 
     for summary in summaries:
         if type(summary.get("id")) is not int:
-            raise Denied("invalid ruleset")
-        rule = github.request("GET", f"/rulesets/{summary['id']}")
+            msg = f"invalid ruleset summary id: {summary.get('id')!r}"
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
+        rule_id = summary["id"]
+        rule = github.request("GET", f"/rulesets/{rule_id}")
+        rule_name = rule.get("name", summary.get("name", f"ruleset-{rule_id}"))
+        print(f"[readiness] Inspecting ruleset id={rule_id} name={rule_name!r}", file=sys.stderr)
         if (
             rule.get("enforcement") in {"disabled", "evaluate"}
             or rule.get("target") == "tag"
         ):
+            print(
+                f"[readiness] Skipping inactive/non-branch ruleset id={rule_id} ({rule_name!r}): "
+                f"enforcement={rule.get('enforcement')!r}, target={rule.get('target')!r}",
+                file=sys.stderr,
+            )
             continue
         if rule.get("enforcement") != "active" or rule.get("target") != "branch":
-            raise Denied("unknown active ruleset target/enforcement")
+            msg = (
+                f"ruleset id={rule_id} ({rule_name!r}): unknown active ruleset target/enforcement "
+                f"(enforcement={rule.get('enforcement')!r}, target={rule.get('target')!r})"
+            )
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
         conditions = rule.get("conditions", {})
         names = conditions.get("ref_name", {})
         if (
@@ -454,18 +482,39 @@ def readiness(github):
             or not isinstance(names.get("include"), list)
             or not isinstance(names.get("exclude"), list)
         ):
-            raise Denied("effective ruleset conditions unknown")
+            msg = (
+                f"ruleset id={rule_id} ({rule_name!r}): effective ruleset conditions unknown "
+                f"(conditions={conditions!r})"
+            )
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
         included = [matches(pattern) for pattern in names["include"]]
         excluded = [matches(pattern) for pattern in names["exclude"]]
         if not any(included) or any(excluded):
+            print(
+                f"[readiness] Skipping ruleset id={rule_id} ({rule_name!r}): does not target main "
+                f"(include={names.get('include')}, exclude={names.get('exclude')})",
+                file=sys.stderr,
+            )
             continue
         bypass = rule.get("bypass_actors")
+        current_bypass = rule.get("current_user_can_bypass", "never")
+        rules_list = rule.get("rules")
         if (
             (bypass is not None and bypass != [])
-            or rule.get("current_user_can_bypass", "never") != "never"
-            or not isinstance(rule.get("rules"), list)
+            or current_bypass != "never"
+            or not isinstance(rules_list, list)
         ):
-            raise Denied("applicable bypass or policy inventory unsupported")
+            reasons = []
+            if bypass is not None and bypass != []:
+                reasons.append(f"bypass_actors is non-empty: {bypass!r}")
+            if current_bypass != "never":
+                reasons.append(f"current_user_can_bypass is {current_bypass!r} (must be 'never')")
+            if not isinstance(rules_list, list):
+                reasons.append(f"rules is not a list: {type(rules_list).__name__}")
+            msg = f"ruleset id={rule_id} ({rule_name!r}): applicable bypass or policy inventory unsupported: {'; '.join(reasons)}"
+            print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+            raise Denied(msg)
         for item in rule["rules"]:
             kind = item.get("type")
             if kind not in {
@@ -474,7 +523,9 @@ def readiness(github):
                 "pull_request",
                 "required_status_checks",
             }:
-                raise Denied("unreviewed effective main policy")
+                msg = f"ruleset id={rule_id} ({rule_name!r}): unreviewed effective main policy type: {kind!r}"
+                print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+                raise Denied(msg)
             parameters = item.get("parameters", {})
             if kind == "pull_request" and not (
                 parameters.get("required_approving_review_count") == 0
@@ -483,38 +534,70 @@ def readiness(github):
                 and parameters.get("allowed_merge_methods") == ["squash"]
                 and parameters.get("require_last_push_approval", False) is False
             ):
-                raise Denied("effective PR policy requires unsupported/human gates")
+                actual_pr_params = {
+                    "required_approving_review_count": parameters.get("required_approving_review_count"),
+                    "require_code_owner_review": parameters.get("require_code_owner_review"),
+                    "required_review_thread_resolution": parameters.get("required_review_thread_resolution"),
+                    "allowed_merge_methods": parameters.get("allowed_merge_methods"),
+                    "require_last_push_approval": parameters.get("require_last_push_approval", False),
+                }
+                msg = (
+                    f"ruleset id={rule_id} ({rule_name!r}): effective PR policy requires unsupported/human gates "
+                    f"(actual parameters: {actual_pr_params})"
+                )
+                print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+                raise Denied(msg)
             if kind == "required_status_checks":
                 if parameters.get("strict_required_status_checks_policy") is not True:
-                    raise Denied("strict candidate checks required")
+                    msg = (
+                        f"ruleset id={rule_id} ({rule_name!r}): strict candidate checks required "
+                        f"(strict_required_status_checks_policy={parameters.get('strict_required_status_checks_policy')!r})"
+                    )
+                    print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+                    raise Denied(msg)
                 entries = parameters.get("required_status_checks")
                 if not isinstance(entries, list) or any(
                     not isinstance(entry.get("context"), str) for entry in entries
                 ):
-                    raise Denied("status policy inventory unknown")
+                    msg = f"ruleset id={rule_id} ({rule_name!r}): status policy inventory unknown (entries={entries!r})"
+                    print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+                    raise Denied(msg)
                 for entry in entries:
                     if entry["context"] == "PawLocal change authorization" and (
                         type(entry.get("integration_id")) is not int
                         or entry["integration_id"] != authorizer
                     ):
-                        raise Denied(
-                            "ordinary change authorization must pin the trusted App source"
+                        msg = (
+                            f"ruleset id={rule_id} ({rule_name!r}): ordinary change authorization must pin the trusted App source "
+                            f"(expected integration_id={authorizer}, got {entry.get('integration_id')!r})"
                         )
+                        print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+                        raise Denied(msg)
                 checks.update(entry["context"] for entry in entries)
             protections.add(kind)
-    if (
-        not {"deletion", "non_fast_forward", "pull_request", "required_status_checks"}
-        <= protections
-        or not required <= checks
-    ):
-        raise Denied(
-            "complete autonomous machine protections must be configured before admission"
-        )
+        active_rulesets.append(f"id={rule_id} ({rule_name!r})")
+    missing_protections = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"} - protections
+    missing_checks = required - checks
+    if missing_protections or missing_checks:
+        reasons = []
+        if missing_protections:
+            reasons.append(f"missing protections: {sorted(missing_protections)}")
+        if missing_checks:
+            reasons.append(f"missing required checks: {sorted(missing_checks)}")
+        msg = f"complete autonomous machine protections must be configured before admission: {'; '.join(reasons)}"
+        print(f"[readiness] DENIED: {msg}", file=sys.stderr)
+        raise Denied(msg)
+    print(
+        f"[readiness] Ruleset validation succeeded for {active_rulesets}: "
+        f"protections={sorted(protections)}, confirmed checks={sorted(checks)}",
+        file=sys.stderr,
+    )
     classic_absent(github.deadline)
     runtime_ready(github)
+    print("[readiness] Preflight readiness checks completed successfully", file=sys.stderr)
 
 
-def main():
+def _main():
     deadline = int(os.environ["INCIDENT_DEADLINE"])
     arm(deadline)
     if (
@@ -607,6 +690,7 @@ def main():
     if selected is None:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
             output.write("admitted=false\n")
+        print("[admission] Preflight completed: no firing alerts selected for admission", file=sys.stderr)
         return
     try:
         release = deployed_release(github, environment)
@@ -658,6 +742,7 @@ def main():
             stream.write(
                 f"admitted=true\nmetadata_sha256={hashlib.sha256(payload).hexdigest()}\nprofile_sha256={profile.digest}\ndeadline={deadline}\n"
             )
+        print(f"[admission] Preflight completed: admitted incident for issue #{selected['issue']}", file=sys.stderr)
     except Exception:
         if time.time() < deadline:
             check_ledger(
@@ -670,6 +755,14 @@ def main():
                     "body": "ESCALATED: trusted preflight did not complete. Any monthly reservation remains consumed. Inspect this incident's linked failed run; no automatic retry or refund is permitted."
                 },
             )
+        raise
+
+
+def main():
+    try:
+        _main()
+    except Exception as exc:
+        print(f"[admission] Preflight admission failed: {exc}", file=sys.stderr)
         raise
 
 
