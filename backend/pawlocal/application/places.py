@@ -11,6 +11,13 @@ class PlaceQueries:
         with application_span("places.search", {"pawlocal.operation": "search"}) as span:
             places, total = self.repository.search(**filters)
             span.set_attribute("pawlocal.outcome", "success" if places else "empty")
+            if len(places) > 1:
+                # Rank search results by community average rating
+                places = sorted(
+                    places,
+                    key=lambda place: place.average_rating,
+                    reverse=True,
+                )
             return places, total
 
     def get(self, place_id) -> Place | None:
