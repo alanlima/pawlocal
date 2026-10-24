@@ -17,6 +17,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from usage import Observation, UsageRecorder
 from control import LiveControl
 from quota import Denied, Profile, RequestBudget, strict_json
 
@@ -198,9 +199,11 @@ class Gateway:
         clock=time.time,
         control=None,
         diagnostic=None,
+        usage=None,
     ):
         if not key or len(local_token) < 32 or not clock() < deadline <= clock() + 1200:
             raise Denied("invalid gateway authorization/deadline")
+        self.usage = usage or UsageRecorder()
         self.profile = profile
         self.key = key
         self.local_token = local_token
@@ -313,6 +316,7 @@ class Gateway:
         self.stage = "quota_reservation"
         self.counted_input_tokens = count["input_tokens"]
         cap = self.budget.admit(self.counted_input_tokens)
+        self.usage.reserve(self.counted_input_tokens, cap)
         body["max_output_tokens"] = cap
         self.remaining()
         # Conservative charged allocation, not a claim of provider-billed
@@ -381,6 +385,7 @@ def serve(gateway, port):
                         )
                     ):
                         raise Denied("unexpected upstream content type")
+                    observation = Observation(content_type.startswith("text/event-stream"))
                     started = True
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
@@ -394,8 +399,13 @@ def serve(gateway, port):
                         total += len(chunk)
                         if total > MAX_RESPONSE:
                             raise Denied("upstream response bound")
+                        observation.feed(chunk)
+                        # Persist terminal usage before a potentially broken client write.
+                        if observation.streaming and observation.usage is not None:
+                            gateway.usage.observed(observation.finish())
                         self.wfile.write(chunk)
                         self.wfile.flush()
+                    gateway.usage.observed(observation.finish())
             except (
                 Denied,
                 ValueError,
@@ -463,6 +473,7 @@ def serve(gateway, port):
                         code="transport_uncertain",
                         reason="transport_failure",
                     )
+                gateway.usage.failure(event["code"] == "local_quota_exhausted")
                 gateway.diagnostic(event)
                 self.close_connection = True
                 if not started and not self.wfile.closed:
@@ -548,6 +559,7 @@ def main():
         args.deadline,
         control=control,
         diagnostic=diagnostic,
+        usage=UsageRecorder(Path(args.profile).with_name("gateway-usage.json")),
     )
     serve(gateway, args.port)
 
