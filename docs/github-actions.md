@@ -590,6 +590,18 @@ An optional existing `GRAFANA_FARO_ACCESS_POLICY_TOKEN` can separate Faro writes
 when absent, the reviewed provisioner uses the existing Cloud policy token. This
 launcher does not create or expand either credential.
 
+<!-- actions-reference: grafana-production-setup.yml; dispatch-inputs: mode,stack_url,region,public_bindings_json,datasource_uids_json,frontend_origin; call-inputs: - -->
+
+[grafana-production-setup.yml](../.github/workflows/grafana-production-setup.yml) is a main-only manual launcher for the existing
+folder/Faro provisioner, using the protected production-apply approval target.
+It defaults to read-only discovery. Plan/apply require a complete reviewed public
+manifest with production enabled and the exact reviewed production origin.
+It uses existing Grafana credentials and has no AWS, model, dashboard, alert,
+synthetic or development operation. Discovery and successful setup retain the
+provisioner's public-only handoff artifact; setup does not enable application
+telemetry. See the [production setup procedure](../observability/grafana/cloud/README.md#production-hosted-launcher).
+
+
 <!-- actions-reference: grafana-access-check.yml; dispatch-inputs: stack_url,region,sm_backend_url; call-inputs: - -->
 
 Run `grafana-access-check.yml` manually from `main` after its reviewed workflow is merged. Supply the approved stack HTTPS origin and actual Grafana region slug at runtime; optionally supply the actual Synthetic Monitoring REST API origin (not the probe gRPC endpoint). No deployment/account identifiers are committed as defaults.
