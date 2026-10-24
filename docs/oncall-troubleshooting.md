@@ -206,15 +206,25 @@ Rejected header/body requests can have null counted input and do not imply an up
 
 Diagnostics contain fixed classifications and bounded upstream identifiers, not credentials, request/model contents or upstream error messages. Normal operational stdout/stderr is retained. The response carries the same structured classification for the model client. Reservations remain consumed on all failed/uncertain calls.
 
-The allocator reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. A profile with four requests, a 16,000-token per-request ceiling and a 32,000-token role ceiling therefore permits four 8,000-token turns without increasing the envelope. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Consumed incident generations and ledger reservations are not automatically retried or refunded.
+### Output allocation and tuning
 
-The reviewed per-request output bound is 128,000, the [official gpt-5.4-mini maximum](https://developers.openai.com/api/docs/models/gpt-5.4-mini). For the owner-approved 126,000-token allowance with a 2,000-token buffer, 64 calls require `output_per_role=8064000`; keeping the former `4096000` role ceiling still allocates only 64,000 per call. At 2.4M input tokens per role and the approved Standard rates, the two-role reservation is $76.176. Protected profile activation follows reviewed source merge; the $300 monthly/40-run ceilings and the 20-minute deadline remain separate constraints. See [runtime capacity bounds](oncall-setup.md#owner-approved-runtime-capacity-bounds-313-315).
+The allocator reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. Four requests with a 16,000-token per-request ceiling and a 32,000-token role ceiling permit four 8,000-token turns. Reasoning and answer output share that cap; integer remainders stay unallocated. Input, request, deadline and monthly limits can stop work earlier.
 
-### Switching the incident model to `gpt-5.4-mini`
+Profile consistency requires `output_per_role <= output_per_request * requests_per_role`. With four requests and a 32,000-token role ceiling, `output_per_request=8000` is valid; `4000` also requires reducing the role ceiling to at most `16000`. Lowering only the per-request field makes the profile invalid. Values above 8,000 still allocate 8,000 when the role ceiling stays 32,000. Reducing ceilings reduces future reservations, not consumed charges.
 
-The profile generator defaults to `gpt-5.4-mini` with matching `750000`/`4500000` rates. Changing only `model` in an existing protected JSON profile does not update token budgets or pricing fields. For another model, the generator requires both reviewed `--input-rate` and `--output-rate` with `--model`; it never silently reuses the default rates. For Standard global pricing reviewed 24 October 2026, use `input_rate=750000` and `output_rate=4500000` (microdollars per million tokens); the former `1100000`/`4400000` values underestimate this model's output rate. The original conservative profile uses `monthly_microdollars=20000000` ($20) and `monthly_runs=20`; the temporary owner-approved capacity profile described above uses $300 and 40 runs.
+The gateway accepts up to 64 requests per role and 128,000 output tokens per request, matching the [official gpt-5.4-mini output maximum](https://developers.openai.com/api/docs/models/gpt-5.4-mini). A 126,000-token cap leaves a manually selected 2,000-token buffer; the gateway does not subtract it. For 64 calls, `output_per_role=8064000` grants that cap, while `4096000` grants only 64,000 per call. At 2.4M input tokens per role and Standard rates of $0.75/M input and $4.50/M output, the former reserves $76.176 across fixer and reviewer. Monthly spend, run count and the 20-minute work deadline remain separate constraints. See the [setup limits and profile approval steps](oncall-setup.md#hard-limits-enforced-by-quotapy).
 
-The four 8,000-token turns require the #301 code fix in [PR #302](https://github.com/alanlima/pawlocal/pull/302) to be reviewed and merged. Updating protected profile model/rate fields is a separate owner-reviewed rollout; it does not activate an unmerged code fix or restore consumed incident reservations. See [the detailed profile instructions and official pricing source](oncall-setup.md#switching-the-approved-profile-to-gpt-54-mini) before preparing the complete profile. No live profile is changed by this documentation.
+Historically, [PR #302](https://github.com/alanlima/pawlocal/pull/302) corrected allocation so the four-request profile could use four 8,000-token turns without increasing its role envelope. Code rollout and protected model/rate approval are separate operations; neither restores a consumed generation or refunds a reservation.
+
+### Historical reservation accounting (#329 / #331)
+
+Provider usage and PawLocal reservations measure different things. The [#329 reports](https://github.com/alanlima/pawlocal/issues/329) recorded 27 inference requests, 799,764 input tokens and 9,679 output tokens; cached input and reasoning output are subsets, not extra tokens. Request budgeting reserved 3,402,000 output tokens, while admission separately reserved the full $76.176 two-role envelope. Lower actual usage or failed candidate CI does not refund either reservation or the consumed generation.
+
+The [#331 capacity change](https://github.com/alanlima/pawlocal/issues/331) followed an earlier $300/40-run allowance and proposed $400/40 runs without changing the 126,000-token cap, 64 calls or $76.176 envelope. At that historical October ledger snapshot of $278.7352, another full envelope would total $354.9112. These figures explain that admission decision; they are not current configuration or remaining-balance evidence. A monthly ceiling does not guarantee the configured number of full-envelope runs. Consult the protected profile and trusted ledger for current limits; code or documentation changes do not activate a profile, retry a generation or refund charges. The conservative generator example remains $20/20 runs in the [setup cost estimate](oncall-setup.md#cost-estimate).
+
+### Symptom: changing the model retains stale pricing or token limits
+
+Changing only `model` in a protected profile does not update its token budgets or pricing fields. The former `1100000`/`4400000` rates underestimate gpt-5.4-mini's Standard output rate; the reviewed 24 October 2026 rates were `750000`/`4500000` microdollars per million tokens. Verify current official pricing before another approval. The generator requires both reviewed rate overrides for another model and never silently reuses default rates. Follow the [complete profile-generation instructions](oncall-setup.md#generating-the-profile-json); do not edit one field and assume the whole profile is current.
 
 ### Symptom: TestClient or asyncio test hangs inside the model sandbox
 
@@ -234,25 +244,6 @@ Credential-free verification runs real TestClient requests under the pinned CLI 
 * **Cause**: The Publisher App installation token does not have write permissions for pull requests or issues.
 * **Fix**: Verify in **GitHub App Settings** → **Permissions** that `Pull requests` and `Issues` are set to **Read and write**.
 
----
-
-## Layer 7 — Deployment, Promotion, and Recovery Verification
-
-### Symptom: Recovery verification timeout (`recovery rule settling` or `stale evaluation`)
-
-* **Cause**: After squash-merging and deploying to `development`, `ops/incident-response/recovery.py` observes the place discovery journey (`/health`, `/places`, `/places/{id}`) and Grafana Prometheus rule state. If the rule continues to fire after the settling window, recovery fails.
-* **Checklist**:
-  1. Inspect the deployment run in GitHub Actions to confirm new container image was deployed.
-  2. Check backend health endpoint (`/health`).
-  3. Verify that Grafana alert rule evaluation interval has passed and Prometheus state returned to `inactive` / `Normal`.
-
-### Symptom: Run stops cleanly after DEV recovery without promoting to PROD
-
-* **Explanation**: This is **by design** when `oncall-production` is not fully enabled:
-  * In `oncall-production`, variable `PAWLOCAL_ONCALL_ENABLED` must be `true`.
-  * In `oncall-production`, variable `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` must be `true`.
-  * If either is absent or false, the incident workflow verifies development recovery and safely terminates without performing production promotion.
-
 ### Symptom: candidate seal rejects otherwise approved edits
 
 Backend package builds create `build/` and egg-info metadata beside their source. The trusted runner installs from a separate runner-owned backend source copy, preserving the archived comparison baseline. Independent checks already use a separate dependency-source archive. These build outputs are not added to the candidate allowlist or ignored by the exporter.
@@ -263,7 +254,7 @@ An export refusal reports a fixed reason (`empty`, `excessive_files`, `outside_a
 
 This can indicate failed inspection rather than actual model deletions. The archive root is private (`0700`), and copying it preserves that mode before ownership changes to the isolated model UID. After quiescing model processes, trusted seal and review seal reclaim only the fixed candidate root directory for the runner, using nonrecursive `chown --no-dereference`. A bounded regular review report is likewise reclaimed so a normal `0600` report remains readable. Contents, modes, nested ownership and model privileges remain unchanged.
 
-Missing, symlink or non-directory roots and unreadable nested directories explicitly fail inspection; they are never treated as an empty tree. A model-created private nested directory or unreadable source file requires escalation, not recursive permission changes. The separately owner-approved temporary capacity ceiling is $300 for 40 monthly runs with the unchanged $76.176 two-role envelope. Consumed reservations remain charged, and source changes do not activate a protected profile or retry a generation.
+Missing, symlink or non-directory roots and unreadable nested directories explicitly fail inspection; they are never treated as an empty tree. A model-created private nested directory or unreadable source file requires escalation, not recursive permission changes. Consumed reservations remain charged; a filesystem fix does not activate a protected profile or retry a generation.
 
 ### Symptom: trusted checks cannot enter source cwd or read regression output
 
@@ -287,8 +278,21 @@ Search SQL is rendered as the isolated UID through a runner-owned helper outside
 
 Frontend disposable checks retain format/lint, tests and the real `build:check` TypeScript/Vite compile. Ordinary `build` still runs cloud release pre/post validators. Real required candidate PR CI remains the final independent gate; passing trusted checks never bypasses it. Record actual hosted fixture evidence for the implementation head before another paid attempt.
 
-### Provider usage and the proposed temporary capacity ceiling
+---
 
-Provider usage and PawLocal reservations measure different things. The #329 numeric reports contain 27 inference requests, 799,764 input tokens and 9,679 output tokens; cached input and reasoning output are subsets, not extra tokens. Request budgeting reserved 3,402,000 output tokens, and admission separately reserved the full $76.176 two-role envelope. Neither lower actual usage nor a failed merge refunds these reservations or the consumed generation.
+## Layer 7 — Deployment, Promotion, and Recovery Verification
 
-The previously activated capacity context was $300/40 runs. Issue #331 proposes a temporary **$400 monthly ceiling with 40 runs**, keeping 126,000 output tokens per call, 64 calls and the $76.176 envelope unchanged. At the recorded October ledger total of $278.7352, one further full envelope would total $354.9112. The proposed profile is not activated by source or documentation changes: activation requires reviewed merge and separate protected-profile readback. No consumed generation is retried or refunded.
+### Symptom: Recovery verification timeout (`recovery rule settling` or `stale evaluation`)
+
+* **Cause**: After squash-merging and deploying to `development`, `ops/incident-response/recovery.py` observes the place discovery journey (`/health`, `/places`, `/places/{id}`) and Grafana Prometheus rule state. If the rule continues to fire after the settling window, recovery fails.
+* **Checklist**:
+  1. Inspect the deployment run in GitHub Actions to confirm new container image was deployed.
+  2. Check backend health endpoint (`/health`).
+  3. Verify that Grafana alert rule evaluation interval has passed and Prometheus state returned to `inactive` / `Normal`.
+
+### Symptom: Run stops cleanly after DEV recovery without promoting to PROD
+
+* **Explanation**: This is **by design** when `oncall-production` is not fully enabled:
+  * In `oncall-production`, variable `PAWLOCAL_ONCALL_ENABLED` must be `true`.
+  * In `oncall-production`, variable `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED` must be `true`.
+  * If either is absent or false, the incident workflow verifies development recovery and safely terminates without performing production promotion.
