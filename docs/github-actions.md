@@ -290,7 +290,7 @@ Converge and Release enforce required handoff inputs before planning. The prefli
 
 Do not independently choose a commit and an image. They are one verified pair.
 
-The Release contract intends to change only the Lightsail container deployment version. During the accepted Issue #148 MVP gap, `--skip-enforcement` keeps the automated ownership/release-only rejection disabled. The protected reviewer must therefore inspect the exact rendered plan and reject any additional resource change.
+The Release contract intends to change only the Lightsail container deployment version. During the accepted Issue #148 MVP gap, `--skip-enforcement` keeps the summary helper's automated ownership/release-only rejection disabled. Owner-approved [#305](https://github.com/alanlima/pawlocal/issues/305) also disables the shared strict release-plan invocation by commenting out the original step under [DEC-015](decisions.md#dec-015--temporary-disabling-of-shared-strict-release-plan-invocation-305). This affects ordinary and incident releases equally: non-release changes, including Lambda updates, are no longer rejected by that validator. Differentiated policies remain deferred in [#308](https://github.com/alanlima/pawlocal/issues/308). Existing authorization, exact saved-plan integrity and infrastructure approval requirements remain; live Environment reviewer settings must be checked rather than assumed. This disabled step creates no new approval hold.
 
 ### Infrastructure · Destroy production environment
 
