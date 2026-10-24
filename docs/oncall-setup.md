@@ -575,29 +575,11 @@ The gateway validates these fields against hard coded bounds. Your profile value
 
 ---
 
-### Per-turn output allocation (#301)
+### Per-turn output allocation
 
-Each role reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens before every forwarded request. The existing `4` / `16000` / `32000` profile therefore supports four turns of at most **8,000 output tokens** within the same 32,000-token role envelope. Reasoning and answer output share that allowance. The input, request, deadline and monthly gates can still stop work earlier. Integer remainders stay unallocated. Failed, interrupted and unknown responses consume their full reservation; there is no automatic refund or inference retry.
+Each role reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. The recommended four-request profile with a 32,000-token role ceiling therefore allocates 8,000 per turn. To choose another allocation, set both request and role ceilings consistently, keep `output_per_role <= output_per_request * requests_per_role`, and obtain owner approval for the complete profile. Reasoning and answer output share the cap; deadlines and input/monthly limits remain independent.
 
-Tuning must keep `output_per_role <= output_per_request * requests_per_role`. With four requests and a 32,000-token role ceiling, setting `output_per_request=8000` is valid and still yields 8,000 per turn. Setting it to `4000` also requires reducing `output_per_role` to at most `16000`; lowering only the per-request field makes the profile invalid. Values at or above `8000` remain capped at 8,000 per turn when the role ceiling stays 32,000. Reducing both ceilings reduces the reserved envelope; it does not refund consumed reservations.
-
-This allocation applies to existing approved profiles after the reviewed code is merged; no variable migration is needed for #301. The protected model/rate approval remains independent. Existing incident generations and monthly ledger reservations remain consumed: do not rerun or refund an escalated generation to activate the fix.
-
-### Owner-approved runtime capacity bounds (#313, #315)
-
-The reviewed upper bounds are 64 requests per role and 128,000 output tokens per request, matching the [official gpt-5.4-mini output maximum](https://developers.openai.com/api/docs/models/gpt-5.4-mini). The separately approved development allocation uses 126,000 per call to leave a 2,000-token buffer. The gateway does not subtract this buffer automatically.
-
-A per-request ceiling alone does not grant that allocation: for 64 calls at 126,000 each, the approved profile must also set `output_per_role=8064000`. With only `output_per_role=4096000`, the same 64 requests receive 64,000 each. These are ceilings; the model need not emit the full allowance, but the gateway conservatively reserves it before each call. The existing 64,000-token allocation remains valid.
-
-For the separately owner-approved development profile with 200,000 input tokens per request, 2,400,000 cumulative input tokens per role, 64 requests, and 8,064,000 output tokens per role, Standard global `gpt-5.4-mini` rates reserve **$76.176 per incident across fixer and reviewer**. Monthly admission and spend ceilings still independently stop new admissions; a $300 monthly ceiling does not guarantee 40 full-envelope incidents. The unchanged 20-minute deadline and per-operation timeouts still apply. This source change updates accepted bounds, not live variables or spending approval.
-
-Issue #331 separately proposes a temporary $400 monthly ceiling with 40 runs to accommodate another unchanged $76.176 envelope after $278.7352 of recorded reservations (next total $354.9112). The earlier activated capacity context was $300/40. This proposal changes no request/role allowance, deadline or generator default; protected-profile activation follows reviewed merge and separate readback. See [quality checks and reservation accounting](oncall-troubleshooting.md#provider-usage-and-the-proposed-temporary-capacity-ceiling).
-
-### Switching the approved profile to `gpt-5.4-mini`
-
-The generator defaults to `gpt-5.4-mini` and its matching rates. A model-only edit of an existing protected JSON profile does **not** update its rates. Before saving a newly approved profile, review its complete JSON and current official model pricing. For Standard global `gpt-5.4-mini`, the [official model page](https://developers.openai.com/api/docs/models/gpt-5.4-mini) lists input **$0.75/M** and output **$4.50/M** (reviewed 24 October 2026): set `"model":"gpt-5.4-mini"`, `"input_rate":750000`, and `"output_rate":4500000`. The former `1100000`/`4400000` values underestimate this model's output price. Verify the configured API project, entitlement and effort compatibility separately.
-
-Keep `requests_per_role=4`, `output_per_request=16000`, `output_per_role=32000`, `input_per_request=100000`, `input_per_role=200000`, `monthly_microdollars=20000000`, and `monthly_runs=20`. With those fields the two-role worst-case reservation is **$0.588 per incident**, or **$11.76 for 20 incidents**, within the same $20 monthly ceiling. This is conservative reservation arithmetic, not provider-billed usage. Refresh `rates_source`, `rates_reviewed_at`, `approved_month`, `expires_at` and the owner approval reference honestly when preparing the profile; never reuse an example's timestamps as a fresh review. These instructions do not change a live variable or authorize additional spending.
+For example, 64 calls at 126,000 output tokens require `output_per_role=8064000`; changing only the per-request ceiling does not grant that allocation. This is arithmetic, not a recommended live budget. See [output allocation and tuning](oncall-troubleshooting.md#output-allocation-and-tuning) for smaller-cap examples, refusal diagnosis and reservation accounting.
 
 ### Cost estimate
 
@@ -614,8 +596,6 @@ Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroo
 
 > [!NOTE]
 > `quota.py` charges the **full worst-case envelope** before forwarding — not actual usage. Failed, cancelled, or interrupted jobs remain charged. There is no automatic refund. The \$20 monthly ceiling is the outer bound, not an expected bill.
-
----
 
 ---
 

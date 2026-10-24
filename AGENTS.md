@@ -365,6 +365,16 @@ Use the following hierarchy:
 7. **`docs/decisions.md`** — approved architectural and product decisions.
 8. **GitHub Issues and PRs** — implementation status and evidence.
 
+Before adding implementation or guidance, search the existing code, tests and documentation for the same responsibility. Extend or correct the established module or section rather than creating a parallel implementation or repeating its explanation. Link to the canonical source when another document needs context.
+
+Documentation ownership:
+
+- `docs/oncall-setup.md` owns configuration contracts, setup steps and activation safeguards. Keep reusable examples concise; exclude incident histories and temporary live-budget snapshots.
+- `docs/oncall-troubleshooting.md` owns symptoms, diagnosis, root causes, detailed quota arithmetic and reusable recovery guidance. Update the matching section and consolidate overlapping explanations.
+- Issues and PRs own implementation-specific changes, run evidence, review results and dated rollout status. Retain only useful diagnostic examples in the troubleshooting guide, clearly marked historical.
+
+During review, check both implementation reuse and documentation placement/duplication. Do not append another account of a change when the existing section can be corrected or linked.
+
 CAO persistent memory supplements these documents but does not replace them.
 
 If instructions conflict, do not silently select one. Identify the conflict and request a decision.
