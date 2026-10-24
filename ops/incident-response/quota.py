@@ -48,7 +48,7 @@ class Profile:
     service_tier: str
     input_rate: int
     output_rate: int
-    monthly_microdollars: int
+    monthly_microdollars: int | None
     monthly_runs: int
     promotion_seconds: int
     recovery_seconds: int
@@ -90,6 +90,8 @@ class Profile:
             "expires_at",
             "rule_uids",
         }:
+            if name == "monthly_microdollars" and value[name] is None:
+                continue
             integer(value[name])
         if (
             value["monthly_runs"] > 1000
@@ -217,7 +219,10 @@ def reserve(profile, ledger, month, run_id, attempt):
     if (
         run_id in seen
         or admissions >= profile.monthly_runs
-        or spent + profile.reservation > profile.monthly_microdollars
+        or (
+            profile.monthly_microdollars is not None
+            and spent + profile.reservation > profile.monthly_microdollars
+        )
     ):
         raise Denied("duplicate or exhausted monthly admission")
     return {

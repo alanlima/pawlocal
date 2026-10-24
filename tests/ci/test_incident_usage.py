@@ -9,7 +9,7 @@ from pathlib import Path
 DIRECTORY = Path(__file__).resolve().parents[2] / 'ops/incident-response'
 sys.path.insert(0, str(DIRECTORY))
 from usage import Observation, UsageRecorder
-from usage_summary import render, validated_report
+from usage_summary import render, validated_report, validate_limits, LIMIT_FIELDS, PROFILE_FIELDS
 import test_incident_quota as fixtures
 
 
@@ -89,6 +89,19 @@ class UsageTests(unittest.TestCase):
         text = render({'fixer':recorder.snapshot()}, limits)
         self.assertIn('1 quota denials', text)
         self.assertIn('total unknown', text)
+
+    def test_unlimited_spending_roundtrips_and_renders_in_both_summaries(self):
+        profile = fixtures.QuotaTests().profile(monthly_microdollars=None)
+        limits = {name: getattr(profile, name) for name in LIMIT_FIELDS + PROFILE_FIELDS}
+        self.assertEqual(validate_limits(limits), limits)
+        for preview in (True, False):
+            text = render({'fixer': None, 'reviewer': None}, limits, preview=preview)
+            self.assertIn('Unlimited', text)
+            self.assertIn('20', text)
+            self.assertNotIn('unknown limit', text)
+        for value in (False, -1, 0, 'unlimited', []):
+            self.assertIsNone(validate_limits(limits | {'monthly_microdollars': value}))
+        self.assertIsNone(validate_limits({key: value for key, value in limits.items() if key != 'monthly_microdollars'}))
 
     def test_reporting_cli_survives_missing_stats_and_expired_profile(self):
         with tempfile.TemporaryDirectory() as directory:

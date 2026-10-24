@@ -16,6 +16,7 @@ into a GitHub Environment variable.
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -66,11 +67,17 @@ def main():
         choices=["minimal", "low", "medium", "high", "xhigh"],
         help="Reasoning effort (default: medium)",
     )
-    parser.add_argument(
+    spending = parser.add_mutually_exclusive_group()
+    spending.add_argument(
         "--monthly-budget-usd",
         type=float,
         default=20.0,
         help="Monthly spending ceiling in USD (default: 20.00)",
+    )
+    spending.add_argument(
+        "--unlimited-monthly-spending",
+        action="store_true",
+        help="Explicit owner-approved unlimited monthly spending (monthly_microdollars: null); other limits remain enforced",
     )
     parser.add_argument(
         "--monthly-runs",
@@ -79,6 +86,8 @@ def main():
         help="Maximum incident runs per month (default: 20)",
     )
     args = parser.parse_args()
+    if not math.isfinite(args.monthly_budget_usd) or not 0 < args.monthly_budget_usd <= 1_000_000:
+        parser.error("--monthly-budget-usd must be a positive finite amount within profile bounds")
     explicit_rates = args.input_rate is not None and args.output_rate is not None
     if (args.input_rate is None) != (args.output_rate is None):
         parser.error("--input-rate and --output-rate must be provided together")
@@ -98,7 +107,7 @@ def main():
         "service_tier": "default",
         "input_rate": args.input_rate if explicit_rates else 750000,
         "output_rate": args.output_rate if explicit_rates else 4500000,
-        "monthly_microdollars": int(args.monthly_budget_usd * 1_000_000),
+        "monthly_microdollars": None if args.unlimited_monthly_spending else int(args.monthly_budget_usd * 1_000_000),
         "monthly_runs": args.monthly_runs,
         "promotion_seconds": 3600,
         "recovery_seconds": 720,
