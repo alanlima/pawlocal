@@ -107,38 +107,26 @@ jobs:
             const expectedWorkflow = await github.rest.actions.getWorkflow({
               ...context.repo, workflow_id: 'fullstack-release.yml',
             })
-            const workflowRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              ...context.repo, workflow_id: expectedWorkflow.data.id, branch: 'main',
-              event: 'push', status: 'success', head_sha: commit, per_page: 100,
-            })
-            const successfulRunIds = new Set(workflowRuns
-              .filter(run => run.head_sha === commit && run.head_branch === 'main' &&
-                run.event === 'push' && run.conclusion === 'success')
-              .map(run => `${run.id}:${run.run_attempt}`))
-            if (successfulRunIds.size === 0) {
-              throw new Error('No successful main-branch full-stack release workflow run exists for the selected commit')
-            }
-
             const deployments = await github.paginate(github.rest.repos.listDeployments, {
               ...context.repo, environment: 'development', ref: commit, per_page: 100,
             })
             for (const deployment of deployments) {
-              const statuses = await github.rest.repos.listDeploymentStatuses({
-                ...context.repo, deployment_id: deployment.id, per_page: 100,
-              })
-              const latest = statuses.data.reduce((value, item) =>
-                !value || Date.parse(item.created_at) > Date.parse(value.created_at) ? item : value, null)
               let payload = deployment.payload || {}
               if (typeof payload === 'string') {
                 try { payload = JSON.parse(payload) } catch { continue }
               }
-              const workflowRun = `${payload.workflow_run_id}:${payload.workflow_run_attempt}`
+              if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue
+              if (!Number.isSafeInteger(payload.workflow_run_id) || payload.workflow_run_id < 1 ||
+                  !Number.isSafeInteger(payload.workflow_run_attempt) || payload.workflow_run_attempt < 1) continue
               const evidenceMatches = payload.record_schema_version === 1 &&
                 ((payload.manifest_schema_version === 2 && payload.evidence_schema_version === 1 &&
                   !Object.hasOwn(payload, 'frontend_telemetry_enabled')) ||
                  (payload.manifest_schema_version === 3 && payload.evidence_schema_version === 2 &&
                   typeof payload.frontend_telemetry_enabled === 'boolean')) &&
-                payload.evidence_validated === true && successfulRunIds.has(workflowRun) &&
+                payload.evidence_validated === true &&
+                deployment.sha === commit && deployment.environment === 'development' &&
+                deployment.repository_url === `https://api.github.com/repos/${context.repo.owner}/${context.repo.repo}` &&
+                deployment.creator?.login === 'github-actions[bot]' &&
                 payload.release_commit === commit &&
                 /^sha256:[0-9a-f]{64}$/.test(payload.release_manifest_digest || '') &&
                 /^sha256:[0-9a-f]{64}$/.test(payload.verification_evidence_digest || '') &&
@@ -154,7 +142,35 @@ jobs:
                 payload.public_endpoint_health?.api === true &&
                 payload.database_query_smoke?.route === '/api/v1/places' &&
                 payload.database_query_smoke?.result === 'valid_place_page'
-              if (latest?.state === 'success' && evidenceMatches) return
+              if (!evidenceMatches) continue
+              // Bind historical evidence to its exact attempt, even if a later rerun failed.
+              const {data: producer} = await github.rest.actions.getWorkflowRunAttempt({
+                ...context.repo, run_id: payload.workflow_run_id, attempt_number: payload.workflow_run_attempt,
+              })
+              const producerMatches = producer.id === payload.workflow_run_id &&
+                producer.workflow_id === expectedWorkflow.data.id &&
+                producer.repository?.id === context.payload.repository.id &&
+                producer.head_repository?.id === context.payload.repository.id &&
+                producer.path === '.github/workflows/fullstack-release.yml' &&
+                producer.head_sha === commit && producer.head_branch === 'main' &&
+                ['push', 'workflow_dispatch'].includes(producer.event) && producer.conclusion === 'success' &&
+                producer.status === 'completed' && producer.run_attempt === payload.workflow_run_attempt
+              const statuses = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deployment.id, per_page: 100,
+              })
+              // Retirement preserves a prior success; never cross a failed or unknown status.
+              const history = statuses.data
+              const validHistory = Array.isArray(history) && history.length > 0 && history.length < 100 &&
+                history.every(item => item && Number.isFinite(Date.parse(item.created_at)))
+              const ordered = validHistory ? [...history].sort((a, b) =>
+                Date.parse(b.created_at) - Date.parse(a.created_at)) : []
+              let successfulHistory = false
+              for (const status of ordered) {
+                if (status.creator?.login !== 'github-actions[bot]') break
+                if (status.state === 'success') { successfulHistory = true; break }
+                if (status.state !== 'inactive') break
+              }
+              if (successfulHistory && producerMatches) return
             }
             throw new Error('No successful development deployment has matching validated full-stack release evidence')
 
