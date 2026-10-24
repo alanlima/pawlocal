@@ -175,7 +175,7 @@ class QuotaTests(unittest.TestCase):
         for changed in (
             {"monthly_microdollars": True},
             {"input_rate": 0},
-            {"requests_per_role": 33},
+            {"requests_per_role": 65},
             {"input_per_request": 272001},
             {"service_tier": "priority"},
             {"approval": ""},
@@ -188,6 +188,26 @@ class QuotaTests(unittest.TestCase):
         ):
             with self.subTest(changed=changed), self.assertRaises(quota.Denied):
                 self.profile(**changed)
+
+    def test_approved_64_calls_and_64000_output_are_actual_bounded_allocations(self):
+        profile = self.profile(
+            requests_per_role=64,
+            output_per_request=64000,
+            output_per_role=4096000,
+            input_per_request=200000,
+            input_per_role=2400000,
+        )
+        budget = quota.RequestBudget(profile)
+        for _ in range(64):
+            self.assertEqual(budget.admit(37500), 64000)
+        self.assertEqual(
+            (budget.requests, budget.inputs, budget.outputs), (64, 2400000, 4096000)
+        )
+        with self.assertRaisesRegex(quota.Denied, "request count quota exhausted"):
+            budget.admit(0)
+        for changes in ({"requests_per_role": 65}, {"output_per_request": 64001}):
+            with self.subTest(changes=changes), self.assertRaises(quota.Denied):
+                self.profile(**changes)
 
     def test_empty_or_omitted_rule_uids_is_valid(self):
         empty_profile = self.profile(rule_uids={})

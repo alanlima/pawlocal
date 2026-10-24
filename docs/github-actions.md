@@ -193,7 +193,7 @@ Do not dispatch `frontend-production-deploy.yml`, `rollback-development.yml`, or
 
 <!-- actions-reference: workflow-validation.yml; dispatch-inputs: -; call-inputs: - -->
 
-`workflow-validation.yml` runs for workflow, local-action, CI-script, policy-test, and deployment-adapter changes and can be called by another workflow. It runs an external-action runtime smoke test, pins and runs `actionlint`, and executes the repository's workflow/path/security tests. Changes to this reference also trigger it so the workflow/input inventory cannot silently drift.
+`workflow-validation.yml` runs for workflow, local-action, CI-script, policy-test, and deployment-adapter changes and can be called by another workflow. It runs an external-action runtime smoke test, pins and runs `actionlint`, and executes the repository's workflow/path/security tests. Changes to this reference also trigger it so the workflow/input inventory cannot silently drift. The same Python 3.12 quality job installs the pinned credential-free Codex sandbox fixture and verifies real TestClient requests through the incident test-only launcher while external socket creation remains denied. No model inference or API credentials are used.
 
 ### Quality · Run complete validation suite
 

@@ -96,9 +96,9 @@ class Profile:
             or value["promotion_seconds"] > 3600
             or not 600 <= value["recovery_seconds"] <= 900
             or value["promotion_seconds"] < 2 * value["recovery_seconds"] + 300
-            or value["requests_per_role"] > 32
+            or value["requests_per_role"] > 64
             or value["input_per_request"] > 250000
-            or value["output_per_request"] > 32000
+            or value["output_per_request"] > 64000
         ):
             raise Denied("request limits exceed reviewed gateway bounds")
         rule_uids = value.get("rule_uids")

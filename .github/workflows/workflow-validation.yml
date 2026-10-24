@@ -117,6 +117,11 @@ jobs:
               core.setFailed(`Expected Node.js 24, received ${process.version}`)
             }
 
+      - name: Set up Python for incident sandbox verification
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
       - name: Install pinned YAML parser for policy tests
         run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
 
@@ -156,6 +161,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - name: Prepare credential-free sandbox regression tools
+        run: |
+          python -m pip install --disable-pip-version-check --index-url https://pypi.org/simple "fastapi>=0.143,<1" "httpx>=0.27,<1" "pytest>=8.3,<9"
+          npm install --prefix "$RUNNER_TEMP/oncall-sandbox-tools" --no-save --ignore-scripts @openai/codex@0.163.0
+      - name: Match Codex action's Ubuntu sandbox prerequisite
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Verify real TestClient inside pinned Codex sandbox
+        env:
+          PAWLOCAL_SANDBOX_CODEX: ${{ runner.temp }}/oncall-sandbox-tools/node_modules/.bin/codex
+        run: python -m unittest discover -s tests/ci -p test_incident_test_launcher.py -v
       - name: Verify incident JavaScript trust boundaries
         run: node --test tests/ci/*.test.mjs
 
