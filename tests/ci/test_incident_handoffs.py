@@ -525,8 +525,13 @@ def complete_fixture(test):
                         )
                     finally:
                         job.quiesce()
-                test.assertTrue(
-                    (CHECK_WORK / "candidate/frontend/dist/index.html").is_file()
+                # umask077 deliberately keeps compiler outputs model-private.
+                # Verify the real generated file as that UID, without relaxing
+                # permissions or claiming the runner must publish these outputs.
+                model_action(
+                    "from pathlib import Path; assert Path("
+                    + repr(str(CHECK_WORK / "candidate/frontend/dist/index.html"))
+                    + ").is_file()"
                 )
                 # Trusted archives/Git metadata remain private, dependency targets
                 # are not model-owned through the node_modules symlink.
