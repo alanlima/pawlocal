@@ -218,6 +218,69 @@ class AdmissionTests(unittest.TestCase):
                 admission.readiness(Rules([bad]))
             environments.assert_not_called()
 
+    def test_readiness_uses_oncall_readiness_token_when_present(self):
+        rule = {
+            "enforcement": "active",
+            "target": "branch",
+            "bypass_actors": [],
+            "conditions": {"ref_name": {"include": ["~ALL"], "exclude": []}},
+            "rules": [
+                {"type": "deletion"},
+                {"type": "non_fast_forward"},
+                {
+                    "type": "pull_request",
+                    "parameters": {
+                        "required_approving_review_count": 0,
+                        "require_code_owner_review": False,
+                        "required_review_thread_resolution": True,
+                        "allowed_merge_methods": ["squash"],
+                    },
+                },
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "strict_required_status_checks_policy": True,
+                        "required_status_checks": [
+                            {"context": name}
+                            | (
+                                {"integration_id": 42}
+                                if name == "PawLocal change authorization"
+                                else {}
+                            )
+                            for name in (
+                                "Backend checks / Backend checks",
+                                "Frontend checks and HTTP-mode build / frontend",
+                                "PawLocal change authorization",
+                            )
+                        ],
+                    },
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            token_file = Path(temp_dir) / "oncall-readiness-token.json"
+            token_file.write_text(json.dumps({"token": "capability-admin-token"}))
+            class RecordingClient:
+                deadline = int(time.time()) + 600
+                opener = None
+                def __init__(self, token, deadline=None, opener=None):
+                    self.token = token
+                    self.deadline = deadline or int(time.time()) + 600
+                    self.opener = opener
+                def request(self, _method, path):
+                    if path == "/rulesets?per_page=100":
+                        return [{"id": 1}]
+                    return rule
+            with (
+                patch.dict(os.environ, {"PAWLOCAL_AUTHORIZER_APP_ID": "42", "RUNNER_TEMP": temp_dir}),
+                patch.object(admission, "GitHub", side_effect=RecordingClient) as client_mock,
+                patch.object(admission, "runtime_ready"),
+                patch.object(admission, "classic_absent"),
+            ):
+                initial_client = RecordingClient("initial-unprivileged-token")
+                admission.readiness(initial_client)
+                client_mock.assert_called_with("capability-admin-token", initial_client.deadline, initial_client.opener)
+
     def test_grouped_schema_rejects_private_extra_generation_and_wrong_environment(
         self,
     ):
