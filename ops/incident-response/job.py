@@ -251,10 +251,6 @@ def prepare(role):
             check=True,
         )
         run(["sudo", "chmod", "644", str(patch_path)], check=True)
-    run(
-        ["sudo", "chown", "-R", f"{identity.pw_uid}:{identity.pw_gid}", str(work)],
-        check=True,
-    )
     dependencies = Path("/tmp/pawlocal-oncall-dependencies")
     if not dependencies.exists():
         dependencies.mkdir(mode=0o755)
@@ -308,6 +304,10 @@ def prepare(role):
     )
     (work / "frontend/node_modules").symlink_to(
         dependencies / "frontend/node_modules", target_is_directory=True
+    )
+    run(
+        ["sudo", "chown", "-R", f"{identity.pw_uid}:{identity.pw_gid}", str(work)],
+        check=True,
     )
     # Parent home and Codex config are not replaceable by the model UID. Only
     # operational session/cache subdirectories are writable by that UID.
