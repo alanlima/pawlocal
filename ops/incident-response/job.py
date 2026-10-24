@@ -386,7 +386,7 @@ def prepare(role):
         "/tmp/pawlocal-oncall-dependencies/backend-test-launcher.py "
         "backend/tests/test_incident_regression.py.\n"
         "Backend quality: from backend run "
-        "/tmp/pawlocal-oncall-dependencies/venv/bin/ruff check .; "
+        "/tmp/pawlocal-oncall-dependencies/venv/bin/ruff check --no-cache .; "
         "the fixer must correct diagnostics only in its allowlisted files before "
         "completion (ruff check --fix may organize those named files). The fresh "
         "reviewer must run check only and report findings without modifying the "

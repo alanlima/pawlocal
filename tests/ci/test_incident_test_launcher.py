@@ -273,6 +273,22 @@ def test_external_socket_creation_remains_denied():
             )
             self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
             self.assertEqual(before, ast.dump(ast.parse(dirty.read_text())))
+            review_prefix = list(lint_prefix)
+            review_prefix[review_prefix.index(":workspace")] = ":read-only"
+            reviewed = subprocess.run(
+                [*review_prefix, "--no-cache", str(dirty)],
+                cwd=work,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            self.assertEqual(reviewed.returncode, 0, reviewed.stdout + reviewed.stderr)
+            self.assertEqual(before, ast.dump(ast.parse(dirty.read_text())))
+            print(
+                "Pinned read-only reviewer sandbox: real Ruff --no-cache check passes without workspace writes"
+            )
             print(
                 "Pinned workspace sandbox: real Ruff I001 -> allowlisted import fix -> clean check; AST and external-network denial unchanged"
             )
