@@ -38,7 +38,7 @@ class GitHub:
     def request(self, method, path, data=None):
         # Only issue writes, repository/deployment/run reads in this client.
         allowed = method == "GET" and re.fullmatch(
-            r"/(?:issues(?:/\d+(?:/comments)?)?|deployments(?:/\d+/statuses)?|actions/runs/\d+(?:/jobs)?|rulesets(?:/\d+)?|commits/[0-9a-f]{40}|git/ref/heads/main|environments/(?:development|production)(?:-plan|-apply)?(?:/deployment-branch-policies)?|environments/oncall-(?:development|production)(?:/deployment-branch-policies)?)(?:\?[A-Za-z0-9_=&-]+)?",
+            r"/(?:issues(?:/\d+(?:/comments)?)?|deployments(?:/\d+/statuses)?|actions/runs/\d+(?:/jobs|/attempts/[1-9][0-9]*)?|rulesets(?:/\d+)?|commits/[0-9a-f]{40}|git/ref/heads/main|environments/(?:development|production)(?:-plan|-apply)?(?:/deployment-branch-policies)?|environments/oncall-(?:development|production)(?:/deployment-branch-policies)?)(?:\?[A-Za-z0-9_=&-]+)?",
             path,
         )
         allowed = (
@@ -235,9 +235,11 @@ def current_alert(stack_url, token, alert, deadline, opener=None):
     return False
 
 
-def verified_record(github, deployment, environment):
+def verified_record(github, deployment, environment, *, historical=False):
+    """Verify current runtime, or durable success of an exact past producer attempt."""
     if (
-        deployment.get("repository_url") != GITHUB
+        deployment.get("environment") != environment
+        or deployment.get("repository_url") != GITHUB
         or deployment.get("creator", {}).get("login") != "github-actions[bot]"
     ):
         raise Denied("untrusted deployment record owner")
@@ -247,13 +249,15 @@ def verified_record(github, deployment, environment):
     sha = deployment.get("sha", "")
     if (
         not isinstance(payload, dict)
+        or not isinstance(sha, str)
         or not re.fullmatch(r"[0-9a-f]{40}", sha)
         or payload.get("release_commit") != sha
     ):
         raise Denied("explicit deployed commit missing")
     digest = payload.get("backend_image_digest", "")
     if (
-        not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+        not isinstance(digest, str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
         or payload.get("running_image_digest") != digest
         or payload.get("backend_image") != "ghcr.io/alanlima/pawlocal-api@" + digest
     ):
@@ -261,9 +265,16 @@ def verified_record(github, deployment, environment):
     record_schema = payload.get("record_schema_version")
     manifest_schema = payload.get("manifest_schema_version")
     evidence_schema = payload.get("evidence_schema_version")
-    if record_schema != 1 or (manifest_schema, evidence_schema) not in {(2, 1), (3, 2)}:
+    if (
+        any(type(version) is not int for version in (record_schema, manifest_schema, evidence_schema))
+        or record_schema != 1
+        or (manifest_schema, evidence_schema) not in {(2, 1), (3, 2)}
+    ):
         raise Denied("validated release/telemetry evidence missing")
-    if manifest_schema == 3 and not isinstance(payload.get("frontend_telemetry_enabled"), bool):
+    if (
+        manifest_schema == 2 and "frontend_telemetry_enabled" in payload
+        or manifest_schema == 3 and not isinstance(payload.get("frontend_telemetry_enabled"), bool)
+    ):
         raise Denied("validated release/telemetry evidence missing")
     required = {
         "evidence_validated": True,
@@ -297,20 +308,34 @@ def verified_record(github, deployment, environment):
         raise Denied("release health evidence missing")
     run_id = payload.get("workflow_run_id")
     attempt = payload.get("workflow_run_attempt")
-    if type(run_id) is not int or type(attempt) is not int or attempt < 1:
+    if (
+        type(run_id) is not int
+        or not 1 <= run_id <= 9007199254740991
+        or type(attempt) is not int
+        or not 1 <= attempt <= 9007199254740991
+    ):
         raise Denied("deployment producer run missing")
-    run = github.request("GET", f"/actions/runs/{run_id}")
+    run_path = f"/actions/runs/{run_id}"
+    if historical:
+        run_path += f"/attempts/{attempt}"
+    run = github.request("GET", run_path)
     expected = (
         ".github/workflows/fullstack-release.yml"
         if environment == "development"
         else ".github/workflows/deploy-production.yml"
     )
-    event = "push" if environment == "development" else "workflow_dispatch"
+    events = (
+        {"push", "workflow_dispatch"}
+        if environment == "development"
+        else {"workflow_dispatch"}
+    )
     if (
-        run.get("repository", {}).get("id") != 1423024931
+        run.get("id") != run_id
+        or run.get("status") != "completed"
+        or run.get("repository", {}).get("id") != 1423024931
         or run.get("head_repository", {}).get("id") != 1423024931
         or run.get("conclusion") != "success"
-        or run.get("event") != event
+        or run.get("event") not in events
         or run.get("path") != expected
         or run.get("head_branch") != "main"
         or run.get("run_attempt") != attempt
@@ -321,14 +346,39 @@ def verified_record(github, deployment, environment):
     statuses = github.request(
         "GET", f"/deployments/{deployment['id']}/statuses?per_page=100"
     )
-    if not statuses or len(statuses) >= 100:
+    if not isinstance(statuses, list) or not statuses or len(statuses) >= 100:
         raise Denied("deployment status uncertainty")
-    latest = max(statuses, key=lambda value: value.get("created_at", ""))
-    if (
-        latest.get("state") != "success"
-        or latest.get("creator", {}).get("login") != "github-actions[bot]"
+    if any(
+        not isinstance(value, dict)
+        or not isinstance(value.get("created_at"), str)
+        or not value["created_at"]
+        for value in statuses
     ):
-        raise Denied("latest deployment is not a trusted successful release")
+        raise Denied("deployment status uncertainty")
+    # GitHub returns newest first; stable sorting preserves API order on tied
+    # timestamps. Inactive only retires a deployment; it does not revoke its
+    # verified history. No failure/error/unknown state may be crossed to find it.
+    try:
+        dated = [
+            (dt.datetime.fromisoformat(value["created_at"].replace("Z", "+00:00")), value)
+            for value in statuses
+        ]
+        if any(date.tzinfo is None for date, _value in dated):
+            raise ValueError("timezone missing")
+    except ValueError as error:
+        raise Denied("deployment status timestamp uncertainty") from error
+    ordered = [
+        value for _date, value in sorted(dated, key=lambda pair: pair[0], reverse=True)
+    ]
+    for status in ordered:
+        if status.get("creator", {}).get("login") != "github-actions[bot]":
+            raise Denied("untrusted deployment status")
+        if status.get("state") == "success":
+            break
+        if not historical or status.get("state") != "inactive":
+            raise Denied("latest deployment is not a trusted successful release")
+    else:
+        raise Denied("deployment has no trusted successful verification")
     return {
         "affected_sha": sha,
         "image_digest": digest,
@@ -353,7 +403,7 @@ def deployed_release(github, environment):
         matched = False
         for candidate in development:
             try:
-                verified = verified_record(github, candidate, "development")
+                verified = verified_record(github, candidate, "development", historical=True)
             except Denied:
                 continue
             if (

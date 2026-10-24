@@ -62,6 +62,7 @@ def deployment():
     }
     return {
         "id": 1,
+        "environment": "development",
         "sha": sha,
         "payload": payload,
         "repository_url": admission.GITHUB,
@@ -78,6 +79,8 @@ class FakeGitHub:
         self.existing = []
         self.record = deployment()
         self.run = {
+            "id": 123,
+            "status": "completed",
             "repository": {"id": 1423024931},
             "head_repository": {"id": 1423024931},
             "conclusion": "success",
