@@ -27,6 +27,7 @@ from job import (
     uid,
     writable_tool_caches,
 )
+from process_policy import TEST_DATABASE_URL
 from quota import Denied
 
 
@@ -38,10 +39,13 @@ def execute(command, cwd, metadata, environment):
         "HOME": "/home/oncall",
         "LANG": "C.UTF-8",
         "CI": "true",
-        "PYTHONPATH": str(cwd / "backend"),
+        "PYTHONPATH": str(cwd if cwd.name == "backend" else cwd / "backend"),
         "PAWLOCAL_TELEMETRY_ENABLED": "false",
         "VITE_TELEMETRY_ENABLED": "false",
     }
+    if environment.get("database"):
+        values["PAWLOCAL_DATABASE_URL"] = TEST_DATABASE_URL
+        values["PAWLOCAL_TEST_DATABASE_URL"] = TEST_DATABASE_URL
     return run(
         [
             "sudo",
@@ -129,6 +133,85 @@ def regression(root, layer, metadata, dependencies, expect_failure):
     raise Denied("regression uncertainty")
 
 
+def backend_quality(source, metadata, dependencies):
+    """Required backend quality commands against candidate bytes, never runner credentials."""
+    backend = source / "backend"
+    environment = {
+        "PATH": str(dependencies / "venv/bin") + ":" + os.environ["PATH"],
+        "database": True,
+    }
+
+    def step(command):
+        try:
+            result = execute(command, backend, metadata, environment)
+        finally:
+            quiesce()
+        if result:
+            raise Denied(
+                "required backend quality command failed: " + Path(command[0]).name
+            )
+
+    step([str(dependencies / "venv/bin/ruff"), "check", "."])
+    sql = sorted(
+        path.relative_to(backend).as_posix()
+        for path in (backend / "migrations/dsql/0001_initial").glob("*.sql")
+    )
+    if not sql:
+        raise Denied("immutable baseline SQL is missing")
+    step([str(dependencies / "venv/bin/dsql-lint"), *sql])
+    step(
+        [
+            str(dependencies / "venv/bin/python"),
+            str(dependencies / "render-check-sql.py"),
+        ]
+    )
+    rendered_path = source / "backend-search.sql"
+    reclaim_model_output(rendered_path)
+    rendered = safe_bytes(source, rendered_path.name, 1024 * 1024)
+    if not rendered:
+        raise Denied("rendered SQL is empty")
+    output = dependencies / "rendered-search.sql"
+    descriptor = os.open(
+        output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644
+    )
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(rendered)
+    output.chmod(0o644)
+    step([str(dependencies / "venv/bin/dsql-lint"), str(output)])
+    step(
+        [str(dependencies / "venv/bin/alembic"), "-c", "alembic.ini", "upgrade", "head"]
+    )
+    step(
+        [
+            str(dependencies / "venv/bin/python"),
+            "-m",
+            "pytest",
+            "--junitxml=../backend-quality.xml",
+        ]
+    )
+    report = source / "backend-quality.xml"
+    reclaim_model_output(report)
+    suite = ET.fromstring(safe_bytes(source, report.name, 1024 * 1024))
+    cases = list(suite.iter("testcase"))
+    integrations = {
+        "test_postgres_repositories_constraints_and_records_survive_new_sessions",
+        "test_0006_quarantines_legacy_rows_and_downgrade_restores_them",
+        "test_0007_backfills_facilities_in_order_and_handles_empty_arrays",
+    }
+    actual = {
+        case.get("name")
+        for case in cases
+        if not any(
+            case.find(tag) is not None for tag in ("skipped", "failure", "error")
+        )
+    }
+    if not integrations <= actual or any(list(case) for case in cases):
+        raise Denied(
+            "complete backend quality tests including PostgreSQL must pass without skips"
+        )
+    return {"tests": len(cases), "postgres_integration_tests": len(integrations)}
+
+
 def main():
     arm(os.environ["INCIDENT_DEADLINE"])
     metadata, profile = context()
@@ -192,7 +275,7 @@ def main():
             str(dependencies / "venv/bin/pip"),
             "install",
             "--disable-pip-version-check",
-            ".[test]",
+            ".[test,dsql-prototype]",
         ],
         cwd=dependency_source / "backend",
         check=True,
@@ -209,6 +292,9 @@ def main():
         check=True,
         timeout=remaining(metadata),
     )
+    renderer = dependencies / "render-check-sql.py"
+    shutil.copyfile(trusted / "ops/incident-response/render-check-sql.py", renderer)
+    renderer.chmod(0o444)
     writable_tool_caches(dependencies)
     work = Path("/tmp/pawlocal-oncall-check-work")
     work.mkdir(mode=0o755)
@@ -239,6 +325,11 @@ def main():
         share_check_source(destination, identity)
         sources[name] = destination
     try:
+        quality = (
+            backend_quality(sources["candidate"], metadata, dependencies)
+            if "backend" in layers
+            else None
+        )
         for layer in layers:
             if not regression(sources["affected"], layer, metadata, dependencies, True):
                 raise Denied("affected release did not reproduce")
@@ -253,20 +344,6 @@ def main():
         environment = {
             "PATH": str(dependencies / "venv/bin") + ":" + os.environ["PATH"]
         }
-        if "backend" in layers and execute(
-            [
-                str(dependencies / "venv/bin/python"),
-                "-m",
-                "pytest",
-                "backend/tests",
-                "-m",
-                "not integration",
-            ],
-            sources["candidate"],
-            metadata,
-            environment,
-        ):
-            raise Denied("backend checks failed")
         if "frontend" in layers:
             for command in (
                 ["npm", "run", "check"],
@@ -287,6 +364,7 @@ def main():
         "affected_reproduced": True,
         "main_reproduced": True,
         "candidate_passed": True,
+        "backend_quality": quality,
         "profile": profile.digest,
     }
     output = root / "export"

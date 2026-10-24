@@ -1,5 +1,6 @@
 """Real credential-free incident handoffs; full hosted fixture is explicit opt-in."""
 
+import ast
 import difflib
 import io
 import json
@@ -80,7 +81,7 @@ class HandoffTests(unittest.TestCase):
             launch.return_value.returncode = 0
             for path in sorted(process_policy.CHECK_REPORTS):
                 deadline.run(["sudo", "chown", "--no-dereference", "123:456", path])
-            self.assertEqual(launch.call_count, 6)
+            self.assertEqual(launch.call_count, 8)
             launch.reset_mock()
             for recipient, path in (
                 ("999:456", min(process_policy.CHECK_REPORTS)),
@@ -372,7 +373,7 @@ def complete_fixture(test):
             b"key=lambda place: place.average_rating if place.average_rating is not None else float('-inf'),",
         )
         test.assertNotEqual(before, fixed)
-        regression = (FIXTURES / "backend-regression.py").read_bytes()
+        regression = (FIXTURES / "backend-dirty-regression.py").read_bytes()
         edits = {
             "backend/pawlocal/application/places.py": fixed,
             "backend/tests/test_incident_regression.py": regression,
@@ -440,26 +441,84 @@ def complete_fixture(test):
                         metadata,
                         {"PATH": os.environ["PATH"]},
                     )
-                # This is the actual seal, not a transport/helper approximation.
-                job.seal()
-                raw = (trusted_root / "export/candidate.json").read_bytes()
-                test.assertEqual(candidate.load(raw, metadata), edits)
-                (trusted_root / "candidate.json").write_bytes(raw)
-                # Separate jobs never retain the prior model workspace.
-                privileged_cleanup(WORK, created.pop(WORK))
-                with (
-                    patch.dict(os.environ, {"CANDIDATE_SHA256": candidate.digest(raw)}),
-                    patch.object(
-                        checks,
-                        "context",
-                        return_value=(metadata, types.SimpleNamespace(digest="c" * 64)),
-                    ),
-                    patch.object(checks, "uid", return_value=model),
-                    patch.object(
-                        checks, "download", return_value={"candidate.json": raw}
-                    ),
-                ):
-                    checks.main()
+                # Actual dirty candidate fails the real required Ruff gate and
+                # cannot mint eligible evidence. Repeat with identical assertions
+                # and only the import blank-line correction in a fresh job tree.
+                for dirty in (True, False):
+                    if not dirty:
+                        clean = regression.replace(
+                            b"PlaceRecord\n\n\n", b"PlaceRecord\n\n"
+                        )
+                        test.assertNotEqual(regression, clean)
+                        test.assertEqual(
+                            ast.dump(ast.parse(regression)), ast.dump(ast.parse(clean))
+                        )
+                        edits["backend/tests/test_incident_regression.py"] = clean
+                        shutil.copytree(trusted_root / "baseline", WORK)
+                        candidate.materialize(edits, WORK)
+                        created[WORK] = WORK.lstat()
+                        job.run(
+                            [
+                                "sudo",
+                                "chown",
+                                "-R",
+                                f"{model.pw_uid}:{model.pw_gid}",
+                                str(WORK),
+                            ],
+                            check=True,
+                        )
+                    # This is the actual seal, not a transport/helper approximation.
+                    job.seal()
+                    raw = (trusted_root / "export/candidate.json").read_bytes()
+                    test.assertEqual(candidate.load(raw, metadata), edits)
+                    (trusted_root / "candidate.json").write_bytes(raw)
+                    # Separate jobs never retain the prior model workspace.
+                    privileged_cleanup(WORK, created.pop(WORK))
+                    with (
+                        patch.dict(
+                            os.environ, {"CANDIDATE_SHA256": candidate.digest(raw)}
+                        ),
+                        patch.object(
+                            checks,
+                            "context",
+                            return_value=(
+                                metadata,
+                                types.SimpleNamespace(digest="c" * 64),
+                            ),
+                        ),
+                        patch.object(checks, "uid", return_value=model),
+                        patch.object(
+                            checks, "download", return_value={"candidate.json": raw}
+                        ),
+                    ):
+                        if dirty:
+                            before_quality = len(launches.events)
+                            with test.assertRaisesRegex(
+                                candidate.Denied, "quality command failed: ruff"
+                            ):
+                                checks.main()
+                            test.assertEqual(
+                                [
+                                    event
+                                    for event in launches.events[before_quality:]
+                                    if event.startswith("model:")
+                                ],
+                                ["model:."],
+                            )
+                        else:
+                            checks.main()
+                    if dirty:
+                        test.assertNotIn("eligible=true", output.read_text())
+                        test.assertFalse(
+                            (runner_temp / "oncall-checks/export/checks.json").exists()
+                        )
+                        for path in (CHECK_WORK, DEPS):
+                            privileged_cleanup(path, created.pop(path))
+                        shutil.rmtree(runner_temp / "oncall-checks")
+                        shutil.rmtree(trusted_root / "export")
+                        print(
+                            "Authentic regression candidate with dirty imports rejected by real Ruff before eligible evidence"
+                        )
                 for path in (CHECK_WORK, DEPS):
                     created[path] = path.lstat()
                 receipt_raw = (
@@ -477,6 +536,49 @@ def complete_fixture(test):
                     )
                 )
                 test.assertEqual(receipt["layers"], ["backend"])
+                test.assertEqual(
+                    receipt["backend_quality"]["postgres_integration_tests"], 3
+                )
+                test.assertGreaterEqual(receipt["backend_quality"]["tests"], 240)
+                quality_report = CHECK_WORK / "candidate/backend-quality.xml"
+                test.assertEqual(stat.S_IMODE(quality_report.stat().st_mode), 0o600)
+                print(
+                    "Required backend quality: Ruff, DSQL, migrations and all three PostgreSQL integration tests passed without skips"
+                )
+                first_candidate = receipt["candidate_sha"]
+                for path in (CHECK_WORK, DEPS):
+                    privileged_cleanup(path, created.pop(path))
+                shutil.rmtree(runner_temp / "oncall-checks")
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "CANDIDATE_SHA256": candidate.digest(raw),
+                            "PINNED_CANDIDATE_SHA": first_candidate,
+                        },
+                    ),
+                    patch.object(
+                        checks,
+                        "context",
+                        return_value=(metadata, types.SimpleNamespace(digest="c" * 64)),
+                    ),
+                    patch.object(checks, "uid", return_value=model),
+                    patch.object(
+                        checks, "download", return_value={"candidate.json": raw}
+                    ),
+                ):
+                    checks.main()
+                receipt_raw = (
+                    runner_temp / "oncall-checks/export/checks.json"
+                ).read_bytes()
+                receipt = json.loads(receipt_raw)
+                test.assertEqual(receipt["candidate_sha"], first_candidate)
+                test.assertEqual(
+                    receipt["backend_quality"]["postgres_integration_tests"], 3
+                )
+                print(
+                    "Fresh trusted rerun independently passed required backend quality for the pinned candidate"
+                )
                 for name in ("affected", "main", "candidate"):
                     tree = CHECK_WORK / name
                     info = tree.lstat()

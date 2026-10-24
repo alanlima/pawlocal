@@ -64,7 +64,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 process_policy.DEPENDENCIES + "/venv/bin/pip",
                 "install",
                 "--disable-pip-version-check",
-                ".[test]",
+                ".[test,dsql-prototype]",
             ]
             fixed_source = process_policy.DEPENDENCIES + "/backend-source"
             popen = subprocess.Popen
@@ -86,7 +86,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                         "--no-build-isolation",
                         "--target",
                         str(root / "installed"),
-                        ".[test]",
+                        ".[test,dsql-prototype]",
                     ],
                     **options,
                 )
@@ -133,7 +133,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             process_policy.DEPENDENCIES + "/venv/bin/pip",
             "install",
             "--disable-pip-version-check",
-            ".[test]",
+            ".[test,dsql-prototype]",
         ]
         with (
             tempfile.TemporaryDirectory() as directory,
