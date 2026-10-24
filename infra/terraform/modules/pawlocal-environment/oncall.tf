@@ -83,7 +83,6 @@ module "oncall_receiver" {
     PAWLOCAL_DISPATCH_REPOSITORY_ID   = var.oncall_receiver.repository_id
     PAWLOCAL_DISPATCH_REPOSITORY      = var.oncall_receiver.repository
     PAWLOCAL_ONCALL_ALLOWED_SERVICES  = jsonencode(sort(tolist(var.oncall_receiver.allowed_services)))
-    PAWLOCAL_ONCALL_ALLOWED_ALERTS    = var.oncall_receiver.allowed_alerts == null || length(var.oncall_receiver.allowed_alerts) == 0 ? "[]" : jsonencode(sort(tolist(var.oncall_receiver.allowed_alerts)))
   }
   tags       = local.common_tags
   depends_on = [aws_iam_role_policy.oncall_runtime]
