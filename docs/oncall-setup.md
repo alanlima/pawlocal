@@ -540,27 +540,9 @@ Set `PAWLOCAL_ONCALL_QUOTA_ISSUE` in both `oncall-development` and `oncall-produ
 
 The `quota.py` admission gate enforces a fully populated, owner-approved JSON profile before any model call is made. The profile must name a real model, carry current pricing from an official source, and specify hard numeric ceilings that fit within the gateway's enforced limits.
 
-### Recommended model: `o4-mini`
+### Default model: `gpt-5.4-mini`
 
-**`o4-mini` is the recommended choice** for the fixer and reviewer roles for these reasons:
-
-| Property | Detail |
-|---|---|
-| **Capability** | Native reasoning model — plans multi-step repairs, writes tests, and explains confidence. Designed for code-heavy, logic-intensive tasks. |
-| **Speed** | Significantly faster than `o1` or `o3` at the same quality tier. The 20-minute admission-to-PR deadline is tight; o4-mini consistently finishes within it. |
-| **Cost** | \$1.10 / M input tokens, \$4.40 / M output tokens (Standard tier, October 2026). Roughly 4× cheaper than GPT-4o per token while outperforming it on code tasks. |
-| **`codex-action` compatibility** | Explicitly supported by `codex-action` v0.163.0 (the pinned version in `incident-responder.yml`) via the Responses API. |
-| **Effort knob** | Supports `low` / `medium` / `high` reasoning effort, letting you tune speed vs. quality within the same model. |
-
-> **Pricing source (verify before approving):** `https://platform.openai.com/docs/pricing`
-
-#### Why not GPT-4o?
-
-GPT-4o costs \$2.50 / M input and \$10.00 / M output — roughly 2.3× more expensive per token with no reasoning advantage for structured code repairs. Reserve GPT-4o for cases requiring multimodal input, which the incident responder does not use.
-
-#### Why not o3 or o1?
-
-Both are slower and more expensive than o4-mini for this class of task. The 20-minute hard deadline makes latency a first-class constraint.
+The owner-selected generator default is `gpt-5.4-mini` with `medium` effort for fixer and reviewer. [Official Standard global pricing](https://developers.openai.com/api/docs/models/gpt-5.4-mini), reviewed 24 October 2026, is **$0.75/M input** and **$4.50/M output** tokens. The generator supplies matching integer rates `750000` and `4500000` microdollars per million tokens. Confirm current pricing, API project entitlement and pinned Action/CLI compatibility before owner approval; generating JSON does not activate a model or authorize spending.
 
 ---
 
@@ -593,16 +575,28 @@ The gateway validates these fields against hard coded bounds. Your profile value
 
 ---
 
+### Per-turn output allocation (#301)
+
+Each role reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens before every forwarded request. The existing `4` / `16000` / `32000` profile therefore supports four turns of at most **8,000 output tokens** within the same 32,000-token role envelope. Reasoning and answer output share that allowance. The input, request, deadline and monthly gates can still stop work earlier. Integer remainders stay unallocated. Failed, interrupted and unknown responses consume their full reservation; there is no automatic refund or inference retry.
+
+This allocation applies to existing approved profiles after the reviewed code is merged; no variable migration is needed for #301. The protected model/rate approval remains independent. Existing incident generations and monthly ledger reservations remain consumed: do not rerun or refund an escalated generation to activate the fix.
+
+### Switching the approved profile to `gpt-5.4-mini`
+
+The generator defaults to `gpt-5.4-mini` and its matching rates. A model-only edit of an existing protected JSON profile does **not** update its rates. Before saving a newly approved profile, review its complete JSON and current official model pricing. For Standard global `gpt-5.4-mini`, the [official model page](https://developers.openai.com/api/docs/models/gpt-5.4-mini) lists input **$0.75/M** and output **$4.50/M** (reviewed 24 October 2026): set `"model":"gpt-5.4-mini"`, `"input_rate":750000`, and `"output_rate":4500000`. The former `1100000`/`4400000` values underestimate this model's output price. Verify the configured API project, entitlement and effort compatibility separately.
+
+Keep `requests_per_role=4`, `output_per_request=16000`, `output_per_role=32000`, `input_per_request=100000`, `input_per_role=200000`, `monthly_microdollars=20000000`, and `monthly_runs=20`. With those fields the two-role worst-case reservation is **$0.588 per incident**, or **$11.76 for 20 incidents**, within the same $20 monthly ceiling. This is conservative reservation arithmetic, not provider-billed usage. Refresh `rates_source`, `rates_reviewed_at`, `approved_month`, `expires_at` and the owner approval reference honestly when preparing the profile; never reuse an example's timestamps as a fresh review. These instructions do not change a live variable or authorize additional spending.
+
 ### Cost estimate
 
-With the recommended values and `o4-mini` pricing:
+With the recommended values and `gpt-5.4-mini` Standard global pricing:
 
 | Item | Calculation | Cost |
 |---|---|---|
-| Input per role (2 roles) | 200 000 tokens × 2 × \$1.10 / M | **\$0.44** |
-| Output per role (2 roles) | 32 000 tokens × 2 × \$4.40 / M | **\$0.28** |
-| **Per incident (worst-case)** | | **≈ \$0.72** |
-| **Monthly ceiling (20 runs)** | \$0.72 × 20 | **≈ \$14.40** |
+| Input per role (2 roles) | 200,000 tokens � 2 � $0.75/M | **$0.30** |
+| Output per role (2 roles) | 32,000 tokens � 2 � $4.50/M | **$0.288** |
+| **Per incident (worst-case)** | | **$0.588** |
+| **Monthly ceiling (20 runs)** | $0.588 � 20 | **$11.76** |
 
 Setting `monthly_microdollars` to `20000000` (\$20.00) gives comfortable headroom over the 20-run worst case while keeping a hard stop well below \$30.
 
@@ -639,15 +633,17 @@ python ops/incident-response/generate-profile.py
 ```
 
 This helper:
-- Uses the recommended `o4-mini` model, `medium` effort, and \$20.00 monthly budget ceiling.
-- Automatically sets the canonical rule UIDs (`pawlocal-development-search-detail` and `pawlocal-production-search-detail`). (Pass `--dev-rule-uid <uid>` and `--prod-rule-uid <uid>` if you use custom UIDs).
+- Uses the owner-selected `gpt-5.4-mini` model, `medium` effort, matching rates `750000`/`4500000`, and \$20.00 monthly budget ceiling.
+- Leaves `rule_uids` empty for dynamic alert matching. Pass `--dev-rule-uid <uid>` and `--prod-rule-uid <uid>` to pin reviewed UIDs.
 - Automatically calculates the current UTC month (`approved_month`), UTC review timestamp (`rates_reviewed_at`), and 30-day expiration timestamp (`expires_at`).
 - Runs the output through `quota.py` validation to guarantee it passes the gateway checks.
 
-**Example output ready to paste into `PAWLOCAL_ONCALL_MODEL_PROFILE`:**
+For another approved model, supply **both** reviewed `--input-rate` and `--output-rate` in microdollars per million tokens alongside `--model`. The generator rejects a model override without both rates, and rejects a one-sided rate override. It does not fetch prices or maintain a model registry. CLI usage or model metadata cannot infer approved budgets or authoritative rates; official pricing and owner policy remain required inputs. Recheck the official pricing source before generation; the generated review timestamp records that operator review, not an automated price lookup.
+
+**Illustrative output; regenerate timestamps and review before saving to `PAWLOCAL_ONCALL_MODEL_PROFILE`:**
 
 ```json
-{"model":"o4-mini","effort":"medium","service_tier":"default","input_rate":1100000,"output_rate":4400000,"monthly_microdollars":20000000,"monthly_runs":20,"promotion_seconds":3600,"recovery_seconds":720,"rule_uids":{"development":"pawlocal-development-search-detail","production":"pawlocal-production-search-detail"},"requests_per_role":4,"input_per_request":100000,"output_per_request":16000,"input_per_role":200000,"output_per_role":32000,"approval":"alanlima/pawlocal/issues/269","approved_month":"2026-10","rates_source":"https://platform.openai.com/docs/pricing","rates_reviewed_at":"2026-10-24T03:04:03Z","expires_at":"2026-11-23T03:04:03Z"}
+{"model":"gpt-5.4-mini","effort":"medium","service_tier":"default","input_rate":750000,"output_rate":4500000,"monthly_microdollars":20000000,"monthly_runs":20,"promotion_seconds":3600,"recovery_seconds":720,"rule_uids":{},"requests_per_role":4,"input_per_request":100000,"output_per_request":16000,"input_per_role":200000,"output_per_role":32000,"approval":"alanlima/pawlocal/issues/269","approved_month":"2026-10","rates_source":"https://developers.openai.com/api/docs/pricing","rates_reviewed_at":"2026-10-24T03:04:03Z","expires_at":"2026-11-23T03:04:03Z"}
 ```
 
 ---
@@ -658,11 +654,11 @@ If you prefer to construct the JSON manually, satisfy all fields below:
 
 ```json
 {
-  "model": "o4-mini",
+  "model": "gpt-5.4-mini",
   "effort": "medium",
   "service_tier": "default",
-  "input_rate": 1100000,
-  "output_rate": 4400000,
+  "input_rate": 750000,
+  "output_rate": 4500000,
   "monthly_microdollars": 20000000,
   "monthly_runs": 20,
   "promotion_seconds": 3600,
@@ -678,7 +674,7 @@ If you prefer to construct the JSON manually, satisfy all fields below:
   "output_per_role": 32000,
   "approval": "alanlima/pawlocal/issues/269",
   "approved_month": "<YYYY-MM of current month, e.g. 2026-10>",
-  "rates_source": "https://platform.openai.com/docs/pricing",
+  "rates_source": "https://developers.openai.com/api/docs/pricing",
   "rates_reviewed_at": "<UTC timestamp when you reviewed pricing, e.g. 2026-10-24T03:00:00Z>",
   "expires_at": "<UTC timestamp at most 31 days from rates_reviewed_at>"
 }
@@ -686,7 +682,7 @@ If you prefer to construct the JSON manually, satisfy all fields below:
 
 **Before enabling:**
 
-1. Visit `https://platform.openai.com/docs/pricing` and confirm `o4-mini` input/output rates match `1100000` / `4400000` microdollars per million tokens.
+1. Visit `https://developers.openai.com/api/docs/pricing` and confirm `gpt-5.4-mini` input/output rates match `750000` / `4500000` microdollars per million tokens.
 2. Record the pricing review date in `rates_reviewed_at`.
 3. Set `approved_month` to the current UTC month (`YYYY-MM`).
 4. Set `expires_at` to no more than 31 days from now (the gateway rejects profiles older than 31 days).

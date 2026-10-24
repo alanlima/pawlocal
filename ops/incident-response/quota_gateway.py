@@ -197,6 +197,7 @@ class Gateway:
         upstream=None,
         clock=time.time,
         control=None,
+        diagnostic=None,
     ):
         if not key or len(local_token) < 32 or not clock() < deadline <= clock() + 1200:
             raise Denied("invalid gateway authorization/deadline")
@@ -209,6 +210,10 @@ class Gateway:
         self.received = 0
         self.upstream = upstream or self.request
         self.control = control
+        self.stage = "request_headers"
+        self.diagnostic = diagnostic or (
+            lambda event: print(json.dumps(event), file=sys.stderr, flush=True)
+        )
 
     def ensure_live(self):
         if self.control is not None:
@@ -240,11 +245,14 @@ class Gateway:
             authorization, "Bearer " + self.local_token
         ):
             raise Denied("local authentication failed")
+        self.stage = "live_control"
         self.remaining()
         self.ensure_live()
+        self.stage = "request_quota"
         self.received += 1
         if self.received > self.profile.requests_per_role or len(raw) > MAX_BODY:
             raise Denied("request quota/body bound exceeded")
+        self.stage = "request_validation"
         body = strict_json(raw)
         if isinstance(body, dict):
             # CLI correlation identifiers are unnecessary for this adapter and
@@ -260,6 +268,7 @@ class Gateway:
         count_body = validate_request(body, self.profile)
         # Token counting includes tool schemas, instructions and entire history.
         # Failure, unknown schema, redirect, or missing count denies inference.
+        self.stage = "input_token_count"
         with self.upstream("/input_tokens", count_body) as response:
             if response.status != 200:
                 raise Denied("token counting failed")
@@ -272,6 +281,7 @@ class Gateway:
                 or type(count.get("input_tokens")) is not int
             ):
                 raise Denied("token count missing")
+        self.stage = "quota_reservation"
         cap = self.budget.admit(count["input_tokens"])
         body["max_output_tokens"] = cap
         self.remaining()
@@ -307,6 +317,8 @@ def serve(gateway, port):
             pass
 
         def do_POST(self):
+            started = False
+            gateway.stage = "request_headers"
             try:
                 if (
                     self.path != "/v1/responses"
@@ -327,7 +339,9 @@ def serve(gateway, port):
                 if len(raw) != length:
                     raise Denied("incomplete body")
                 body = gateway.admit(self.headers.get("Authorization"), raw)
+                gateway.stage = "live_control"
                 gateway.ensure_live()
+                gateway.stage = "inference"
                 with gateway.upstream("", body) as response:
                     if response.status != 200:
                         raise Denied("upstream inference failed")
@@ -338,6 +352,7 @@ def serve(gateway, port):
                         )
                     ):
                         raise Denied("unexpected upstream content type")
+                    started = True
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
                     self.end_headers()
@@ -352,12 +367,82 @@ def serve(gateway, port):
                             raise Denied("upstream response bound")
                         self.wfile.write(chunk)
                         self.wfile.flush()
-            except (Denied, ValueError, OSError, urllib.error.URLError, TimeoutError):
-                # Reservation remains charged regardless of delivery/usage.
-                self.close_connection = True
-                if not self.wfile.closed:
+            except (
+                Denied,
+                ValueError,
+                OSError,
+                urllib.error.URLError,
+                TimeoutError,
+            ) as error:
+                # One classification, no gateway retry and no reservation refund.
+                status = 403
+                event = {
+                    "event": "oncall_gateway_failure",
+                    "stage": gateway.stage,
+                    "origin": "local",
+                    "code": "local_quota_exhausted"
+                    if gateway.stage in {"request_quota", "quota_reservation"}
+                    else "local_admission_denied",
+                    "reason": str(error)
+                    if isinstance(error, Denied)
+                    else "invalid_request",
+                    "response_started": started,
+                }
+                if isinstance(error, urllib.error.HTTPError):
+                    status = error.code if 400 <= error.code <= 599 else 502
+                    origin = (
+                        "openai"
+                        if gateway.stage in {"input_token_count", "inference"}
+                        else "github"
+                    )
+                    event.update(
+                        origin=origin,
+                        code="upstream_http_error",
+                        reason="upstream_http_error",
+                        upstream_status=error.code,
+                    )
+                    # Read only bounded structured error identifiers, never messages or payloads.
                     try:
-                        self.send_error(429, "Admission denied or upstream uncertain")
+                        raw_error = error.read(65537)
+                        details = (
+                            strict_json(raw_error) if len(raw_error) <= 65536 else None
+                        )
+                        details = (
+                            details.get("error") if isinstance(details, dict) else None
+                        )
+                        if isinstance(details, dict):
+                            for name in ("code", "type"):
+                                value = details.get(name)
+                                if isinstance(value, str) and re.fullmatch(
+                                    r"[A-Za-z0-9_-]{1,128}", value
+                                ):
+                                    event["upstream_" + name] = value
+                    except (ValueError, OSError, urllib.error.URLError, TimeoutError):
+                        pass
+                    finally:
+                        error.close()
+                    request_id = (
+                        error.headers.get("x-request-id", "") if error.headers else ""
+                    )
+                    if re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id):
+                        event["request_id"] = request_id
+                elif isinstance(error, (OSError, urllib.error.URLError, TimeoutError)):
+                    status = 502
+                    event.update(
+                        origin="transport",
+                        code="transport_uncertain",
+                        reason="transport_failure",
+                    )
+                gateway.diagnostic(event)
+                self.close_connection = True
+                if not started and not self.wfile.closed:
+                    try:
+                        raw = json.dumps({"error": event}).encode()
+                        self.send_response(status)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(raw)))
+                        self.end_headers()
+                        self.wfile.write(raw)
                     except OSError:
                         pass
 
@@ -415,12 +500,24 @@ def main():
             return strict_json(raw)
 
     control = LiveControl(read_control, credentials["metadata"], args.deadline).check
+    diagnostic_path = Path(args.profile).with_name("gateway-diagnostics.jsonl")
+    # Trusted runner owns this fixed path; the model UID cannot replace it.
+    descriptor = os.open(diagnostic_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    diagnostic_file = os.fdopen(descriptor, "w", buffering=1)
+
+    def diagnostic(event):
+        raw = json.dumps(event)
+        print(raw, file=sys.stderr, flush=True)
+        diagnostic_file.write(raw + "\n")
+        diagnostic_file.flush()
+
     gateway = Gateway(
         profile,
         credentials["api_key"],
         credentials["local_token"],
         args.deadline,
         control=control,
+        diagnostic=diagnostic,
     )
     serve(gateway, args.port)
 

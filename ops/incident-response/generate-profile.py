@@ -6,7 +6,7 @@ Usage:
         --dev-rule-uid <grafana-dev-alert-rule-uid> \\
         --prod-rule-uid <grafana-prod-alert-rule-uid>
 
-All other fields use the recommended o4-mini/medium defaults and
+All other fields use the recommended gpt-5.4-mini/medium defaults and
 auto-compute the current month, review timestamp and 30-day expiry.
 
 The output is a single-line JSON string suitable for pasting directly
@@ -47,8 +47,18 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="o4-mini",
-        help="Model name (default: o4-mini)",
+        default="gpt-5.4-mini",
+        help="Model name (default: gpt-5.4-mini; other models require explicit rates)",
+    )
+    parser.add_argument(
+        "--input-rate",
+        type=int,
+        help="Reviewed input price in microdollars per million tokens; provide with --output-rate",
+    )
+    parser.add_argument(
+        "--output-rate",
+        type=int,
+        help="Reviewed output price in microdollars per million tokens; provide with --input-rate",
     )
     parser.add_argument(
         "--effort",
@@ -69,6 +79,13 @@ def main():
         help="Maximum incident runs per month (default: 20)",
     )
     args = parser.parse_args()
+    explicit_rates = args.input_rate is not None and args.output_rate is not None
+    if (args.input_rate is None) != (args.output_rate is None):
+        parser.error("--input-rate and --output-rate must be provided together")
+    if args.model != "gpt-5.4-mini" and not explicit_rates:
+        parser.error(
+            "A nondefault --model requires reviewed --input-rate and --output-rate"
+        )
 
     now = dt.datetime.now(dt.UTC)
     reviewed_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -79,8 +96,8 @@ def main():
         "model": args.model,
         "effort": args.effort,
         "service_tier": "default",
-        "input_rate": 1100000,
-        "output_rate": 4400000,
+        "input_rate": args.input_rate if explicit_rates else 750000,
+        "output_rate": args.output_rate if explicit_rates else 4500000,
         "monthly_microdollars": int(args.monthly_budget_usd * 1_000_000),
         "monthly_runs": args.monthly_runs,
         "promotion_seconds": 3600,
@@ -100,16 +117,18 @@ def main():
         "output_per_role": 32000,
         "approval": args.approval,
         "approved_month": approved_month,
-        "rates_source": "https://platform.openai.com/docs/pricing",
+        "rates_source": "https://developers.openai.com/api/docs/pricing",
         "rates_reviewed_at": reviewed_at,
         "expires_at": expires_at,
     }
 
     output = json.dumps(profile, separators=(",", ":"))
+    # Never emit an invalid profile that an operator could accidentally paste.
+    try:
+        Profile.load(output, now=now.timestamp())
+    except ValueError as error:
+        parser.error(str(error))
     print(output)
-
-    # Validate it actually passes the gate
-    Profile.load(output, now=now.timestamp())
     print("\n✓ Profile passes quota.py validation", file=sys.stderr)
 
 

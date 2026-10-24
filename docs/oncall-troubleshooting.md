@@ -169,13 +169,36 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 * **Fix**:
   Re-generate the monthly profile and update `PAWLOCAL_ONCALL_MODEL_PROFILE` in GitHub Environments:
   ```powershell
-  python ops/incident-response/generate-profile.py --issue 269
+  python ops/incident-response/generate-profile.py --approval alanlima/pawlocal/issues/269
   ```
   Record the approval comment on the Quota Ledger issue as required by DEC-012.
 
 ---
 
 ## Layer 6 — Fixer, Candidate CI, and PR Publication
+
+### Symptom: model continuation fails with HTTP 403 or 429
+
+Check **Show quota gateway failure diagnostics** immediately after the fixer/reviewer model step. This always-run step reads at most 64 KiB from the fixed runner-owned diagnostic file, even when the model step failed or the gateway has stopped. An absent file means no diagnostic was recorded; it does not prove that no model request or reservation occurred.
+
+| Diagnostic | Meaning and next action |
+|---|---|
+| `origin=local`, `code=local_quota_exhausted`, HTTP 403 | Local request/input/output quota refused the call. Inspect `stage` and `reason`; adding API credits cannot change this limit. |
+| `origin=local`, `code=local_admission_denied`, HTTP 403 | Request schema, profile, deadline or live-control policy refused admission. Preserve the gate and inspect the reason. |
+| `origin=openai`, `code=upstream_http_error`, `upstream_status=429` | OpenAI returned 429. Inspect available `upstream_code`, `upstream_type` and `request_id` to distinguish billing quota from rate limits. The gateway preserves upstream HTTP status; it does not retry the call. |
+| `origin=github`, `stage=live_control` | A GitHub live-control read failed. This is not an OpenAI credit failure. |
+| `origin=transport`, `code=transport_uncertain`, HTTP 502 before streaming | A socket/network operation failed. `stage` distinguishes header reading, token count, live control and inference; usage may be uncertain. |
+| `response_started=true` | Streaming had already returned HTTP 200 before failing. The connection closes; no second HTTP response is appended. Treat partial delivery as uncertain. |
+
+Diagnostics contain fixed classifications and bounded upstream identifiers, not credentials, request/model contents or upstream error messages. Normal operational stdout/stderr is retained. The response carries the same structured classification for the model client. Reservations remain consumed on all failed/uncertain calls.
+
+The allocator reserves `min(output_per_request, output_per_role // requests_per_role)` output tokens per call. A profile with four requests, a 16,000-token per-request ceiling and a 32,000-token role ceiling therefore permits four 8,000-token turns without increasing the envelope. See [profile allocation and rollout](oncall-setup.md#per-turn-output-allocation-301). Consumed incident generations and ledger reservations are not automatically retried or refunded.
+
+### Switching the incident model to `gpt-5.4-mini`
+
+The profile generator defaults to `gpt-5.4-mini` with matching `750000`/`4500000` rates. Changing only `model` in an existing protected JSON profile does not update token budgets or pricing fields. For another model, the generator requires both reviewed `--input-rate` and `--output-rate` with `--model`; it never silently reuses the default rates. For Standard global pricing reviewed 24 October 2026, use `input_rate=750000` and `output_rate=4500000` (microdollars per million tokens); the former `1100000`/`4400000` values underestimate this model's output rate. Keep the monthly ceiling at `monthly_microdollars=20000000` ($20) and `monthly_runs=20`.
+
+The four 8,000-token turns require the #301 code fix in [PR #302](https://github.com/alanlima/pawlocal/pull/302) to be reviewed and merged. Updating protected profile model/rate fields is a separate owner-reviewed rollout; it does not activate an unmerged code fix or restore consumed incident reservations. See [the detailed profile instructions and official pricing source](oncall-setup.md#switching-the-approved-profile-to-gpt-54-mini) before preparing the complete profile. No live profile is changed by this documentation.
 
 ### Symptom: `candidate changes touch non-allowlisted paths`
 

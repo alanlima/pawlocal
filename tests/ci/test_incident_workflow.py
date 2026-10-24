@@ -135,6 +135,18 @@ class IncidentWorkflowTests(unittest.TestCase):
                 any("candidate" in step.get("run", "") for step in jobs[name]["steps"])
             )
 
+    def test_failed_model_steps_always_show_bounded_trusted_gateway_diagnostics(self):
+        for name in ("fixer", "reviewer"):
+            steps = self.workflow["jobs"][name]["steps"]
+            model_index = next(i for i, step in enumerate(steps) if step.get("uses", "").startswith("openai/codex-action@"))
+            diagnostic = steps[model_index + 1]
+            self.assertEqual(diagnostic["name"], "Show quota gateway failure diagnostics")
+            self.assertEqual(diagnostic["if"], "always()")
+            self.assertIn('$RUNNER_TEMP/oncall-trusted/gateway-diagnostics.jsonl', diagnostic["run"])
+            self.assertIn('head -c 65536 "$diagnostics"', diagnostic["run"])
+            self.assertNotIn("inputs.", diagnostic["run"])
+            self.assertNotIn("secrets.", str(diagnostic))
+
     def test_profile_has_no_model_or_budget_default_in_workflow(self):
         self.assertIn("vars.PAWLOCAL_ONCALL_MODEL_PROFILE", self.raw)
         self.assertNotIn("gpt-", self.raw)

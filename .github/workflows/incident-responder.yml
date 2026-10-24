@@ -150,6 +150,15 @@ jobs:
           prompt-file: /home/oncall/incident-prompt.md
           allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
+      - name: Show quota gateway failure diagnostics
+        if: always()
+        run: |
+          diagnostics="$RUNNER_TEMP/oncall-trusted/gateway-diagnostics.jsonl"
+          if [ -f "$diagnostics" ]; then
+            head -c 65536 "$diagnostics"
+          else
+            echo "No gateway failure diagnostics recorded; inspect preparation and model step output."
+          fi
       - name: Stop all untrusted processes and seal allowed bytes
         id: seal
         run: python ops/incident-response/job.py seal
@@ -264,6 +273,15 @@ jobs:
           output-schema-file: /home/oncall/review-schema.json
           allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
+      - name: Show quota gateway failure diagnostics
+        if: always()
+        run: |
+          diagnostics="$RUNNER_TEMP/oncall-trusted/gateway-diagnostics.jsonl"
+          if [ -f "$diagnostics" ]; then
+            head -c 65536 "$diagnostics"
+          else
+            echo "No gateway failure diagnostics recorded; inspect preparation and model step output."
+          fi
       - name: Stop review processes and bind pinned result
         id: seal
         run: python ops/incident-response/job.py review-seal

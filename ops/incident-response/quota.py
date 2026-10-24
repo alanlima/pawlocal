@@ -244,7 +244,13 @@ class RequestBudget:
             or self.inputs + input_tokens > p.input_per_role
         ):
             raise Denied("request or cumulative input quota exhausted")
-        output_cap = min(p.output_per_request, p.output_per_role - self.outputs)
+        # A full reservation per turn must leave room for every configured turn.
+        # Keep any integer remainder unallocated; never refund earlier calls.
+        output_cap = min(
+            p.output_per_request,
+            p.output_per_role // p.requests_per_role,
+            p.output_per_role - self.outputs,
+        )
         if output_cap <= 0:
             raise Denied("cumulative output quota exhausted")
         # Charge BEFORE forwarding. Unknown/failed/stream-interrupted requests
