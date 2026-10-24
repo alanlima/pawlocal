@@ -260,9 +260,12 @@ Add yourself (or the team lead) as a required **Reviewer** so that ordinary (non
 
 ---
 
-## Step 5 — Update the Dispatch App config in Terraform / Lambda
+## Step 5 — Update the Dispatch App config and apply via Terraform
 
-The Lambda receiver is deployed with placeholder App IDs. Update the `oncall_receiver` object in your Terraform plan environment variable (`PAWLOCAL_ONCALL_RECEIVER_CONFIG`) with the real values from Step 1:
+The Lambda receiver is initially provisioned with placeholder App IDs (`100001`/`200001`). To apply the real Dispatch App credentials to the live Lambda without any manual CLI mutations:
+
+### 5a. Update `PAWLOCAL_ONCALL_RECEIVER_CONFIG` variable
+In **Settings → Environments → development-plan**, update (or add) the variable `PAWLOCAL_ONCALL_RECEIVER_CONFIG` with your real Dispatch App details from Step 1:
 
 ```json
 {
@@ -275,13 +278,24 @@ The Lambda receiver is deployed with placeholder App IDs. Update the `oncall_rec
 }
 ```
 
-Then update the SSM private key populated in Step 3 with the real Dispatch App private key.
-
 > [!TIP]
-> Find the numeric repository ID with:
+> Find your numeric repository ID using GitHub CLI:
 > ```bash
 > gh api /repos/<org>/<repo> --jq .id
 > ```
+
+### 5b. Trigger the Terraform workflow to apply changes to AWS
+Once the environment variable is saved, run the Terraform environment workflow so Terraform plans and applies the new configuration to the Lambda receiver:
+
+1. In GitHub, go to **Actions** → **Terraform environment plan and apply** (`terraform-environment.yml`).
+2. Click **Run workflow**:
+   - **Environment**: `development`
+   - **Phase**: `converge`
+   - **Backend image**: Paste the current deployed backend image tag. 
+     *(Find it quickly via CLI: `gh api /repos/<org>/<repo>/deployments?environment=development --jq ".[0].payload.backend_image"`)*
+3. Click **Run workflow**.
+4. The **Plan** step will show only the Lambda environment variables changing from the placeholders (`100001`/`200001`) to your real Dispatch App ID and Installation ID.
+5. Approve the deployment in `development-apply` (if required) and allow the apply job to complete successfully.
 
 ---
 
