@@ -147,9 +147,19 @@ def safe_bytes(root, relative, maximum):
 
 
 def files(root):
+    try:
+        root_info = Path(root).lstat()
+    except OSError as error:
+        raise Denied("candidate inspection root unavailable") from error
+    if not stat.S_ISDIR(root_info.st_mode):
+        raise Denied("candidate inspection requires a real directory root")
+
+    def traversal_error(error):
+        raise Denied(f"candidate traversal failed (errno={error.errno})") from error
+
     result = {}
     total = 0
-    for directory, directories, names in os.walk(root, followlinks=False):
+    for directory, directories, names in os.walk(root, followlinks=False, onerror=traversal_error):
         directories[:] = [name for name in directories if name not in IGNORED]
         for name in directories:
             if (Path(directory) / name).is_symlink():

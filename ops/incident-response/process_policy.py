@@ -137,6 +137,16 @@ def approved(command, input_data):
             or args == ["chmod", "755", "/home/oncall"]
             or args == ["chmod", "440", SUDOERS]
         )
+    if args[:2] == ["chown", "--no-dereference"]:
+        return (
+            len(args) == 4
+            and args[2] == f"{os.getuid()}:{os.getgid()}"
+            and args[3]
+            in {
+                "/tmp/pawlocal-oncall-candidate",
+                "/tmp/pawlocal-oncall-review.json",
+            }
+        )
     if args[:1] == ["chown"]:
         return (
             args == ["chown", "root:root", "/home/oncall"]

@@ -12,6 +12,7 @@ except ImportError:
     pwd = None  # Offline Windows imports; execution is explicitly POSIX-only.
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -462,8 +463,46 @@ def prepare(role):
         )
 
 
+def reclaim_model_output(path):
+    directory = path == Path("/tmp/pawlocal-oncall-candidate")
+    if not directory and path != Path("/tmp/pawlocal-oncall-review.json"):
+        raise Denied("fixed model output path required")
+    try:
+        before = path.lstat()
+    except OSError as error:
+        raise Denied("model output root unavailable") from error
+    if not (
+        stat.S_ISDIR(before.st_mode)
+        if directory
+        else stat.S_ISREG(before.st_mode) and before.st_size <= 16384
+    ):
+        raise Denied(
+            "real candidate directory or bounded regular review output required"
+        )
+    # Model processes must already be quiesced. Reclaim only this inode: never
+    # recurse, follow symlinks, or change modes/nested ownership.
+    run(
+        [
+            "sudo",
+            "chown",
+            "--no-dereference",
+            f"{os.getuid()}:{os.getgid()}",
+            str(path),
+        ],
+        check=True,
+    )
+    after = path.lstat()
+    if (after.st_dev, after.st_ino, after.st_mode) != (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+    ) or (after.st_uid, after.st_gid) != (os.getuid(), os.getgid()):
+        raise Denied("model output identity changed during readback")
+
+
 def seal():
     quiesce()
+    reclaim_model_output(Path("/tmp/pawlocal-oncall-candidate"))
     root = Path(os.environ["RUNNER_TEMP"]) / "oncall-trusted"
     metadata = strict_json((root / "metadata.json").read_bytes())
     remaining(metadata)
@@ -477,6 +516,8 @@ def seal():
 
 def review_seal():
     quiesce()
+    reclaim_model_output(Path("/tmp/pawlocal-oncall-candidate"))
+    reclaim_model_output(Path("/tmp/pawlocal-oncall-review.json"))
     root = Path(os.environ["RUNNER_TEMP"]) / "oncall-trusted"
     metadata = strict_json((root / "metadata.json").read_bytes())
     remaining(metadata)
