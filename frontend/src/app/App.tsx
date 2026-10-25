@@ -22,13 +22,21 @@ import {
 import { isMockBackend, placeService } from '../services'
 import { getAccessToken, getAuthSession } from '../auth/authSession'
 import { useDiscovery } from '../features/discovery/useDiscovery'
+import { PlacePagination } from '../features/discovery/PlacePagination'
 import {
   ContributionDialog,
   type ReportableContributionsStatus,
 } from '../features/community/ContributionDialog'
 import { PlaceCard as FeaturePlaceCard } from '../features/place/PlaceCard'
 import { PlaceDetail } from '../features/place/PlaceDetail'
-import type { Contribution, ContributionKind, Facility, Place, PlaceCategory } from '../types/place'
+import type {
+  Contribution,
+  ContributionKind,
+  Facility,
+  Place,
+  PlaceCategory,
+  PlaceQuery,
+} from '../types/place'
 import { recordOperation } from '../observability/telemetry'
 import { buildIdentity } from './buildIdentity'
 
@@ -51,7 +59,14 @@ const facilities: Facility[] = [
 ]
 
 export default function App() {
-  const { query, places, loading, error, updateQuery, refresh } = useDiscovery(placeService)
+  const {
+    query,
+    places,
+    loading,
+    error,
+    updateQuery: searchPlaces,
+    refresh,
+  } = useDiscovery(placeService)
   const [favourites, setFavourites] = useState<string[]>([])
   const [selected, setSelected] = useState<Place | null>(null)
   const [showFilters, setShowFilters] = useState(false)
@@ -69,7 +84,17 @@ export default function App() {
   const [reportableRequest, setReportableRequest] = useState(0)
   const [notice, setNotice] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
-  const [view, setView] = useState<'explore' | 'favourites'>('explore')
+  const [view, setCurrentView] = useState<'explore' | 'favourites'>('explore')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const updateQuery = (nextQuery: PlaceQuery) => {
+    setPage(1)
+    searchPlaces(nextQuery)
+  }
+  const setView = (nextView: typeof view) => {
+    if (nextView !== view) setPage(1)
+    setCurrentView(nextView)
+  }
   const dialogTriggerRef = useRef<HTMLElement | null>(null)
   const placeRequestId = useRef(0)
 
@@ -146,6 +171,12 @@ export default function App() {
       view === 'favourites' ? places.filter((place) => favourites.includes(place.id)) : places,
     [places, favourites, view],
   )
+  const totalPages = Math.max(1, Math.ceil(visiblePlaces.length / pageSize))
+  const currentPage = Math.min(page, totalPages)
+  // Persist the clamped page so newly added favourites cannot restore a stale page.
+  if (page !== currentPage) setPage(currentPage)
+  const pageStart = (currentPage - 1) * pageSize
+  const paginatedPlaces = visiblePlaces.slice(pageStart, pageStart + pageSize)
   const openDialog = (
     type: 'contribute' | 'report',
     nextKind?: ContributionKind,
@@ -516,6 +547,18 @@ export default function App() {
                   : `${visiblePlaces.length} lovely ${visiblePlaces.length === 1 ? 'place' : 'places'} to explore`}
               </span>
             </div>
+            {!loading && !error && visiblePlaces.length > 0 && (
+              <PlacePagination
+                page={currentPage}
+                pageSize={pageSize}
+                total={visiblePlaces.length}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => {
+                  setPageSize(size)
+                  setPage(1)
+                }}
+              />
+            )}
             {loading ? (
               <div className="place-grid" aria-label="Loading places">
                 {[1, 2, 3].map((number) => (
@@ -552,7 +595,7 @@ export default function App() {
               </div>
             ) : (
               <div className="place-grid">
-                {visiblePlaces.map((place, index) => (
+                {paginatedPlaces.map((place, index) => (
                   <FeaturePlaceCard
                     key={place.id}
                     place={place}
