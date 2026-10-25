@@ -15,7 +15,7 @@ class PlaceQueries:
                 # Rank search results by community average rating
                 places = sorted(
                     places,
-                    key=lambda place: place.average_rating if place.average_rating is not None else -1.0,
+                    key=lambda place: place.average_rating,
                     reverse=True,
                 )
             return places, total
