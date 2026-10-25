@@ -1,6 +1,6 @@
 # Project 1 delivery plan
 
-Owner: alanlima. Tracking: [#281 delivery readiness](https://github.com/alanlima/pawlocal/issues/281), [#284 README/evidence](https://github.com/alanlima/pawlocal/issues/284), [#283 peer reviews](https://github.com/alanlima/pawlocal/issues/283). Last evidence review: 25 October 2026. **Preparation in progress; no platform submission or receipt recorded.**
+Owner: alanlima. Tracking: [#281 delivery readiness](https://github.com/alanlima/pawlocal/issues/281), [#284 README/evidence](https://github.com/alanlima/pawlocal/issues/284), [#283 peer reviews](https://github.com/alanlima/pawlocal/issues/283). Documentation preparation: [PR #403](https://github.com/alanlima/pawlocal/pull/403). Last evidence review: 25 October 2026. **Final delivery acceptance and platform submission remain pending; no receipt is recorded.**
 
 ## Problem, goal and reviewer entry point
 
@@ -64,19 +64,20 @@ The successful drill recorded 548 HTTP 500 followed by 103 valid HTTP 200 across
 
 ## Infrastructure document review
 
-The review corrected stale pre-deployment/current DSQL-outage and telemetry-disabled claims in the README, architecture, implementation plan, testing, backend README and hosted telemetry guide. Original stage criteria and initial rollout examples are historical; maintained operational instructions remain canonical. Development/production/IAM-bootstrap ownership, runtime secret boundaries, ordinary manual promotion and incident exceptions remain explicit.
+The review corrected stale pre-deployment/current DSQL-outage and telemetry-disabled claims in the README, architecture, implementation plan, testing, backend README and hosted telemetry guide. The wider operator-guide pass reconciled Actions, greenfield/production lifecycle procedures, configuration handoffs, the hosting/cost proposal and DSQL validation notes with the implemented paths and DEC-015/017. Original stage criteria, pricing dates and offline validation limits remain historical; no new price or live-runtime claim was inferred. Development/production/IAM-bootstrap ownership, runtime secret boundaries, ordinary manual promotion and incident exceptions remain explicit.
 
 Read [DEC-015](decisions.md#dec-015--temporary-disabling-of-shared-strict-release-plan-invocation-305) and [DEC-017](decisions.md) alongside the source policies: shared strict release-plan validation is temporarily disabled; incident software policy enforcement has its own broader temporary switch. Existing external GitHub/IAM controls, Terraform state ownership and infrastructure approval still apply. Documents cannot establish current live settings by themselves.
 
 ## Verification record
 
-Documentation branch: `docs/284-delivery-readme`, based on source `8895b99a549ee0db134cec69bd681618f8db46d7`. Final documentation PR/commit will be recorded in #284. Live screenshots were captured separately; no frontend bundle commit is claimed from the `BUILD local` label.
+Documentation branch: `docs/284-delivery-readme`, based on source `8895b99a549ee0db134cec69bd681618f8db46d7`. [PR #403](https://github.com/alanlima/pawlocal/pull/403) records the current documentation head and its reviews; selecting the final submission commit remains an owner action. Live screenshots were captured separately; no frontend bundle commit is claimed from the `BUILD local` label.
 
 - Official rubric, form fields, embedded UTC deadline and calendar: inspected 25 October 2026.
 - Public production UI: real discovery/detail, category filtering (17 dog parks), facility controls, share confirmation and anonymous save prompt inspected and captured.
 - Grafana production application/incident dashboards: inspected; actual metrics and safe structured logs visible. Unknown panels retained in captions.
 - Infrastructure source/workflow review: architecture, Terraform ownership, DSQL role configuration, CI/release and telemetry instructions inspected; no infrastructure operation performed.
-- `git diff --check`: passed. All relative Markdown file targets and heading fragments resolve across the 12 changed/new Markdown documents.
+- `git diff --check`: passed. Relative Markdown file targets and heading fragments resolve across the changed/new documentation. All eight maintained GitHub Actions documentation-reference tests passed after the wider operator-guide corrections.
+- Anonymous HTTP checks returned the expected public repository, PR #403, delivery issues, drill wiki, repair PR, development/production release pages and both application pages (ten URLs). All eleven screenshot URLs were anonymously readable; downloaded JPEG byte hashes matched the inspected captures. Grafana itself still requires authorized access, as labelled.
 - Rendered README and delivery plan: inspected using GitHub-rendered Markdown previews; embedded images loaded. GitHub repository preview also rendered the Mermaid diagram iframe successfully.
 - Independent documentation review: screenshot/content review found one DEC-015 fragment mismatch, corrected; final integrated review is tracked on the PR.
 - Aggregate README check command: passed after `npm ci --prefix frontend`, using the existing backend test virtual environment and `PYTHONPATH` bound to this worktree. Frontend: 15 files / 73 Vitest tests plus 9 Node checks passed. Backend: 237 passed, 3 PostgreSQL/migration tests skipped because no disposable integration URL was configured. This was an isolated source worktree using an existing Python environment, not a clean dependency installation.
