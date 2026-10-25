@@ -228,6 +228,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           mask-aws-account-id: "true"
       - uses: ./.configuration-tools/.github/actions/setup-frontend-toolchain
+      - name: Set frontend artifact build timestamp
+        run: echo "VITE_APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
       - name: Build production frontend
         working-directory: frontend
         env:

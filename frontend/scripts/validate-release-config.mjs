@@ -30,6 +30,17 @@ export function validateReleaseSettings(env = process.env) {
   if (releaseEnvironment !== 'development' && releaseEnvironment !== 'production') {
     throw new Error('VITE_RELEASE_ENV must be "development" or "production"')
   }
+  if (!/^[a-f0-9]{40}$/i.test(env.VITE_APP_COMMIT?.trim() ?? '')) {
+    throw new Error('Cloud release builds require VITE_APP_COMMIT as a full source commit SHA')
+  }
+  const buildTime = env.VITE_APP_BUILD_TIME?.trim() ?? ''
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(buildTime) ||
+    Number.isNaN(Date.parse(buildTime)) ||
+    new Date(buildTime).toISOString().replace('.000Z', 'Z') !== buildTime.replace('.000Z', 'Z')
+  ) {
+    throw new Error('Cloud release builds require VITE_APP_BUILD_TIME as an ISO 8601 UTC timestamp')
+  }
   if (env.VITE_USE_MOCK_BACKEND !== 'false') {
     throw new Error('Cloud release builds require VITE_USE_MOCK_BACKEND=false')
   }

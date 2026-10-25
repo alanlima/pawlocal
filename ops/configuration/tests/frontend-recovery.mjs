@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { matchesOAuthSnapshot } from '../oauth-snapshot.mjs'
+import { verifyServedBuildIdentity } from '../verify-served-build-identity.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const frontend = join(root, 'frontend')
@@ -15,6 +16,8 @@ const require = createRequire(join(frontend, 'package.json'))
 const { chromium } = require('@playwright/test')
 const oldConfig = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const newConfig = JSON.parse(await readFile(process.argv[3], 'utf8'))
+const buildCommit = 'a'.repeat(40)
+const buildTime = new Date().toISOString()
 const temporary = await mkdtemp(join(tmpdir(), 'pawlocal-config-recovery-'))
 let published
 const server = createServer(async (request, response) => {
@@ -42,6 +45,8 @@ try {
     const env = {
       ...process.env,
       ...config,
+      VITE_APP_COMMIT: buildCommit,
+      VITE_APP_BUILD_TIME: buildTime,
       VITE_RELEASE_ENV: process.argv[4] || 'development',
       VITE_USE_MOCK_BACKEND: 'false',
       VITE_TELEMETRY_ENABLED: 'false',
@@ -64,11 +69,19 @@ try {
   }
   async function observedRedirect() {
     const page = await browser.newPage()
-    await page.route(`${new URL(oldConfig.VITE_API_BASE_URL).origin}/**`, (route) =>
-      route.fulfill({
-        json: { items: [], total: 0, page: 1, page_size: 20 },
-      }),
-    )
+    await page.route(`${new URL(oldConfig.VITE_API_BASE_URL).origin}/**`, (route) => {
+      const place = {
+        id: 'release-fixture',
+        name: 'Synthetic release fixture',
+        category: 'dog_park',
+        area: 'Fixture',
+      }
+      return route.fulfill({
+        json: new URL(route.request().url()).pathname.endsWith('/places/release-fixture')
+          ? place
+          : { items: [place], total: 1, page: 1, page_size: 20 },
+      })
+    })
     await page.route('https://*.amazoncognito.com/**', (route) =>
       route.fulfill({
         contentType: 'text/html',
@@ -76,6 +89,22 @@ try {
       }),
     )
     await page.goto(`http://127.0.0.1:${server.address().port}/`)
+    for (const width of [1280, 375]) {
+      await page.setViewportSize({ width, height: 900 })
+      await verifyServedBuildIdentity(page, buildCommit, buildTime)
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        true,
+      )
+      await page.getByRole('button', { name: 'View Synthetic release fixture' }).click()
+      await page.getByRole('heading', { name: 'Synthetic release fixture' }).waitFor()
+      await verifyServedBuildIdentity(page, buildCommit, buildTime)
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        true,
+      )
+      await page.goto(`http://127.0.0.1:${server.address().port}/`)
+    }
     const request = page.waitForRequest((request) => request.url().includes('/oauth2/authorize'))
     await page.getByRole('button', { name: /^Sign in/ }).click()
     const url = new URL((await request).url())

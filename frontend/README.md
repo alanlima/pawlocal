@@ -149,6 +149,8 @@ Supply these **public client settings separately for development and production*
 | Variable                    | Purpose                                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `VITE_RELEASE_ENV`          | Must be `development` or `production` for a cloud release build.                                               |
+| `VITE_APP_COMMIT` | Full source commit SHA embedded in the release footer. |
+| `VITE_APP_BUILD_TIME` | ISO 8601 UTC artifact build time generated immediately before bundling. |
 | `VITE_USE_MOCK_BACKEND`     | Must be exactly `false` for cloud release builds.                                                              |
 | `VITE_TELEMETRY_ENABLED`    | Must be exactly `false` for the initial cloud release.                                                         |
 | `VITE_API_BASE_URL`         | Absolute HTTPS API URL ending in `/api/v1`; use the environment's separate `api-dev.<domain>` or `api.<domain>` host. |
@@ -157,6 +159,8 @@ Supply these **public client settings separately for development and production*
 | `VITE_COGNITO_REDIRECT_URI` | Exact callback URL registered with the app client.                                                             |
 | `VITE_COGNITO_LOGOUT_URI`   | Exact post-logout URL registered with the app client.                                                          |
 | `VITE_COGNITO_SCOPES`       | Optional OAuth scopes; defaults to `openid email profile`.                                                     |
+
+The release workflow generates build identity metadata for each artifact; these values are not synchronized Environment configuration.
 
 `npm run build` always runs `prebuild` and requires valid release settings, including for a workstation build; it fails before TypeScript/Vite runs if `VITE_RELEASE_ENV` or any required value is missing or malformed. Local `npm run dev` does not require release settings. The frontend also checks the same release invariants at startup. Run `npm run validate:release-config` to validate the currently selected release environment directly.
 
