@@ -124,4 +124,4 @@ Reviewer walkthrough: public demo → search/filter/detail/share → local run/c
 | Telemetry, dashboards and privacy | [Hosted telemetry](docs/hosted-telemetry-operations.md), [monitoring plan](docs/plans/monitoring-implementation.md) |
 | Incident demonstration, investigation and emergency stop | [Setup](docs/oncall-setup.md), [troubleshooting](docs/oncall-troubleshooting.md), [controller operations](ops/incident-response/README.md) |
 
-Operational changes retain existing approvals. Final rollback evidence is being reviewed separately; retired `rollback-development.yml` is an inert historical workflow, not an operational rollback procedure.
+Operational changes retain existing approvals. See [Application release rollback — operator steps and live evidence](https://github.com/alanlima/pawlocal/wiki/Application-release-rollback). The retired `rollback-development.yml` is an inert historical workflow, not an operational rollback procedure.
