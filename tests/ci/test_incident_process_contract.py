@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import pathlib
 import shutil
 import tempfile
@@ -15,6 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 DIRECTORY = ROOT / "ops/incident-response"
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class IncidentProcessContractTests(unittest.TestCase):
     def test_only_proven_launches_removed_and_residual_scanner_still_runs(self):
         validate_inventory(ROOT)

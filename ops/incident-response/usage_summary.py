@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 from quota import Denied, integer, strict_json
+from enforcement import evidence
 
 PROFILE_FIELDS = ("model", "effort", "service_tier")
 LIMIT_FIELDS = ("requests_per_role", "input_per_request", "output_per_request", "input_per_role", "output_per_role", "input_rate", "output_rate", "monthly_runs", "monthly_microdollars")
@@ -207,6 +208,18 @@ def main():
         limits = limits_from_profile(root / "profile.json")
         text = render({args.mode: report}, limits)
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as output:
+        mode = evidence()
+        output.write(
+            "\nIncident enforcement: **"
+            + ("enabled" if mode["enabled"] else "disabled")
+            + "**.\n"
+        )
+        if not mode["enabled"]:
+            output.write(
+                "Disabled policy categories: "
+                + ", ".join(mode["disabled_categories"])
+                + ". Configured ceilings below are reference values; skipped checks are not passes.\n"
+            )
         output.write(text)
     if "GITHUB_OUTPUT" in os.environ:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:

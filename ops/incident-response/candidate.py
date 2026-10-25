@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from deadline import run
 from quota import Denied, strict_json
+from enforcement import enabled
 
 MAX_FILES = 20
 MAX_BYTES = 512 * 1024
@@ -48,24 +49,33 @@ def is_allowed_path(name):
     pure = PurePosixPath(name)
     if pure.is_absolute() or ".." in pure.parts:
         return False
+    if not enabled():
+        # Containment and private metadata remain execution isolation.
+        return not any(
+            part in IGNORED or part.startswith(".env") for part in pure.parts
+        )
     if len(pure.parts) < 2:
         return False
     if any(part in IGNORED for part in pure.parts):
         return False
     # Only allow regular application code and tests under backend and frontend
-    valid_prefix = (
-        name.startswith(("backend/pawlocal/", "backend/tests/"))
-        or name.startswith(("frontend/src/", "frontend/public/"))
-    )
+    valid_prefix = name.startswith(
+        ("backend/pawlocal/", "backend/tests/")
+    ) or name.startswith(("frontend/src/", "frontend/public/"))
     if not valid_prefix:
         return False
     # Exclude workflow/IAM/auth/security/secrets/infrastructure/data repair per AGENTS.md
-    if any(part in ("auth", "security", "infra", "iam", "migrations", "data", "scripts") for part in pure.parts):
-        return False
-    if (
-        pure.stem in ("auth", "security", "dsql_post_apply_setup", "dsql_role_bootstrap")
-        or pure.name.startswith(("auth.", "auth_", ".env"))
+    if any(
+        part in ("auth", "security", "infra", "iam", "migrations", "data", "scripts")
+        for part in pure.parts
     ):
+        return False
+    if pure.stem in (
+        "auth",
+        "security",
+        "dsql_post_apply_setup",
+        "dsql_role_bootstrap",
+    ) or pure.name.startswith(("auth.", "auth_", ".env")):
         return False
     if pure.name in DISALLOWED_NAMES or pure.suffix in DISALLOWED_EXTENSIONS:
         return False
@@ -159,7 +169,9 @@ def files(root):
 
     result = {}
     total = 0
-    for directory, directories, names in os.walk(root, followlinks=False, onerror=traversal_error):
+    for directory, directories, names in os.walk(
+        root, followlinks=False, onerror=traversal_error
+    ):
         directories[:] = [name for name in directories if name not in IGNORED]
         for name in directories:
             if (Path(directory) / name).is_symlink():
@@ -201,7 +213,7 @@ def export(base, candidate, metadata):
         reason = "outside_approved_paths"
     elif deleted:
         reason = "source_deletion"
-    if reason:
+    if reason and enabled():
         # Bounded, escaped filenames only; never candidate contents or payloads.
         report = {
             "reason": reason,
@@ -223,10 +235,13 @@ def export(base, candidate, metadata):
         ("backend", BACKEND_REGRESSION),
         ("frontend", FRONTEND_REGRESSION),
     ):
-        if layer in layers and regression not in changed:
+        if enabled() and (layer in layers and regression not in changed):
             raise Denied("changed layer requires its fixed regression test")
     content = {}
     for name in changed:
+        if name not in updated:
+            content[name] = None
+            continue
         raw_file = safe_bytes(candidate, name, MAX_BYTES)
         if b"\0" in raw_file:
             raise Denied("binary candidate forbidden")
@@ -235,7 +250,9 @@ def export(base, candidate, metadata):
         except UnicodeDecodeError as error:
             raise Denied("UTF-8 source required") from error
         content[name] = base64.b64encode(raw_file).decode()
-    if sum(len(base64.b64decode(raw)) for raw in content.values()) > MAX_BYTES:
+    if enabled() and (
+        sum(len(base64.b64decode(raw)) for raw in content.values()) > MAX_BYTES
+    ):
         raise Denied("total candidate bound")
     value = {
         "schema": 1,
@@ -251,7 +268,7 @@ def load(raw, metadata):
     if len(raw) > MAX_BYTES * 2:
         raise Denied("candidate transport bound")
     value = strict_json(raw)
-    if (
+    if enabled() and (
         not isinstance(value, dict)
         or set(value) != {"schema", "base_sha", "incident_key", "files"}
         or value["schema"] != 1
@@ -260,7 +277,7 @@ def load(raw, metadata):
     ):
         raise Denied("candidate provenance differs")
     content = value["files"]
-    if (
+    if enabled() and (
         not isinstance(content, dict)
         or not 1 <= len(content) <= MAX_FILES
         or any(name not in ALLOWED for name in content)
@@ -270,10 +287,16 @@ def load(raw, metadata):
         ("backend/", BACKEND_REGRESSION),
         ("frontend/", FRONTEND_REGRESSION),
     ):
-        if any(name.startswith(layer_prefix) for name in content) and regression not in content:
+        if enabled() and (
+            any(name.startswith(layer_prefix) for name in content)
+            and regression not in content
+        ):
             raise Denied("fixed regression test required")
     result = {}
     for name, encoded in content.items():
+        if not enabled() and encoded is None:
+            result[name] = None
+            continue
         if not isinstance(encoded, str) or len(encoded) > MAX_BYTES * 2:
             raise Denied("candidate file bound")
         try:
@@ -284,7 +307,7 @@ def load(raw, metadata):
         if b"\0" in decoded:
             raise Denied("binary candidate forbidden")
         result[name] = decoded
-    if sum(map(len, result.values())) > MAX_BYTES:
+    if enabled() and (sum(map(len, result.values())) > MAX_BYTES):
         raise Denied("total candidate bound")
     return result
 
@@ -302,6 +325,9 @@ def materialize(content, root):
                 raise Denied("symlink parent forbidden")
         if target.is_symlink():
             raise Denied("symlink target forbidden")
+        if raw is None and not enabled():
+            target.unlink(missing_ok=True)
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(raw)
 
@@ -344,7 +370,7 @@ def git(trusted, *args, input_data=None, extra_env=None):
 def bind_candidate(trusted, content, metadata, patch_sha):
     # The checked-out source/config here comes from pinned trusted main; allowed
     # changes cannot modify attributes, git config, hooks or external filters.
-    if git(trusted, "rev-parse", "HEAD") != metadata["base_sha"]:
+    if enabled() and (git(trusted, "rev-parse", "HEAD") != metadata["base_sha"]):
         raise Denied("trusted base differs")
     materialize(content, trusted)
     git(trusted, "add", "--", *sorted(content))

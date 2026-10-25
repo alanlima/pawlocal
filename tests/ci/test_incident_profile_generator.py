@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import contextlib
 import importlib.util
 import io
@@ -5,7 +7,6 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 DIRECTORY = Path(__file__).resolve().parents[2] / "ops/incident-response"
 sys.path.insert(0, str(DIRECTORY))
@@ -16,6 +17,7 @@ generator = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(generator)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class ProfileGeneratorTests(unittest.TestCase):
     def generate(self, *arguments):
         output, errors = io.StringIO(), io.StringIO()

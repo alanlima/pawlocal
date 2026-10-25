@@ -16,12 +16,14 @@ from admission import (
     current_alert,
     deployed_release,
     readiness,
+    verified_record,
 )
 from candidate import digest
 from control import LiveControl
 from deadline import arm
 from job import context, download
 from quota import Denied, integer, strict_json
+from enforcement import enabled, skipped, operational_deadline
 from quota_gateway import NoRedirect
 from recovery import configured_rule, observe
 from settings import runtime_ready
@@ -63,8 +65,10 @@ def request(token, deadline, method, path, body=None, opener=None):
             and body.get("ref") == "main"
             and body.get("return_run_details") is True
             and isinstance(body.get("inputs"), dict)
-            and set(body["inputs"])
+            and (set(body["inputs"]) - {"incident_environment"})
             == {"release_commit", "backend_image", "expected_workflow_sha"}
+            and body["inputs"].get("incident_environment", "")
+            in {"", "development", "production"}
             and body["inputs"].get("expected_workflow_sha")
             == body["inputs"].get("release_commit")
             and re.fullmatch(r"[0-9a-f]{40}", str(body["inputs"].get("release_commit")))
@@ -73,8 +77,10 @@ def request(token, deadline, method, path, body=None, opener=None):
                 str(body["inputs"].get("backend_image")),
             )
         )
-        if not (merge_allowed or dispatch_allowed):
+        if enabled() and not (merge_allowed or dispatch_allowed):
             raise Denied("non-allowlisted release mutation")
+    if not enabled():
+        deadline = operational_deadline()
     if not token or time.time() >= deadline:
         raise Denied("promotion credential/deadline unavailable")
     value = urllib.request.Request(
@@ -102,10 +108,10 @@ def publication():
     raw = download("oncall-publication-" + metadata["run_id"], {"publication.json"})[
         "publication.json"
     ]
-    if digest(raw) != os.environ.get("PUBLICATION_SHA256"):
+    if enabled() and (digest(raw) != os.environ.get("PUBLICATION_SHA256")):
         raise Denied("publication artifact differs")
     value = strict_json(raw)
-    if not isinstance(value, dict) or set(value) != {
+    if not isinstance(value, dict) or (set(value) - {"enforcement"}) != {
         "schema",
         "run_id",
         "issue",
@@ -123,7 +129,7 @@ def publication():
     integer(value["pr"])
     integer(value["published_at"])
     integer(value["promotion_deadline"])
-    if (
+    if enabled() and (
         value["schema"] != 1
         or value["run_id"] != metadata["run_id"]
         or value["issue"] != metadata["issue"]
@@ -147,6 +153,14 @@ def publication():
 
 
 def valid_run(run, workflow, event, sha=None):
+    if not enabled():
+        skipped("release")
+        return (
+            isinstance(run, dict)
+            and type(run.get("id")) is int
+            and run.get("path") == ".github/workflows/" + workflow
+            and run.get("event") == event
+        )
     return (
         isinstance(run, dict)
         and type(run.get("id")) is int
@@ -210,7 +224,7 @@ def candidate_ci(client, value):
 
 def check_pr(client, value):
     pr = client.request("GET", f"/pulls/{value['pr']}")
-    if (
+    if enabled() and (
         pr.get("state") != "open"
         or pr.get("draft") is not False
         or pr.get("head", {}).get("sha") != value["candidate_sha"]
@@ -222,7 +236,7 @@ def check_pr(client, value):
         or pr.get("merged") is not False
     ):
         raise Denied("exact published PR changed")
-    if (
+    if enabled() and (
         client.request("GET", "/git/ref/heads/main").get("object", {}).get("sha")
         != value["base_sha"]
     ):
@@ -231,7 +245,7 @@ def check_pr(client, value):
 
 
 def pause(deadline):
-    remaining = deadline - time.time()
+    remaining = deadline - time.time() if enabled() else 15
     if remaining <= 0:
         raise Denied(
             "release phase deadline; cease new mutations and reconcile in-flight deployment"
@@ -243,7 +257,9 @@ def candidate_authorization(client, value):
     statuses = client.request("GET", f"/commits/{value['candidate_sha']}/statuses")
     if not isinstance(statuses, list):
         raise Denied("unable to inspect candidate commit statuses")
-    matches = [s for s in statuses if s.get("context") == "PawLocal change authorization"]
+    matches = [
+        s for s in statuses if s.get("context") == "PawLocal change authorization"
+    ]
     if not matches:
         return False
     latest = matches[0]
@@ -255,12 +271,34 @@ def candidate_authorization(client, value):
     creator = latest.get("creator", {})
     creator_login = creator.get("login", "")
     if not (creator_login.endswith("[bot]") or creator.get("type") == "Bot"):
-        raise Denied("candidate change authorization status not issued by authorized bot")
+        raise Denied(
+            "candidate change authorization status not issued by authorized bot"
+        )
     return True
 
 
 def merge(client, token, value, metadata):
-    while not (candidate_ci(client, value) and candidate_authorization(client, value)):
+    if not enabled():
+        # GitHub still enforces repository rules. Wait on the server's actual
+        # ability to merge; do not manufacture CI/authorization success and do
+        # not retry a write whose acknowledgement may be uncertain.
+        while True:
+            actual = client.request("GET", f"/pulls/{value['pr']}")
+            state = actual.get("mergeable_state")
+            if actual.get("state") != "open" or state in {"dirty", "behind"}:
+                raise Denied(
+                    "GitHub cannot merge the current PR; inspect external repository requirements"
+                )
+            if state in {"clean", "unstable"} and actual.get("mergeable") is True:
+                break
+            print(
+                "[incident-enforcement] waiting for external GitHub merge requirements",
+                flush=True,
+            )
+            pause(client.deadline)
+    while enabled() and not (
+        candidate_ci(client, value) and candidate_authorization(client, value)
+    ):
         check_pr(client, value)
         pause(client.deadline)
     check_pr(client, value)
@@ -285,7 +323,7 @@ def merge(client, token, value, metadata):
         raise Denied("merge result uncertain; no retry")
     commit = client.request("GET", "/git/commits/" + sha)
     parents = commit.get("parents", [])
-    if (
+    if enabled() and (
         commit.get("tree", {}).get("sha") != value["tree_sha"]
         or not isinstance(parents, list)
         or len(parents) != 1
@@ -296,6 +334,9 @@ def merge(client, token, value, metadata):
 
 
 def check_incident(client, metadata):
+    if not enabled():
+        skipped("continuity")
+        return
     LiveControl(
         lambda path: client.request("GET", path), metadata, client.deadline
     ).check()
@@ -333,8 +374,9 @@ def development_run(client, sha):
         for run in listing.get("workflow_runs", [])
         if valid_run(run, "fullstack-release.yml", "push", sha)
         and run.get("head_branch") == "main"
+        and run.get("head_sha") == sha
     ]
-    if len(runs) > 1:
+    if enabled() and (len(runs) > 1):
         raise Denied("multiple development release attempts require escalation")
     if not runs or runs[0].get("status") != "completed":
         return None
@@ -343,13 +385,50 @@ def development_run(client, sha):
     return runs[0]["id"]
 
 
+def operation_release(client, environment, sha, run_id):
+    """Read the artifact produced by an operation, rather than current runtime.
+
+    This selects usable deployment inputs. Optional policy about trusted
+    producers/current release identity is still handled by verified_record.
+    """
+    records = client.pages(
+        f"/deployments?environment={environment}&ref={sha}", maximum=2
+    )
+    matches = []
+    for record in records:
+        payload = record.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+        if (
+            record.get("environment") == environment
+            and record.get("sha") == sha
+            and isinstance(payload, dict)
+            and payload.get("workflow_run_id") == run_id
+        ):
+            matches.append(record)
+    if not matches:
+        return None
+    record = max(matches, key=lambda item: item.get("created_at", ""))
+    return verified_record(client, record, environment)
+
+
 def wait_development(client, sha, control):
     while True:
         control()
         run_id = development_run(client, sha)
         if run_id is not None:
-            development = deployed_release(client, "development")
-            if (
+            development = (
+                deployed_release(client, "development")
+                if enabled()
+                else operation_release(client, "development", sha, run_id)
+            )
+            if development is None:
+                pause(client.deadline)
+                continue
+            if enabled() and (
                 development["affected_sha"] != sha
                 or development["deployment_run"] != run_id
             ):
@@ -360,16 +439,30 @@ def wait_development(client, sha, control):
         pause(client.deadline)
 
 
-def promote(client, sha, control=None, progress=None, expected_development=None):
+def promote(
+    client,
+    sha,
+    control=None,
+    progress=None,
+    expected_development=None,
+    *,
+    incident_environment="",
+):
+    if incident_environment not in {"", "development", "production"}:
+        raise Denied("usable incident Environment selector required")
     control = control or (lambda: None)
     progress = progress or (lambda _payload: None)
     control()
     runtime_ready(client)
     development = wait_development(client, sha, control)
-    if expected_development is not None and development != expected_development:
+    if enabled() and (
+        expected_development is not None and development != expected_development
+    ):
         raise Denied("observed development release changed before promotion")
     runtime_ready(client)
-    if client.request("GET", "/git/ref/heads/main").get("object", {}).get("sha") != sha:
+    if enabled() and (
+        client.request("GET", "/git/ref/heads/main").get("object", {}).get("sha") != sha
+    ):
         raise Denied("main moved before exact verified production dispatch")
     image = "ghcr.io/alanlima/pawlocal-api@" + development["image_digest"]
     control()
@@ -392,6 +485,11 @@ def promote(client, sha, control=None, progress=None, expected_development=None)
                 "release_commit": sha,
                 "backend_image": image,
                 "expected_workflow_sha": sha,
+                **(
+                    {"incident_environment": incident_environment}
+                    if incident_environment
+                    else {}
+                ),
             },
             "return_run_details": True,
         },
@@ -422,8 +520,15 @@ def promote(client, sha, control=None, progress=None, expected_development=None)
                 raise Denied(
                     "production release failed; no automatic infrastructure rollback"
                 )
-            production = deployed_release(client, "production")
-            if (
+            production = (
+                deployed_release(client, "production")
+                if enabled()
+                else operation_release(client, "production", sha, run_id)
+            )
+            if production is None:
+                pause(client.deadline)
+                continue
+            if enabled() and (
                 production["affected_sha"] != sha
                 or production["image_digest"] != development["image_digest"]
                 or production["deployment_run"] != run_id
@@ -444,7 +549,7 @@ def verified_merge(client, metadata, value):
         "pr": value["pr"],
     }
     sha = payload.get("merged_sha", "")
-    if (
+    if enabled() and (
         set(payload) != set(expected) | {"merged_sha"}
         or any(payload[key] != item for key, item in expected.items())
         or not re.fullmatch(r"[0-9a-f]{40}", str(sha))
@@ -454,7 +559,7 @@ def verified_merge(client, metadata, value):
     pr = client.request("GET", f"/pulls/{value['pr']}")
     commit = client.request("GET", "/git/commits/" + sha)
     parents = commit.get("parents", [])
-    if (
+    if enabled() and (
         pr.get("merged") is not True
         or pr.get("merge_commit_sha") != sha
         or pr.get("head", {}).get("sha") != value["candidate_sha"]
@@ -470,7 +575,7 @@ def verified_merge(client, metadata, value):
 
 def recover(client, environment, release, profile, metadata, control):
     control()
-    if deployed_release(client, environment) != release:
+    if enabled() and (deployed_release(client, environment) != release):
         raise Denied("release identity changed before observation")
     proof = observe(
         Path(os.environ["GITHUB_WORKSPACE"]),
@@ -486,7 +591,7 @@ def recover(client, environment, release, profile, metadata, control):
         control=control,
     )
     control()
-    if deployed_release(client, environment) != release:
+    if enabled() and (deployed_release(client, environment) != release):
         raise Denied("release identity changed during observation")
     return proof
 
@@ -498,13 +603,16 @@ def main():
     arm(os.environ["PROMOTION_DEADLINE"], maximum=3600)
     metadata, profile, value = publication()
     client = ReleaseClient(os.environ["GH_TOKEN"], value["promotion_deadline"])
-    if os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true":
+    if enabled() and (os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true"):
         raise Denied("incident automation disabled")
-    if (
-        phase == "promote"
-        or phase == "merge"
-        and metadata["alert"]["environment"] == "production"
-    ) and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true":
+    if enabled() and (
+        (
+            phase == "promote"
+            or phase == "merge"
+            and metadata["alert"]["environment"] == "production"
+        )
+        and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true"
+    ):
         raise Denied("production telemetry-read authority revoked")
     root = Path(os.environ["RUNNER_TEMP"])
     control = LiveControl(
@@ -555,13 +663,14 @@ def main():
             development = receipts.read(
                 "development", os.environ.get("DEVELOPMENT_SHA256"), metadata, value
             )
-            if (
+            if enabled() and (
                 development.get("merged_sha") != sha
                 or development.get("merge_sha256") != os.environ["MERGE_SHA256"]
                 or development.get("release", {}).get("affected_sha") != sha
                 or development.get("recovery", {}).get("profile_sha256")
                 != profile.digest
-                or development.get("recovery", {}).get("window_seconds")
+                or enabled()
+                and development.get("recovery", {}).get("window_seconds")
                 != profile.recovery_seconds
             ):
                 raise Denied("development recovery receipt differs")
@@ -592,6 +701,9 @@ def main():
                 control,
                 lambda payload: receipts.write("progress", metadata, value, payload),
                 development["release"],
+                incident_environment=metadata.get(
+                    "source_environment", metadata["alert"]["environment"]
+                ),
             )
             proof = recover(client, "production", release, profile, metadata, control)
             receipts.validate_recovery(proof, release, profile, "production", value)

@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import io
 import json
 import sys
@@ -6,7 +8,6 @@ import unittest
 import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import protection
@@ -55,6 +56,7 @@ class Opener:
         )
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class ProtectionTests(unittest.TestCase):
     def check(self, opener, path=None):
         with patch.object(protection.os, "getuid", return_value=7, create=True):

@@ -10,6 +10,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from enforcement import enabled, skipped
 
 
 class Denied(ValueError):
@@ -74,7 +75,7 @@ class Profile:
                 r"[A-Za-z0-9_.:/-]{1,160}", value[name]
             ):
                 raise Denied("explicit model and approval reference required")
-        if (
+        if enabled() and (
             value["effort"] not in {"minimal", "low", "medium", "high", "xhigh"}
             or value["service_tier"] != "default"
         ):
@@ -93,7 +94,7 @@ class Profile:
             if name == "monthly_microdollars" and value[name] is None:
                 continue
             integer(value[name])
-        if (
+        if enabled() and (
             value["monthly_runs"] > 1000
             or value["promotion_seconds"] > 3600
             or not 600 <= value["recovery_seconds"] <= 900
@@ -118,7 +119,7 @@ class Profile:
         else:
             value["rule_uids"] = {}
         for prefix in ("input", "output"):
-            if (
+            if enabled() and (
                 value[f"{prefix}_per_role"]
                 > value[f"{prefix}_per_request"] * value["requests_per_role"]
             ):
@@ -128,6 +129,9 @@ class Profile:
         return profile
 
     def valid_at(self, now):
+        if not enabled():
+            skipped("budget")
+            return
         if not isinstance(self.rates_source, str) or not re.fullmatch(
             r"https://(?:developers|platform)\.openai\.com/[A-Za-z0-9_./#?=&-]{1,240}",
             self.rates_source,
@@ -182,7 +186,8 @@ def reserve(profile, ledger, month, run_id, attempt):
         or type(attempt) is not int
         or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month)
         or not re.fullmatch(r"[1-9]\d{0,19}", run_id)
-        or attempt != 1
+        or enabled()
+        and attempt != 1
     ):
         raise Denied("invalid month/run or repeated attempt")
     if not isinstance(ledger, list) or len(ledger) > 10000:
@@ -210,17 +215,20 @@ def reserve(profile, ledger, month, run_id, attempt):
         ):
             raise Denied("invalid ledger month")
         integer(entry["microdollars"])
-        if entry["run_id"] in seen:
+        if enabled() and entry["run_id"] in seen:
             raise Denied("duplicate ledger run")
         seen.add(entry["run_id"])
         if entry["month"] == month:
             spent += entry["microdollars"]
             admissions += 1
     if (
-        run_id in seen
-        or admissions >= profile.monthly_runs
+        enabled()
+        and run_id in seen
+        or enabled()
+        and admissions >= profile.monthly_runs
         or (
-            profile.monthly_microdollars is not None
+            enabled()
+            and profile.monthly_microdollars is not None
             and spent + profile.reservation > profile.monthly_microdollars
         )
     ):
@@ -241,6 +249,14 @@ class RequestBudget:
         self.requests = self.inputs = self.outputs = 0
 
     def admit(self, input_tokens):
+        if not enabled():
+            skipped("budget")
+            integer(input_tokens, 0)
+            cap = self.profile.output_per_request
+            self.requests += 1
+            self.inputs += input_tokens
+            self.outputs += cap
+            return cap
         p = self.profile
         integer(input_tokens, 0)
         if input_tokens > p.input_per_request:

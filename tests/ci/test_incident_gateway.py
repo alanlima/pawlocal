@@ -1,9 +1,10 @@
+import os
+from unittest.mock import patch
 import contextlib
 import http.client
 import importlib.util
 import io
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -28,6 +29,7 @@ class Response(io.BytesIO):
     status = 200
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class GatewayTests(unittest.TestCase):
     def body(self, **changes):
         return {
@@ -83,6 +85,60 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(admitted["max_output_tokens"], 5000)
         self.assertNotIn("client_metadata", admitted)
         self.assertNotIn("prompt_cache_key", admitted)
+
+    def test_count_transport_projects_cli_fields_in_both_enforcement_modes(self):
+        original = json.loads(
+            (
+                DIRECTORY.parents[1] / "tests/ci/fixtures/codex-0.163.0-request.json"
+            ).read_bytes()
+        )
+        for mode in ("true", "false", None):
+            calls = []
+            request_body = original | {"max_output_tokens": 9999999}
+            if mode != "true":
+                request_body["store"] = True
+            environment = dict(os.environ)
+            environment.pop("PAWLOCAL_ONCALL_ENFORCE_GUARDS", None)
+            if mode is not None:
+                environment["PAWLOCAL_ONCALL_ENFORCE_GUARDS"] = mode
+
+            def strict_provider(suffix, body):
+                calls.append((suffix, body))
+                if suffix == "/input_tokens":
+                    if set(body) - gateway.COUNT_FIELDS:
+                        raise urllib.error.HTTPError(
+                            "https://fixture/input_tokens",
+                            400,
+                            "unsupported counting field",
+                            {},
+                            io.BytesIO(b'{"error":{"code":"unknown_parameter"}}'),
+                        )
+                    return Response(b'{"input_tokens":1000}')
+                response = Response(b'{"id":"resp_fixture"}')
+                response.headers = {"Content-Type": "application/json"}
+                return response
+
+            with (
+                self.subTest(mode=mode),
+                patch.dict(os.environ, environment, clear=True),
+                self.http_gateway(strict_provider) as (process, events, port),
+            ):
+                status, raw = self.post(port, request_body)
+                self.assertEqual(status, 200, raw.decode())
+            self.assertEqual([suffix for suffix, body in calls], ["/input_tokens", ""])
+            counted, generated = calls[0][1], calls[1][1]
+            self.assertEqual(set(counted), set(original) & gateway.COUNT_FIELDS)
+            for field in gateway.COUNT_FIELDS & set(original):
+                self.assertEqual(counted[field], original[field])
+            for field in ("store", "stream", "include"):
+                self.assertNotIn(field, counted)
+                self.assertEqual(generated[field], request_body[field])
+            self.assertNotIn("service_tier", counted)
+            self.assertNotIn("max_output_tokens", counted)
+            self.assertEqual(generated["service_tier"], "default")
+            self.assertEqual(
+                generated["max_output_tokens"], 5000 if mode == "true" else 10000
+            )
 
     def test_wrong_auth_deadline_and_count_failure_never_admit(self):
         for auth in ("Bearer upstream-secret", "", "Bearer " + "y" * 32):

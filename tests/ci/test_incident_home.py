@@ -1,7 +1,8 @@
+import os
+from unittest.mock import patch
 """Exercise the pinned CLI's writable home boundary using a different real UID."""
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -12,6 +13,7 @@ from pathlib import Path
 @unittest.skipUnless(
     os.name == "posix", "Real UID/sticky directory semantics require Ubuntu"
 )
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class CodexHomeTests(unittest.TestCase):
     def test_operational_writes_cannot_change_trusted_config_or_parent_home(self):
         import pwd

@@ -72,6 +72,7 @@ class ReleaseHistory(fixtures.FakeGitHub):
         return super().request(method, path, data)
 
 
+@patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"})
 class HistoricalReleaseTests(unittest.TestCase):
     def test_production_retains_verified_pair_after_development_advances_and_reruns(self):
         for event in ("push", "workflow_dispatch"):
@@ -169,6 +170,7 @@ class HistoricalReleaseTests(unittest.TestCase):
                 finalize.complete(fake, {}, None, {})
 
 
+@patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"})
 class ProductionEligibilityTests(unittest.TestCase):
     def fixture(self):
         fake = ReleaseHistory()

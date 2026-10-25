@@ -1,11 +1,11 @@
 import os
+from unittest.mock import patch
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import finalize
@@ -40,6 +40,7 @@ class Client:
         raise AssertionError((method, path))
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class FinalizerTests(unittest.TestCase):
     def run_finalizer(self, client=None, **changes):
         client = client or Client()
@@ -61,7 +62,7 @@ class FinalizerTests(unittest.TestCase):
                 "alert": {"incident_key": "a" * 64},
             }
             with (
-                patch.dict(os.environ, env, clear=True),
+                patch.dict(os.environ, ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | env), clear=True),
                 patch.object(finalize, "arm"),
                 patch.object(finalize, "ReleaseClient", return_value=client),
                 patch.object(finalize, "context", return_value=(metadata, None)),

@@ -1,10 +1,11 @@
+import os
+from unittest.mock import patch
 """Real credential-free incident handoffs; full hosted fixture is explicit opt-in."""
 
 import ast
 import difflib
 import io
 import json
-import os
 import shutil
 import signal
 import stat
@@ -16,7 +17,6 @@ import time
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops/incident-response"))
@@ -33,6 +33,7 @@ DEPS = Path(process_policy.DEPENDENCIES)
 FIXTURES = Path(__file__).parent / "fixtures/incident-handoff"
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class HandoffTests(unittest.TestCase):
     def test_regression_quiesces_before_private_report_read_and_on_exceptions(self):
         metadata = {"deadline": time.time() + 100}

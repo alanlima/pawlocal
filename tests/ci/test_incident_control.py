@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import copy
 import sys
 import time
@@ -9,6 +11,7 @@ from control import LiveControl
 from quota import Denied
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class LiveControlTests(unittest.TestCase):
     def fixture(self):
         metadata = {

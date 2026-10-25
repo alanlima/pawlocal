@@ -1,4 +1,5 @@
 import os
+from unittest.mock import patch
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class IncidentWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.raw = (ROOT / ".github/workflows/incident-responder.yml").read_text()
@@ -20,6 +22,21 @@ class IncidentWorkflowTests(unittest.TestCase):
             self.workflow["concurrency"],
             {"group": "pawlocal-oncall-global-quota", "cancel-in-progress": False, "queue": "max"},
         )
+
+    def test_environment_override_is_resolved_at_runtime_then_pinned_for_every_phase(self):
+        flag = "PAWLOCAL_ONCALL_ENFORCE_GUARDS"
+        self.assertNotIn(flag, self.workflow.get("env", {}))
+        preflight = self.workflow["jobs"]["preflight"]
+        self.assertEqual(preflight["environment"], "oncall-${{ inputs.environment }}")
+        self.assertNotIn("if", preflight)
+        resolver = next(step for step in preflight["steps"] if step.get("id") == "enforcement")
+        self.assertIn("vars."+flag, resolver["env"][flag])
+        self.assertIn("python ops/incident-response/enforcement.py", resolver["run"])
+        self.assertEqual(preflight["outputs"]["enforce_guards"], "${{ steps.enforcement.outputs.enforce_guards }}")
+        for name, job in self.workflow["jobs"].items():
+            if name != "preflight":
+                with self.subTest(phase=name):
+                    self.assertEqual(job["env"][flag], "${{ needs.preflight.outputs.enforce_guards }}")
 
     def test_direct_lint_exception_preserves_other_errors(self):
         ci = yaml.safe_load((ROOT / ".github/workflows/workflow-validation.yml").read_text())
@@ -150,7 +167,7 @@ class IncidentWorkflowTests(unittest.TestCase):
     def test_profile_has_no_model_or_budget_default_in_workflow(self):
         self.assertIn("vars.PAWLOCAL_ONCALL_MODEL_PROFILE", self.raw)
         self.assertNotIn("gpt-", self.raw)
-        self.assertNotIn("||", self.raw)
+        self.assertNotIn("PAWLOCAL_ONCALL_MODEL_PROFILE ||", self.raw)
 
     def test_recovery_receipts_gate_promotion_and_always_finalizer(self):
         jobs = self.workflow["jobs"]
@@ -185,11 +202,12 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class IncidentUsageWorkflowTests(unittest.TestCase):
     def test_always_reports_no_claim_failures_and_skipped_models_without_mutation(self):
         jobs = yaml.safe_load((ROOT / ".github/workflows/incident-responder.yml").read_text())["jobs"]
         self.assertEqual(len(jobs), 9)
-        self.assertEqual(jobs["finalize"]["if"], "always() && github.ref == 'refs/heads/main' && github.run_attempt == 1")
+        self.assertEqual(jobs["finalize"]["if"], "always() && (needs.preflight.outputs.enforce_guards != 'true' || (github.ref == 'refs/heads/main' && github.run_attempt == 1))")
         finalizer = next(step for step in jobs["finalize"]["steps"] if step.get("run") == "python ops/incident-response/finalize.py")
         self.assertEqual(finalizer["if"], "needs.preflight.outputs.issue != ''")
         for name in ("preflight", "fixer", "reviewer", "finalize"):

@@ -42,6 +42,11 @@ on:
       frontend_config:
         value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
     inputs:
+      enforce_guards:
+        description: Resolved incident enforcement mode from the origin on-call Environment; ordinary calls keep true.
+        required: false
+        default: 'true'
+        type: string
       environment:
         required: true
         type: string
@@ -72,6 +77,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ inputs.enforce_guards || 'true' }}
   TERRAFORM_VERSION: 1.14.3
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}
@@ -90,12 +96,21 @@ jobs:
         env:
           RELEASE_COMMIT: ${{ inputs.release_commit }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}
+          INCIDENT_RELEASE: ${{ github.workflow == 'Release · Promote verified release to production' && fromJSON(toJSON(github.event.inputs)).expected_workflow_sha != '' }}
         with:
           script: |
             const commit = process.env.RELEASE_COMMIT
             const image = process.env.BACKEND_IMAGE
             if (!/^[0-9a-f]{40}$/.test(commit)) throw new Error('Production requires a full development-verified commit SHA')
             if (!/^ghcr\.io\/alanlima\/pawlocal-api@sha256:[0-9a-f]{64}$/.test(image)) throw new Error('Production requires a valid immutable backend image')
+
+            const mode = process.env.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false'
+            if (!['false', 'true'].includes(mode)) throw new Error('PAWLOCAL_ONCALL_ENFORCE_GUARDS must be true or false')
+            if (process.env.INCIDENT_RELEASE === 'true' && mode === 'false') {
+              core.info('[incident-enforcement] disabled: development release eligibility policy')
+              await core.summary.addRaw('Incident enforcement disabled; development eligibility verification skipped.').write()
+              return
+            }
 
             const comparison = await github.rest.repos.compareCommitsWithBasehead({
               ...context.repo, basehead: `${commit}...main`,

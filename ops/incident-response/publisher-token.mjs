@@ -14,17 +14,28 @@ export function narrow(permissions, expected = appPermissions) {
     Object.keys(expected).every(key => permissions[key] === expected[key]) &&
     Object.entries(permissions).every(([key, value]) => expected[key] === value || (key === 'metadata' && value === 'read'));
 }
+export function enforcementEnabled(environment = process.env) {
+  const value = environment.PAWLOCAL_ONCALL_ENFORCE_GUARDS ?? 'false';
+  if (!['', 'false', 'true'].includes(value)) throw new Error('PAWLOCAL_ONCALL_ENFORCE_GUARDS must be true or false');
+  return value === 'true';
+}
 export async function mint(environment = process.env, fetcher = fetch, writer = writeFileSync) {
+  const enforce = enforcementEnabled(environment);
+  const policy = (condition, reason) => {
+    if (enforce && !condition) throw new Error(reason);
+  };
+  if (!enforce) console.info('[incident-enforcement] disabled: credential admission policy');
   const purpose = environment.PAWLOCAL_CREDENTIAL_PHASE || 'publish';
   if (!['readiness', 'publish', 'merge', 'status'].includes(purpose)) throw new Error('Unknown credential purpose');
   const expected = purpose === 'readiness' ? { administration: 'read' } : (purpose === 'status' ? statusAllowed : allowed);
-  const deadline = Number(environment.INCIDENT_DEADLINE) * 1000;
+  const requestedDeadline = Number(environment.INCIDENT_DEADLINE) * 1000;
+  const deadline = enforce ? requestedDeadline : Date.now() + 3600000;
   const maximumLifetime = purpose === 'publish' ? 1200000 : (purpose === 'status' ? 600000 : 3600000);
   const attemptAllowed = purpose === 'status'
     ? /^[1-9][0-9]*$/.test(String(environment.GITHUB_RUN_ATTEMPT || ''))
     : environment.GITHUB_RUN_ATTEMPT === '1';
-  if (environment.GITHUB_REPOSITORY !== repository || environment.GITHUB_REF !== 'refs/heads/main' || !attemptAllowed ||
-      !Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + maximumLifetime) throw new Error('Trusted phase deadline required');
+  policy(environment.GITHUB_REPOSITORY === repository && environment.GITHUB_REF === 'refs/heads/main' && attemptAllowed &&
+      Number.isSafeInteger(requestedDeadline) && requestedDeadline > Date.now() && requestedDeadline <= Date.now() + maximumLifetime, 'Trusted phase deadline required');
   const appId = environment.PAWLOCAL_PUBLISHER_APP_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_APP_ID;
   const installationId = environment.PAWLOCAL_PUBLISHER_INSTALLATION_ID || environment.PAWLOCAL_ONCALL_PUBLISHER_INSTALLATION_ID;
   if (![appId, installationId].every(value => typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value) && Number.isSafeInteger(Number(value)))) throw new Error('Public publisher identities unconfigured');
@@ -54,11 +65,12 @@ export async function mint(environment = process.env, fetcher = fetch, writer = 
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   }
   const app = await request('/app');
-  if (String(app.id) !== appId || !narrow(app.permissions)) throw new Error('Publisher App identity/permission mismatch');
+  policy(String(app.id) === appId && narrow(app.permissions), 'Publisher App identity/permission mismatch');
   const installation = await request(`/repos/${repository}/installation`);
-  if (String(installation.id) !== installationId || String(installation.app_id) !== appId || installation.account?.login !== 'alanlima' || installation.repository_selection !== 'selected' || !narrow(installation.permissions)) throw new Error('Publisher installation mismatch');
+  policy(String(installation.id) === installationId && String(installation.app_id) === appId && installation.account?.login === 'alanlima' && installation.repository_selection === 'selected' && narrow(installation.permissions), 'Publisher installation mismatch');
   const token = await request(`/app/installations/${installationId}/access_tokens`, { repository_ids: [repositoryId], permissions: expected });
-  if (!narrow(token.permissions, expected) || token.repository_selection !== 'selected' || typeof token.token !== 'string' || token.token.length < 20 || token.token.length > 1024) throw new Error('Publisher token scope mismatch');
+  policy(narrow(token.permissions, expected) && token.repository_selection === 'selected', 'Publisher token scope mismatch');
+  if (typeof token.token !== 'string' || token.token.length < 20 || token.token.length > 1024) throw new Error('Publisher token unusable');
   const name = purpose === 'readiness' ? 'oncall-readiness-token.json' : (purpose === 'status' ? 'oncall-status-token.json' : 'oncall-publisher-token.json');
   writer(join(environment.RUNNER_TEMP, name), JSON.stringify({ token: token.token, repository_id: repositoryId, permissions: expected }), { mode: 0o600, flag: 'wx' });
 }

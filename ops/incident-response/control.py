@@ -3,12 +3,16 @@
 import time
 
 from quota import Denied, integer
+from enforcement import enabled, skipped
 
 LEDGER = "<!-- pawlocal-oncall-quota:v1 -->"
 INCIDENT = "<!-- pawlocal-incident:v1:"
 
 
 def check_ledger(reader, quota_issue, deadline, clock=time.time):
+    if not enabled():
+        skipped("stop")
+        return
     integer(quota_issue)
     if clock() >= deadline:
         raise Denied("live work deadline exhausted")
@@ -30,10 +34,14 @@ class LiveControl:
             deadline,
             clock,
         )
-        integer(metadata.get("quota_issue"))
-        integer(metadata.get("issue"))
+        if enabled():
+            integer(metadata.get("quota_issue"))
+            integer(metadata.get("issue"))
 
     def check(self):
+        if not enabled():
+            skipped("stop")
+            return
         if self.clock() >= self.deadline:
             raise Denied("live work deadline exhausted")
         check_ledger(

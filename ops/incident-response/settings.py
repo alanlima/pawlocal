@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from quota import Denied, strict_json
+from enforcement import enabled, skipped
 
 RUNTIME_ENVIRONMENTS = (
     "development",
@@ -19,6 +20,9 @@ RUNTIME_ENVIRONMENTS = (
 
 
 def environment_ready(client, name):
+    if not enabled():
+        skipped("readiness")
+        return
     if name not in RUNTIME_ENVIRONMENTS:
         raise Denied("unsupported runtime environment")
     environment = client.request("GET", "/environments/" + name)
@@ -58,6 +62,9 @@ def runtime_ready(client):
 
 
 def bindings_ready(trusted):
+    if not enabled():
+        skipped("readiness")
+        return
     # Reuse the producer's complete public schema; it performs no API calls.
     validator_path = (
         Path(__file__).resolve().parents[2] / "observability/grafana/cloud/provision.py"

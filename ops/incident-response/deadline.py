@@ -7,6 +7,7 @@ import time
 
 from process_policy import validate
 from quota import Denied
+from enforcement import enabled, skipped
 
 DEADLINE = None
 GROUPS = set()
@@ -14,6 +15,10 @@ GROUPS = set()
 
 def arm(value, maximum=1200):
     global DEADLINE
+    if not enabled():
+        skipped("deadline")
+        DEADLINE = None
+        return
     value = int(value)
     if os.name != "posix" or not 0 < value - time.time() <= maximum <= 3600:
         raise Denied("absolute admission work deadline required")

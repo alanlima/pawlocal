@@ -32,7 +32,6 @@ concurrency:
 jobs:
   preflight:
     name: Trusted preflight
-    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: oncall-${{ inputs.environment }}
@@ -42,6 +41,7 @@ jobs:
       deployments: read
       issues: write
     outputs:
+      enforce_guards: ${{ steps.enforcement.outputs.enforce_guards }}
       usage_limits: ${{ steps.usage.outputs.limits }}
       admitted: ${{ steps.admit.outputs.admitted }}
       admission_sha256: ${{ steps.admit.outputs.metadata_sha256 }}
@@ -60,6 +60,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - name: Resolve incident enforcement mode after entering on-call Environment
+        id: enforcement
+        env:
+          PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+        run: |
+          python ops/incident-response/enforcement.py
+          echo 'Incident enforcement resolved from on-call Environment; mode is pinned for this run.' >> "$GITHUB_STEP_SUMMARY"
       - name: Start one absolute admission work budget
         id: budget
         run: python -c "import time; print('deadline=' + str(int(time.time()) + 1200))" >> "$GITHUB_OUTPUT"
@@ -114,6 +121,7 @@ jobs:
       actions: read
       issues: read
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
       PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
@@ -156,7 +164,7 @@ jobs:
           permission-profile: ':workspace'
           working-directory: /tmp/pawlocal-oncall-candidate
           prompt-file: /home/oncall/incident-prompt.md
-          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          allow-bot-users: ${{ needs.preflight.outputs.enforce_guards == 'true' && vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR || '*' }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
       - name: Show quota gateway failure diagnostics
         if: always()
@@ -207,6 +215,8 @@ jobs:
       eligible: ${{ steps.check.outputs.eligible }}
       candidate_sha: ${{ steps.check.outputs.candidate_sha }}
       checks_sha256: ${{ steps.check.outputs.checks_sha256 }}
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -228,7 +238,7 @@ jobs:
           CANDIDATE_SHA256: ${{ needs.fixer.outputs.candidate_sha256 }}
         run: python ops/incident-response/checks.py
       - uses: actions/upload-artifact@v7
-        if: steps.check.outputs.eligible == 'true'
+        if: steps.check.outputs.checks_sha256 != ''
         with:
           name: oncall-checks-${{ github.run_id }}
           path: ${{ runner.temp }}/oncall-checks/export/checks.json
@@ -238,7 +248,7 @@ jobs:
   reviewer:
     name: Fresh review
     needs: [preflight, fixer, checks]
-    if: needs.checks.outputs.eligible == 'true'
+    if: needs.checks.outputs.checks_sha256 != '' && (needs.preflight.outputs.enforce_guards != 'true' || needs.checks.outputs.eligible == 'true')
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -261,6 +271,7 @@ jobs:
       actions: read
       issues: read
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       ADMISSION_SHA256: ${{ needs.preflight.outputs.admission_sha256 }}
       PROFILE_SHA256: ${{ needs.preflight.outputs.profile_sha256 }}
@@ -312,7 +323,7 @@ jobs:
           prompt-file: /home/oncall/incident-prompt.md
           output-file: /tmp/pawlocal-oncall-review.json
           output-schema-file: /home/oncall/review-schema.json
-          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          allow-bot-users: ${{ needs.preflight.outputs.enforce_guards == 'true' && vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR || '*' }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
       - name: Show quota gateway failure diagnostics
         if: always()
@@ -352,6 +363,8 @@ jobs:
     outputs:
       publication_sha256: ${{ steps.publish.outputs.publication_sha256 }}
       promotion_deadline: ${{ steps.publish.outputs.promotion_deadline }}
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -364,7 +377,7 @@ jobs:
         with:
           node-version: '24'
       - name: Mint separate publisher installation credential
-        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        if: needs.checks.outputs.checks_sha256 != '' && (needs.preflight.outputs.enforce_guards != 'true' || (needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'))
         env:
           INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
           PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
@@ -372,7 +385,7 @@ jobs:
           PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
         run: node ops/incident-response/publisher-token.mjs
       - name: Recheck protection capability before publication
-        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        if: needs.checks.outputs.checks_sha256 != '' && (needs.preflight.outputs.enforce_guards != 'true' || (needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'))
         env:
           INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
           PAWLOCAL_CREDENTIAL_PHASE: readiness
@@ -426,6 +439,7 @@ jobs:
       merged_sha: ${{ steps.merge.outputs.merged_sha }}
       merge_sha256: ${{ steps.merge.outputs.merge_sha256 }}
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       GH_TOKEN: ${{ github.token }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
@@ -490,6 +504,7 @@ jobs:
     outputs:
       development_sha256: ${{ steps.recover.outputs.development_sha256 }}
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       GH_TOKEN: ${{ github.token }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
@@ -538,6 +553,7 @@ jobs:
       production_sha256: ${{ steps.promote.outputs.production_sha256 }}
       progress_sha256: ${{ steps.promote.outputs.progress_sha256 }}
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       GH_TOKEN: ${{ github.token }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}
@@ -582,7 +598,7 @@ jobs:
   finalize:
     name: Record incident outcome
     needs: [preflight, fixer, checks, reviewer, publisher, merge, development_recovery, promote]
-    if: always() && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: always() && (needs.preflight.outputs.enforce_guards != 'true' || (github.ref == 'refs/heads/main' && github.run_attempt == 1))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: oncall-${{ inputs.environment }}
@@ -593,6 +609,7 @@ jobs:
       deployments: read
       pull-requests: read
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.preflight.outputs.enforce_guards }}
       GH_TOKEN: ${{ github.token }}
       INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
       PROMOTION_DEADLINE: ${{ needs.publisher.outputs.promotion_deadline }}

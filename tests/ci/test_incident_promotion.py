@@ -1,19 +1,21 @@
+import os
+from unittest.mock import patch
 import copy
 import io
 import json
-import os
 import subprocess
 import sys
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import promotion
+
+BASH = os.environ.get("PAWLOCAL_TEST_BASH") or ("bash" if os.name != "nt" else None)
 
 
 def publication():
@@ -93,7 +95,29 @@ class Client:
         raise AssertionError(path)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class PromotionTests(unittest.TestCase):
+    def test_dispatch_broker_accepts_optional_origin_environment(self):
+        body = {
+            "ref": "main", "return_run_details": True,
+            "inputs": {"release_commit": "a" * 40,
+                       "backend_image": "ghcr.io/alanlima/pawlocal-api@sha256:" + "b" * 64,
+                       "expected_workflow_sha": "a" * 40,
+                       "incident_environment": "development"},
+        }
+        class Response(io.BytesIO):
+            status = 200
+        class Opener:
+            def open(self, request, **options):
+                return Response(b"{}")
+        self.assertEqual(promotion.request("fixture", time.time()+30, "POST",
+                          "/actions/workflows/deploy-production.yml/dispatches", body,
+                          opener=Opener()), {})
+        body["inputs"]["incident_environment"] = "unsupported"
+        with self.assertRaisesRegex(promotion.Denied, "non-allowlisted"):
+            promotion.request("fixture", time.time()+30, "POST",
+                              "/actions/workflows/deploy-production.yml/dispatches", body)
+
     def test_dispatch_broker_requires_the_exact_workflow_assertion(self):
         body = {
             "ref": "main",
@@ -144,10 +168,11 @@ class PromotionTests(unittest.TestCase):
             }) as dispatch,
         ):
             with self.assertRaisesRegex(promotion.Denied, "provenance"):
-                promotion.promote(client, sha)
+                promotion.promote(client, sha, incident_environment="development")
             inputs = dispatch.call_args.args[4]["inputs"]
             self.assertEqual(inputs["expected_workflow_sha"], sha)
             self.assertEqual(inputs["release_commit"], sha)
+            self.assertEqual(inputs["incident_environment"], "development")
             deployed.assert_not_called()
 
     def test_production_binding_precedes_every_reusable_or_credential_job(self):
@@ -168,25 +193,28 @@ class PromotionTests(unittest.TestCase):
                 with self.subTest(job=name):
                     self.assertTrue(depends(name))
 
-    @unittest.skipIf(os.name == "nt", "Production guard executes under hosted Linux bash")
+    @unittest.skipUnless(BASH, "Hosted Linux Bash or explicit PAWLOCAL_TEST_BASH required")
     def test_actual_entry_guard_rejects_race_and_preserves_ordinary_older_release(self):
         root = Path(__file__).resolve().parents[2]
         workflow = yaml.safe_load((root / ".github/workflows/deploy-production.yml").read_text())
         script = workflow["jobs"]["workflow-binding"]["steps"][0]["run"]
-        for expected, actual, release, accepted in (
-            ("a" * 40, "a" * 40, "a" * 40, True),
-            ("a" * 40, "b" * 40, "a" * 40, False),
-            ("a" * 40, "a" * 40, "b" * 40, False),
-            ("true", "a" * 40, "a" * 40, False),
-            ("", "b" * 40, "a" * 40, True),
+        for mode, expected, actual, release, accepted in (
+            ("true", "a" * 40, "a" * 40, "a" * 40, True),
+            ("true", "a" * 40, "b" * 40, "a" * 40, False),
+            ("true", "a" * 40, "a" * 40, "b" * 40, False),
+            ("true", "true", "a" * 40, "a" * 40, False),
+            ("true", "", "b" * 40, "a" * 40, True),
+            ("false", "a" * 40, "b" * 40, "a" * 40, True),
+            ("invalid", "", "b" * 40, "a" * 40, False),
         ):
-            with self.subTest(expected=expected, actual=actual, release=release):
+            with self.subTest(mode=mode, expected=expected, actual=actual, release=release):
                 result = subprocess.run(
-                    ["bash", "-c", script], check=False, capture_output=True,
+                    [BASH, "-c", script], check=False, capture_output=True,
                     env={"PATH": os.environ["PATH"], "EXPECTED_WORKFLOW_SHA": expected,
-                         "ACTUAL_WORKFLOW_SHA": actual, "RELEASE_COMMIT": release},
+                         "ACTUAL_WORKFLOW_SHA": actual, "RELEASE_COMMIT": release,
+                         "PAWLOCAL_ONCALL_ENFORCE_GUARDS": mode},
                 )
-                self.assertEqual(result.returncode == 0, accepted)
+                self.assertEqual(result.returncode == 0, accepted, result.stderr.decode())
 
     def test_configured_production_rule_is_required_before_dispatch(self):
         metadata = {"alert": {"environment": "development", "service": "pawlocal-api"}}
@@ -201,7 +229,7 @@ class PromotionTests(unittest.TestCase):
         with (
             patch.dict(
                 os.environ,
-                {
+                ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | {
                     "PROMOTION_DEADLINE": str(value["promotion_deadline"]),
                     "GH_TOKEN": "fixture",
                     "PAWLOCAL_ONCALL_ENABLED": "true",
@@ -210,7 +238,7 @@ class PromotionTests(unittest.TestCase):
                     "GITHUB_WORKSPACE": "/fixture",
                     "MERGE_SHA256": "e" * 64,
                     "DEVELOPMENT_SHA256": "f" * 64,
-                },
+                }),
                 clear=True,
             ),
             patch.object(sys, "argv", ["promotion.py", "promote"]),
@@ -347,12 +375,12 @@ class PromotionTests(unittest.TestCase):
                 self.subTest(phase=phase),
                 patch.dict(
                     os.environ,
-                    {
+                    ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | {
                         "PAWLOCAL_ONCALL_ENABLED": "true",
                         "PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED": "false",
                         "PROMOTION_DEADLINE": str(int(time.time()) + 600),
                         "GH_TOKEN": "fixture",
-                    },
+                    }),
                     clear=True,
                 ),
                 patch.object(sys, "argv", ["promotion.py", phase]),

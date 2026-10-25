@@ -10,13 +10,16 @@ from pathlib import Path
 from candidate import digest
 from job import download
 from quota import Denied, strict_json
+from enforcement import enabled, skipped, evidence
 
 
 def write(phase, metadata, publication, payload):
     if phase not in {"merge", "development", "production", "progress"}:
         raise Denied("unsupported receipt phase")
     now = int(time.time())
-    if not publication["published_at"] <= now < publication["promotion_deadline"]:
+    if enabled() and (
+        not publication["published_at"] <= now < publication["promotion_deadline"]
+    ):
         raise Denied("receipt cannot extend release deadline")
     value = {
         "schema": 1,
@@ -28,6 +31,7 @@ def write(phase, metadata, publication, payload):
         "deadline": publication["promotion_deadline"],
         "recorded_at": now,
         "payload": payload,
+        **({"enforcement": evidence()} if not enabled() else {}),
     }
     raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     root = Path(os.environ["RUNNER_TEMP"]) / ("oncall-" + phase)
@@ -49,7 +53,9 @@ def read(phase, expected, metadata, publication):
         "receipt.json"
     ]
     value = strict_json(raw)
-    if (
+    if not isinstance(value, dict) or not isinstance(value.get("payload"), dict):
+        raise Denied("receipt payload unavailable")
+    if enabled() and (
         digest(raw) != expected
         or not isinstance(value, dict)
         or set(value)
@@ -75,7 +81,7 @@ def read(phase, expected, metadata, publication):
         "profile_sha256": publication["profile_sha256"],
         "deadline": publication["promotion_deadline"],
     }
-    if (
+    if enabled() and (
         any(
             type(value[key]) is not type(item) or value[key] != item
             for key, item in expected_fields.items()
@@ -89,6 +95,11 @@ def read(phase, expected, metadata, publication):
 
 
 def validate_recovery(proof, release, profile, environment, publication):
+    if not enabled():
+        skipped("receipts")
+        if not isinstance(proof, dict) or proof.get("recovery_verified") is not False:
+            raise Denied("disabled recovery must be explicitly unverified")
+        return
     fields = {
         "schema",
         "environment",

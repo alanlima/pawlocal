@@ -1,15 +1,16 @@
-import importlib
 import os
+from unittest.mock import patch
+import importlib
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import deadline
 import process_policy
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class ProcessDeadlineTests(unittest.TestCase):
     def test_git_loader_environment_must_equal_trusted_parent(self):
         command = [

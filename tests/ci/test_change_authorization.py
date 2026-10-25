@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import sys
 from pathlib import Path
@@ -26,7 +27,14 @@ from authorizer import (
 from guards import PlanViolation, validate_production_promotion, validate_release_plan_strict
 
 
-class ChangeAuthorizationClassifierTests(unittest.TestCase):
+class EnforcedIncidentTests(unittest.TestCase):
+    def setUp(self):
+        setting = patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"})
+        setting.start()
+        self.addCleanup(setting.stop)
+
+
+class ChangeAuthorizationClassifierTests(EnforcedIncidentTests):
     def test_authenticated_bot_incident_branch_classifies_as_incident(self):
         pr = {
             "number": 100,
@@ -111,8 +119,9 @@ class ChangeAuthorizationClassifierTests(unittest.TestCase):
             GitHubClient(token="dummy-token", repository="invalid-format-no-slash")
 
 
-class IncidentCandidateVerificationTests(unittest.TestCase):
+class IncidentCandidateVerificationTests(EnforcedIncidentTests):
     def setUp(self):
+        super().setUp()
         self.client = MagicMock(spec=GitHubClient)
         self.head_sha = "1" * 40
         self.base_sha = "2" * 40
@@ -356,8 +365,9 @@ class OrdinaryChangeApprovalTests(unittest.TestCase):
             )
 
 
-class EntrypointGuardTests(unittest.TestCase):
+class EntrypointGuardTests(EnforcedIncidentTests):
     def setUp(self):
+        super().setUp()
         self.commit = "f" * 40
         self.image = "ghcr.io/alanlima/pawlocal-api@sha256:" + "0" * 64
 
@@ -501,6 +511,93 @@ class EntrypointGuardTests(unittest.TestCase):
         }
         with self.assertRaises(PlanViolation):
             validate_release_plan_strict(plan)
+
+
+class DisabledIncidentEnforcementTests(unittest.TestCase):
+    def test_expired_policy_deadline_is_optional_only_for_disabled_incident_client(self):
+        for flag, incident, denied in (("false", True, False), ("false", False, True), ("true", True, True)):
+            with self.subTest(flag=flag, incident=incident), patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": flag}):
+                opener = MagicMock()
+                response = opener.open.return_value.__enter__.return_value
+                response.status = 200
+                response.read.return_value = b'{}'
+                client = GitHubClient(
+                    token="dummy", repository="alanlima/pawlocal",
+                    deadline=time.time() - 1, opener=opener, incident_mode=incident,
+                )
+                if denied:
+                    with self.assertRaises(Denied):
+                        client.request("GET", "/pulls/371")
+                    opener.open.assert_not_called()
+                else:
+                    self.assertEqual(client.request("GET", "/pulls/371"), {})
+                    opener.open.assert_called_once()
+
+    def test_default_and_explicit_false_skip_incident_provenance_without_fake_verification(self):
+        for value in (None, "false"):
+            with self.subTest(flag=value), patch.dict(os.environ):
+                if value is None:
+                    os.environ.pop("PAWLOCAL_ONCALL_ENFORCE_GUARDS", None)
+                else:
+                    os.environ["PAWLOCAL_ONCALL_ENFORCE_GUARDS"] = value
+                client = MagicMock()
+                client.get_pr.return_value = {
+                    "state": "open",
+                    "head": {"sha": "b" * 40},
+                    "base": {"sha": "a" * 40},
+                }
+                result = verify_incident_candidate(
+                    client, 371, publication_receipt={"schema": 0},
+                    expected_head_sha="c" * 40,
+                )
+                self.assertFalse(result["enforcement"]["enabled"])
+                self.assertEqual(result["head_sha"], "b" * 40)
+                self.assertEqual(result["route"], "incident")
+                client.get_pr_files.assert_not_called()
+                client.download_raw.assert_not_called()
+
+    def test_disabled_incident_route_relaxes_author_policy_but_keeps_ordinary_approval(self):
+        with patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "false"}):
+            incident = {
+                "draft": True,
+                "head": {"ref": "incident/production/demo"},
+                "base": {"ref": "other"},
+                "user": {"login": "human", "type": "User"},
+            }
+            self.assertEqual(classify_pr(incident), "incident")
+            ordinary = dict(incident, head={"ref": "feature/demo"})
+            with self.assertRaises(Denied):
+                classify_pr(ordinary)
+            client = MagicMock()
+            client.get_pr.return_value = {
+                "state": "open", "head": {"sha": "b" * 40},
+                "base": {"sha": "a" * 40},
+            }
+            with self.assertRaises(Denied):
+                verify_ordinary_approval(client, 1, "c" * 40, "a" * 40)
+
+    def test_disabled_mode_still_requires_real_status_commit_identities(self):
+        with patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "false"}):
+            client = MagicMock()
+            client.get_pr.return_value = {"head": {}, "base": {}}
+            with self.assertRaises(Denied):
+                verify_incident_candidate(client, 1)
+
+    def test_disabled_machine_release_policy_preserves_transport_identifiers(self):
+        with patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "false"}):
+            self.assertTrue(validate_production_promotion(
+                None, "a" * 40, "ghcr.io/alanlima/pawlocal-api@sha256:" + "b" * 64, True,
+            ))
+            validate_release_plan_strict({"resource_changes": [{"type": "aws_iam_role", "change": {"actions": ["delete"]}}]})
+            with self.assertRaises(ValueError):
+                validate_production_promotion(None, "bad-sha", "invalid-image", True)
+
+    def test_enabled_mode_still_denies_missing_incident_lineage(self):
+        with patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"}):
+            with self.assertRaises(ValueError):
+                validate_production_promotion(
+                    None, "a" * 40, "ghcr.io/alanlima/pawlocal-api@sha256:" + "b" * 64, True,
+                )
 
 
 if __name__ == "__main__":

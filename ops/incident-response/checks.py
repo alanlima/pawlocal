@@ -29,6 +29,7 @@ from job import (
 )
 from process_policy import TEST_DATABASE_URL
 from quota import Denied
+from enforcement import enabled, skipped, evidence
 
 
 def execute(command, cwd, metadata, environment):
@@ -221,7 +222,7 @@ def main():
     root.mkdir(mode=0o700)
     values = download("oncall-candidate-" + metadata["run_id"], {"candidate.json"})
     raw = values["candidate.json"]
-    if digest(raw) != os.environ.get("CANDIDATE_SHA256"):
+    if enabled() and digest(raw) != os.environ.get("CANDIDATE_SHA256"):
         raise Denied("candidate transport differs")
     content = load(raw, metadata)
     layers = [
@@ -253,6 +254,30 @@ def main():
     )
     git(candidate, "checkout", "--detach", metadata["base_sha"])
     binding = bind_candidate(candidate, content, metadata, digest(raw))
+    if not enabled():
+        skipped("checks")
+        # Candidate construction is operational. No test/reproduction pass is
+        # inferred when the policy checks are skipped.
+        report = binding | {
+            "run_id": metadata["run_id"],
+            "admission_sha256": os.environ["ADMISSION_SHA256"],
+            "layers": layers,
+            "affected_reproduced": None,
+            "main_reproduced": None,
+            "candidate_passed": None,
+            "backend_quality": None,
+            "profile": profile.digest,
+            "enforcement": evidence(),
+        }
+        output = root / "export"
+        output.mkdir(mode=0o700)
+        raw_report = json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+        (output / "checks.json").write_bytes(raw_report)
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
+            stream.write(
+                f"eligible=true\ncandidate_sha={binding['candidate_sha']}\nchecks_sha256={digest(raw_report)}\n"
+            )
+        return
     if (
         os.environ.get("PINNED_CANDIDATE_SHA")
         and binding["candidate_sha"] != os.environ["PINNED_CANDIDATE_SHA"]

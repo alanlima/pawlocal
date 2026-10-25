@@ -1,7 +1,8 @@
+import os
+from unittest.mock import patch
 import ast
 import errno
 import importlib.util
-import os
 import socket
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 ROOT = Path(__file__).resolve().parents[2]
 LAUNCHER = ROOT / "ops/incident-response/backend-test-launcher.py"
@@ -18,6 +19,7 @@ launcher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(launcher)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         unix = patch.object(
