@@ -1,6 +1,6 @@
 # Delivery screenshot evidence
 
-Captured from the actual production application and authenticated Grafana UI on **25 October 2026** during the #284 documentation review. Images are browser viewport JPEGs; no mock fixtures or generated UI images are presented as live evidence. Captures were inspected before inclusion for credentials and personal/customer data; visible telemetry is operational route/status/duration/release and correlation metadata.
+Captured on **25 October 2026** during the #284 documentation review. Production application/Grafana captures and local test-fixture captures are separated below; no generated UI image or fixture is presented as production evidence. Captures were inspected before inclusion for credentials and personal/customer data; visible telemetry is operational route/status/duration/release and correlation metadata.
 
 The source audit baseline is `8895b99a549ee0db134cec69bd681618f8db46d7`, with [production release run 40181618456](https://github.com/alanlima/pawlocal/actions/runs/40181618456). The application footer displayed `BUILD local`, so these captures cannot independently bind the served frontend bundle to that commit. Dashboard time windows include multiple backend releases. Use exact workflow manifests for release provenance.
 
@@ -26,7 +26,27 @@ All application images use [production](https://pawlocal.alanlima.cloud/). These
 
 ![Anonymous save prompts sign-in](production-sign-in-required-2026-10-25.jpg)
 
-*Anonymous Save displayed “Sign in to save favourites.” This proves the UI boundary, not authenticated persistence. Fresh signed-in contribution/favourite screenshots remain pending.*
+*Anonymous Save displayed “Sign in to save favourites.” This proves the UI boundary. The separate local captures below demonstrate authenticated persistence with a test issuer; hosted Cognito sign-in remains a separate check.*
+
+## Local authenticated persistence
+
+These captures are **local synthetic test fixtures**, not real places or production sessions. The real frontend/HTTP adapter, FastAPI token validation and PostgreSQL were exercised through the existing ephemeral-issuer harness on source head `5a79eab793aeb63ef0941d5c1a33d210f0f3c303`. The three authenticated frames are unedited JPEG screencast frames from the successful Playwright run (800 × 450); the full trace, tokens and network payloads are excluded. [Commands and persistence readback](../../submission.md#local-reproducibility-verification) explain what passed.
+
+![Local authenticated tip submission against the real API and PostgreSQL](local-authenticated-contribution-2026-10-25.jpg)
+
+*The signed-in fixture fills a useful-tip contribution; the test then asserts HTTP 201. The text and place are explicitly synthetic.*
+
+![Saved favourite reloaded in a fresh browser context](local-persisted-favourite-2026-10-25.jpg)
+
+*The fresh browser context reads “Saved to your list” from the real API/database.*
+
+![Persisted contribution remains selectable for reporting in a fresh browser context](local-persisted-contribution-2026-10-25.jpg)
+
+*The previously submitted contribution remains available as a report target after a new browser context. The test also verifies report creation; it does not submit this fresh-context form again.*
+
+![Clean Compose database starts with an honest empty directory](local-compose-empty-directory-2026-10-25.jpg)
+
+*Fresh root Compose HTTP mode with no seeded places. This is the normal application database; the harness uses a separate disposable database.*
 
 ## Grafana dashboards
 

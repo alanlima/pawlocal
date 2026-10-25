@@ -27,7 +27,7 @@ Unknown facilities stay unknown, facility filters use verified details, empty se
 
 ![Production place detail with access information and save/share controls](docs/images/delivery/production-place-detail-2026-10-25.jpg)
 
-*A real place detail page; unverified facilities are explicitly unknown. [Filter, share and sign-in-boundary captures](docs/images/delivery/README.md) extend the walkthrough. Fresh signed-in write/persistence screenshots remain pending.*
+*A real place detail page; unverified facilities are explicitly unknown. [Filter, share and sign-in-boundary captures](docs/images/delivery/README.md) extend the walkthrough. [Authenticated local fixture captures](docs/images/delivery/README.md#local-authenticated-persistence) show the real HTTP/API/PostgreSQL path; hosted Cognito sign-in is a separate check.*
 
 ## Delivery status
 
@@ -55,10 +55,10 @@ Root Compose explicitly selects the HTTP adapter even though `.env.example` enab
 
 ### Run checks
 
-Use Python 3.12 in a virtual environment. On Windows, keep tracked shell scripts checked out with LF line endings and have WSL/Bash available for the deployment-adapter test; CRLF produces an invalid `pipefail` option before the test can inspect the adapter. Install dependencies with `python -m pip install -e './backend[test]'` and `npm ci --prefix frontend`. From the root, this single PowerShell command runs frontend unit/component and backend unit/API/repository checks, stopping on failure:
+Use Python 3.12 in a virtual environment. For a fresh Windows review checkout, use `git clone --config core.autocrlf=false https://github.com/alanlima/pawlocal.git pawlocal-review`, then check out the selected submission commit. Have WSL/Bash available for the deployment-adapter test; CRLF shell scripts fail before its assertions. Install dependencies with `python -m pip install -e './backend[test,dsql-prototype]'` and `npm ci --prefix frontend`. From the root, this single PowerShell command runs frontend unit/component and backend unit/API/repository checks, stopping on failure:
 
 ```powershell
-& { npm test --prefix frontend; if ($LASTEXITCODE -ne 0) { throw 'Frontend checks failed' }; python -m pytest backend/tests; if ($LASTEXITCODE -ne 0) { throw 'Backend checks failed' } }
+& { npm test --prefix frontend; if ($LASTEXITCODE -ne 0) { throw 'Frontend checks failed' }; Push-Location backend; try { python -m pytest; if ($LASTEXITCODE -ne 0) { throw 'Backend checks failed' } } finally { Pop-Location } }
 ```
 
 Backend API/repository tests use isolated SQLite fixtures by default. PostgreSQL integration **skips** unless `PAWLOCAL_TEST_DATABASE_URL` identifies a dedicated disposable database; configure and migrate it as in [backend CI](.github/workflows/backend-ci.yml) before claiming that coverage. Browser persistence checks need the opted-in harness and `npm run test:e2e:backend --prefix frontend`. [Verification record](docs/submission.md#verification-record) distinguishes reruns from skipped checks.
@@ -98,9 +98,9 @@ Evidence map for the [current rubric](https://github.com/DataTalksClub/ai-dev-to
 | Product specification (2) | [Spec](product-spec.md), [OpenAPI](openapi.yaml), [public issues](https://github.com/alanlima/pawlocal/issues) | [#396](https://github.com/alanlima/pawlocal/issues/396) and [agent PR #400](https://github.com/alanlima/pawlocal/pull/400) show tracker use; historical parent acceptance needs reconciliation. |
 | Agent team (2) | [Profiles](agents/profiles), [workflow](docs/agent-workflow.md), [AI usage](docs/ai-usage-report.md) | Responsibilities, handoffs and review defined; read with incident exception. |
 | Context management (2) | [AGENTS.md](AGENTS.md), [documentation](#documentation) | Modular specification, process, decisions and operations references. |
-| Application (2) | [Services](frontend/src/services), [backend](backend/pawlocal), [startup](#run-locally) | Public browse/detail captured; [historical PostgreSQL browser persistence](backend/README.md#browser-integration-authentication). Fresh authenticated persistence/startup pending. |
+| Application (2) | [Services](frontend/src/services), [backend](backend/pawlocal), [startup](#run-locally) | Public browse/detail captured; [fresh local PostgreSQL/browser persistence and restart readback](docs/submission.md#local-reproducibility-verification). Hosted Cognito acceptance is separate from the local ephemeral issuer. |
 | Testing (2) | [Check command](#run-checks), [backend tests](backend/tests), [strategy](docs/testing.md) | Unit/component/API/repository suites; [verification record](docs/submission.md#verification-record) separates reruns and PostgreSQL/browser gaps. |
-| Containerization (2) | [Compose](docker-compose.yml), [frontend](frontend/Dockerfile), [backend](backend/Dockerfile) | One startup command includes database/telemetry. Fresh clean start pending: Docker daemon unavailable during review. |
+| Containerization (2) | [Compose](docker-compose.yml), [frontend](frontend/Dockerfile), [backend](backend/Dockerfile) | Fresh isolated build/start passed with all eight services healthy; [commands and scope](docs/submission.md#local-reproducibility-verification). |
 | Deployment (2) | [Production](https://pawlocal.alanlima.cloud/), [release](https://github.com/alanlima/pawlocal/actions/runs/40181618456) | Real deployment and discovery/detail captured; reachability alone does not prove authenticated persistence. |
 | CI/CD (3) | [Catalogue](docs/github-actions.md), [release](.github/workflows/fullstack-release.yml), [manual promotion](.github/workflows/deploy-production.yml) | [DEV](https://github.com/alanlima/pawlocal/actions/runs/40180921838), [incident PROD](https://github.com/alanlima/pawlocal/actions/runs/40181618456), [historical manual PROD](https://github.com/alanlima/pawlocal/actions/runs/40044690011). Ordinary/incident paths are distinct. |
 | Observability (2) | [Operations](docs/hosted-telemetry-operations.md), [definitions](observability), [screenshots](docs/images/delivery/README.md) | Production metrics/logs visible; [#225](https://github.com/alanlima/pawlocal/issues/225) accepts amended DEV correlation. Fresh single-journey metric/log/trace set and [#230](https://github.com/alanlima/pawlocal/issues/230) gates remain. |

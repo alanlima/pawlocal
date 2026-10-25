@@ -74,10 +74,12 @@ Write rate limits are per subject and per API process. This is suitable for loca
 With the backend virtual environment and dependencies installed, set `PAWLOCAL_E2E_DATABASE_URL` to a disposable PostgreSQL database whose name contains a `_test`, `_e2e`, or `_verify` segment. Explicitly opt into migration and fixture reset with `PAWLOCAL_E2E_ALLOW_RESET=true`, then run from `backend/`:
 
 ```powershell
-$env:PAWLOCAL_E2E_DATABASE_URL = "postgresql+psycopg://pawlocal:pawlocal-local@host.docker.internal:55432/pawlocal_stage3_verify"
+$env:PAWLOCAL_E2E_DATABASE_URL = "postgresql+psycopg://pawlocal:local-compose-password@127.0.0.1:55432/pawlocal_stage3_verify"
 $env:PAWLOCAL_E2E_ALLOW_RESET = "true"
 python tests/e2e_local_server.py
 ```
+
+The example above runs on the Windows host and uses the default Compose PostgreSQL port. Replace the password with your local `.env` value and create the disposable database first (for the default Compose project: `docker compose exec -T postgres createdb -U pawlocal pawlocal_stage3_verify`). Use `host.docker.internal` only for a runner inside a container that needs the host-published port.
 
 The runner fails before migrations or cleanup unless both settings are present, the opt-in value is exactly `true`, the URL uses PostgreSQL, and its database name includes one of the disposable-name segments. It does not fall back to `PAWLOCAL_DATABASE_URL`.
 
@@ -86,6 +88,8 @@ The helper listens on `127.0.0.1:18001` for the API and `127.0.0.1:18002` for it
 ```powershell
 npm run test:e2e:backend
 ```
+
+For a cold/resource-constrained workstation, `npm run test:e2e:backend -- --timeout=90000` changes only the test deadline. Restart the dedicated test runner before a repeated attempt so its synthetic subject/place records and rate limits are reset. Do not point it at a retained development or production database. Current local delivery verification is recorded in [the submission plan](../docs/submission.md#local-reproducibility-verification).
 
 The dedicated Vite test configuration aliases only the test build to `HttpPlaceService` and proxies requests to the real API. It obtains a token from the local issuer, then covers anonymous rejection, place discovery and detail, contribution, favourite, report, and reloading saved/reportable state in a fresh browser context. The demo-member control only reveals mock-stage form UI; it does not authenticate API requests. The regular service factory uses the HTTP adapter unless `VITE_USE_MOCK_BACKEND=true` explicitly selects the mock; the HTTP adapter remains wrapped by the frontend observability layer.
 
