@@ -753,15 +753,25 @@ def _main():
         or os.environ.get("SCHEMA_VERSION") != "1"
     ):
         raise Denied("admission disabled or unsupported schema")
+    environment = os.environ.get("INCIDENT_ENVIRONMENT", "")
+    # Event eligibility is a routing minimum, not an optional incident policy.
+    received = [
+        alert
+        for alert in alerts(os.environ.get("ALERTS_JSON", ""), environment)
+        if alert["status"] == "firing"
+    ]
+    if not received:
+        with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+            output.write("admitted=false\n")
+        print("[admission] Resolved-only notification ignored", file=sys.stderr)
+        return
     profile = Profile.load(os.environ.get("PAWLOCAL_MODEL_PROFILE", ""))
     bindings_ready(os.environ["GITHUB_WORKSPACE"])
-    environment = os.environ.get("INCIDENT_ENVIRONMENT", "")
     if enabled() and (
         environment == "production"
         and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true"
     ):
         raise Denied("production telemetry-read/privacy approval missing")
-    received = alerts(os.environ.get("ALERTS_JSON", ""), environment)
     github = GitHub(os.environ.get("GH_TOKEN", ""), deadline)
     readiness(github)
     quota_issue = integer(int(os.environ.get("PAWLOCAL_QUOTA_ISSUE", "0")))
@@ -805,7 +815,7 @@ def _main():
                 + (
                     "One attempt only; trusted automation enforces fresh review, candidate CI, squash merge and verified release promotion."
                     if enabled()
-                    else "Incident enforcement is disabled. Generation/status, deduplication, quotas, check/review verdicts and recovery policy are skipped; no skipped check is a pass."
+                    else "Incident enforcement is disabled. Generation continuity, deduplication, quotas, check/review verdicts and recovery policy are skipped; no skipped check is a pass."
                 ),
                 "labels": ["stage-5", "bug"],
             },

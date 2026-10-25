@@ -224,7 +224,13 @@ export function createHandler({ env = process.env, now = Date.now, getParameter 
       const request = rawRequest(event, time);
       verifySignature(request, await getParameter(config.hmacParameter, { signal }));
       signal.throwIfAborted();
-      const alerts = normalize(request.bytes, config);
+      // Resolution acknowledges delivery; only firing records request remediation.
+      // This routing minimum is independent of incident-run enforcement mode.
+      const alerts = normalize(request.bytes, config).filter(alert => alert.status === 'firing');
+      if (alerts.length === 0) {
+        log(JSON.stringify({ event: 'oncall_receiver', outcome: 'resolved_ignored', alerts: 0 }));
+        return { statusCode: 204, body: '' };
+      }
       const key = await getParameter(config.keyParameter, { signal });
       signal.throwIfAborted();
       await dispatch(alerts, config, key, time, http, signal);

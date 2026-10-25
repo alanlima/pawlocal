@@ -48,17 +48,17 @@ function harness({ overrides = {}, environment = env, secret = HMAC, httpFailure
   };
 }
 
-test('valid signed grouped firing/resolved reaches fixed main dispatch and strips private fields', async () => {
-  const h = harness();
+for (const mode of [undefined, 'false', 'true']) test(`mixed group dispatches only firing records in mode ${String(mode)} and strips private fields`, async () => {
+  const h = harness({ environment: { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: mode } });
   const resolved = alert({ fingerprint: 'abcdef1234567890', status: 'resolved', endsAt: '2026-10-23T09:30:00Z' });
-  const result = await h.handler(event(payload([alert(), resolved])));
+  const result = await h.handler(event(payload([resolved, alert()])));
   assert.equal(result.statusCode, 204);
   assert.deepEqual(h.parameters, ['/pawlocal/development/secrets/grafana/webhook-hmac', '/pawlocal/development/secrets/oncall/dispatch-app-private-key']);
   const outbound = JSON.parse(h.calls.at(-1).options.body);
   assert.equal(outbound.ref, 'main'); assert.equal(outbound.inputs.environment, 'development');
   assert.equal(outbound.inputs.schema_version, '1');
   const normalized = JSON.parse(outbound.inputs.alerts_json);
-  assert.equal(normalized.length, 2); assert.equal(normalized[1].status, 'resolved');
+  assert.equal(normalized.length, 1); assert.equal(normalized[0].status, 'firing');
   assert.equal(normalized[0].starts_at, '2026-10-23T09:00:00.000Z');
   assert.match(normalized[0].incident_key, /^[a-f0-9]{64}$/);
   assert.ok(!JSON.stringify(outbound).includes('private customer'));
@@ -72,6 +72,16 @@ test('valid signed grouped firing/resolved reaches fixed main dispatch and strip
   assert.ok(verify('RSA-SHA256', Buffer.from(jwt.slice(0, 2).join('.')), publicKey, Buffer.from(jwt[2], 'base64url')));
   assert.ok(!JSON.stringify(h.logs).includes('private-installation-token'));
   assert.ok(!JSON.stringify(h.logs).includes(HMAC));
+});
+
+for (const mode of [undefined, 'false', 'true']) test(`resolved-only is acknowledged without dispatch in mode ${String(mode)}`, async () => {
+  const h = harness({ environment: { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: mode } });
+  const resolved = alert({ status: 'resolved', endsAt: '2026-10-23T09:30:00Z' });
+  const result = await h.handler(event({ ...payload([resolved]), status: 'resolved' }));
+  assert.equal(result.statusCode, 204);
+  assert.deepEqual(h.parameters, ['/pawlocal/development/secrets/grafana/webhook-hmac']);
+  assert.equal(h.calls.length, 0);
+  assert.deepEqual(JSON.parse(h.logs[0]), { event: 'oncall_receiver', outcome: 'resolved_ignored', alerts: 0 });
 });
 
 test('base64 verifies original bytes rather than parsed/reserialized JSON', async () => {

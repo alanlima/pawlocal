@@ -129,6 +129,9 @@ class IncidentWorkflowTests(unittest.TestCase):
         self.assertEqual(
             jobs["publisher"]["needs"], ["preflight", "fixer", "checks", "reviewer"]
         )
+        self.assertIn("!cancelled()", jobs["publisher"]["if"])
+        self.assertIn("needs.fixer.outputs.candidate_sha256 != ''", jobs["publisher"]["if"])
+        self.assertIn("always()", jobs["finalize"]["if"])
         self.assertIn("vars.PAWLOCAL_GRAFANA_URL", self.raw)
         self.assertNotIn("vars.PAWLOCAL_GRAFANA_STACK_URL", self.raw)
 
