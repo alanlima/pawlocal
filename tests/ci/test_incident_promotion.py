@@ -95,6 +95,27 @@ class Client:
 
 @patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class PromotionTests(unittest.TestCase):
+    def test_dispatch_broker_accepts_optional_origin_environment(self):
+        body = {
+            "ref": "main", "return_run_details": True,
+            "inputs": {"release_commit": "a" * 40,
+                       "backend_image": "ghcr.io/alanlima/pawlocal-api@sha256:" + "b" * 64,
+                       "expected_workflow_sha": "a" * 40,
+                       "incident_environment": "development"},
+        }
+        class Response(io.BytesIO):
+            status = 200
+        class Opener:
+            def open(self, request, **options):
+                return Response(b"{}")
+        self.assertEqual(promotion.request("fixture", time.time()+30, "POST",
+                          "/actions/workflows/deploy-production.yml/dispatches", body,
+                          opener=Opener()), {})
+        body["inputs"]["incident_environment"] = "unsupported"
+        with self.assertRaisesRegex(promotion.Denied, "non-allowlisted"):
+            promotion.request("fixture", time.time()+30, "POST",
+                              "/actions/workflows/deploy-production.yml/dispatches", body)
+
     def test_dispatch_broker_requires_the_exact_workflow_assertion(self):
         body = {
             "ref": "main",
@@ -145,10 +166,11 @@ class PromotionTests(unittest.TestCase):
             }) as dispatch,
         ):
             with self.assertRaisesRegex(promotion.Denied, "provenance"):
-                promotion.promote(client, sha)
+                promotion.promote(client, sha, incident_environment="development")
             inputs = dispatch.call_args.args[4]["inputs"]
             self.assertEqual(inputs["expected_workflow_sha"], sha)
             self.assertEqual(inputs["release_commit"], sha)
+            self.assertEqual(inputs["incident_environment"], "development")
             deployed.assert_not_called()
 
     def test_production_binding_precedes_every_reusable_or_credential_job(self):

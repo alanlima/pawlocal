@@ -874,6 +874,7 @@ def _main():
             | release
             | {
                 **({"enforcement": evidence()} if not enabled() else {}),
+                "source_environment": environment,
                 "diagnostics": diagnostics,
                 "base_sha": base,
                 "deadline": deadline,

@@ -64,8 +64,10 @@ def request(token, deadline, method, path, body=None, opener=None):
             and body.get("ref") == "main"
             and body.get("return_run_details") is True
             and isinstance(body.get("inputs"), dict)
-            and set(body["inputs"])
+            and (set(body["inputs"]) - {"incident_environment"})
             == {"release_commit", "backend_image", "expected_workflow_sha"}
+            and body["inputs"].get("incident_environment", "")
+            in {"", "development", "production"}
             and body["inputs"].get("expected_workflow_sha")
             == body["inputs"].get("release_commit")
             and re.fullmatch(r"[0-9a-f]{40}", str(body["inputs"].get("release_commit")))
@@ -393,7 +395,17 @@ def wait_development(client, sha, control):
         pause(client.deadline)
 
 
-def promote(client, sha, control=None, progress=None, expected_development=None):
+def promote(
+    client,
+    sha,
+    control=None,
+    progress=None,
+    expected_development=None,
+    *,
+    incident_environment="",
+):
+    if incident_environment not in {"", "development", "production"}:
+        raise Denied("usable incident Environment selector required")
     control = control or (lambda: None)
     progress = progress or (lambda _payload: None)
     control()
@@ -429,6 +441,11 @@ def promote(client, sha, control=None, progress=None, expected_development=None)
                 "release_commit": sha,
                 "backend_image": image,
                 "expected_workflow_sha": sha,
+                **(
+                    {"incident_environment": incident_environment}
+                    if incident_environment
+                    else {}
+                ),
             },
             "return_run_details": True,
         },
@@ -635,6 +652,9 @@ def main():
                 control,
                 lambda payload: receipts.write("progress", metadata, value, payload),
                 development["release"],
+                incident_environment=metadata.get(
+                    "source_environment", metadata["alert"]["environment"]
+                ),
             )
             proof = recover(client, "production", release, profile, metadata, control)
             receipts.validate_recovery(proof, release, profile, "production", value)

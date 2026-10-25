@@ -33,7 +33,12 @@ class Broker:
         self.token = token
         self.metadata = metadata
         self.candidate_sha = candidate_sha
-        self.branch = f"incident/{metadata['alert']['environment']}/{metadata['alert']['incident_key'][:16]}"
+        source_environment = metadata.get(
+            "source_environment", metadata["alert"]["environment"]
+        )
+        self.branch = (
+            f"incident/{source_environment}/{metadata['alert']['incident_key'][:16]}"
+        )
         self.opener = opener or urllib.request.build_opener(NoRedirect)
         self.control = control
 

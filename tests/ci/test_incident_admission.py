@@ -404,12 +404,13 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(admission.Denied):
             admission.alerts(json.dumps([alert(), alert()]), "development")
 
-    def run_preflight(self, fake, current=True, reserve_error=False, profile_changes=None):
+    def run_preflight(self, fake, current=True, reserve_error=False, profile_changes=None, enforce_guards="true", alert_changes=None):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             output.touch()
             profile = quota_fixtures.QuotaTests().profile(**(profile_changes or {}))
             env = {
+                "PAWLOCAL_ONCALL_ENFORCE_GUARDS": enforce_guards,
                 "INCIDENT_DEADLINE": str(int(time.time()) + 1200),
                 "GITHUB_REPOSITORY": "alanlima/pawlocal",
                 "GITHUB_REF": "refs/heads/main",
@@ -422,7 +423,7 @@ class AdmissionTests(unittest.TestCase):
                 "SCHEMA_VERSION": "1",
                 "PAWLOCAL_MODEL_PROFILE": json.dumps(profile.__dict__),
                 "INCIDENT_ENVIRONMENT": "development",
-                "ALERTS_JSON": json.dumps([alert()]),
+                "ALERTS_JSON": json.dumps([alert() | (alert_changes or {})]),
                 "GH_TOKEN": "fixture",
                 "GRAFANA_STACK_URL": "https://fixture.grafana.net",
                 "PAWLOCAL_GRAFANA_QUERY_TOKEN": "fixture",

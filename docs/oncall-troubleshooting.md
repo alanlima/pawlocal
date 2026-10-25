@@ -1,6 +1,6 @@
 # On-call responder troubleshooting guide
 
-Temporary owner exception: [all incident enforcement guards default off](oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017) under DEC-017 / #375. Set exact `PAWLOCAL_ONCALL_ENFORCE_GUARDS=true` to restore the policies described below; disabled evidence is not verified recovery. See the canonical setup guard matrix for external controls and operational errors that still block.
+Temporary owner exception: [incident-run enforcement guards default off](oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017) under DEC-017 / #375. Set exact `PAWLOCAL_ONCALL_ENFORCE_GUARDS=true` to restore the policies described below; disabled evidence is not verified recovery. See the canonical setup guard matrix for external controls and operational errors that still block.
 
 This guide documents verified failure modes, root causes, diagnosis commands, and resolutions across the automated incident responder lifecycle (`incident-responder.yml`).
 

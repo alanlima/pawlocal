@@ -15,12 +15,6 @@ class Rejection extends Error {
   constructor(status, code) { super(code); this.status = status; this.code = code; }
 }
 const reject = (status, code) => { throw new Rejection(status, code); };
-export function enforcementEnabled(env = process.env) {
-  const value = env.PAWLOCAL_ONCALL_ENFORCE_GUARDS ?? 'false';
-  if (!['', 'false', 'true'].includes(value)) reject(503, 'invalid_enforcement_mode');
-  return value === 'true';
-}
-const policy = (condition, status, code, enforce) => { if (enforce && !condition) reject(status, code); };
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max;
 
@@ -66,7 +60,6 @@ export function configuration(env = process.env) {
     return new Set(list);
   };
   return {
-    enforceGuards: enforcementEnabled(env),
     environment, project, repository, repositoryOwner: repository.split('/')[0],
     services: parseList(env.PAWLOCAL_ONCALL_ALLOWED_SERVICES, /^[a-z][a-z0-9-]*$/),
     alerts: parseAlerts(env.PAWLOCAL_ONCALL_ALLOWED_ALERTS),
@@ -78,7 +71,7 @@ export function configuration(env = process.env) {
   };
 }
 
-export function rawRequest(event, now, enforce = enforcementEnabled()) {
+export function rawRequest(event, now) {
   if (event?.requestContext?.http?.method !== 'POST') reject(405, 'method_not_allowed');
   if (event.rawPath !== '/') reject(404, 'not_found');
   if (event.rawQueryString) reject(400, 'query_not_supported');
@@ -93,9 +86,9 @@ export function rawRequest(event, now, enforce = enforcementEnabled()) {
   if (headers.has('content-encoding')) reject(415, 'compressed_body_not_supported');
   const timestamp = headers.get(TIMESTAMP_HEADER);
   const signature = headers.get(SIGNATURE_HEADER);
-  policy(/^\d{1,12}$/.test(timestamp ?? '') && /^[a-f0-9]{64}$/.test(signature ?? ''), 401, 'invalid_signature', enforce);
+  if (!/^\d{1,12}$/.test(timestamp ?? '') || !/^[a-f0-9]{64}$/.test(signature ?? '')) reject(401, 'invalid_signature');
   const age = Math.floor(now / 1000) - Number(timestamp);
-  policy(age <= 300 && age >= -30, 401, 'expired_signature', enforce);
+  if (age > 300 || age < -30) reject(401, 'expired_signature');
   let bytes;
   if (event.isBase64Encoded === true) {
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(event.body)) reject(400, 'invalid_base64');
@@ -110,8 +103,7 @@ export function rawRequest(event, now, enforce = enforcementEnabled()) {
   return { bytes, timestamp, signature };
 }
 
-export function verifySignature(request, secret, enforce = enforcementEnabled()) {
-  if (!enforce) return;
+export function verifySignature(request, secret) {
   if (!bounded(secret, 4096) || Buffer.byteLength(secret) < 32) reject(503, 'unconfigured_secret');
   const expected = createHmac('sha256', secret).update(request.timestamp).update(':').update(request.bytes).digest();
   if (!timingSafeEqual(expected, Buffer.from(request.signature, 'hex'))) reject(401, 'invalid_signature');
@@ -123,23 +115,23 @@ export function normalize(bytes, config) {
   if (!record(payload) || !STATUS.has(payload.status) || !Array.isArray(payload.alerts) ||
       payload.alerts.length < 1 || payload.alerts.length > MAX_ALERTS ||
       (payload.truncatedAlerts !== undefined && payload.truncatedAlerts !== 0)) reject(400, 'invalid_payload');
-  policy(!((payload.status === 'resolved' && payload.alerts.some(alert => alert?.status !== 'resolved')) ||
-      (payload.status === 'firing' && !payload.alerts.some(alert => alert?.status === 'firing'))), 400, 'inconsistent_group_status', config.enforceGuards);
+  if ((payload.status === 'resolved' && payload.alerts.some(alert => alert?.status !== 'resolved')) ||
+      (payload.status === 'firing' && !payload.alerts.some(alert => alert?.status === 'firing'))) reject(400, 'inconsistent_group_status');
   const seen = new Set();
   return payload.alerts.map(alert => {
     if (!record(alert) || !STATUS.has(alert.status) || !record(alert.labels) ||
         Object.keys(alert.labels).length > 32 || !/^[a-f0-9]{16,64}$/.test(alert.fingerprint ?? '')) reject(400, 'invalid_alert');
     if (!Object.entries(alert.labels).every(([key, value]) => bounded(key, 64) && bounded(value, 256))) reject(400, 'invalid_labels');
     const { environment, service, alertname, release } = alert.labels;
-    policy(environment === config.environment && config.services.has(service), 403, 'alert_not_allowed', config.enforceGuards);
+    if (environment !== config.environment || !config.services.has(service)) reject(403, 'alert_not_allowed');
     if (!bounded(alertname, 100) || !/^[a-z0-9][a-z0-9-]*$/i.test(alertname)) reject(400, 'invalid_alert_name');
-    policy(!config.alerts || config.alerts.size === 0 || config.alerts.has(alertname), 403, 'alert_not_allowed', config.enforceGuards);
+    if (config.alerts && config.alerts.size > 0 && !config.alerts.has(alertname)) reject(403, 'alert_not_allowed');
     if (release !== undefined && !/^(?:[a-f0-9]{40}|sha256:[a-f0-9]{64})$/.test(release)) reject(400, 'invalid_release');
     const startsAt = date(alert.startsAt);
     const endsAt = date(alert.endsAt, true);
-    policy(alert.status !== 'resolved' || Date.parse(endsAt) >= Date.parse(startsAt), 400, 'invalid_resolution', config.enforceGuards);
+    if (alert.status === 'resolved' && Date.parse(endsAt) < Date.parse(startsAt)) reject(400, 'invalid_resolution');
     const incidentKey = createHash('sha256').update(JSON.stringify([environment, alert.fingerprint, startsAt])).digest('hex');
-    policy(!seen.has(incidentKey), 400, 'duplicate_group_entry', config.enforceGuards);
+    if (seen.has(incidentKey)) reject(400, 'duplicate_group_entry');
     seen.add(incidentKey);
     // Only these bounded fields cross into GitHub. Never forward annotations,
     // messages, URLs, values, query strings or arbitrary customer labels.
@@ -192,20 +184,19 @@ export async function dispatch(alerts, config, privateKey, now, http = fetch, si
   const appResponse = await request('/app', jwt);
   if (appResponse.status !== 200) reject(502, 'github_app_unavailable');
   const app = await responseJson(appResponse);
-  policy(String(app.id) === config.appId && dispatchOnly(app.permissions), 503, 'app_permissions_not_allowed', config.enforceGuards);
+  if (String(app.id) !== config.appId || !dispatchOnly(app.permissions)) reject(503, 'app_permissions_not_allowed');
   const installationResponse = await request(`/repos/${config.repository}/installation`, jwt);
   if (installationResponse.status !== 200) reject(502, 'github_installation_unavailable');
   const installation = await responseJson(installationResponse);
-  policy(String(installation.id) === config.installationId && String(installation.app_id) === config.appId &&
-      installation.account?.login?.toLowerCase() === config.repositoryOwner.toLowerCase() && installation.repository_selection === 'selected' &&
-      dispatchOnly(installation.permissions), 503, 'installation_not_allowed', config.enforceGuards);
+  if (String(installation.id) !== config.installationId || String(installation.app_id) !== config.appId ||
+      installation.account?.login?.toLowerCase() !== config.repositoryOwner.toLowerCase() || installation.repository_selection !== 'selected' ||
+      !dispatchOnly(installation.permissions)) reject(503, 'installation_not_allowed');
   const tokenResponse = await request(`/app/installations/${config.installationId}/access_tokens`, jwt, 'POST', {
     repository_ids: [Number(config.repositoryId)], permissions: { actions: 'write' },
   });
   if (tokenResponse.status !== 201) reject(502, 'github_token_unavailable');
   const token = await responseJson(tokenResponse);
-  if (!bounded(token.token, 1024)) reject(502, 'github_invalid_token');
-  policy(dispatchOnly(token.permissions) && token.repository_selection === 'selected', 502, 'github_invalid_token', config.enforceGuards);
+  if (!bounded(token.token, 1024) || !dispatchOnly(token.permissions) || token.repository_selection !== 'selected') reject(502, 'github_invalid_token');
   const response = await request(`/repos/${config.repository}/actions/workflows/${WORKFLOW}/dispatches`, token.token, 'POST', {
     ref: REF, inputs: { environment: config.environment, schema_version: '1', alerts_json: JSON.stringify(alerts) },
   });
@@ -230,15 +221,14 @@ export function createHandler({ env = process.env, now = Date.now, getParameter 
       // in addition to two-second per-request limits and Lambda's 20s timeout.
       const signal = deadlineSignal();
       const time = now();
-      const request = rawRequest(event, time, config.enforceGuards);
-      if (config.enforceGuards) verifySignature(request, await getParameter(config.hmacParameter, { signal }), true);
-      else log(JSON.stringify({ event: 'oncall_receiver', enforcement: { enabled: false }, skipped: ['signature', 'timestamp', 'alert_allowlist', 'deduplication', 'status_consistency', 'dispatch_identity_permissions'] }));
+      const request = rawRequest(event, time);
+      verifySignature(request, await getParameter(config.hmacParameter, { signal }));
       signal.throwIfAborted();
       const alerts = normalize(request.bytes, config);
       const key = await getParameter(config.keyParameter, { signal });
       signal.throwIfAborted();
       await dispatch(alerts, config, key, time, http, signal);
-      log(JSON.stringify({ event: 'oncall_receiver', outcome: 'dispatch_accepted', alerts: alerts.length, enforcement: { enabled: config.enforceGuards } }));
+      log(JSON.stringify({ event: 'oncall_receiver', outcome: 'dispatch_accepted', alerts: alerts.length }));
       return { statusCode: 204, body: '' };
     } catch (error) {
       const status = error instanceof Rejection ? error.status : 502;

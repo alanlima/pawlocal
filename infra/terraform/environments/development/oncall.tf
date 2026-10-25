@@ -5,7 +5,6 @@ variable "oncall_receiver" {
     installation_id  = string
     repository_id    = string
     repository       = string
-    enforce_guards   = optional(bool, false)
     allowed_services = set(string)
     allowed_alerts   = optional(set(string), [])
     kms_key_arn      = optional(string)

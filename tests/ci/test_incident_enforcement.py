@@ -16,6 +16,7 @@ import admission
 import candidate
 import control
 import deadline
+import job
 import enforcement
 import finalize
 import promotion
@@ -30,6 +31,93 @@ import test_incident_finalizer as finalizer_fixtures
 
 
 class EnforcementTests(unittest.TestCase):
+    @patch.dict(os.environ, {enforcement.FLAG: "false"})
+    def test_configured_source_environment_survives_different_alert_label(self):
+        output, metadata = admission_fixtures.AdmissionTests().run_preflight(
+            admission_fixtures.FakeGitHub(),
+            enforce_guards="false",
+            alert_changes={"environment": "production"},
+        )
+        self.assertIn("admitted=true", output)
+        self.assertEqual(metadata["source_environment"], "development")
+        self.assertEqual(metadata["alert"]["environment"], "production")
+        broker = publisher.Broker("fixture", metadata, "a" * 40)
+        self.assertTrue(broker.branch.startswith("incident/development/"))
+        profile = quota_fixtures.QuotaTests().profile()
+        development = {
+            "release": {"affected_sha": "a" * 40},
+            "recovery": {"recovery_verified": False},
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "PROMOTION_DEADLINE": str(int(time.time()) + 600),
+                    "GH_TOKEN": "fixture",
+                    "RUNNER_TEMP": tempfile.gettempdir(),
+                    "GITHUB_WORKSPACE": tempfile.gettempdir(),
+                    "MERGE_SHA256": "b" * 64,
+                    "DEVELOPMENT_SHA256": "c" * 64,
+                },
+            ),
+            patch.object(sys, "argv", ["promotion.py", "promote"]),
+            patch.object(
+                promotion,
+                "publication",
+                return_value=(
+                    metadata,
+                    profile,
+                    {"promotion_deadline": int(time.time()) + 600},
+                ),
+            ),
+            patch.object(promotion, "ReleaseClient"),
+            patch.object(promotion, "verified_merge", return_value="a" * 40),
+            patch.object(receipts, "read", return_value=development),
+            patch.object(receipts, "write"),
+            patch.object(promotion, "promote", return_value={}) as dispatch,
+            patch.object(
+                promotion, "recover", return_value={"recovery_verified": False}
+            ),
+        ):
+            promotion.main()
+        self.assertEqual(
+            dispatch.call_args.kwargs["incident_environment"], "development"
+        )
+
+    def test_runtime_environment_resolver_exports_one_normalized_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for raw, normalized in (
+                ("true", "true"),
+                ("false", "false"),
+                ("", "false"),
+            ):
+                output, environment = root / "output", root / "environment"
+                summary = root / "summary"
+                output.write_text("")
+                environment.write_text("")
+                summary.write_text("")
+                with (
+                    self.subTest(raw=raw),
+                    patch.dict(
+                        os.environ,
+                        {
+                            enforcement.FLAG: raw,
+                            "GITHUB_OUTPUT": str(output),
+                            "GITHUB_ENV": str(environment),
+                            "GITHUB_STEP_SUMMARY": str(summary),
+                        },
+                    ),
+                ):
+                    enforcement.resolve()
+                self.assertEqual(output.read_text(), f"enforce_guards={normalized}\n")
+                self.assertEqual(
+                    summary.read_text(), f"Incident enforcement: **{normalized}**\n"
+                )
+                self.assertEqual(
+                    environment.read_text(), f"{enforcement.FLAG}={normalized}\n"
+                )
+
     def test_exact_default_and_invalid_configuration(self):
         for value, expected in (
             (None, False),
@@ -223,6 +311,69 @@ class EnforcementTests(unittest.TestCase):
             with self.assertRaisesRegex(quota.Denied, "production release failed"):
                 promotion.promote(client, "a" * 40)
             fallback.assert_not_called()
+
+    @patch.dict(os.environ, {enforcement.FLAG: "false"})
+    def test_reviewer_preparation_builds_diff_for_deleted_source(self):
+        class Prepared(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            home = root / "home"
+            home.mkdir()
+            work = root / "work"
+            dependencies = root / "dependencies"
+            original_path = Path
+
+            def located_path(value):
+                return {
+                    "/tmp/pawlocal-oncall-candidate": work,
+                    "/tmp/pawlocal-oncall-dependencies": dependencies,
+                }.get(str(value), original_path(value))
+
+            def archive(trusted, sha, destination):
+                destination.mkdir()
+                (destination / "README.md").write_text("deleted source line\n")
+
+            metadata = {
+                "run_id": "7",
+                "base_sha": "a" * 40,
+                "alert": {"incident_key": "b" * 64},
+            }
+            raw = json.dumps(
+                {
+                    "schema": 1,
+                    "base_sha": metadata["base_sha"],
+                    "incident_key": "b" * 64,
+                    "files": {"README.md": None},
+                }
+            ).encode()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "INCIDENT_DEADLINE": "1",
+                        "RUNNER_TEMP": directory,
+                        "GITHUB_WORKSPACE": directory,
+                    },
+                ),
+                patch.object(job, "Path", side_effect=located_path),
+                patch.object(job, "context", return_value=(metadata, None)),
+                patch.object(
+                    job, "uid", return_value=SimpleNamespace(pw_dir=str(home))
+                ),
+                patch.object(job, "archive", side_effect=archive),
+                patch.object(job, "download", return_value={"candidate.json": raw}),
+                patch.object(job, "run") as execute,
+                patch.object(job, "backend_dependency_source", side_effect=Prepared),
+            ):
+                with self.assertRaises(Prepared):
+                    job.prepare("reviewer")
+                diff = execute.call_args_list[0].kwargs["input"].decode()
+            self.assertIn("--- a/README.md", diff)
+            self.assertIn("+++ /dev/null", diff)
+            self.assertIn("-deleted source line", diff)
+            self.assertFalse((work / "README.md").exists())
 
     @patch.dict(os.environ, {enforcement.FLAG: "false"})
     def test_deletion_transport_and_more_than_twenty_tree_entries(self):
@@ -500,7 +651,10 @@ class EnforcementTests(unittest.TestCase):
                     ),
                 ):
                     actual_production = promotion.promote(
-                        merged, sha, expected_development={"different": True}
+                        merged,
+                        sha,
+                        expected_development={"different": True},
+                        incident_environment="development",
                     )
                 self.assertEqual(actual_production, production_release)
                 production_proof = promotion.recover(

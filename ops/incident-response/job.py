@@ -257,9 +257,9 @@ def prepare(role):
             changes.extend(
                 difflib.unified_diff(
                     original,
-                    raw.decode().splitlines(keepends=True),
+                    raw.decode().splitlines(keepends=True) if raw is not None else [],
                     fromfile="a/" + name,
-                    tofile="b/" + name,
+                    tofile="b/" + name if raw is not None else "/dev/null",
                 )
             )
         patch_path = Path(identity.pw_dir) / "candidate.diff"

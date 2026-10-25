@@ -42,6 +42,11 @@ on:
       frontend_config:
         value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
     inputs:
+      enforce_guards:
+        description: Resolved incident enforcement mode from the origin on-call Environment; ordinary calls keep true.
+        required: false
+        default: 'true'
+        type: string
       environment:
         required: true
         type: string
@@ -71,10 +76,8 @@ concurrency:
   group: ${{ contains(fromJSON('["Release · Publish and verify development","Release · Promote verified release to production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
   cancel-in-progress: false
 
-# Repository variable only: same-name Environment variables are unsupported.
-# Controller predicates and runner mode must use the same repository setting.
 env:
-  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ inputs.enforce_guards || 'true' }}
   TERRAFORM_VERSION: 1.14.3
   PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS: ${{ vars.PAWLOCAL_TERRAFORM_DIAGNOSTIC_LOGS }}
   TF_ROOT: infra/terraform/environments/${{ inputs.environment }}

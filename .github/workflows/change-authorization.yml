@@ -12,17 +12,57 @@ concurrency:
   group: pawlocal-change-authorization-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# Repository variable only: same-name Environment variables are unsupported.
-# Controller predicates and runner mode must use the same repository setting.
-env:
-  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
-
 jobs:
+  incident-origin:
+    name: Select incident on-call Environment
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      environment: ${{ steps.origin.outputs.environment }}
+    steps:
+      - name: Read bounded incident branch routing hint
+        id: origin
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const branch = context.payload.pull_request?.head?.ref || ''
+            const match = /^incident\/(development|production)\/[^\r\n]{1,128}$/.exec(branch)
+            core.setOutput('environment', match ? match[1] : '')
+
+  incident-enforcement:
+    name: Resolve incident enforcement mode
+    needs: incident-origin
+    if: needs.incident-origin.outputs.environment != ''
+    runs-on: ubuntu-24.04
+    environment: oncall-${{ needs.incident-origin.outputs.environment }}
+    permissions:
+      contents: read
+    outputs:
+      enforce_guards: ${{ steps.enforcement.outputs.enforce_guards }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Resolve mode after entering on-call Environment
+        id: enforcement
+        env:
+          PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+        run: python ops/incident-response/enforcement.py
+
   classify:
     name: Classify change authorization route
+    needs: [incident-origin, incident-enforcement]
+    if: always() && needs.incident-origin.result == 'success' && (needs.incident-enforcement.result == 'success' || needs.incident-enforcement.result == 'skipped')
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.incident-enforcement.outputs.enforce_guards || 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
+      enforce_guards: ${{ needs.incident-enforcement.outputs.enforce_guards || 'true' }}
       route: ${{ steps.classifier.outputs.route }}
       pr_number: ${{ steps.classifier.outputs.pr_number }}
       head_sha: ${{ steps.classifier.outputs.head_sha }}
@@ -56,7 +96,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: incident-change-authorization
     env:
-      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.classify.outputs.route == 'incident' && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false') || 'true' }}
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.classify.outputs.enforce_guards }}
     timeout-minutes: 5
     steps:
       - name: Check out trusted main
@@ -102,7 +142,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: incident-change-authorization
     env:
-      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.classify.outputs.enforce_guards }}
     timeout-minutes: 10
     steps:
       - name: Check out trusted main

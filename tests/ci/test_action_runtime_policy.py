@@ -11,6 +11,8 @@ import yaml
 WORKFLOWS = Path(".github/workflows")
 
 EXPECTED_HOSTED_JOBS = {
+    ("change-authorization.yml", "incident-origin"),
+    ("change-authorization.yml", "incident-enforcement"),
     ("change-authorization.yml", "classify"),
     ("change-authorization.yml", "reset-status"),
     ("change-authorization.yml", "incident-authorize"),
@@ -31,6 +33,7 @@ EXPECTED_HOSTED_JOBS = {
     ("compose-ci.yml", "compose"),
     ("deploy-production.yml", "verify-production"),
     ("deploy-production.yml", "workflow-binding"),
+    ("deploy-production.yml", "incident-enforcement"),
     ("development-dsql-seed.yml", "seed"),
     ("frontend-deploy.yml", "frontend"),
     ("frontend-production-deploy.yml", "disabled"),

@@ -12,6 +12,11 @@ on:
         description: Exact development-verified immutable backend image reference.
         required: true
         type: string
+      incident_environment:
+        description: Optional incident origin; selects its on-call enforcement override. Empty means ordinary release.
+        required: false
+        default: ''
+        type: string
       expected_workflow_sha:
         description: Optional exact workflow-source assertion; incident controller must bind this to release_commit. This is not authorization.
         required: false
@@ -25,14 +30,44 @@ concurrency:
   group: pawlocal-lifecycle-production
   cancel-in-progress: false
 
-# Repository variable only: same-name Environment variables are unsupported.
-# Controller predicates and runner mode must use the same repository setting.
-env:
-  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
-
 jobs:
+  incident-enforcement:
+    name: Resolve incident release enforcement mode
+    if: inputs.incident_environment != ''
+    runs-on: ubuntu-24.04
+    environment: oncall-${{ inputs.incident_environment == 'development' && 'development' || 'production' }}
+    permissions:
+      contents: read
+    outputs:
+      enforce_guards: ${{ steps.enforcement.outputs.enforce_guards }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Resolve mode after entering origin on-call Environment
+        id: enforcement
+        env:
+          INCIDENT_ENVIRONMENT: ${{ inputs.incident_environment }}
+          PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+        run: |
+          case "$INCIDENT_ENVIRONMENT" in
+            development|production) ;;
+            *) echo 'Invalid incident Environment' >&2; exit 1 ;;
+          esac
+          python ops/incident-response/enforcement.py
+
   workflow-binding:
     name: Verify production workflow source binding
+    needs: incident-enforcement
+    if: always() && (needs.incident-enforcement.result == 'success' || needs.incident-enforcement.result == 'skipped')
+    outputs:
+      enforce_guards: ${{ needs.incident-enforcement.outputs.enforce_guards || 'true' }}
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.incident-enforcement.outputs.enforce_guards || 'true' }}
     runs-on: ubuntu-24.04
     permissions: {}
     steps:
@@ -71,6 +106,7 @@ jobs:
       backend_image: ${{ inputs.backend_image }}
       release_commit: ${{ inputs.release_commit }}
       release_only: true
+      enforce_guards: ${{ needs.workflow-binding.outputs.enforce_guards }}
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
       PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
@@ -79,7 +115,7 @@ jobs:
 
   verify-production:
     name: Publish frontend and verify production
-    needs: terraform-production
+    needs: [workflow-binding, terraform-production]
     runs-on: ubuntu-24.04
     environment: production
     permissions:
@@ -87,6 +123,7 @@ jobs:
       deployments: write
       id-token: write
     env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.workflow-binding.outputs.enforce_guards }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       PAWLOCAL_DEPLOY_ADAPTER_PATH: ${{ vars.PAWLOCAL_DEPLOY_ADAPTER_PATH }}
       PAWLOCAL_DATABASE_PROVIDER: aurora_dsql

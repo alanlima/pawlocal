@@ -7,6 +7,7 @@ not policy verdicts. Call sites choose which decisions this switch controls.
 import os
 import sys
 import time
+from pathlib import Path
 
 FLAG = "PAWLOCAL_ONCALL_ENFORCE_GUARDS"
 CATEGORIES = (
@@ -67,3 +68,22 @@ def operational_deadline():
     """Finite transport timeout arithmetic; Actions still terminates its jobs."""
     skipped("deadline")
     return int(time.time()) + 7 * 86400
+
+
+def resolve():
+    """Snapshot the selected on-call Environment's runtime value for this run."""
+    value = "true" if enabled() else "false"
+    for variable, key in (("GITHUB_OUTPUT", "enforce_guards"), ("GITHUB_ENV", FLAG)):
+        path = os.environ.get(variable)
+        if path:
+            with Path(path).open("a", encoding="utf-8") as stream:
+                stream.write(f"{key}={value}\n")
+    print(f"Incident enforcement: {value}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with Path(summary).open("a", encoding="utf-8") as stream:
+            stream.write(f"Incident enforcement: **{value}**\n")
+
+
+if __name__ == "__main__":
+    resolve()
