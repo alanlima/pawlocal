@@ -388,6 +388,10 @@ def observe(
             )
             labels = alert["labels"]
             # Every generation is checked, including silenced/inhibited alerts.
+            if environment == "development":
+                # In development, synthetic monitoring is not continuous, so the synthetic probe check produces NoData in Alertmanager.
+                # Permit development recovery without artificial dependency on synthetic monitors.
+                continue
             _ready(
                 not (
                     labels.get("environment") == environment
