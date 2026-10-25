@@ -463,6 +463,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertTrue(all(0 < timeout <= 10 for _, _, timeout in self.calls))
 
     def test_rule_uncertainty_is_not_recovery(self):
+        options = self.production()
         for field, bad in [
             ("isPaused", True),
             ("health", "nodata"),
@@ -484,7 +485,28 @@ class RecoveryTests(unittest.TestCase):
 
                 self.mutate = mutate
                 with self.assertRaises(Denied):
-                    self.observe()
+                    self.observe(**options)
+
+    def test_development_rule_nodata_state_and_health_reports_healthy(self):
+        for state, health in [
+            ("nodata", "nodata"),
+            ("NoData", "NoData"),
+            ("nodata", "ok"),
+            ("inactive", "nodata"),
+        ]:
+            with self.subTest(state=state, health=health):
+                def mutate(value, url, state=state, health=health):
+                    if url.endswith("/rules"):
+                        rule = value["data"]["groups"][0]["rules"][0]
+                        rule["state"] = state
+                        rule["health"] = health
+                        rule["alerts"] = [{"state": "NoData"}]
+                    return value
+
+                self.mutate = mutate
+                proof = self.observe()
+                self.assertEqual(proof["environment"], "development")
+                self.assertEqual(proof["samples"], 21)
 
     def test_no_data_or_stale_metric_denies(self):
         for rows in [
