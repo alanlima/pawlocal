@@ -69,9 +69,9 @@ Backend API/repository tests use isolated SQLite fixtures by default. PostgreSQL
 
 The cloud path below applies separately to development and production. Each environment has its own frontend, API, identity, database and application Terraform state.
 
-![End-to-end application architecture: browser, frontend delivery, identity, API, database and telemetry](docs/images/delivery/architecture-end-to-end.svg)
+![End-to-end application architecture: browser, frontend delivery, identity, API, database and telemetry](docs/images/delivery/architecture-end-to-end.png)
 
-[Editable Mermaid source](docs/images/delivery/architecture-end-to-end.mmd).
+[Full-size vector image](docs/images/delivery/architecture-end-to-end.svg).
 
 CloudFront/S3 serve the frontend; the browser calls the separate HTTPS API host. Deployment injects general configuration; the backend reads the OTLP credential from Parameter Store at runtime. Local HTTP mode uses PostgreSQL and the local Collector stack; explicit standalone mock mode uses the interchangeable mock adapter. Cloud telemetry uses direct Faro/OTLP, rather than the local Collector. Runtime secrets stay outside Terraform state. Diagram paths describe implemented capabilities; the [evidence map](#project-self-review-guide) retains the hosted correlation and identity acceptance gaps. See [architecture](docs/architecture.md), [infrastructure operations](docs/terraform-greenfield-operations.md) and [hosting/cost decisions](docs/stage4-hosting-options.md).
 
@@ -79,9 +79,9 @@ CloudFront/S3 serve the frontend; the browser calls the separate HTTPS API host.
 
 Ordinary changes and alert-driven repairs share the release path, with separate authorization routes. Terraform owns deployment changes through the matching environment state.
 
-![Operations and CI/CD architecture: checks, authorization, releases, incident response and recovery](docs/images/delivery/architecture-operations-cicd.svg)
+![Operations and CI/CD architecture: checks, authorization, releases, incident response and recovery](docs/images/delivery/architecture-operations-cicd.png)
 
-[Editable Mermaid source](docs/images/delivery/architecture-operations-cicd.mmd).
+[Full-size vector image](docs/images/delivery/architecture-operations-cicd.svg).
 
 Development and production use independent application states. Production selects the development-verified source/backend digest and rebuilds frontend assets with production configuration. The incident route has no runtime human approval; DEC-017 can disable software review/provenance/budget/stop/recovery checks, while external GitHub/IAM controls and exact-plan/state ownership remain. The observed drill therefore retains `RELEASE_COMPLETED_UNVERIFIED`. DEC-015 separately disables shared strict release-only rejection. See the [Actions catalogue](docs/github-actions.md) and [canonical enforcement matrix](docs/oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017). Documentation-only changes do not automatically run every application workflow; final rollback acceptance remains with the owner.
 

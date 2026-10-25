@@ -64,4 +64,4 @@ The existing [drill 02 wiki](https://github.com/alanlima/pawlocal/wiki/Incident-
 
 ## Architecture diagrams
 
-`architecture-end-to-end.svg` and `architecture-operations-cicd.svg` are diagrams generated from their adjacent `.mmd` Mermaid sources. README embeds the portable SVGs because GitHub's live Mermaid renderer failed on the operations graph. Both diagrams describe implemented capabilities; the README captions retain the separate live acceptance limitations. They are illustrations, not screenshots or additional runtime evidence.
+The application and operations/CI/CD images use custom layouts with official AWS service icons, explicit environment boundaries, and separate external-system and automation zones. README embeds high-resolution PNGs; the matching SVGs remain available for full-size inspection. The layouts and original icon inputs are kept under [source/](source/README.md). They describe implemented capabilities; the README captions retain the separate live acceptance limitations. These illustrations are separate from the eleven runtime JPEG screenshots above.
