@@ -896,6 +896,8 @@ In disabled mode, a structurally supported `incident/` branch selects the incide
 
 The webhook receiver Lambda is outside this toggle and retains its existing signature, timestamp, payload, allow-list and dispatch checks. No receiver source, tests, configuration or Terraform changes are part of this exception.
 
+The pinned Codex action bot permission guard remains active in both modes: the configured dispatcher bot is admitted explicitly, and other bots retain the existing repository write-permission fallback. Disabled mode supplies an actual-actor override only for human actors. See [Codex action actor inputs](oncall-troubleshooting.md#symptom-codex-action-rejects-allow-bot-users-before-model-execution).
+
 | Covered policy | Decision sites | Disabled behavior | Enabled behavior / evidence |
 |---|---|---|---|
 | Actor/main/attempt, activation, production telemetry approval, readiness/protection configuration | `admission.py`, `protection.py`, `control.py`, incident workflow, `publisher-token.mjs` | Admit usable configured incident inputs without these policy verdicts | Original trusted admission and readiness checks; `enforcement` metadata and bounded log entries identify disabled categories |

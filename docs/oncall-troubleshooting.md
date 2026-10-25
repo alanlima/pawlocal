@@ -179,6 +179,12 @@ Admission connects to Grafana Alertmanager (`/api/alertmanager/grafana/api/v2/al
 
 ## Layer 6 — Fixer, Candidate CI, and PR Publication
 
+### Symptom: Codex action rejects `allow-bot-users` before model execution
+
+The pinned action rejects `*` in `allow-bot-users`, even when `allow-users` would admit the actor. Both fixer and reviewer retain the configured dispatcher bot input in either enforcement mode. The pinned action admits that bot explicitly and otherwise checks repository write permission. Disabled enforcement bypasses that permission check only for human actors; bot actors never receive an allow-users override.
+
+If the fixer fails before sealing a candidate, publication is skipped because no candidate hash exists. The finalizer still records `ESCALATED`; inspect the first fixer failure rather than treating a missing candidate artifact as a second incident cause. A real candidate remains required in either enforcement mode.
+
 ### Symptom: model continuation fails with HTTP 403 or 429
 
 Check **Show quota gateway failure diagnostics** immediately after the fixer/reviewer model step. This always-run step reads at most 64 KiB from the fixed runner-owned diagnostic file, even when the model step failed or the gateway has stopped. An absent file means no diagnostic was recorded; it does not prove that no model request or reservation occurred.

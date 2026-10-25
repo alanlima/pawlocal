@@ -36,7 +36,7 @@ test('Environment overrides resolve only inside a runner step and controller job
   assert.match(incident, /enforce_guards: \$\{\{ steps.enforcement.outputs.enforce_guards \}\}/);
   assert.equal((incident.match(/PAWLOCAL_ONCALL_ENFORCE_GUARDS: \$\{\{ needs.preflight.outputs.enforce_guards \}\}/g) || []).length, 8);
   assert.ok(!incident.includes("if: vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS"));
-  assert.match(incident, /allow-bot-users: \$\{\{ needs.preflight.outputs.enforce_guards/);
+  assert.match(incident, /allow-bot-users: \$\{\{ vars\.PAWLOCAL_ONCALL_DISPATCH_ACTOR/);
 });
 test('shared authorization resolves origin Environment and ordinary approval pins true', async () => {
   const auth = workflow('change-authorization');
