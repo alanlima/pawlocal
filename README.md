@@ -1,52 +1,126 @@
 # PawLocal
 
-PawLocal is a community-maintained directory of dog-friendly places across South East Queensland, from the Gold Coast to the Sunshine Coast.
+Find dog-friendly places across South East Queensland, from the Gold Coast through Brisbane and Moreton Bay to the Sunshine Coast.
 
-## Project status
+**[Open PawLocal](https://pawlocal.alanlima.cloud/)** · [Development site](https://pawlocal-dev.alanlima.cloud/) · [Public task tracker](https://github.com/alanlima/pawlocal/issues) · [Delivery plan](docs/submission.md)
 
-**Stages 2, 3, and 3.1 are complete and reviewed. Stage 4 is in progress.** Issue #135 implements a greenfield Terraform design with a standalone IAM bootstrap state and clean development and production application states while preserving the Issue #75 Lightsail Container Services and Aurora DSQL architecture. Read-only inventory verified the former application state is empty and that no PawLocal application resources survive; an unrelated account-level personal workload was verified out of scope. The configuration and workflows are not evidence of an apply or deployment. Telemetry is disabled for the initial release and backup, HA, restore, recovery, and rollback remain deferred.
+[Problem and goal](#problem-and-goal) · [Use the app](#use-the-app) · [Run locally](#run-locally) · [Architecture](#architecture) · [Project self-review guide](#project-self-review-guide) · [Documentation](#documentation)
 
-Issue #43's release path runs applicable PR checks, publishes an immutable backend image from `main`, plans and applies the matching development Terraform state through protected GitHub Environments, then verifies development. Production promotion is a separate manual workflow that accepts only the same commit and image recorded by a successful development deployment. No development or production infrastructure apply is authorized by this documentation.
+## Problem and goal
 
-## Project documentation
+Dog owners must piece together scattered, incomplete or outdated information about parks, beaches, walks and cafés. Fencing, off-leash rules, shade, drinking water and access restrictions can be hard to verify before a visit.
 
-- [Product specification](product-spec.md)
-- [OpenAPI contract](openapi.yaml)
-- [Architecture](docs/architecture.md)
-- [Implementation plan and issue proposals](docs/implementation-plan.md)
-- [Agent workflow](docs/agent-workflow.md)
-- [Model policy](docs/model-policy.md)
-- [Decisions](docs/decisions.md)
-- [Testing approach](docs/testing.md)
-- [GitHub Actions workflow reference](docs/github-actions.md)
-- [On-call responder setup guide](docs/oncall-setup.md)
-- [On-call responder troubleshooting guide](docs/oncall-troubleshooting.md)
-- [Issue #135 Terraform operator guide](docs/terraform-greenfield-operations.md)
-- [Historical AWS deployment record](docs/deployment-aws-frontend.md)
-- [AI usage report](docs/ai-usage-report.md)
+PawLocal's goal is a free, searchable, community-maintained directory that helps people choose an outing and improve the information for the next visitor. Anonymous visitors can browse, search, filter, inspect and share places. Signed-in members can save favourites, rate and review places, suggest locations, add tips or corrections, and report inaccurate or inappropriate content. Contributions publish immediately after validation and can be reported. AI listing drafts require human approval before publication; automated listing generation is not demonstrated by this delivery.
 
-## Planned stack
+Unknown facilities stay unknown, facility filters use verified details, empty searches explain the result, and API failures stay visible. HTTP mode never silently falls back to demo data. The [product specification](product-spec.md) defines acceptance criteria and exclusions.
 
-React, TypeScript, Vite and Tailwind CSS; Python, FastAPI and Pydantic; PostgreSQL with SQLAlchemy 2 and Alembic; Docker Compose; and OpenTelemetry with Grafana, Prometheus, Loki and Tempo. Local Compose uses PostgreSQL. The owner selected Lightsail Container Services + Aurora DSQL with short-lived GitHub OIDC deployment identities. Hosted telemetry is disabled for the initial release; backup, HA and recovery are deferred. Live DSQL compatibility and runtime credential refresh remain deployment gates.
+![Production discovery with search, area selection and place cards](docs/images/delivery/production-discovery-2026-10-25.jpg)
 
-## Backend development
+*Production, 25 October 2026: this visit displayed 51 listings. [Screenshot provenance](docs/images/delivery/README.md) records environment and limits.*
 
-Stage 3 backend setup, migration, API, and test instructions are in [backend/README.md](backend/README.md). Protected API operations validate Cognito access tokens; no Cognito or other AWS resources are provisioned by local development.
+## Use the app
 
-## Frontend service mode
+1. Open the public site. Search by place or area, choose a region, or select a category such as **Dog parks**. **Filters** shows verified facilities; selecting an unrecorded facility can correctly return no matches.
+2. Open a place to inspect access information, facilities and community contributions. Check current local signage before visiting. **Share this place** copies its permanent public URL.
+3. Use **Sign in** for the hosted Cognito flow. Saving a place while anonymous prompts sign-in; **Saved places** collects favourites after authentication.
+4. Use **Write a review**, **Add a helpful tip**, **Suggest an update** or **Add a place** to contribute. Report a listing or published contribution using its report controls. Protected writes require a valid access token and server validation; the UI reports permission, validation and network failures.
 
-The frontend uses `MockPlaceService` only when `VITE_USE_MOCK_BACKEND=true`. When the toggle is false or unset, it selects the typed `HttpPlaceService` and uses `VITE_API_BASE_URL` (default `/api/v1`). Vite's development server proxies that path to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`); set the target to `http://backend:8000` in Compose. Cloud releases use separate HTTPS API hosts (`api-dev.<domain>` and `api.<domain>`), while CloudFront serves frontend assets only. A failed or unavailable API remains an HTTP error and never silently switches to mock data. The checked-in `.env.example` opts into mock mode for the local demo.
+![Production place detail with access information and save/share controls](docs/images/delivery/production-place-detail-2026-10-25.jpg)
 
-HTTP-mode authentication is a host integration seam, not a PawLocal sign-in flow. The host can inject `window.pawLocalAuth` before the app loads with `getAccessToken()` returning the current Cognito access token (sync or async), and optional `signIn()`/`signOut()` callbacks. The frontend requests a fresh token for each API call, sends it only as a Bearer header, and does not persist it. Hosts own authentication UX and token refresh. Without the host provider, protected actions report that authentication is unavailable; mock demo-member mode never authenticates HTTP requests. See [frontend/README.md](frontend/README.md#host-authentication-integration) for the interface contract.
+*A real place detail page; unverified facilities are explicitly unknown. [Filter, share and sign-in-boundary captures](docs/images/delivery/README.md) extend the walkthrough. Fresh signed-in write/persistence screenshots remain pending.*
 
-## Development
+## Delivery status
 
-For the combined local frontend, API, PostgreSQL and observability stack, first copy `.env.example` to `.env` (`Copy-Item .env.example .env` in PowerShell). Keep `.env` out of version control and replace the local-only password placeholder. Then run `docker compose up --build -d` from the repository root. Open PawLocal at <http://localhost:5173>, Grafana at <http://localhost:3000>, and the API health endpoint at <http://localhost:8000/health>. See the frontend and backend READMEs for ports, health checks, privacy, synthetic failures, shutdown, migrations and tests.
+The frontend, API, persistence adapters, local Compose stack, cloud release workflows, hosted instrumentation and incident controller are implemented. Public discovery/detail and production Grafana metrics/logs were inspected on 25 October. The [controlled production drill](https://github.com/alanlima/pawlocal/issues/396) records a real alert, automatic repair PR, actual hosted CI, automatic merge, development verification, production promotion and observed recovery under traffic.
 
-## Issue #135 Terraform structure
+The drill used the approved enforcement-disabled mode (DEC-017). [Incident #399](https://github.com/alanlima/pawlocal/issues/399) reports `RELEASE_COMPLETED_UNVERIFIED`: disabled checks do not count as passed review/provenance/stable-recovery policies. Formal acceptance remains tracked in [#226](https://github.com/alanlima/pawlocal/issues/226), [#230](https://github.com/alanlima/pawlocal/issues/230), [#229](https://github.com/alanlima/pawlocal/issues/229) and [#231](https://github.com/alanlima/pawlocal/issues/231). Backup/restore/HA guarantees and final rollback acceptance are not established here.
 
-The active roots are `infra/terraform/iam-bootstrap`, `infra/terraform/environments/development`, and `infra/terraform/environments/production`. They use the distinct backend keys `pawlocal/iam-bootstrap/terraform.tfstate`, `pawlocal/development/terraform.tfstate`, and `pawlocal/production/terraform.tfstate`. The application roots share only `infra/terraform/modules/pawlocal-environment`.
+Source baseline for this documentation review: `8895b99a549ee0db134cec69bd681618f8db46d7`. The final submission commit remains to be selected in the [delivery plan](docs/submission.md). A live screenshot alone does not identify the frontend bundle revision.
 
-Bootstrap owns GitHub OIDC trust, plan/apply and publisher role identity, baseline permissions, and permissions boundaries. Each application state owns its resources, environment-specific managed policies, and only the matching attachments. Plan roles have AWS read permissions plus their own state lock and private plan upload. Apply roles cannot create roles, alter trust or boundaries, attach another environment's policy, or exceed their bootstrap-owned boundary. Lightsail update/deployment authorization requires the matching project and environment resource tags; the roles have no `UntagResource` permission and can set the authorization tags only once on exact environment-named resources.
+## Run locally
 
-Application plans and applies run through `.github/workflows/terraform-environment.yml`. It publishes a value-free resource-type/action summary, transfers the opaque plan through the private bootstrap bucket, binds it to the commit, repository, run, attempt, environment, state key, one-way backend-target fingerprint, and SHA-256 digest, and applies only that saved plan after approval in `<environment>-apply`. Production first requires a successful matching development deployment. See [the operator guide](docs/terraform-greenfield-operations.md) for bootstrap planning, protected configuration, staged immutable-ARN/runtime handoffs, release commands, and verification gates.
+Prerequisites: Git, Docker Engine with Compose v2, and available loopback ports. Node.js and Python are needed for host-side development/tests. From the repository root, copy `.env.example` to `.env` once and replace its local PostgreSQL password. Keep `.env` out of Git.
+
+```powershell
+Copy-Item .env.example .env
+# Edit PAWLOCAL_POSTGRES_PASSWORD in .env before starting.
+docker compose up --build -d
+```
+
+Open [the app](http://localhost:5173), [API health](http://localhost:8000/health), [API documentation](http://localhost:8000/docs) and [Grafana](http://localhost:3000). `docker compose ps` shows health. Startup includes frontend, FastAPI, PostgreSQL, Collector, Prometheus, Loki, Tempo and Grafana; migrations run before the API starts. A fresh database has no published places until approved data is loaded.
+
+Root Compose explicitly selects the HTTP adapter even though `.env.example` enables mock mode for standalone Vite development. Local persistence uses PostgreSQL; hosted environments use Aurora DSQL. Compose has no Cognito settings by default: browsing works, but protected writes need configured authentication. For disposable authenticated tests, use the [backend browser harness](backend/README.md#browser-integration-authentication).
+
+`docker compose stop` / `docker compose start` stops/restarts existing containers. `docker compose down` retains named data volumes; the startup command recreates containers. Volume deletion erases local data and belongs only in an intentional disposable reset. See [frontend setup](frontend/README.md#local-frontend-and-observability-stack) and [backend setup](backend/README.md).
+
+### Run checks
+
+Use Python 3.12 in a virtual environment. On Windows, keep tracked shell scripts checked out with LF line endings and have WSL/Bash available for the deployment-adapter test; CRLF produces an invalid `pipefail` option before the test can inspect the adapter. Install dependencies with `python -m pip install -e './backend[test]'` and `npm ci --prefix frontend`. From the root, this single PowerShell command runs frontend unit/component and backend unit/API/repository checks, stopping on failure:
+
+```powershell
+& { npm test --prefix frontend; if ($LASTEXITCODE -ne 0) { throw 'Frontend checks failed' }; python -m pytest backend/tests; if ($LASTEXITCODE -ne 0) { throw 'Backend checks failed' } }
+```
+
+Backend API/repository tests use isolated SQLite fixtures by default. PostgreSQL integration **skips** unless `PAWLOCAL_TEST_DATABASE_URL` identifies a dedicated disposable database; configure and migrate it as in [backend CI](.github/workflows/backend-ci.yml) before claiming that coverage. Browser persistence checks need the opted-in harness and `npm run test:e2e:backend --prefix frontend`. [Verification record](docs/submission.md#verification-record) distinguishes reruns from skipped checks.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U[React / TypeScript / Vite] --> S[Typed PlaceService]
+  S --> A[FastAPI: routes / use cases / repositories]
+  S -. explicit local demo mode .-> M[Mock adapter]
+  C[Cognito: hosted sign-in / PKCE] --> U
+  A --> P[Local: PostgreSQL / Alembic]
+  A --> D[Hosted: Aurora DSQL / separate baseline]
+  U --> O[Journey telemetry]
+  A --> O
+  O --> G[Grafana: metrics / logs / traces / alerts]
+  G --> I[Incident controller / bounded repair]
+  I --> R[GitHub PR / CI / releases]
+```
+
+CloudFront/S3 serve the frontend; Lightsail Container Services run the API. Terraform owns AWS resources through separate IAM-bootstrap, development and production states. Runtime secrets stay outside Terraform state. See [architecture](docs/architecture.md), [infrastructure operations](docs/terraform-greenfield-operations.md) and [hosting/cost decisions](docs/stage4-hosting-options.md).
+
+Applicable PRs run CI; successful application releases publish an immutable backend image and deploy/verify development. Ordinary production promotion is manually dispatched for that exact verified release. The incident exception can merge/promote automatically; read its current enforcement mode in [on-call setup](docs/oncall-setup.md). Documentation-only changes do not automatically run all application workflows.
+
+![Grafana production application panels: requests, latency, status classes and structured logs](docs/images/delivery/grafana-production-application-2026-10-25.jpg)
+
+*Actual Grafana Cloud panels, 25 October 2026, six-hour window across releases. [Dashboard evidence](docs/images/delivery/README.md) includes the incident dashboard and interpretation limits. Grafana links require access; checked-in captures and the [drill wiki](https://github.com/alanlima/pawlocal/wiki/Incident-drill-2026-10-25-02) are reviewer entry points.*
+
+## Project self-review guide
+
+Evidence map for the [current rubric](https://github.com/DataTalksClub/ai-dev-tools-zoomcamp/blob/main/project/README.md), not an awarded score. Maximum: 24 points; passing requires 10 points **and three peer reviews**, tracked in [#283](https://github.com/alanlima/pawlocal/issues/283).
+
+| Criterion (maximum) | Implementation / inspection | Evidence, status and limits |
+| --- | --- | --- |
+| Problem description (2) | [Problem and goal](#problem-and-goal), [walkthrough](#use-the-app) | Functionality and expected behavior documented; real screenshots above. |
+| Product specification (2) | [Spec](product-spec.md), [OpenAPI](openapi.yaml), [public issues](https://github.com/alanlima/pawlocal/issues) | [#396](https://github.com/alanlima/pawlocal/issues/396) and [agent PR #400](https://github.com/alanlima/pawlocal/pull/400) show tracker use; historical parent acceptance needs reconciliation. |
+| Agent team (2) | [Profiles](agents/profiles), [workflow](docs/agent-workflow.md), [AI usage](docs/ai-usage-report.md) | Responsibilities, handoffs and review defined; read with incident exception. |
+| Context management (2) | [AGENTS.md](AGENTS.md), [documentation](#documentation) | Modular specification, process, decisions and operations references. |
+| Application (2) | [Services](frontend/src/services), [backend](backend/pawlocal), [startup](#run-locally) | Public browse/detail captured; [historical PostgreSQL browser persistence](backend/README.md#browser-integration-authentication). Fresh authenticated persistence/startup pending. |
+| Testing (2) | [Check command](#run-checks), [backend tests](backend/tests), [strategy](docs/testing.md) | Unit/component/API/repository suites; [verification record](docs/submission.md#verification-record) separates reruns and PostgreSQL/browser gaps. |
+| Containerization (2) | [Compose](docker-compose.yml), [frontend](frontend/Dockerfile), [backend](backend/Dockerfile) | One startup command includes database/telemetry. Fresh clean start pending: Docker daemon unavailable during review. |
+| Deployment (2) | [Production](https://pawlocal.alanlima.cloud/), [release](https://github.com/alanlima/pawlocal/actions/runs/40181618456) | Real deployment and discovery/detail captured; reachability alone does not prove authenticated persistence. |
+| CI/CD (3) | [Catalogue](docs/github-actions.md), [release](.github/workflows/fullstack-release.yml), [manual promotion](.github/workflows/deploy-production.yml) | [DEV](https://github.com/alanlima/pawlocal/actions/runs/40180921838), [incident PROD](https://github.com/alanlima/pawlocal/actions/runs/40181618456), [historical manual PROD](https://github.com/alanlima/pawlocal/actions/runs/40044690011). Ordinary/incident paths are distinct. |
+| Observability (2) | [Operations](docs/hosted-telemetry-operations.md), [definitions](observability), [screenshots](docs/images/delivery/README.md) | Production metrics/logs visible; [#225](https://github.com/alanlima/pawlocal/issues/225) accepts amended DEV correlation. Fresh single-journey metric/log/trace set and [#230](https://github.com/alanlima/pawlocal/issues/230) gates remain. |
+| User-impact alerting (1) | [Spec](docs/specs/hosted-observability.md), [drill](https://github.com/alanlima/pawlocal/wiki/Incident-drill-2026-10-25-02) | Real search-filter 5xx alert and Normal under traffic. Formal G1 [#226](https://github.com/alanlima/pawlocal/issues/226) remains open. |
+| On-call agent (2) | [Controller](ops/incident-response), [workflow](.github/workflows/incident-responder.yml), [repair](https://github.com/alanlima/pawlocal/pull/400) | [#396](https://github.com/alanlima/pawlocal/issues/396): automatic fix/deploy, observed recovery. [#399](https://github.com/alanlima/pawlocal/issues/399): policy-unverified with enforcement disabled; formal G2/production-origin acceptance open. |
+
+Reviewer walkthrough: public demo → search/filter/detail/share → local run/checks → architecture/agent process → release runs → telemetry and incident timeline → [remaining delivery gates](docs/submission.md).
+
+## Documentation
+
+| Need | Maintained entry point |
+| --- | --- |
+| Submission form, dates, final commit and evidence | [Delivery plan](docs/submission.md), [#281](https://github.com/alanlima/pawlocal/issues/281), [#284](https://github.com/alanlima/pawlocal/issues/284) |
+| Product and API | [Product specification](product-spec.md), [OpenAPI](openapi.yaml) |
+| Architecture and stages | [Architecture](docs/architecture.md), [implementation plan](docs/implementation-plan.md), [decisions](docs/decisions.md) |
+| Agent responsibilities and context | [Workflow](docs/agent-workflow.md), [team](agents/README.md), [model policy](docs/model-policy.md), [AI usage](docs/ai-usage-report.md) |
+| Development and tests | [Frontend](frontend/README.md), [backend](backend/README.md), [testing](docs/testing.md) |
+| Development deploy / exact-release promotion | [Actions catalogue and commands](docs/github-actions.md), [Terraform guide](docs/terraform-greenfield-operations.md) |
+| Configuration and lifecycle | [Management](docs/configuration-management.md), [inventory](docs/configuration-inventory.md), [production lifecycle](docs/terraform-production-lifecycle.md) |
+| Telemetry, dashboards and privacy | [Hosted telemetry](docs/hosted-telemetry-operations.md), [monitoring plan](docs/plans/monitoring-implementation.md) |
+| Incident demonstration, investigation and emergency stop | [Setup](docs/oncall-setup.md), [troubleshooting](docs/oncall-troubleshooting.md), [controller operations](ops/incident-response/README.md) |
+
+Operational changes retain existing approvals. Final rollback evidence is being reviewed separately; retired `rollback-development.yml` is an inert historical workflow, not an operational rollback procedure.
