@@ -10,8 +10,8 @@ import re
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "incident-response"))
-from admission import GitHub, Denied, deployed_release, matching_development, verified_record
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_evidence import GitHub, ReleaseEvidenceError as Denied, deployed_release, matching_development, verified_record
 
 PREVIOUS = "Previous verified production release"
 SPECIFIC = "Specific production deployment"
@@ -109,8 +109,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["resolve", "validate"])
     args = parser.parse_args()
-    # Rollback evidence is mandatory even when incident policy enforcement is off.
-    os.environ["PAWLOCAL_ONCALL_ENFORCE_GUARDS"] = "true"
     if os.environ.get("GITHUB_REF") != "refs/heads/main" or os.environ.get("GITHUB_REPOSITORY") != "alanlima/pawlocal":
         raise Denied("Rollback requires the trusted repository main branch")
     github = GitHub(os.environ.get("GH_TOKEN"), time.time() + 180)
