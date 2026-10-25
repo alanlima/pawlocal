@@ -22,7 +22,7 @@ import {
 import { isMockBackend, placeService } from '../services'
 import { getAccessToken, getAuthSession } from '../auth/authSession'
 import { useDiscovery } from '../features/discovery/useDiscovery'
-import { PlacePagination } from '../features/discovery/PlacePagination'
+import { Pagination } from '../components/Pagination'
 import {
   ContributionDialog,
   type ReportableContributionsStatus,
@@ -548,7 +548,10 @@ export default function App() {
               </span>
             </div>
             {!loading && !error && visiblePlaces.length > 0 && (
-              <PlacePagination
+              <Pagination
+                itemLabel="places"
+                pageSizeLabel="Places per page"
+                ariaLabel="Place list pagination"
                 page={currentPage}
                 pageSize={pageSize}
                 total={visiblePlaces.length}

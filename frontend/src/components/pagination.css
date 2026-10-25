@@ -1,4 +1,4 @@
-.place-pagination {
+.pagination {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -14,8 +14,8 @@
   gap: 8px;
 }
 
-.place-pagination select,
-.place-pagination button {
+.pagination select,
+.pagination button {
   min-height: 44px;
   padding: 8px 12px;
   border: 1px solid #c4c7ba;
@@ -25,13 +25,13 @@
   font: inherit;
 }
 
-.place-pagination button:disabled {
+.pagination button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-.place-pagination button:focus-visible,
-.place-pagination select:focus-visible {
+.pagination button:focus-visible,
+.pagination select:focus-visible {
   outline: 2px solid #315f42;
   outline-offset: 3px;
 }

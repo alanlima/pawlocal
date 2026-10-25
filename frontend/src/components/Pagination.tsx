@@ -1,6 +1,9 @@
-import './placePagination.css'
+import './pagination.css'
 
 type Props = {
+  itemLabel?: string
+  pageSizeLabel?: string
+  ariaLabel?: string
   page: number
   pageSize: number
   total: number
@@ -8,12 +11,21 @@ type Props = {
   onPageSizeChange: (size: number) => void
 }
 
-export function PlacePagination({ page, pageSize, total, onPageChange, onPageSizeChange }: Props) {
-  const totalPages = Math.ceil(total / pageSize)
+export function Pagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  onPageSizeChange,
+  itemLabel = 'items',
+  pageSizeLabel = 'Items per page',
+  ariaLabel = 'Pagination',
+}: Props) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   return (
-    <nav className="place-pagination" aria-label="Place list pagination">
+    <nav className="pagination" aria-label={ariaLabel}>
       <label className="page-size">
-        Places per page
+        {pageSizeLabel}
         <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))}>
           {[20, 40, 60, 80, 100].map((size) => (
             <option key={size} value={size}>
@@ -23,14 +35,15 @@ export function PlacePagination({ page, pageSize, total, onPageChange, onPageSiz
         </select>
       </label>
       <span className="page-range" aria-live="polite" aria-atomic="true">
-        Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} places
+        Showing {total === 0 ? 0 : (page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of{' '}
+        {total} {itemLabel}
         {' · '}Page {page} of {totalPages}
       </span>
       <div className="page-navigation">
-        <button type="button" disabled={page === 1} onClick={() => onPageChange(page - 1)}>
+        <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
           Previous
         </button>
-        <button type="button" disabled={page === totalPages} onClick={() => onPageChange(page + 1)}>
+        <button type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
           Next
         </button>
       </div>
