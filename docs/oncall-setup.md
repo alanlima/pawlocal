@@ -790,6 +790,28 @@ Expected response: `204 No Content` (GitHub accepted dispatch). A `502` indicate
 
 ## Step 11 — Activate the Grafana contact point (DEV)
 
+### Search/detail alert query
+
+In **Alerts & IRM** → **Alerting** → **Alert rules**, configure query **A** with the Prometheus data source and query type **Instant**. Use the expression for the target environment below and set the alert condition to **A is above 0** (a positive rate of search/detail 5xx responses).
+
+**Development:**
+
+```promql
+sum(rate(pawlocal_api_requests_total{environment="development",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="development",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))
+```
+
+**Production:**
+
+```promql
+sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))
+```
+
+The traffic-based fallback returns **0** when matching request metrics have enough samples for the two-minute rate but no 5xx series exists. If neither side has data, the result remains **No Data**; absent telemetry does not establish healthy recovery. Keep No Data and query errors visible rather than mapping them to Normal.
+
+Use the matching rule name (`alertname`) `pawlocal-development-search-detail-failure` or `pawlocal-production-search-detail-failure`, and explicitly set rule labels `environment=development` or `environment=production` and `service=pawlocal-api`. The sums remove metric labels, so these rule labels are required for notification routing. See [Grafana-managed alert rule configuration](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/) for query and condition controls.
+
+### Activate development routing
+
 Once the controlled test in Step 10 passes (G2):
 
 1. Go to **Alerts & IRM** → **Alerting** → **Notification configuration** → **Notification policies** tab.
@@ -808,7 +830,7 @@ After G2 is accepted:
 
 1. Set `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED = true` in `oncall-production`.
 2. Configure a PROD Grafana contact point targeting the PROD Function URL with the PROD HMAC secret.
-3. Assign it to a notification policy matching `environment=production` alerts.
+3. Configure the [search/detail alert query](#searchdetail-alert-query) with the production expression, rule name and labels, then assign the contact point to a notification policy matching `environment=production`, `service=pawlocal-api` alerts.
 4. Verify a live PROD alert triggers remediation and results in the exact DEV-verified release being automatically promoted to production with no runtime human approval gate.
 
 ---
