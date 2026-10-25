@@ -27,7 +27,12 @@ class SqlAlchemyPlaceRepository:
             or 0
         )
         records = self.session.scalars(
-            statement.order_by(PlaceRecord.name, PlaceRecord.id)
+            statement.order_by(
+                PlaceRecord.average_rating.is_(None),
+                PlaceRecord.average_rating.desc(),
+                PlaceRecord.name,
+                PlaceRecord.id,
+            )
             .options(selectinload(PlaceRecord.facility_records))
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -54,6 +59,7 @@ class SqlAlchemyPlaceRepository:
             select(PlaceRecord).where(
                 and_(PlaceRecord.id == place_id, PlaceRecord.is_published.is_(True))
             )
+            .options(selectinload(PlaceRecord.facility_records))
         )
         return self._to_domain(record) if record else None
 
