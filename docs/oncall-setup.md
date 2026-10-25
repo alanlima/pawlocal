@@ -367,7 +367,9 @@ The automated incident responder verifies the repository ruleset during prefligh
 
 Run the following command using the GitHub CLI (`gh`) and your Publisher App ID from Step 2.
 
-**Bash (Linux / macOS):**
+<details>
+<summary>Bash (Linux / macOS)</summary>
+
 ```bash
 PUBLISHER_APP_ID="<your-publisher-app-id>"
 
@@ -433,7 +435,11 @@ cat <<EOF | gh api -X PUT "repos/:owner/:repo/rulesets/$RULESET_ID" -H "Accept: 
 EOF
 ```
 
-**PowerShell (Windows):**
+</details>
+
+<details>
+<summary>PowerShell (Windows)</summary>
+
 ```powershell
 $PublisherAppId = <your-publisher-app-id>
 
@@ -478,6 +484,8 @@ $Payload = @{
 
 $Payload | gh api -X PUT "repos/:owner/:repo/rulesets/$RulesetId" --input -
 ```
+
+</details>
 
 This automatically configures the active `Protect Main Branch` ruleset to:
 - Pin `PawLocal change authorization` to your Publisher App ID.
@@ -658,6 +666,9 @@ For another approved model, supply **both** reviewed `--input-rate` and `--outpu
 
 If you prefer to construct the JSON manually, satisfy all fields below:
 
+<details>
+<summary>Manual profile JSON example</summary>
+
 ```json
 {
   "model": "gpt-5.4-mini",
@@ -685,6 +696,8 @@ If you prefer to construct the JSON manually, satisfy all fields below:
   "expires_at": "<UTC timestamp at most 31 days from rates_reviewed_at>"
 }
 ```
+
+</details>
 
 **Before enabling:**
 
@@ -733,7 +746,9 @@ Click **Save contact point**.
 2. Set `PAWLOCAL_ONCALL_MODEL_PROFILE` to the owner-approved profile JSON.
 3. POST a signed test payload to the DEV Function URL to verify the full dispatch path:
 
-**Bash / macOS / Linux:**
+<details>
+<summary>Bash (macOS / Linux)</summary>
+
 ```bash
 # Read the Lambda Function URL and HMAC secret from SSM
 URL=$(aws ssm get-parameter \
@@ -756,7 +771,11 @@ curl -i -X POST "$URL" \
   -d "$BODY"
 ```
 
-**PowerShell (Windows):**
+</details>
+
+<details>
+<summary>PowerShell (Windows)</summary>
+
 ```powershell
 $Url = (aws ssm get-parameter --name "/pawlocal/development/config/oncall/webhook-url" --query Parameter.Value --output text)
 $Secret = (aws ssm get-parameter --name "/pawlocal/development/secrets/grafana/webhook-hmac" --with-decryption --query Parameter.Value --output text)
@@ -775,6 +794,8 @@ Invoke-RestMethod -Uri $Url -Method POST -Headers @{
 } -ContentType "application/json" -Body $Body
 ```
 
+</details>
+
 Expected response: `204 No Content` (GitHub accepted dispatch). A `502` indicates that GitHub App credentials in SSM or the Lambda receiver configuration are invalid or unauthorized; a `401` indicates an HMAC signature or timestamp verification mismatch.
 
 4. Watch [GitHub Actions](https://github.com/<org>/<repo>/actions/workflows/incident-responder.yml) for the dispatched run.
@@ -789,6 +810,34 @@ Expected response: `204 No Content` (GitHub accepted dispatch). A `502` indicate
 ---
 
 ## Step 11 — Activate the Grafana contact point (DEV)
+
+### Search/detail alert query
+
+In **Alerts & IRM** → **Alerting** → **Alert rules**, configure query **A** with the Prometheus data source and query type **Instant**. Use the expression for the target environment below and set the alert condition to **A is above 0** (a positive rate of search/detail 5xx responses).
+
+<details>
+<summary>Development alert query</summary>
+
+```promql
+sum(rate(pawlocal_api_requests_total{environment="development",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="development",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))
+```
+
+</details>
+
+<details>
+<summary>Production alert query</summary>
+
+```promql
+sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*",status_class="5xx"}[2m])) or (0 * sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-api",route=~"/api/v1/places.*"}[2m])))
+```
+
+</details>
+
+The traffic-based fallback returns **0** when matching request metrics have enough samples for the two-minute rate but no 5xx series exists. If neither side has data, the result remains **No Data**; absent telemetry does not establish healthy recovery. Keep No Data and query errors visible rather than mapping them to Normal.
+
+Keep the existing rule name (`alertname`) aligned with the target receiver's `allowed_alerts` in the [receiver configuration](#5a-update-pawlocal_oncall_receiver_config-variable); the examples use `pawlocal-development-search-detail-failure` and `pawlocal-production-search-detail-failure`. Explicitly set rule labels `environment=development` or `environment=production` and `service=pawlocal-api`. The sums remove metric labels, so these rule labels are required for notification routing. See [Grafana-managed alert rule configuration](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/) for query and condition controls.
+
+### Activate development routing
 
 Once the controlled test in Step 10 passes (G2):
 
@@ -808,7 +857,7 @@ After G2 is accepted:
 
 1. Set `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED = true` in `oncall-production`.
 2. Configure a PROD Grafana contact point targeting the PROD Function URL with the PROD HMAC secret.
-3. Assign it to a notification policy matching `environment=production` alerts.
+3. Configure the [search/detail alert query](#searchdetail-alert-query) with the production expression and labels, preserving the existing approved rule name matching the PROD receiver's `allowed_alerts`, then assign the contact point to a notification policy matching `environment=production`, `service=pawlocal-api` alerts.
 4. Verify a live PROD alert triggers remediation and results in the exact DEV-verified release being automatically promoted to production with no runtime human approval gate.
 
 ---
