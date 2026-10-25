@@ -75,7 +75,7 @@ GLOBALS = {
     "process_policy.py": "55cf9a36a5254acd6a360ba4b95e2c73ad7fbc6aacaf711bb849efefe11c10f2",
 }
 DYNAMIC_READERS = {
-    "ops/configuration/tests/test_integration.py": "a2d921d98b186ddf53f6ed705e52b2a476d0fcdba1902237594114cbe2d6b06d",
+    "ops/configuration/tests/test_integration.py": "ac8e91c9be1bef945c5537391871605def9e7a2344f94cc382d758d3044744ca",
     "ops/configuration/tests/test_job_summary.py": "bdbac3edd26f3b5dc889ff3aacee998bcd39e68669949fa2541185825a0f96e5",
     "ops/configuration/tests/test_reconcile.py": "98dcf2e0764a561fc641b90f4763e1d052201f5a2d0bf71a5b4af30c19612c9a",
     "ops/incident-response/settings.py": "7fdb481adb4b1be232a2619a4960d7ee96538f57ba9f53b7a2b2d6cc72732399",

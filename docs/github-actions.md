@@ -253,7 +253,7 @@ Development verification is produced after this run's Terraform Release apply an
 
 ### Infrastructure · Plan and apply environment
 
-<!-- actions-reference: terraform-environment.yml; dispatch-inputs: environment,phase,backend_image,release_commit,release_only; call-inputs: enforce_guards,environment,phase,backend_image,release_commit,release_only -->
+<!-- actions-reference: terraform-environment.yml; dispatch-inputs: environment,phase,backend_image,release_commit,release_only; call-inputs: rollback_only,enforce_guards,environment,phase,backend_image,release_commit,release_only -->
 
 `terraform-environment.yml` owns protected plans and exact saved-plan applies for one clean environment state. It uses the matching plan/apply GitHub Environments, transfers the opaque plan through private storage, and verifies the plan metadata and digest before applying it.
 
@@ -280,7 +280,7 @@ Converge and Release enforce required handoff inputs before planning. The prefli
 
 ### Release · Promote verified release to production
 
-<!-- actions-reference: deploy-production.yml; dispatch-inputs: release_commit,backend_image,incident_environment,expected_workflow_sha; call-inputs: - -->
+<!-- actions-reference: deploy-production.yml; dispatch-inputs: release_commit,backend_image,incident_environment,expected_workflow_sha; call-inputs: release_commit,backend_image,incident_environment,expected_workflow_sha,rollback_from_deployment_id,rollback_to_deployment_id,rollback_reason -->
 
 `deploy-production.yml` is the normal production application-promotion entry point after the infrastructure has converged. It rejects a commit/image pair unless a successful development deployment recorded matching verification evidence. It then calls the production Release phase, builds the selected commit's frontend with production configuration, publishes it, runs public verification, and records the successful production deployment.
 
@@ -716,3 +716,28 @@ Retired workflows remain exactly the three non-deploying stubs; no removal or tr
 The existing delivery-automation quality job also runs an explicit credential-free incident handoff fixture after Python/Node setup. It exercises real distinct-UID source traversal, actual pytest fail/fail/pass and full backend checks, Vitest JSON reports, TypeScript/Vite compilation, and fresh review binding. Its test-only adapter maps the model identity to an existing local UID and kills only recorded fixture process groups; production isolation and process policy remain in force.
 
 Incident candidate validation and its fresh trusted rerun perform required backend quality before authentic regression execution: Ruff, DSQL baseline lint, candidate search SQL rendering/lint, Alembic and full pytest. Their existing jobs and the delivery-quality fixture job use a disposable PostgreSQL 17.6 service bound only to loopback; no deployment or cloud database credentials are projected. The explicit distinct-UID fixture proves dirty generated imports cannot produce eligible evidence and all three PostgreSQL integration tests execute without skips. The same pinned CLI fixture verifies real Ruff check/fix/check without changing the Python AST or external-network denial. Required backend candidate CI remains unchanged and mandatory; workflow names, jobs, triggers, permissions and catalogue identities are preserved.
+
+## Release · Roll back production
+
+<!-- actions-reference: release-rollback-production.yml; dispatch-inputs: target,deployment_id,reason,preview_only; call-inputs: - -->
+
+Open [release-rollback-production.yml](../.github/workflows/release-rollback-production.yml) in Actions, choose **Run workflow** on `main`, and provide:
+
+| Input | Use |
+|---|---|
+| `target` | Default **Previous verified production release**, or **Specific production deployment**. The dropdown contains fixed choices, not a live history list. |
+| `deployment_id` | Empty for the default choice. For a specific target, use its numeric GitHub production deployment ID from a previous successful release record. No commit or image input is needed. |
+| `reason` | Required single line, up to 500 characters; include the incident link when available. |
+| `preview_only` | Select to resolve/show the target without deployment or AWS credentials. Default false executes the rollback. |
+
+Review the selection summary: current/target deployment IDs, exact commit and immutable image, original run link and date. The default selects the most recent earlier distinct commit/image pair with trusted historical production and matching development success; repeated deployments of the current pair are ignored. Historical `inactive` retirement does not erase a successful original attempt. Manual rollback accepts validated boolean backend telemetry evidence in either enabled or disabled mode; incident admission retains its additional enabled-telemetry requirement. Failed/unknown current deployment or ambiguous/incomplete history fails closed. History lookup is bounded to 1,000 records; missing targets require reconciliation rather than an unbounded search. Records from automatic Environment entry without the canonical release payload are not treated as verified application releases; an uncertain newest record blocks rollback rather than being silently skipped.
+
+**Verified refers to the recorded release checks. It does not prove every search/category works.** An earlier deployment may contain a known application defect despite passing health/general discovery verification. Use preview and select a known healthy specific deployment when the previous distinct release is unsuitable. Confirm schema compatibility before dispatch: rollback restores application code and the immutable backend image, not database/schema/data state. The frontend is rebuilt from the selected source with current trusted tools and reconciled configuration, rather than restoring a stored frontend archive.
+
+The wrapper calls the existing [production promotion workflow](../.github/workflows/deploy-production.yml); it does not implement another deployment path. Its reusable-call inputs add `rollback_from_deployment_id`, `rollback_to_deployment_id` and `rollback_reason` to the existing release inputs. The canonical workflow owns the production lifecycle lock and revalidates both records plus current deployment identity before Terraform/publication. A changed current deployment stops the run; start a fresh rollback. The nested Terraform lock recognizes the rollback parent name to avoid taking the same lock twice. Existing main-only trust, ordinary authorization/Environments, release eligibility and exact saved-plan handling remain; incident promoter dispatch inputs are unchanged.
+
+Only rollback calls set reusable Terraform `rollback_only=true`: its strict application release plan guard runs before exact-plan transfer/apply, regardless of the incident enforcement toggle. It rejects unrelated infrastructure changes; the shared #305 exception remains unchanged for ordinary/incident promotions. If a plan contains unexpected changes, stop and reconcile separately; do not bypass the rollback guard.
+
+Success is recorded only after Terraform, frontend publication, deployment adapter verification and served OAuth configuration checks pass. The new production deployment payload retains standard release evidence plus `operation=rollback`, `rollback_from_deployment_id`, `rollback_to_deployment_id`, and `rollback_reason`. The final summary links the source/target/new deployment IDs and restored pair. The source and target records remain immutable historical evidence. Failure before recording is not successful recovery evidence. Inspect Actions logs for failure and actual runtime state before another attempt.
+
+After success, verify served frontend commit, API/running image, place discovery/details and the affected journey (for example Hiking search), and capture frontend screenshots. Link run, deployment IDs and checks in the incident record/wiki. CI and release health alone are insufficient for incident recovery acceptance.

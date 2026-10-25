@@ -88,7 +88,7 @@ class WorkflowCatalogueTests(unittest.TestCase):
     def test_literal_caller_names_follow_current_display_names(self):
         group = load('terraform-environment.yml')['concurrency']['group']
         callers = json.loads(re.search(r"fromJSON\('([^']+)'\)", group)[1])
-        self.assertEqual(callers, [load('fullstack-release.yml')['name'], load('deploy-production.yml')['name']])
+        self.assertEqual(callers, [load('fullstack-release.yml')['name'], load('deploy-production.yml')['name'], load('release-rollback-production.yml')['name']])
         self.assertIn("format('pawlocal-terraform-{0}', inputs.environment)", group)
         self.assertFalse(load('terraform-environment.yml')['concurrency']['cancel-in-progress'])
         cleanup = load('cleanup-destroyed-configuration.yml')

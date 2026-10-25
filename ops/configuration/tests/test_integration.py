@@ -480,6 +480,7 @@ class IntegrationTests(unittest.TestCase):
             [
                 "Release · Publish and verify development",
                 "Release · Promote verified release to production",
+                "Release · Roll back production",
             ],
         )
         self.assertEqual(

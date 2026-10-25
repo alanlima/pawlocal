@@ -34,6 +34,8 @@ EXPECTED_HOSTED_JOBS = {
     ("deploy-production.yml", "verify-production"),
     ("deploy-production.yml", "workflow-binding"),
     ("deploy-production.yml", "incident-enforcement"),
+    ("deploy-production.yml", "rollback-binding"),
+    ("release-rollback-production.yml", "resolve"),
     ("development-dsql-seed.yml", "seed"),
     ("frontend-deploy.yml", "frontend"),
     ("frontend-production-deploy.yml", "disabled"),

@@ -1,0 +1,84 @@
+name: Release · Roll back production
+run-name: 'Production rollback · ${{ inputs.target }} · @${{ github.actor }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Select a distinct historically verified production release.
+        type: choice
+        required: true
+        default: Previous verified production release
+        options:
+          - Previous verified production release
+          - Specific production deployment
+      deployment_id:
+        description: Production deployment ID; required only for a specific deployment.
+        type: string
+        required: false
+      reason:
+        description: Reason for rollback, with incident link where available (one line).
+        type: string
+        required: true
+      preview_only:
+        description: Resolve and show the target without deploying.
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+# The called production workflow owns the lifecycle lock. Do not nest the same lock.
+jobs:
+  resolve:
+    name: Resolve verified rollback target
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    outputs:
+      release_commit: ${{ steps.target.outputs.release_commit }}
+      backend_image: ${{ steps.target.outputs.backend_image }}
+      rollback_from: ${{ steps.target.outputs.rollback_from_deployment_id }}
+      rollback_to: ${{ steps.target.outputs.rollback_to_deployment_id }}
+      reason: ${{ steps.target.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Resolve current and historical verified production pair
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROLLBACK_TARGET: ${{ inputs.target }}
+          ROLLBACK_DEPLOYMENT_ID: ${{ inputs.deployment_id }}
+          ROLLBACK_REASON: ${{ inputs.reason }}
+        run: python ops/rollback-production.py resolve
+
+  rollback:
+    name: Restore and verify production release
+    needs: resolve
+    if: ${{ !inputs.preview_only }}
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/deploy-production.yml
+    with:
+      release_commit: ${{ needs.resolve.outputs.release_commit }}
+      backend_image: ${{ needs.resolve.outputs.backend_image }}
+      rollback_from_deployment_id: ${{ needs.resolve.outputs.rollback_from }}
+      rollback_to_deployment_id: ${{ needs.resolve.outputs.rollback_to }}
+      rollback_reason: ${{ needs.resolve.outputs.reason }}
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
+      PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN: ${{ secrets.PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN }}
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
+      GRAFANA_SERVICE_ACCOUNT_TOKEN: ${{ secrets.GRAFANA_SERVICE_ACCOUNT_TOKEN }}
