@@ -57,7 +57,7 @@ Secret write acceptance is opaque: repeated apply may rewrite only the supplied 
 
 ## Setup, plan and apply boundaries
 
-Keep #224 bindings configured only from actual discovery and approved origins. Populate `experience.json` public settings after review: usage datasource UID, actual regional SM API origin, one online public probe ID, approved `https://api-dev.<domain>/api/v1` base URL matching the reviewed development Faro origin `https://pawlocal-dev.<domain>`, existing operator receiver name and setup approval reference. Leave `active` false until activation is approved. Leave `responder_routing` false until G1/#227 and its approval reference exist; only then supply the reviewed webhook URL and runtime HMAC.
+Keep #224 bindings configured only from actual discovery and approved origins. Populate `experience.json` public settings after review: usage datasource UID, actual regional SM API origin, one online public probe ID, approved `https://pawlocal-dev.<domain>/api/v1` base URL matching the reviewed development Faro origin `https://pawlocal-dev.<domain>`, existing operator receiver name and setup approval reference. Leave `active` false until activation is approved. Leave `responder_routing` false until G1/#227 and its approval reference exist; only then supply the reviewed webhook URL and runtime HMAC.
 
 Protected operator inputs outside SSM synchronization are #224's Cloud/Faro policy and Grafana service-account tokens, plus the existing tenant's `GRAFANA_SYNTHETIC_MONITORING_TOKEN`. The tool does not register a tenant, create a token or add a probe. Verify actual scopes/entitlements and revoke/rotate through the separately approved owner process. No AWS CLI/API write, Terraform apply or new state is used by this Grafana-only API owner.
 

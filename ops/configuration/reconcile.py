@@ -149,15 +149,10 @@ def validate_values(values, environment):
                 frontend = (
                     "pawlocal-dev" if environment == "development" else "pawlocal"
                 )
-                api = "api-dev" if environment == "development" else "api"
-                expected_label = (
-                    api
-                    if name in {"VITE_API_BASE_URL", "PAWLOCAL_API_HEALTH_URL"}
-                    else frontend
-                )
+                expected_label = frontend
                 expected_path = {
                     "VITE_API_BASE_URL": "/api/v1",
-                    "PAWLOCAL_API_HEALTH_URL": "/health",
+                    "PAWLOCAL_API_HEALTH_URL": "/api/health",
                     "VITE_COGNITO_REDIRECT_URI": "/auth/callback",
                     "VITE_COGNITO_LOGOUT_URI": "/",
                 }.get(name, "")

@@ -370,7 +370,7 @@ elif args[:2] == ['s3', 'cp'] and args[3].endswith('/index.html'):
                 "FAKE_HEALTH_RESPONSE": str(health_path),
                 "RUNNER_TEMP": directory,
                 "PAWLOCAL_DEPLOY_ADAPTER_PATH": "ops/deployment-adapters/lightsail-dsql.sh",
-                "PAWLOCAL_API_HEALTH_URL": "https://api.example.test/health",
+                "PAWLOCAL_API_HEALTH_URL": "https://pawlocal.example.test/api/health",
                 "PAWLOCAL_PUBLIC_BASE_URL": "https://app.example.test",
             })
             evidence_path = temp / "evidence.json"

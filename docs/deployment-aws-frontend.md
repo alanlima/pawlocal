@@ -22,7 +22,7 @@ This historical combined-state implementation deliberately kept its release role
 
 ## Architecture
 
-The frontend remains a private S3 origin behind CloudFront OAC with HTTPS, SPA fallback, and Route 53 alias records. The API is served directly by the Lightsail Container Service public endpoint; Route 53 CNAME records map `api-dev.<domain>` and `api.<domain>` to its generated hostname. Terraform creates domain-validation records, and Lightsail manages the endpoint certificate. Frontend and API origins remain separate.
+The frontend remains a private S3 origin behind CloudFront OAC with HTTPS, SPA fallback, and Route 53 alias records. The API is served directly by the Lightsail Container Service public endpoint; Route 53 CNAME records map `api-dev.<domain>` and `api.<domain>` to its generated hostname. Terraform creates domain-validation records, and Lightsail manages the endpoint certificate. Frontend and API origins remained separate in this historical record. Current source routing follows [DEC-018 / #346](decisions.md#dec-018--shared-cloudfront-application-entry-point-346): one CloudFront application entry point with private S3 frontend and generated Lightsail API origins, plus public `/api/health`.
 
 ### Frontend access verification (2026-10-19)
 

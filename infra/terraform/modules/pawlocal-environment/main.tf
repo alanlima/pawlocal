@@ -3,16 +3,13 @@ data "aws_partition" "current" {}
 
 locals {
   frontend_label = var.environment == "development" ? "pawlocal-dev" : "pawlocal"
-  api_label      = var.environment == "development" ? "api-dev" : "api"
   database_role  = "pawlocal_${var.environment}_app"
 
   resource_name_prefix = "pawlocal-${var.environment}"
   resource_suffixes = {
-    cert              = "cert"
     container_service = "api"
   }
   resource_names = {
-    cert              = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}-${local.resource_suffixes.cert}"
     container_service = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}"
   }
 
@@ -21,7 +18,6 @@ locals {
   cognito_pre_sign_up_role_arn         = coalesce(var.cognito_pre_sign_up_role_arn, local.default_cognito_pre_sign_up_role_arn)
 
   frontend_hostname = "${local.frontend_label}.${trimsuffix(var.root_domain, ".")}"
-  api_hostname      = "${local.api_label}.${trimsuffix(var.root_domain, ".")}"
   common_tags = {
     project     = var.project_name
     environment = var.environment
@@ -215,6 +211,44 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  # AWS managed policies have stable IDs; no new IAM policy-lookup authority.
+  # CachingDisabled + AllViewerExceptHostHeader forwards Authorization, trace
+  # headers, cookies and queries, while TLS and Host use the Lightsail hostname.
+  origin {
+    domain_name = trimprefix(trimsuffix(aws_lightsail_container_service.api.url, "/"), "https://")
+    origin_id   = "pawlocal-${var.environment}-api"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/api", "/api/*"]
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "pawlocal-${var.environment}-api"
+      viewer_protocol_policy   = "https-only"
+      allowed_methods          = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+      cached_methods           = ["GET", "HEAD"]
+      cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+      origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+      compress                 = true
+    }
+  }
+
+  # Error TTL is distribution-wide. Preserve origin status/body (no SPA error
+  # mapping), and never conceal API health failures or recovery behind a cache.
+  dynamic "custom_error_response" {
+    for_each = toset([400, 403, 404, 405, 414, 416, 500, 501, 502, 503, 504])
+    content {
+      error_code            = custom_error_response.value
+      error_caching_min_ttl = 0
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "pawlocal-${var.environment}-private-s3"
     viewer_protocol_policy = "redirect-to-https"
@@ -351,21 +385,6 @@ module "dsql_post_apply_setup" {
   ]
 }
 
-resource "aws_lightsail_certificate" "api" {
-  name        = local.resource_names.cert
-  domain_name = local.api_hostname
-  tags        = local.common_tags
-  depends_on  = [time_sleep.application_permissions_propagation]
-}
-
-resource "aws_route53_record" "api_certificate_validation" {
-  zone_id = var.route53_zone_id
-  name    = one(aws_lightsail_certificate.api.domain_validation_options).resource_record_name
-  type    = one(aws_lightsail_certificate.api.domain_validation_options).resource_record_type
-  records = [one(aws_lightsail_certificate.api.domain_validation_options).resource_record_value]
-  ttl     = 60
-}
-
 resource "aws_lightsail_container_service" "api" {
   name        = local.resource_names.container_service
   power       = var.container_power
@@ -373,14 +392,7 @@ resource "aws_lightsail_container_service" "api" {
   is_disabled = false
   tags        = local.common_tags
 
-  public_domain_names {
-    certificate {
-      certificate_name = aws_lightsail_certificate.api.name
-      domain_names     = [local.api_hostname]
-    }
-  }
-
-  depends_on = [aws_route53_record.api_certificate_validation]
+  depends_on = [time_sleep.application_permissions_propagation]
 }
 
 locals {
@@ -426,16 +438,6 @@ resource "aws_lightsail_container_service_deployment_version" "api" {
   }
 
   depends_on = [module.dsql_post_apply_setup]
-}
-
-resource "aws_route53_record" "api" {
-  count      = local.deployment_enabled ? 1 : 0
-  zone_id    = var.route53_zone_id
-  name       = local.api_hostname
-  type       = "CNAME"
-  ttl        = 60
-  records    = [trimprefix(trimsuffix(aws_lightsail_container_service.api.url, "/"), "https://")]
-  depends_on = [aws_lightsail_container_service_deployment_version.api]
 }
 
 module "cognito_pre_sign_up" {

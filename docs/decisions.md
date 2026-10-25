@@ -2,6 +2,13 @@
 
 Record accepted decisions with date, status, context, decision and consequences. Drafts are not approvals.
 
+## DEC-018 — Shared CloudFront application entry point (#346)
+
+- **Status:** Owner approved 2026-10-26 through [Issue #346](https://github.com/alanlima/pawlocal/issues/346) and explicit implementation confirmation. Implementation authorization does not authorize infrastructure apply, deployment, new spending or production changes.
+- **Decision:** Reuse each environment's existing CloudFront distribution as its public frontend and API entry point. Production uses `https://pawlocal.alanlima.cloud/api/v1`; development uses `https://pawlocal-dev.alanlima.cloud/api/v1`. Default requests retain the private S3 origin and SPA routing; reserved `/api` and `/api/*` behaviors use the matching generated Lightsail HTTPS endpoint, preserve the URI and origin Host/TLS, forward required methods, bodies, queries, authentication and tracing, and disable API and error caching. Public health is `/api/health`; backend `/health` remains the internal Lightsail probe. No root `/health` backend behavior is added.
+- **Replacement and ownership:** This amends DEC-007/DEC-008's separate public API-host topology. Terraform retains existing distribution/service/state identities and retires the obsolete custom API hostname, DNS validation and Lightsail certificate. Frontend builds use explicit absolute same-domain HTTPS API URLs. Configuration publication/reconciliation, release verification, existing telemetry/synthetic checks and incident recovery change atomically. Direct replacement may disrupt service; compatibility aliases, staged cutover and migration-specific rollback are excluded.
+- **Boundaries and acceptance:** FastAPI, Aurora DSQL, S3 access restrictions, authentication, authorization, CORS, validation, telemetry and existing approval/provenance controls remain. The generated Lightsail origin stays publicly reachable; additional CORS verification and origin protection belong to [#417](https://github.com/alanlima/pawlocal/issues/417). WAF, new limits, bot controls, logging pipelines, API Gateway, ALB and compute migration are excluded. Independent code review, applicable tests, reviewed exact Terraform plans and separately approved deployment/runtime evidence are required; development verification precedes production. Foundation, Converge, Release and teardown must retain their lifecycle and state boundaries.
+
 ## DEC-017 — Temporary default-off enforcement for all incident guards (#375)
 
 - **Status:** Owner approved 2026-10-25; source implementation and independent review tracked by [#375](https://github.com/alanlima/pawlocal/issues/375), guard-policy redesign deferred to [#374](https://github.com/alanlima/pawlocal/issues/374).

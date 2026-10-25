@@ -305,10 +305,10 @@ Frontend disposable checks retain format/lint, tests and the real `build:check` 
 
 ### Symptom: Recovery verification timeout (`recovery rule settling` or `stale evaluation`)
 
-* **Cause**: After squash-merging and deploying to `development`, `ops/incident-response/recovery.py` observes the place discovery journey (`/health`, `/places`, `/places/{id}`) and Grafana Prometheus rule state. If the rule continues to fire after the settling window, recovery fails.
+* **Cause**: After squash-merging and deploying to `development`, `ops/incident-response/recovery.py` observes the place discovery journey (`/api/health`, `/api/v1/places`, `/api/v1/places/{id}`) and Grafana Prometheus rule state. If the rule continues to fire after the settling window, recovery fails.
 * **Checklist**:
   1. Inspect the deployment run in GitHub Actions to confirm new container image was deployed.
-  2. Check backend health endpoint (`/health`).
+  2. Check the public health endpoint (`/api/health`) through the matching CloudFront application hostname. Lightsail alone probes internal `/health`.
   3. Verify that Grafana alert rule evaluation interval has passed and Prometheus state returned to `inactive` / `Normal`.
 
 ### Symptom: Run stops cleanly after DEV recovery without promoting to PROD

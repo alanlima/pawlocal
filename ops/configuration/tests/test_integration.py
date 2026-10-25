@@ -35,7 +35,7 @@ def values(environment):
         if environment == "development"
         else "pawlocal.example.test"
     )
-    api = "api-dev.example.test" if environment == "development" else "api.example.test"
+    api = "pawlocal-dev.example.test" if environment == "development" else "pawlocal.example.test"
     account = "123456789012"
     return {
         "PAWLOCAL_AWS_ACCOUNT_ID": account,
@@ -47,7 +47,7 @@ def values(environment):
         "PAWLOCAL_CLOUDFRONT_OAC_ARN": f"arn:aws:cloudfront::{account}:origin-access-control/E456EXAMPLE",
         "PAWLOCAL_DEPLOY_ROLE_ARN": f"arn:aws:iam::{account}:role/pawlocal-{environment}-github-deploy",
         "PAWLOCAL_PUBLIC_BASE_URL": f"https://{frontend}",
-        "PAWLOCAL_API_HEALTH_URL": f"https://{api}/health",
+        "PAWLOCAL_API_HEALTH_URL": f"https://{api}/api/health",
         "PAWLOCAL_FRONTEND_BUCKET": f"pawlocal-{environment}-frontend-example",
         "PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID": "E123EXAMPLE",
         "VITE_API_BASE_URL": f"https://{api}/api/v1",
@@ -264,7 +264,7 @@ class IntegrationTests(unittest.TestCase):
     def test_invalid_account_environment_and_public_formats_fail_before_writes(self):
         replacements = {
             "PAWLOCAL_RUNTIME_ROLE_ARN": "arn:aws:iam::999999999999:role/pawlocal-development-dsql-runtime",
-            "VITE_API_BASE_URL": "https://api.example.test/api/v1",
+            "VITE_API_BASE_URL": "https://pawlocal.example.test/api/v1",
             "VITE_COGNITO_DOMAIN": "http://pawlocal-development-example.auth.ap-southeast-2.amazoncognito.com",
             "VITE_COGNITO_REDIRECT_URI": "https://pawlocal-dev.other.test/auth/callback",
         }
@@ -296,7 +296,7 @@ class IntegrationTests(unittest.TestCase):
             dict(public, PAWLOCAL_CONFIG_GITHUB_TOKEN=SENTINEL),
             dict(
                 public,
-                VITE_API_BASE_URL="https://api-dev.example.test/api/v1\nINJECTED=yes",
+                VITE_API_BASE_URL="https://pawlocal-dev.example.test/api/v1\nINJECTED=yes",
             ),
         ):
             with self.assertRaises(ValueError):

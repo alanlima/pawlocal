@@ -6,6 +6,25 @@ from pawlocal.config import settings
 from pawlocal.main import app
 
 
+def test_public_health_has_an_unversioned_contract_and_shared_response(client):
+    specification = yaml.safe_load(
+        (Path(__file__).parents[2] / "openapi.yaml").read_text(encoding="utf-8")
+    )
+    health = specification["paths"]["/api/health"]
+    assert health["servers"] == [{"url": "/"}]
+    assert health["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/Health"}
+    runtime = app.openapi()["paths"]
+    assert "/api/health" in runtime
+    assert "/api/v1/health" not in runtime
+    response = client[0].get("/api/health")
+    schema = specification["components"]["schemas"]["Health"]
+    assert response.status_code == 200
+    assert set(response.json()) == set(schema["required"])
+    assert client[0].get("/api/v1/health").status_code == 404
+
+
 def test_runtime_openapi_documents_runtime_validation_and_auth_responses():
     contract = app.openapi()
     paths = contract["paths"]

@@ -10,8 +10,8 @@ locals {
   ]
   public_configuration = {
     frontend_base_url    = "https://${trimsuffix(aws_route53_record.frontend_a.fqdn, ".")}"
-    api_base_url         = local.deployment_enabled ? "https://${trimsuffix(aws_route53_record.api[0].fqdn, ".")}/api/v1" : null
-    api_health_url       = local.deployment_enabled ? "https://${trimsuffix(aws_route53_record.api[0].fqdn, ".")}/health" : null
+    api_base_url         = local.deployment_enabled ? "https://${trimsuffix(aws_route53_record.frontend_a.fqdn, ".")}/api/v1" : null
+    api_health_url       = local.deployment_enabled ? "https://${trimsuffix(aws_route53_record.frontend_a.fqdn, ".")}/api/health" : null
     cognito_domain       = "https://${aws_cognito_user_pool_domain.application.domain}.auth.${var.aws_region}.amazoncognito.com"
     cognito_redirect_uri = one(aws_cognito_user_pool_client.browser.callback_urls)
     cognito_logout_uri   = one(aws_cognito_user_pool_client.browser.logout_urls)

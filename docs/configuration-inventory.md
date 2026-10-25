@@ -2,7 +2,7 @@
 
 The active mapping is `ops/configuration/parameter-mapping.yaml`: 24 development and 30 production destinations from 18 distinct source keys per environment. All generated entries are `String`, `secret: false`, `validations: [required]`; no secret payload, unmanaged parameter or shared source is needed.
 
-Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait for managed API DNS. The owned source attributes and exact-key **producer write** policies are listed below. #237 replaces public reader admission with three authorization tags; its code is distinct from an approved live policy/tag rollout (see the [rollout guide](../infra/terraform/iam-bootstrap/POLICY_DESIGN.md#ordered-rollout-and-rollback-237)). Initial publication, all 36 owned values and populated audits are [verified](https://github.com/alanlima/pawlocal/issues/206#issuecomment-6344710835).
+Bootstrap publishes six Standard Strings per environment; its runtime-role key waits until that role exists. Each matching application state publishes twelve keys; its two API keys wait until the backend is deployed. Under #346 / [DEC-018](decisions.md#dec-018--shared-cloudfront-application-entry-point-346), those keys retain their names and destinations but use the matching frontend origin. The owned source attributes and exact-key **producer write** policies are listed below. #237 replaces public reader admission with three authorization tags; its code is distinct from an approved live policy/tag rollout (see the [rollout guide](../infra/terraform/iam-bootstrap/POLICY_DESIGN.md#ordered-rollout-and-rollback-237)). Initial publication, all 36 owned values and populated audits are [verified](https://github.com/alanlima/pawlocal/issues/206#issuecomment-6344710835).
 
 Integrated [development](https://github.com/alanlima/pawlocal/actions/runs/39809521175) and [production](https://github.com/alanlima/pawlocal/actions/runs/39812132462) releases verified enforced reconciliation, same-run frontend publication and served OAuth host/client/callback/scopes. Legacy deletion and preservation evidence is recorded below. Cognito replacement, stale-bundle rejection and destroy/reapply recovery were tested in isolated fixtures; production was not destroyed or replaced for testing.
 
@@ -21,13 +21,13 @@ Prefix every key suffix with `/pawlocal/{environment}/config/`. R = `{environmen
 | iam/frontend-publish-role-arn | PAWLOCAL_DEPLOY_ROLE_ARN | R | B | `aws_iam_role.identity_app["<environment>_frontend"].arn`; frontend publisher OIDC |
 | iam/runtime-role-arn | PAWLOCAL_RUNTIME_ROLE_ARN | P, A | B | Matching `aws_iam_role.development_runtime[0].arn` / `production_runtime[0].arn`, only when created; environment plan's runtime trust/DSQL/deployment input |
 | frontend/base-url | PAWLOCAL_PUBLIC_BASE_URL | R | E | HTTPS origin from managed `aws_route53_record.frontend_a.fqdn`; publish/verify adapter and deployment URL |
-| api/health-url | PAWLOCAL_API_HEALTH_URL | R | E | HTTPS managed `aws_route53_record.api[0].fqdn` plus `/health`, only when deployed; public health/database smoke verification |
+| api/health-url | PAWLOCAL_API_HEALTH_URL | R | E | HTTPS managed `aws_route53_record.frontend_a.fqdn` plus `/api/health`, only when deployed; public health/database smoke verification |
 | frontend/bucket | PAWLOCAL_FRONTEND_BUCKET | R | E | `aws_s3_bucket.frontend.bucket`; frontend artifact publication |
 | frontend/cloudfront-distribution-id | PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID | R | E | `aws_cloudfront_distribution.frontend.id`; CDN publication/invalidation |
 | frontend/cloudfront-distribution-arn | PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ARN | P, A | E | `aws_cloudfront_distribution.frontend.arn`; exact generated-resource environment policy input |
 | frontend/cloudfront-oac-arn | PAWLOCAL_CLOUDFRONT_OAC_ARN | P, A | E | `aws_cloudfront_origin_access_control.frontend.arn`; exact generated-resource environment policy input |
 | auth/client-id | VITE_COGNITO_CLIENT_ID | R | E | `aws_cognito_user_pool_client.browser.id`; frontend public OAuth browser client |
-| api/base-url | VITE_API_BASE_URL | R | E | HTTPS managed `aws_route53_record.api[0].fqdn` plus `/api/v1`, only when deployed; HTTP service adapter |
+| api/base-url | VITE_API_BASE_URL | R | E | HTTPS managed `aws_route53_record.frontend_a.fqdn` plus `/api/v1`, only when deployed; HTTP service adapter; same source also feeds the matching on-call Environment |
 | auth/domain | VITE_COGNITO_DOMAIN | R | E | `aws_cognito_user_pool_domain.application.domain` and owning region, full HTTPS Cognito origin; hosted sign-in/token/logout endpoints |
 | auth/redirect-uri | VITE_COGNITO_REDIRECT_URI | R | E | Managed browser client `callback_urls` matching frontend `/auth/callback`; OAuth callback |
 | auth/logout-uri | VITE_COGNITO_LOGOUT_URI | R | E | Managed browser client `logout_urls` matching frontend `/`; OAuth logout return |
@@ -76,6 +76,19 @@ Release constants (`VITE_RELEASE_ENV`, mock-backend false, telemetry false, sele
 **None.** All currently approved Parameter Store keys above are generated non-secret configuration assigned to one Terraform owner. The required GitHub token resides in the protected GitHub Environment, not Parameter Store. No static AWS keys, GitHub App-ID, installation-ID, private-key, application secret or other credential parameter has an actual need here. Do not pre-create Terraform-owned keys with CLI setup. Adding a real unmanaged source requires an inventory/mapping update and the applicable authorization before initialization.
 
 ## Obsolete history
+
+### API hostname bindings superseded by #346
+
+On 2026-10-26, #346 / DEC-018 replaced the separate public API hostname contract. Existing source keys and GitHub destinations remain active; no synchronization mapping is deleted or renamed. The prior bindings below are retained as history. Source changes, DNS/certificate retirement and live synchronization are **pending reviewed deployment**, not proven deleted by this documentation change.
+
+| Historical source key | Type / secret / validation | GitHub destination | Historical source / consumer / owner | Replacement and deletion status |
+|---|---|---|---|---|
+| `/pawlocal/{environment}/config/api/health-url` | String / false / required, HTTPS environment binding | `PAWLOCAL_API_HEALTH_URL` / R | `aws_route53_record.api[0].fqdn` plus `/health`; public health/smoke; matching application state | Same key, frontend origin plus `/api/health`; old API DNS/certificate retirement pending |
+| `/pawlocal/{environment}/config/api/base-url` | String / false / required, HTTPS environment binding | `VITE_API_BASE_URL` / R and `oncall-{environment}` | `aws_route53_record.api[0].fqdn` plus `/api/v1`; frontend/recovery; matching application state | Same key, frontend origin plus `/api/v1`; old API DNS/certificate retirement pending |
+
+Historical origins were `https://api-dev.<domain>` for development and `https://api.<domain>` for production. They are not compatibility aliases. The generated Lightsail HTTPS endpoint remains the CloudFront origin and publicly reachable; protection follow-up is #417.
+
+### Legacy release configuration retired in October 2026
 
 The legacy release records below were retired and deleted on 2026-10-23 because they have no current release/recovery consumer. Protected cleanup succeeded in [development](https://github.com/alanlima/pawlocal/actions/runs/39840236693) and [production](https://github.com/alanlima/pawlocal/actions/runs/39840241046): exactly 13 variables and 3 secrets removed from each release Environment. A direct comparison across nine Environments verified every other variable, secret metadata record and Environment setting unchanged, including plan/apply, recovery and `development-seed`.
 

@@ -60,7 +60,7 @@ def test_main_verifies_catalog_ids_in_list_and_detail(monkeypatch, tmp_path):
 
     def get_json(url: str):
         calls.append(url)
-        if url.endswith("/health"):
+        if url.endswith("/api/health"):
             return {"environment": "development"}
         if "/places?page=1" in url:
             return {"items": catalog_rows, "page": 1, "page_size": 100, "total": 2}
@@ -73,7 +73,7 @@ def test_main_verifies_catalog_ids_in_list_and_detail(monkeypatch, tmp_path):
         "argv",
         [
             str(SCRIPT),
-            "https://api-dev.example.test/health",
+            "https://pawlocal-dev.example.test/api/health",
             str(catalog),
             str(evidence),
         ],
@@ -88,8 +88,8 @@ def test_main_verifies_catalog_ids_in_list_and_detail(monkeypatch, tmp_path):
         "place-2",
     ]
     assert any("/api/v1/places?page=1&page_size=100" in url for url in calls)
-    assert "https://api-dev.example.test/api/v1/places/place-1" in calls
-    assert "https://api-dev.example.test/api/v1/places/place-2" in calls
+    assert "https://pawlocal-dev.example.test/api/v1/places/place-1" in calls
+    assert "https://pawlocal-dev.example.test/api/v1/places/place-2" in calls
 
 
 def test_main_verifies_catalog_record_on_second_list_page(monkeypatch, tmp_path):
@@ -108,7 +108,7 @@ def test_main_verifies_catalog_record_on_second_list_page(monkeypatch, tmp_path)
 
     def get_json(url: str):
         calls.append(url)
-        if url.endswith("/health"):
+        if url.endswith("/api/health"):
             return {"environment": "development"}
         if "/places?page=1" in url:
             return {
@@ -133,7 +133,7 @@ def test_main_verifies_catalog_record_on_second_list_page(monkeypatch, tmp_path)
         "argv",
         [
             str(SCRIPT),
-            "https://api-dev.example.test/health",
+            "https://pawlocal-dev.example.test/api/health",
             str(catalog),
             str(evidence),
         ],
@@ -142,7 +142,7 @@ def test_main_verifies_catalog_record_on_second_list_page(monkeypatch, tmp_path)
     assert validator.main() == 0
     result = json.loads(evidence.read_text(encoding="utf-8"))
     assert [place["id"] for place in result["places"]] == ["place-1", "place-2"]
-    assert "https://api-dev.example.test/api/v1/places?page=2&page_size=100" in calls
+    assert "https://pawlocal-dev.example.test/api/v1/places?page=2&page_size=100" in calls
 
 
 def test_main_refuses_non_development_health_response(monkeypatch, tmp_path):
@@ -158,7 +158,7 @@ def test_main_refuses_non_development_health_response(monkeypatch, tmp_path):
         "argv",
         [
             str(SCRIPT),
-            "https://api.example.test/health",
+            "https://pawlocal.example.test/api/health",
             str(catalog),
             str(tmp_path / "evidence.json"),
         ],
@@ -168,7 +168,7 @@ def test_main_refuses_non_development_health_response(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("failure,expected", [
-    (HTTPError("https://api.example.test/health", 503, "Service Unavailable", {}, None),
+    (HTTPError("https://pawlocal.example.test/api/health", 503, "Service Unavailable", {}, None),
      "HTTPError: HTTP Error 503: Service Unavailable"),
     (URLError("connection refused"), "URLError: <urlopen error connection refused>"),
 ])
@@ -180,7 +180,7 @@ def test_main_retains_http_status_and_transport_reason(monkeypatch, tmp_path, ca
         raise failure
 
     monkeypatch.setattr(validator, "get_json", fail)
-    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "https://api.example.test/health", str(catalog), str(tmp_path / "evidence.json")])
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "https://pawlocal.example.test/api/health", str(catalog), str(tmp_path / "evidence.json")])
     assert validator.main() == 1
     assert expected in capsys.readouterr().err
     assert not (tmp_path / "evidence.json").exists()

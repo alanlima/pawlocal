@@ -54,6 +54,7 @@ mappings:
     github_environment: '{environment}'
     env_name: PAWLOCAL_PUBLIC_BASE_URL
     secret: false
+  # #346: same frontend HTTPS origin + /api/health; keys/destinations retained.
   - store_key: /pawlocal/{environment}/config/api/health-url
     environment: [development, production]
     github_environment: '{environment}'
@@ -94,6 +95,7 @@ mappings:
     github_environment: '{environment}'
     env_name: VITE_COGNITO_CLIENT_ID
     secret: false
+  # #346: same frontend HTTPS origin + /api/v1 (absolute URL for cloud builds).
   - store_key: /pawlocal/{environment}/config/api/base-url
     environment: [development, production]
     github_environment: '{environment}'
@@ -189,6 +191,7 @@ mappings:
     github_environment: oncall-{environment}
     env_name: PAWLOCAL_PUBLIC_BASE_URL
     secret: false
+  # #346: same frontend HTTPS origin + /api/v1 (absolute URL for cloud builds).
   - store_key: /pawlocal/{environment}/config/api/base-url
     environment: [development, production]
     github_environment: oncall-{environment}

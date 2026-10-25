@@ -76,12 +76,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
         )[0]
 
         self.assertEqual(module_locals.count("resource_suffixes = {"), 1)
-        self.assertIn('cert              = "cert"', module_locals)
         self.assertIn('container_service = "api"', module_locals)
-        self.assertIn(
-            'cert              = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}-${local.resource_suffixes.cert}"',
-            module_locals,
-        )
         self.assertIn(
             'container_service = "${local.resource_name_prefix}-${local.resource_suffixes.container_service}"',
             module_locals,
@@ -90,6 +85,25 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn("service_name", module_locals)
         self.assertNotIn("certificate", bootstrap_environments)
         self.assertNotIn("service_name", bootstrap_environments)
+
+    def test_shared_cloudfront_api_origin_keeps_generated_host_and_uri(self) -> None:
+        source = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(encoding="utf-8")
+        distribution = source.split('resource "aws_cloudfront_distribution" "frontend" {', 1)[1].split('data "aws_iam_policy_document" "frontend_bucket"', 1)[0]
+        # Native plan assertions cover behaviors and cache policies. Origin is a
+        # provider set with computed timeout values, unknown until apply; verify
+        # its source contract without substituting a mock distribution.
+        origins = distribution.split("  default_cache_behavior {", 1)[0]
+        self.assertEqual(origins.count("\n  origin {"), 2)
+        self.assertIn('trimprefix(trimsuffix(aws_lightsail_container_service.api.url, "/"), "https://")', origins)
+        self.assertIn('origin_protocol_policy = "https-only"', origins)
+        self.assertIn('origin_ssl_protocols   = ["TLSv1.2"]', origins)
+        self.assertNotIn('origin_path', origins)
+        self.assertNotIn('function_association', origins)
+        self.assertNotIn('resource "aws_route53_record" "api"', source)
+        self.assertNotIn('resource "aws_lightsail_certificate" "api"', source)
+        service = source.split('resource "aws_lightsail_container_service" "api" {', 1)[1].split('locals {', 1)[0]
+        self.assertNotIn('public_domain_names', service)
+        self.assertNotIn('aws_cloudfront_distribution', service)
 
     def test_environment_creation_roots_wait_for_application_permissions(self) -> None:
         module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
@@ -116,7 +130,7 @@ class GreenfieldTerraformTests(unittest.TestCase):
             ("aws_cloudfront_origin_access_control", "frontend"),
             ("aws_cloudfront_function", "spa"),
             ("aws_dsql_cluster", "application"),
-            ("aws_lightsail_certificate", "api"),
+            ("aws_lightsail_container_service", "api"),
             ("aws_cognito_user_pool", "application"),
         )
         for resource_type, resource_name in creation_roots:
@@ -337,7 +351,10 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn('"s3:PutPublicAccessBlock"', module_permissions)
         self.assertIn('"s3:GetBucket*", "s3:Get*Configuration"', boundary)
         self.assertNotIn('"s3:Get*"', boundary)
-        self.assertIn('Certificate/*', module_permissions)
+        self.assertNotIn('Certificate/*', module_permissions)
+        self.assertNotIn('lightsail:CreateCertificate', module_permissions)
+        self.assertIn('lightsail:DeleteCertificate', module_permissions)
+        self.assertNotIn('retired_api_hostname', module_main)
         self.assertIn('Certificate/*', boundary)
         self.assertIn('ContainerService/*', module_permissions)
         self.assertIn('ContainerService/*', boundary)

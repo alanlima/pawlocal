@@ -133,10 +133,7 @@ def _scope(
     host = urllib.parse.urlsplit(frontend).hostname
     prefix = "pawlocal-dev." if environment == "development" else "pawlocal."
     _require(host.startswith(prefix), "recovery frontend environment mismatch")
-    domain = host[len(prefix) :]
-    api_origin = (
-        "https://" + ("api-dev." if environment == "development" else "api.") + domain
-    )
+    api_origin = frontend
     _require(api_base_url == api_origin + "/api/v1", "recovery API binding mismatch")
     return rule_uid, stack, frontend, api_origin
 
@@ -350,7 +347,7 @@ def observe(
             control()
         _require(binding() == uid, "recovery binding changed")
         _require(request(frontend + "/", json_body=False), "recovery frontend empty")
-        health = request(api_origin + "/health")
+        health = request(api_origin + "/api/health")
         _require(isinstance(health, dict), "recovery health schema invalid")
         _require(
             health.get("status") == "ok"

@@ -116,7 +116,7 @@ class RecoveryTests(unittest.TestCase):
                 }
         else:
             self.assertIsNone(request.get_header("Authorization"))
-            if parsed.path == "/health":
+            if parsed.path == "/api/health":
                 value = {
                     "status": "ok",
                     "environment": self.scenario_environment,
@@ -147,7 +147,7 @@ class RecoveryTests(unittest.TestCase):
             "release": self.release,
             "profile": self.profile,
             "service": "pawlocal-api",
-            "api_base_url": "https://api-dev.example.com/api/v1",
+            "api_base_url": "https://pawlocal-dev.example.com/api/v1",
             "frontend_origin": "https://pawlocal-dev.example.com",
             "stack_url": "https://test.grafana.net",
             "query_token": "private-token",
@@ -174,7 +174,7 @@ class RecoveryTests(unittest.TestCase):
         return {
             "environment": "production",
             "frontend_origin": "https://pawlocal.example.com",
-            "api_base_url": "https://api.example.com/api/v1",
+            "api_base_url": "https://pawlocal.example.com/api/v1",
         }
 
     def test_production_full_stable_window_exact_scopes(self):
@@ -322,7 +322,7 @@ class RecoveryTests(unittest.TestCase):
             "environment": "production",
             "profile": self.profile,
             "service": "pawlocal-api",
-            "api_base_url": "https://api.example.com/api/v1",
+            "api_base_url": "https://pawlocal.example.com/api/v1",
             "frontend_origin": "https://pawlocal.example.com",
             "stack_url": "https://test.grafana.net",
             "query_token": "private-token",
@@ -613,7 +613,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_identity_drift_denies(self):
         def mutate(value, url):
-            if url.endswith("/health"):
+            if url.endswith("/api/health"):
                 value["image_digest"] = "sha256:" + "d" * 64
             return value
 
@@ -623,7 +623,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_wrong_api_origin_denied_before_network(self):
         with self.assertRaises(Denied):
-            self.observe(api_base_url="https://api.example.com/api/v1")
+            self.observe(api_base_url="https://pawlocal.example.com/api/v1")
         self.assertEqual(self.calls, [])
 
     def test_deadline_cannot_extend_window(self):
@@ -650,7 +650,7 @@ class RecoveryTests(unittest.TestCase):
             self.observe(
                 environment="production",
                 frontend_origin="https://pawlocal.example.com",
-                api_base_url="https://api.example.com/api/v1",
+                api_base_url="https://pawlocal.example.com/api/v1",
             )
         self.assertEqual(self.calls, [])
 

@@ -13,7 +13,7 @@ ET.register_namespace("", NS)
 def tag(n): return "{" + NS + "}" + n
 root = ET.Element(tag("svg"), {"width":"2000", "height":"1320", "viewBox":"0 0 2000 1320", "role":"img", "aria-labelledby":"architecture-title architecture-desc"})
 ET.SubElement(root, tag("title"), {"id":"architecture-title"}).text = "PawLocal end-to-end application architecture"
-ET.SubElement(root, tag("desc"), {"id":"architecture-desc"}).text = "Separate development and production AWS environments each contain CloudFront, S3, Cognito, a Lightsail FastAPI service and Aurora DSQL. Browser sessions call the matching HTTPS services. Browser Faro and API OTLP send telemetry directly to external Grafana Cloud. Local Compose uses PostgreSQL and a separate local observability stack. Environment boundaries are logical, not VPC or account claims."
+ET.SubElement(root, tag("desc"), {"id":"architecture-desc"}).text = "Separate development and production AWS environments each contain CloudFront, S3, Cognito, a Lightsail FastAPI service and Aurora DSQL. Browser sessions use each matching CloudFront entry point, which routes frontend paths to private S3 and /api paths including /api/health to Lightsail. Browser Faro and API OTLP send telemetry directly to external Grafana Cloud. Local Compose uses PostgreSQL and a separate local observability stack. Environment boundaries are logical, not VPC or account claims."
 N='#13243A'; MUT='#53657A'; TEAL='#007F78'; PUR='#7050A0'; ORANGE='#ED7D22'; GRAY='#617689'
 def el(name, attrs, parent=root): return ET.SubElement(parent,tag(name),{k:str(v) for k,v in attrs.items()})
 def rect(x,y,w,h,fill='white',stroke='#D9E2EA',r=12,sw=1.8):
@@ -76,7 +76,7 @@ for y,env in [(354,'Development'),(694,'Production')]:
 # AWS service cards and their intentionally fixed orthogonal connection routes.
 for dy,prefix in [(0,'dev'),(340,'prod')]:
  y=325+dy
- service(450,y,245,'CloudFront','HTTPS frontend','Arch_Amazon-CloudFront_64.svg',prefix+'-cf')
+ service(450,y,245,'CloudFront','HTTPS entry point','Arch_Amazon-CloudFront_64.svg',prefix+'-cf')
  service(780,y,260,'Amazon S3','Frontend assets','Arch_Amazon-Simple-Storage-Service_64.svg',prefix+'-s3')
  service(1200,y,270,'Cognito','Sign-in / PKCE','Arch_Amazon-Cognito_64.svg',prefix+'-auth')
  service(780,y+120,290,'Lightsail','FastAPI service','Arch_Amazon-Lightsail_64.svg',prefix+'-api')
@@ -84,9 +84,9 @@ for dy,prefix in [(0,'dev'),(340,'prod')]:
  line(f'M 340 {y+17} H 365 V {y-15} H 1335 V {y}',GRAY,True)
  line(f'M 340 {y+40} H 450')
  line(f'M 695 {y+50} H 780')
- label(705,y+28,'Assets',size=22)
- line(f'M 340 {y+170} H 780')
- label(460,y+158,'HTTPS API · token for writes',size=22)
+ label(705,y+28,'Default',size=22)
+ line(f'M 575 {y+100} V {y+170} H 780')
+ label(445,y+207,'/api/* incl. /api/health',size=22)
  line(f'M 1070 {y+170} H 1200')
  label(1090,y+153,'TLS SQL',size=22)
  # Backend verifies Cognito JWTs; browser sign-in remains labelled on Cognito.

@@ -13,6 +13,32 @@ from pawlocal.config import settings
 from pawlocal.observability import _SafeJsonFormatter
 
 
+@pytest.mark.parametrize("path", ["/health", "/api/health"])
+def test_health_probes_bypass_request_telemetry_and_synthetic_faults(
+    client, monkeypatch, path
+):
+    from pawlocal import cloud_telemetry, main
+
+    def unexpected_telemetry(*args, **kwargs):
+        pytest.fail("Health probes must not create request telemetry")
+
+    monkeypatch.setattr(main, "create_api_span", unexpected_telemetry)
+    monkeypatch.setattr(main, "log_request", unexpected_telemetry)
+    monkeypatch.setattr(cloud_telemetry, "record_request", unexpected_telemetry)
+    monkeypatch.setattr(settings, "demo_faults_enabled", True)
+
+    response = client[0].get(
+        path,
+        headers={
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01",
+            "x-pawlocal-demo-failure": "api",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
 def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatch):
     from pawlocal import observability
 
