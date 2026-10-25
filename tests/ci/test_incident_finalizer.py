@@ -105,6 +105,19 @@ class FinalizerTests(unittest.TestCase):
         self.assertIn("LEASE_UNCERTAIN", summary)
         self.assertFalse(any(method == "PATCH" for method, _, _ in calls))
 
+    def test_disabled_failed_fixer_without_candidate_still_escalates(self):
+        calls, summary, error = self.run_finalizer(
+            PAWLOCAL_ONCALL_ENFORCE_GUARDS="false", ADMITTED="true",
+            PROMOTER_RESULT="skipped", FIXER_RESULT="failure",
+        )
+        self.assertIsNone(error)
+        writes = [call for call in calls if call[0] != "GET"]
+        self.assertEqual(len(writes), 1)
+        self.assertIn("ESCALATED", writes[0][2]["body"])
+        self.assertIn("ESCALATED", summary)
+        self.assertNotIn("RELEASE_COMPLETED_UNVERIFIED", summary)
+        self.assertFalse(any(method == "PATCH" for method, _, _ in calls))
+
     def test_only_verified_complete_recovery_closes_the_bound_incident(self):
         calls, summary, error = self.run_finalizer(
             ADMITTED="true", PROMOTER_RESULT="success", PUBLICATION_SHA256="b" * 64

@@ -1,2 +1,3 @@
 ops/deployment-adapters/*.sh text eol=lf
 .github/scripts/*.sh text eol=lf
+tests/ci/fixtures/codex-action-c05cfd7/* text eol=lf
