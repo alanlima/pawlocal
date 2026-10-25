@@ -2,9 +2,9 @@
 from pathlib import Path
 from html import escape
 import xml.etree.ElementTree as ET
+from icon_assets import load_icon
 ROOT = Path(__file__).resolve().parents[4]
 OUT = ROOT/'docs/images/delivery/architecture-operations-cicd.svg'
-ICONS = ROOT/'docs/images/delivery/source/icons'
 parts=[]
 def add(s): parts.append(s)
 def rect(x,y,w,h,fill='#ffffff',stroke='#d8e1ec',r=16): add(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" fill="{fill}" stroke="{stroke}"/>')
@@ -14,9 +14,9 @@ def lines(x,y,ss,size=19,gap=28,color='#53657A'):
  for i,s in enumerate(ss):text(x,y+i*gap,s,size,color=color)
 def arrow(d,color='#607990',dash=False):add(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2.7" stroke-linejoin="round" {chr(32)+"stroke-dasharray=\"7 6\"" if dash else ""} marker-end="url(#arrow)"/>')
 def icon(name,x,y,size=48):
- f=next(p for p in ICONS.glob('*.svg') if name in p.name and not p.name.startswith('._'))
- e=ET.fromstring(f.read_bytes());e.set('x',str(x));e.set('y',str(y));e.set('width',str(size));e.set('height',str(size))
- # All bundled service icons used here are self-contained path geometry.
+ filename={'Identity-and-Access':'Arch_AWS-Identity-and-Access-Management_64.svg','AWS-Lambda':'Arch_AWS-Lambda_64.svg'}.get(name,name+'.svg')
+ e=ET.fromstring(load_icon(filename));e.set('x',str(x));e.set('y',str(y));e.set('width',str(size));e.set('height',str(size))
+ # Verified CDN service artwork is inlined as self-contained path geometry.
  for el in e.iter():
   if 'id' in el.attrib:el.set('id','aws-'+name+'-'+el.get('id').replace('/','-'))
  add(ET.tostring(e,encoding='unicode'))

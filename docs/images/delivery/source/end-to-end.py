@@ -1,10 +1,11 @@
 """Hand-positioned PawLocal architecture. Run with Python from any directory.
-AWS service icons are unmodified inline shapes from the adjacent icons folder.
-No graph/layout generator or remote resource is used.
+AWS service icons load from a pinned CDN into memory, then inline unchanged.
+No graph/layout generator is used; viewing the generated artwork needs no network.
 """
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from icon_assets import load_icon
 
 HERE = Path(__file__).resolve().parent
 NS = "http://www.w3.org/2000/svg"
@@ -28,8 +29,7 @@ def label(x,y,value,color=MUT,size=22):
  text(x,y,value,size,color)
 
 def icon(name,x,y,size=64,prefix='icon'):
- f=HERE/'icons'/name
- s=ET.parse(f).getroot()
+ s=ET.fromstring(load_icon(name))
  ids={v.attrib['id']:prefix+'-'+re.sub('[^a-zA-Z0-9_-]','-',v.attrib['id']) for v in s.iter() if 'id' in v.attrib}
  for v in s.iter():
   for k,value in list(v.attrib.items()):
