@@ -249,8 +249,8 @@ def current_alert(stack_url, token, alert, deadline, opener=None):
     return False
 
 
-def verified_record(github, deployment, environment, *, historical=False):
-    """Verify current runtime, or durable success of an exact past producer attempt."""
+def verified_record(github, deployment, environment, *, historical=False, require_telemetry=True):
+    """Verify release evidence; incident callers additionally require backend telemetry."""
     if enabled() and (
         deployment.get("environment") != environment
         or deployment.get("repository_url") != GITHUB
@@ -313,10 +313,11 @@ def verified_record(github, deployment, environment, *, historical=False):
         "database_provider": "aurora_dsql",
         "migration_runner": "dsql_baseline",
         "migration_id": "dsql_0001_initial",
-        "telemetry_enabled": True,
     }
     if enabled() and (
-        any(
+        type(payload.get("telemetry_enabled")) is not bool
+        or (require_telemetry and payload["telemetry_enabled"] is not True)
+        or any(
             type(payload.get(key)) is not type(value) or payload.get(key) != value
             for key, value in required.items()
         )
@@ -436,20 +437,20 @@ def verified_record(github, deployment, environment, *, historical=False):
     }
 
 
-def deployed_release(github, environment):
+def deployed_release(github, environment, *, require_telemetry=True):
     deployments = github.pages("/deployments?environment=" + environment, maximum=2)
     if not deployments:
         raise Denied("deployed release not found")
     # A failed/unknown newer deployment can have changed runtime identity. Do
     # not silently fall back to an older successful record.
     selected = max(deployments, key=lambda value: value.get("created_at", ""))
-    release = verified_record(github, selected, environment)
+    release = verified_record(github, selected, environment, require_telemetry=require_telemetry)
     if enabled() and environment == "production":
-        matching_development(github, release)
+        matching_development(github, release, require_telemetry=require_telemetry)
     return release
 
 
-def matching_development(github, release):
+def matching_development(github, release, *, require_telemetry=True):
     """Require the exact pair's durable development proof, including retired success."""
     if enabled():
         development = github.pages(
@@ -460,7 +461,7 @@ def matching_development(github, release):
         for candidate in development:
             try:
                 verified = verified_record(
-                    github, candidate, "development", historical=True
+                    github, candidate, "development", historical=True, require_telemetry=require_telemetry
                 )
             except Denied:
                 continue

@@ -47,7 +47,7 @@ def resolve(github, target, deployment_id, reason):
         raise Denied("Deployment ID must be empty for previous-release selection")
     requested = identifier(deployment_id) if target == SPECIFIC else None
     # The current release must be trusted; never skip an uncertain latest record.
-    current = deployed_release(github, "production")
+    current = deployed_release(github, "production", require_telemetry=False)
     history = github.pages("/deployments?environment=production", maximum=10)
     if not history or len({record.get("id") for record in history}) != len(history):
         raise Denied("Missing or ambiguous production history")
@@ -59,8 +59,8 @@ def resolve(github, target, deployment_id, reason):
         if requested is not None and record["id"] != requested:
             continue
         try:
-            selected = verified_record(github, record, "production", historical=True)
-            matching_development(github, selected)
+            selected = verified_record(github, record, "production", historical=True, require_telemetry=False)
+            matching_development(github, selected, require_telemetry=False)
         except Denied:
             if requested is not None:
                 raise
@@ -89,7 +89,7 @@ def validate(github, source, target, reason, commit, image):
     """Called while the canonical production lifecycle lock is held, before mutation."""
     source, target = identifier(source), identifier(target)
     reason_text(reason)
-    current = deployed_release(github, "production")
+    current = deployed_release(github, "production", require_telemetry=False)
     if current["deployment_id"] != source:
         raise Denied("Production changed since selection; start a new rollback")
     records = github.pages("/deployments?environment=production", maximum=10)
@@ -97,8 +97,8 @@ def validate(github, source, target, reason, commit, image):
     sources = [record for record in records if record.get("id") == source]
     if len(selected) != 1 or len(sources) != 1 or (date(selected[0]), target) >= (date(sources[0]), source):
         raise Denied("Rollback target must be an unambiguous historical production deployment")
-    release = verified_record(github, selected[0], "production", historical=True)
-    matching_development(github, release)
+    release = verified_record(github, selected[0], "production", historical=True, require_telemetry=False)
+    matching_development(github, release, require_telemetry=False)
     if release["affected_sha"] != commit or "ghcr.io/alanlima/pawlocal-api@" + release["image_digest"] != image:
         raise Denied("Resolved rollback release pair changed")
     if (release["affected_sha"], release["image_digest"]) == (current["affected_sha"], current["image_digest"]):

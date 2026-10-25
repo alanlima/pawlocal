@@ -29,6 +29,7 @@ class History(fixtures.FakeGitHub):
         self.add(8, "a", "b", 8)
         self.add(7, "e", "f", 7)
         self.development_missing = False
+        self.development_telemetry = {}
 
     def add(self, identity, sha, digest, second):
         production = copy.deepcopy(fixtures.deployment())
@@ -53,6 +54,12 @@ class History(fixtures.FakeGitHub):
             dev = copy.deepcopy(record)
             dev.update(environment="development", id=record["id"] + 100)
             dev["payload"]["workflow_run_id"] += 100
+            if record["id"] in self.development_telemetry:
+                value = self.development_telemetry[record["id"]]
+                if value == "missing":
+                    dev["payload"].pop("telemetry_enabled")
+                else:
+                    dev["payload"]["telemetry_enabled"] = value
             return [dev]
         raise AssertionError(path)
 
@@ -151,6 +158,44 @@ class RollbackTests(unittest.TestCase):
         fake = History()
         fake.runs[10]["path"] = ".github/workflows/release-rollback-production.yml"
         self.assertEqual(self.resolve(fake)["rollback_from_deployment_id"], "10")
+
+    def test_manual_rollback_accepts_disabled_current_target_and_development(self):
+        for disabled in ({10}, {8}, {10, 9, 8, 7}):
+            fake = History()
+            for record in fake.records:
+                if record["id"] in disabled:
+                    record["payload"]["telemetry_enabled"] = False
+            result = self.resolve(fake)
+            self.assertEqual(result["rollback_to_deployment_id"], "8")
+            rollback.validate(fake, "10", "8", "reason", result["release_commit"], result["backend_image"])
+        # Development and production can have different configured telemetry modes.
+        fake = History()
+        fake.development_telemetry = {10: False, 8: False}
+        self.assertEqual(self.resolve(fake)["rollback_to_deployment_id"], "8")
+        # Existing incident consumers preserve the secure enabled-only default,
+        # including the matching development record when production is enabled.
+        with self.assertRaises(rollback.Denied):
+            rollback.deployed_release(fake, "production")
+        fake.records[0]["payload"]["telemetry_enabled"] = False
+        with self.assertRaises(rollback.Denied):
+            rollback.deployed_release(fake, "production")
+        with self.assertRaises(rollback.Denied):
+            rollback.verified_record(fake, fake.records[0], "production")
+
+    def test_manual_rollback_still_rejects_missing_or_nonboolean_telemetry(self):
+        for invalid in (None, "false", "true", 0, 1, [], {}, "missing"):
+            for where in ("current", "target", "development-current", "development-target"):
+                fake = History()
+                identity = 10 if where.endswith("current") else 8
+                record = next(r for r in fake.records if r["id"] == identity)
+                if where.startswith("development"):
+                    fake.development_telemetry[identity] = invalid
+                elif invalid == "missing":
+                    record["payload"].pop("telemetry_enabled")
+                else:
+                    record["payload"]["telemetry_enabled"] = invalid
+                with self.subTest(invalid=invalid, where=where), self.assertRaises(rollback.Denied):
+                    self.resolve(fake, rollback.SPECIFIC, "8")
 
 
 class WorkflowTests(unittest.TestCase):
