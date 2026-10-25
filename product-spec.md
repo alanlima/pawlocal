@@ -48,7 +48,7 @@ Dog owners in South East Queensland have difficulty finding current, reliable in
 
 ## MVP acceptance criteria
 
-1. A visitor can search and filter published places by area, category and facilities and see loading, empty and error states.
+1. A visitor can search and filter published places by area, category and facilities and see loading, empty and error states. Explore and saved-place lists show 20 places per page by default, with 20, 40, 60, 80 or 100 selectable. Previous/Next controls show the current page and result range; changing a search, filter, view or page size returns to the first page.
 2. A visitor can open a place detail page and share a permanent URL that resolves to that place.
 3. A registered user can add/remove a favourite and submit a rating/review, a location suggestion, or a tip/correction; anonymous write attempts are rejected.
 4. A user can report a place or contribution; reports are recorded for moderation without exposing reporter details publicly.
