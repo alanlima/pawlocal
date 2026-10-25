@@ -184,13 +184,14 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
   statement {
     effect = "Allow"
     actions = [
-      "s3:DeleteBucket", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
+      "s3:DeleteBucket", "s3:DeleteBucketPolicy", "s3:PutBucketOwnershipControls", "s3:PutBucketPolicy",
       "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration", "s3:DeleteObject",
       "s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource", "s3:PutBucketTagging"
     ]
     resources = [
-      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*",
-      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*/*"
+      # The trailing * already includes /object suffixes; the second object
+      # ARN was redundant. Preserve the exact existing effective scope.
+      "arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.key}-*"
     ]
   }
 
@@ -274,7 +275,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     effect = "Allow"
     actions = [
       "dsql:DbConnectAdmin", "dsql:DeleteCluster", "dsql:UpdateCluster",
-      "dsql:PutClusterPolicy",
+      "dsql:PutClusterPolicy", "dsql:DeleteClusterPolicy",
       "lightsail:*ContainerService*", "lightsail:DeleteCertificate",
       "cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"
     ]
@@ -323,7 +324,7 @@ data "aws_iam_policy_document" "environment_apply_boundary" {
     condition {
       test     = "ForAllValues:StringLike"
       variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
-      values   = ["${each.value.api_name}.${var.domain_name}", "${each.value.frontend}.${var.domain_name}", "_*.${each.value.api_name}.${var.domain_name}"]
+      values   = local.environment_dns_record_names[each.key]
     }
     condition {
       test     = "ForAllValues:StringEquals"

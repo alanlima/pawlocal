@@ -109,6 +109,15 @@ locals {
       ]
     }
   }
+  # Route 53 has no record-level ResourceTag authorization. Keep lifecycle
+  # deletion inside each environment's configured DNS namespace instead.
+  environment_dns_record_names = {
+    for environment, config in local.environments : environment => [
+      "${config.api_name}.${lower(trimsuffix(trimspace(var.domain_name), "."))}",
+      "${config.frontend}.${lower(trimsuffix(trimspace(var.domain_name), "."))}",
+      "_*.${config.api_name}.${lower(trimsuffix(trimspace(var.domain_name), "."))}"
+    ]
+  }
   role_definitions = merge(
     { for env, _ in local.environments : "${env}-plan" => { environment = env, purpose = "plan", role_name = "pawlocal-${env}-terraform-plan", subject_environments = ["${env}-plan"] } },
     { for env, config in local.environments : "${env}-apply" => {
@@ -187,6 +196,73 @@ resource "aws_iam_role" "github_terraform" {
 
 data "aws_iam_policy_document" "role_permissions" {
   for_each = local.role_definitions
+
+  # Permanent lifecycle deletion remains available when application-managed
+  # DNS resources and their environment-owned mutation policy are removed.
+  dynamic "statement" {
+    for_each = each.value.purpose == "apply" ? [true] : []
+    content {
+      sid       = "DeleteOnlyEnvironmentDNSRecords"
+      effect    = "Allow"
+      actions   = ["route53:ChangeResourceRecordSets"]
+      resources = ["arn:${data.aws_partition.current.partition}:route53:::hostedzone/${var.route53_zone_id}"]
+      condition {
+        test     = "ForAllValues:StringLike"
+        variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+        values   = local.environment_dns_record_names[each.value.environment]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsRecordTypes"
+        values   = ["A", "AAAA", "CNAME"]
+      }
+      condition {
+        test     = "ForAllValues:StringEquals"
+        variable = "route53:ChangeResourceRecordSetsActions"
+        values   = ["DELETE"]
+      }
+      dynamic "condition" {
+        for_each = ["NormalizedRecordNames", "RecordTypes", "Actions"]
+        content {
+          test     = "Null"
+          variable = "route53:ChangeResourceRecordSets${condition.value}"
+          values   = ["false"]
+        }
+      }
+    }
+  }
+
+  # Provider delete APIs for the resource policies are distinct from Put.
+  # Bootstrap retains these lifecycle grants independently of application policy.
+  dynamic "statement" {
+    for_each = each.value.purpose == "apply" ? [true] : []
+    content {
+      sid       = "DeleteOnlyEnvironmentBucketPolicy"
+      effect    = "Allow"
+      actions   = ["s3:DeleteBucketPolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:s3:::pawlocal-${each.value.environment}-*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.purpose == "apply" ? [true] : []
+    content {
+      sid       = "DeleteOnlyTaggedEnvironmentClusterPolicy"
+      effect    = "Allow"
+      actions   = ["dsql:DeleteClusterPolicy"]
+      resources = ["arn:${data.aws_partition.current.partition}:dsql:${var.aws_region}:${data.aws_caller_identity.current.account_id}:cluster/*"]
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/project"
+        values   = [var.project_name]
+      }
+      condition {
+        test     = "StringEquals"
+        variable = "aws:ResourceTag/environment"
+        values   = [each.value.environment]
+      }
+    }
+  }
 
   statement {
     sid       = "RefreshOnlyOwnedApplicationConfiguration"

@@ -140,9 +140,10 @@ run "foundation_publishes_only_existing_bootstrap_values" {
           ]
         ]
         ]))) == toset(concat(
-        # S3's existing trailing * already matches /object paths. These five
-        # pairs only repeat an already permitted ARN subset (not a type guess).
-        [for action in ["s3:GetBucket*", "s3:Get*Configuration", "s3:ListBucket", "s3:ListTagsForResource", "s3:PutBucketTagging"] : jsonencode({ effect = "Allow", action = action, resource = "arn:aws:s3:::pawlocal-${environment}-*/*", condition = {} })],
+        # Exactly two missing provider-delete capabilities are added. DSQL's
+        # other-service pairs remain unsupported, as with existing DSQL actions.
+        [jsonencode({ effect = "Allow", action = "s3:DeleteBucketPolicy", resource = "arn:aws:s3:::pawlocal-${environment}-*", condition = {} })],
+        [for resource in ["arn:aws:dsql:ap-southeast-2:111111111111:cluster/*", "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*", "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*", "arn:aws:cloudfront::111111111111:distribution/*"] : jsonencode({ effect = "Allow", action = "dsql:DeleteClusterPolicy", resource = resource, condition = { StringEquals = { "aws:ResourceTag/project" = "pawlocal", "aws:ResourceTag/environment" = environment } } })],
         # CloudFront actions authorize only CloudFront distribution resources;
         # the named other-service ARN pairs below are explicitly unsupported.
         [for resource in ["arn:aws:cognito-idp:ap-southeast-2:111111111111:userpool/*", "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*", "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*"] : jsonencode({ effect = "Allow", action = "cloudfront:TagResource", resource = resource, condition = { StringEquals = { "aws:ResourceTag/project" = "pawlocal", "aws:ResourceTag/environment" = environment, "aws:RequestTag/project" = "pawlocal", "aws:RequestTag/environment" = environment } } })],
@@ -150,7 +151,7 @@ run "foundation_publishes_only_existing_bootstrap_values" {
         flatten([for action in ["cloudfront:DeleteDistribution", "cloudfront:UpdateDistribution"] : [for resource in ["arn:aws:dsql:ap-southeast-2:111111111111:cluster/*", "arn:aws:lightsail:ap-southeast-2:111111111111:Certificate/*", "arn:aws:lightsail:ap-southeast-2:111111111111:ContainerService/*"] : jsonencode({ effect = "Allow", action = action, resource = resource, condition = { StringEquals = { "aws:ResourceTag/project" = "pawlocal", "aws:ResourceTag/environment" = environment } } })]]),
         [for action in ["dsql:DbConnectAdmin", "dsql:DeleteCluster", "dsql:UpdateCluster", "dsql:PutClusterPolicy", "lightsail:*ContainerService*", "lightsail:DeleteCertificate"] : jsonencode({ effect = "Allow", action = action, resource = "arn:aws:cloudfront::111111111111:distribution/*", condition = { StringEquals = { "aws:ResourceTag/project" = "pawlocal", "aws:ResourceTag/environment" = environment } } })]
       )) &&
-      length(setsubtract(toset(flatten([
+      setsubtract(toset(flatten([
         for statement in jsondecode(file("${path.module}/tests/fixtures/boundary-before-206.json")).policies[environment].Statement : [
           for action in flatten([statement.Action]) : [for resource in flatten([statement.Resource]) : jsonencode({ effect = statement.Effect, action = action, resource = resource, condition = try(statement.Condition, {}) })]
         ]
@@ -158,9 +159,18 @@ run "foundation_publishes_only_existing_bootstrap_values" {
         for statement in jsondecode(policy.minified_json).Statement : [
           for action in flatten([statement.Action]) : [for resource in flatten([statement.Resource]) : jsonencode({ effect = statement.Effect, action = action, resource = resource, condition = try(statement.Condition, {}) })]
         ]
-      ])))) == 0
+      ]))) == toset([for action in ["s3:PutEncryptionConfiguration", "s3:PutBucketPublicAccessBlock", "s3:PutBucketPolicy", "s3:PutBucketOwnershipControls", "s3:DeleteObject", "s3:DeleteBucket"] : jsonencode({ effect = "Allow", action = action, resource = "arn:aws:s3:::pawlocal-${environment}-*/*", condition = {} })]) &&
+      # Every removed literal object pair is still covered by the same action,
+      # effect and condition on the existing trailing-star bucket-prefix ARN.
+      alltrue([for action in ["s3:PutEncryptionConfiguration", "s3:PutBucketPublicAccessBlock", "s3:PutBucketPolicy", "s3:PutBucketOwnershipControls", "s3:DeleteObject", "s3:DeleteBucket"] :
+        anytrue([for statement in jsondecode(policy.minified_json).Statement :
+          contains(flatten([statement.Action]), action) &&
+          contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*") &&
+          statement.Effect == "Allow" && try(length(statement.Condition), 0) == 0
+        ])
+      ])
     ])
-    error_message = "Compaction must retain every prior pair and add exactly the 22 sourced unsupported/redundant pairs; any other authority change is forbidden."
+    error_message = "Only the two explicit missing provider-delete capabilities may be added; all removed literal S3 object pairs must remain covered by the identical existing trailing-star scope."
   }
 }
 

@@ -74,7 +74,7 @@ run "environment_apply_boundaries_fit_and_stay_isolated" {
       length([
         for statement in jsondecode(policy.minified_json).Statement : statement
         if contains(flatten([statement.Action]), "s3:DeleteObject") &&
-        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*/*")
+        contains(flatten([statement.Resource]), "arn:aws:s3:::pawlocal-${environment}-*")
       ]) == 1 &&
       strcontains(data.aws_iam_policy_document.role_permissions["${environment}-apply"].minified_json, local.environment_policy_arns[environment].frontend_teardown) &&
       length(local.environment_application_policy_arns[environment]) == 6 &&
