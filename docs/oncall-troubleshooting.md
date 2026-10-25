@@ -8,6 +8,19 @@ For step-by-step onboarding and setup instructions, see the [On-call responder s
 
 ---
 
+## Request logs exist but the related trace is missing
+
+Hosted traces use parent-based 10% root sampling; request logs are not sampled. A valid `trace_id` in a log therefore does not mean that Tempo stored that trace. New request logs include the boolean `trace_sampled`: false means the sampling decision excluded its trace; true means the trace was selected for export, not that delivery succeeded. Older logs lack this field. Do not increase traffic or change sampling just to find a trace.
+
+1. In Loki Explore, select the incident time range and matching environment. Query `{service_name="pawlocal-api"} | json | environment="production" | trace_sampled="true"` (use `development` for DEV). Copy a request's `trace_id`; keep the matching release and timestamp.
+2. In Tempo Explore, use the trace-ID lookup with that exact ID. The API server span should contain application spans such as `places.search` or `places.detail`, followed by `db.query` dependency spans. Expand a database span's attributes to see `db.query.text`: a bounded SELECT template with `?` placeholders, never actual values or raw SQL. Unsupported statements omit the template while retaining the dependency's duration and result. Browser parents appear only when that browser journey was sampled and exported.
+3. To search instead, use `{ resource.service.name = "pawlocal-api" && resource.deployment.environment.name = "production" }` in the same time range. The incidents dashboard's **Related traces** table adds its selected release filter; a release with no sampled requests can legitimately return no results. Select a result's Explore link to open the full trace, or copy its ID into the dashboard's **Trace ID** box for the **Selected trace waterfall**. Search results need a table visualization; the traces visualization expects one complete trace. See [Grafana's trace panel contract](https://grafana.com/docs/grafana/latest/visualizations/panels-visualizations/visualizations/traces/).
+4. Return to Loki with `{service_name="pawlocal-api"} | json | environment="production" | trace_id="<copied-trace-id>"` to see the request and dependency events together. If a sampled ID is still absent after a short ingestion delay, check exporter completions and failures for `signal="traces"`, deployment mode and the Tempo time range before concluding that correlation is broken.
+
+Exporter health counters describe HTTP attempts, not business requests or delivered span counts. `pawlocal_telemetry_exports_total` counts completed HTTP responses, including rejected responses; `pawlocal_telemetry_export_failures_total` counts HTTP errors (status 400 or higher) and transport/credential exceptions. The installed SDK accepts status 200–399, so a completed response alone does not prove collector ingestion. Retries are separate attempts. Failure series can be absent before the first failure, and a metrics-export outage can hide its own counters. Use existing application metrics/logs and Tempo lookups as independent evidence.
+
+---
+
 ## Incident lifecycle at a glance
 
 ```text

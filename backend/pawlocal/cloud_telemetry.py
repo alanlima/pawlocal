@@ -24,6 +24,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status
 
+from pawlocal.infrastructure.query_telemetry import safe_query_template
+
 SAFE_SPAN_FIELDS = frozenset(
     {
         "http.request.method",
@@ -45,6 +47,7 @@ SAFE_LOG_FIELDS = frozenset(
         "duration_ms",
         "trace_id",
         "span_id",
+        "trace_sampled",
         "error_code",
     }
 )
@@ -230,6 +233,11 @@ class SafeSpanExporter(OTLPSpanExporter):
                     else v
                     for k, v in span.attributes.items()
                     if k in SAFE_SPAN_FIELDS
+                    or (
+                        k == "db.query.text"
+                        and safe_query_template(v) == v
+                        and v is not None
+                    )
                 },
                 events=(),
                 links=(),
@@ -270,25 +278,32 @@ class SafeCloudHandler(LoggingHandler):
 
 
 class ObservedSession(requests.Session):
-    def post(self, *args, **kwargs):
-        signal = kwargs.pop("_pawlocal_signal", None) or (
-            str(args[0]).rsplit("/", 1)[-1] if args else "unknown"
-        )
+    """Observe each HTTP attempt, including SDKs using request() directly."""
+
+    def request(self, method, url, **kwargs):
+        # Inherited post() delegates here too; observing both would double count.
+        signal = urlsplit(url).path.rsplit("/", 1)[-1]
         labels = {
             **_labels,
             "signal": signal if signal in {"traces", "logs", "metrics"} else "unknown",
         }
         try:
-            response = super().post(*args, **kwargs)
-            if _exports is not None:
-                _exports.add(1, labels)
-            if response.status_code >= 400 and _export_failures is not None:
-                _export_failures.add(1, labels)
-            return response
+            response = super().request(method, url, **kwargs)
         except Exception:
-            if _export_failures is not None:
-                _export_failures.add(1, labels)
+            self._record(_export_failures, labels)
             raise
+        self._record(_exports, labels)
+        if response.status_code >= 400:
+            self._record(_export_failures, labels)
+        return response
+
+    @staticmethod
+    def _record(counter, labels):
+        try:
+            if counter is not None:
+                counter.add(1, labels)
+        except Exception:  # noqa: BLE001 - observation cannot alter HTTP outcomes
+            return
 
 
 def configure(settings):

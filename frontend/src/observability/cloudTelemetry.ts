@@ -2,6 +2,7 @@ import {
   FetchTransport,
   initializeFaro,
   TransportItemType,
+  VERSION,
   type Faro,
   type TransportItem,
 } from '@grafana/faro-web-sdk'
@@ -54,7 +55,7 @@ export function sanitizeCloudItem(item: TransportItem): TransportItem | null {
     )
   )
     return null
-  // No browser/page/session/user/SDK metadata or automatically captured content.
+  // Only application identity and the static SDK identity required by hosted ingestion.
   return {
     ...item,
     meta: {
@@ -65,12 +66,25 @@ export function sanitizeCloudItem(item: TransportItem): TransportItem | null {
           ? import.meta.env.VITE_APP_COMMIT
           : 'unknown',
       },
+      sdk: { name: '@grafana/faro-web-sdk', version: VERSION },
     },
   }
 }
 
 export function cloudExporter(): SpanExporter {
   const url = collectorUrl(import.meta.env.VITE_FARO_COLLECTOR_URL)
+  // The hosted collector requires this protocol header even with session capture disabled.
+  // Keep it in memory only and rotate on send; no visitor identity or browser storage.
+  let transportId: string | undefined
+  let transportIdExpiresAt = 0
+  const collectorTransportId = () => {
+    const now = Date.now()
+    if (!transportId || now >= transportIdExpiresAt) {
+      transportId = crypto.randomUUID()
+      transportIdExpiresAt = now + 15 * 60 * 1000
+    }
+    return transportId
+  }
   instance = initializeFaro({
     app: { name: 'pawlocal-frontend', environment: import.meta.env.VITE_RELEASE_ENV },
     instrumentations: [],
@@ -86,7 +100,10 @@ export function cloudExporter(): SpanExporter {
         concurrency: 1,
         requestTimeoutMs: 2000,
         retry: { maxAttempts: 1 },
-        requestOptions: { credentials: 'omit' },
+        requestOptions: {
+          credentials: 'omit',
+          headers: { 'X-Faro-Session-Id': collectorTransportId },
+        },
       }),
     ],
     batching: { enabled: true, itemLimit: 20, sendTimeout: 1000 },
@@ -123,7 +140,11 @@ export function cloudExporter(): SpanExporter {
         )
       exporter.export(safe, callback)
     },
-    shutdown: () => exporter.shutdown(),
+    shutdown: () => {
+      transportId = undefined
+      transportIdExpiresAt = 0
+      return exporter.shutdown()
+    },
   }
 }
 

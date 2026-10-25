@@ -20,8 +20,8 @@ async function exercise(mode, requests, shouldPass) {
     route: async (_, callback) => {handler=callback},
     close: async () => {closed=true},
     newPage: async () => ({goto:async()=>{
-      for(const [url,version=commit] of requests) await handler({
-        request:()=>({url:()=>url,method:()=> 'POST',postDataJSON:()=>({meta:{app:{name:'pawlocal-frontend',environment:'development',version}}})}),
+      for(const [url,version=commit,transportId='b444723d-3b16-49fc-927c-c3cba99c1676',sdk={name:'@grafana/faro-web-sdk',version:'2.13.0'},extraMeta={}] of requests) await handler({
+        request:()=>({url:()=>url,method:()=> 'POST',headers:()=>({'x-faro-session-id':transportId}),postDataJSON:()=>({meta:{app:{name:'pawlocal-frontend',environment:'development',version},sdk,...extraMeta}})}),
         fulfill:async()=>{},continue:async()=>{},
       });
     },waitForTimeout:async()=>{}}),
@@ -33,6 +33,12 @@ async function exercise(mode, requests, shouldPass) {
 await exercise('true',[[collector]],true);
 await exercise('true',[],false);
 await exercise('true',[[collector,'b'.repeat(40)]],false);
+await exercise('true',[[collector,commit,'']],false);
+await exercise('true',[[collector,commit,'visitor-identifier']],false);
+await exercise('true',[[collector,commit,undefined,{}]],false);
+await exercise('true',[[collector,commit,undefined,{name:'@grafana/faro-web-sdk',version:''}]],false);
+await exercise('true',[[collector,commit,undefined,{name:'@grafana/faro-web-sdk',version:'2.13.0',integrations:['private']}]],false);
+await exercise('true',[[collector,commit,undefined,undefined,{session:{id:'private-session'}}]],false);
 await exercise('true',[['https://other.grafana.net/collect/foreign']],false);
 await exercise('false',[],true);
 await exercise('false',[[collector]],false);

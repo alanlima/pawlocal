@@ -20,8 +20,14 @@ export async function verifyServedTelemetry(browser, config, environment, commit
           invalid ||= mode !== 'true' || request.url() !== expected || request.method() !== 'POST'
           try {
             const payload = request.postDataJSON()
+            const transportId = request.headers()['x-faro-session-id']
             invalid ||= payload?.meta?.app?.name !== 'pawlocal-frontend' ||
               payload?.meta?.app?.environment !== environment || payload?.meta?.app?.version !== commit
+            invalid ||= !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transportId ?? '') ||
+              payload?.meta?.sdk?.name !== '@grafana/faro-web-sdk' ||
+              !/^\d+\.\d+\.\d+$/.test(payload?.meta?.sdk?.version ?? '') ||
+              Object.keys(payload?.meta?.sdk ?? {}).some((key) => !['name', 'version'].includes(key)) ||
+              Object.keys(payload?.meta ?? {}).some((key) => !['app', 'sdk'].includes(key))
           } catch { invalid = true }
         }
         await route.fulfill({ status: 204, headers: {
