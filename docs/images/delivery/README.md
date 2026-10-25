@@ -61,3 +61,7 @@ These captures are **local synthetic test fixtures**, not real places or product
 ## Incident demonstration
 
 The existing [drill 02 wiki](https://github.com/alanlima/pawlocal/wiki/Incident-drill-2026-10-25-02) contains 19 inspected screenshots with timestamps, both attempts and exact run/PR links. [#396](https://github.com/alanlima/pawlocal/issues/396) records automatic repair and observed recovery; [#399](https://github.com/alanlima/pawlocal/issues/399) remains `RELEASE_COMPLETED_UNVERIFIED` because enforcement was disabled. See the [delivery plan](../../submission.md) for acceptance gaps and final release binding.
+
+## Architecture diagrams
+
+`architecture-end-to-end.svg` and `architecture-operations-cicd.svg` are diagrams generated from their adjacent `.mmd` Mermaid sources. README embeds the portable SVGs because GitHub's live Mermaid renderer failed on the operations graph. Both diagrams describe implemented capabilities; the README captions retain the separate live acceptance limitations. They are illustrations, not screenshots or additional runtime evidence.

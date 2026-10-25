@@ -1,0 +1,34 @@
+flowchart TD
+  USER["Dog owner"] -->|"HTTPS pages / assets"| EDGE
+  subgraph AWS["AWS: separate development and production environments"]
+    EDGE["CloudFront + S3<br/>Frontend delivery"]
+    AUTH["Cognito Hosted UI<br/>OAuth / PKCE"]
+    API["Lightsail Container Service<br/>FastAPI routes → use cases → repositories"]
+    DB["Aurora DSQL<br/>Persistent application data"]
+    IAM["Runtime IAM role<br/>Short-lived database credentials"]
+    SSM["Parameter Store<br/>Server-only OTLP token"]
+    API -->|"TLS SQL / IAM authentication"| DB
+    IAM -.-> API
+    SSM -.->|"Runtime credential lookup"| API
+  end
+  EDGE --> UI["Browser: React / TypeScript / Vite<br/>Typed PlaceService HTTP adapter"]
+  UI <-->|"Sign in / refresh"| AUTH
+  UI -->|"HTTPS API; access token for writes"| API
+  API -.->|"Issuer / signing keys"| AUTH
+  subgraph OBS["Grafana Cloud"]
+    FARO["Faro browser signals"]
+    SIGNALS["Metrics / logs / sampled traces"]
+    DASH["Dashboards / user-impact alerts"]
+    FARO --> SIGNALS --> DASH
+  end
+  UI -->|"Manual journey signals"| FARO
+  API -->|"Direct asynchronous OTLP"| SIGNALS
+
+  classDef client fill:#e8f1e8,stroke:#557356,color:#182b19
+  classDef cloud fill:#edf3fa,stroke:#4e719b,color:#17283e
+  classDef data fill:#fff1da,stroke:#ad7c2e,color:#3d2c0d
+  classDef observe fill:#f1eafa,stroke:#8661a6,color:#30203f
+  class USER,UI client
+  class EDGE,AUTH,API,IAM,SSM cloud
+  class DB data
+  class FARO,SIGNALS,DASH observe
