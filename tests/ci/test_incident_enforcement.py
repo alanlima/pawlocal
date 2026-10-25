@@ -266,7 +266,9 @@ class EnforcementTests(unittest.TestCase):
                 {
                     "id": 123,
                     "run_attempt": 2,
-                    "head_sha": "different",
+                    "head_sha": "b" * 40,
+                    "path": ".github/workflows/fullstack-release.yml",
+                    "event": "push",
                     "head_branch": "main",
                     "status": "completed",
                     "conclusion": "success",
@@ -276,6 +278,149 @@ class EnforcementTests(unittest.TestCase):
         self.assertEqual(promotion.development_run(client, "b" * 40), 123)
 
     @patch.dict(os.environ, {enforcement.FLAG: "false"})
+    def test_development_selection_ignores_unrelated_quality_and_wrong_commit_runs(
+        self,
+    ):
+        sha = "a" * 40
+        actual = {
+            "id": 22,
+            "path": ".github/workflows/fullstack-release.yml",
+            "event": "push",
+            "head_sha": sha,
+            "head_branch": "main",
+            "run_attempt": 2,
+            "status": "in_progress",
+            "conclusion": None,
+        }
+        client = Mock()
+        for conclusion in ("success", "failure"):
+            unrelated = actual | {
+                "id": 11,
+                "path": ".github/workflows/workflow-validation.yml",
+                "status": "completed",
+                "conclusion": conclusion,
+            }
+            wrong_commit = actual | {
+                "id": 12,
+                "head_sha": "b" * 40,
+                "status": "completed",
+                "conclusion": "success",
+            }
+            client.request.return_value = {
+                "total_count": 3,
+                "workflow_runs": [unrelated, wrong_commit, actual],
+            }
+            with self.subTest(quality=conclusion):
+                self.assertIsNone(promotion.development_run(client, sha))
+            actual["status"], actual["conclusion"] = "completed", "success"
+            self.assertEqual(promotion.development_run(client, sha), 22)
+            actual["status"], actual["conclusion"] = "in_progress", None
+
+    @patch.dict(os.environ, {enforcement.FLAG: "false"})
+    def test_release_operations_wait_for_their_own_artifacts_and_promote_their_image(
+        self,
+    ):
+        sha, image, stale_image = "a" * 40, "sha256:" + "b" * 64, "sha256:" + "c" * 64
+        actual_run = {
+            "id": 22,
+            "path": ".github/workflows/fullstack-release.yml",
+            "event": "push",
+            "head_sha": sha,
+            "head_branch": "main",
+            "run_attempt": 2,
+            "status": "in_progress",
+            "conclusion": None,
+        }
+        unrelated = actual_run | {
+            "id": 11,
+            "path": ".github/workflows/workflow-validation.yml",
+            "status": "completed",
+            "conclusion": "failure",
+        }
+
+        def record(environment, producer, digest, record_id):
+            return {
+                "id": record_id,
+                "sha": sha,
+                "environment": environment,
+                "created_at": str(record_id),
+                "payload": {
+                    "release_commit": sha,
+                    "backend_image_digest": digest,
+                    "workflow_run_id": producer,
+                },
+            }
+
+        stale = record("development", 99, stale_image, 999)
+        development = record("development", 22, image, 222)
+        production = record("production", 33, image, 333)
+        production["payload"] = json.dumps(production["payload"])
+        client = Mock()
+        client.token, client.deadline = "fixture", 0
+        listing_calls, artifact_calls, production_artifact_calls = 0, 0, 0
+
+        def request(method, path):
+            nonlocal listing_calls
+            if path.startswith("/actions/runs?"):
+                listing_calls += 1
+                run = (
+                    actual_run
+                    if listing_calls == 1
+                    else actual_run | {"status": "completed", "conclusion": "success"}
+                )
+                return {"total_count": 2, "workflow_runs": [unrelated, run]}
+            if path == "/actions/runs/33":
+                return {
+                    "id": 33,
+                    "path": ".github/workflows/deploy-production.yml",
+                    "event": "workflow_dispatch",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "run_attempt": 2,
+                }
+            raise AssertionError(path)
+
+        def pages(path, maximum):
+            nonlocal artifact_calls, production_artifact_calls
+            if path == "/deployments?environment=development&ref=" + sha:
+                artifact_calls += 1
+                return [stale] if artifact_calls == 1 else [stale, development]
+            if path == "/deployments?environment=production&ref=" + sha:
+                production_artifact_calls += 1
+                if production_artifact_calls == 1:
+                    return [record("production", 99, stale_image, 1000)]
+                return [record("production", 99, stale_image, 1000), production]
+            raise AssertionError(path)
+
+        client.request.side_effect, client.pages.side_effect = request, pages
+        dispatched = {
+            "workflow_run_id": 33,
+            "run_url": promotion.GITHUB + "/actions/runs/33",
+            "html_url": "https://github.com/alanlima/pawlocal/actions/runs/33",
+        }
+        with (
+            patch.object(promotion, "pause") as pause,
+            patch.object(
+                promotion,
+                "deployed_release",
+                side_effect=AssertionError("must not substitute global runtime"),
+            ),
+            patch.object(promotion, "request", return_value=dispatched) as dispatch,
+        ):
+            selected = promotion.wait_development(client, sha, lambda: None)
+            self.assertEqual(selected["deployment_run"], 22)
+            self.assertEqual(selected["image_digest"], image)
+            self.assertEqual(pause.call_count, 2)
+            result = promotion.promote(client, sha, incident_environment="development")
+            self.assertEqual(pause.call_count, 3)
+        self.assertEqual(
+            dispatch.call_args.args[4]["inputs"]["backend_image"],
+            "ghcr.io/alanlima/pawlocal-api@" + image,
+        )
+        self.assertEqual(result["deployment_run"], 33)
+        self.assertEqual(result["image_digest"], image)
+
+    @patch.dict(os.environ, {enforcement.FLAG: "false"})
     def test_release_operation_failures_remain_errors_in_disabled_mode(self):
         client = Mock()
         client.request.return_value = {
@@ -283,6 +428,9 @@ class EnforcementTests(unittest.TestCase):
             "workflow_runs": [
                 {
                     "id": 123,
+                    "path": ".github/workflows/fullstack-release.yml",
+                    "event": "push",
+                    "head_sha": "a" * 40,
                     "head_branch": "main",
                     "status": "completed",
                     "conclusion": "failure",
@@ -296,7 +444,13 @@ class EnforcementTests(unittest.TestCase):
         client.request.side_effect = lambda method, path: (
             {"object": {"sha": "a" * 40}}
             if path == "/git/ref/heads/main"
-            else {"id": 123, "status": "completed", "conclusion": "cancelled"}
+            else {
+                "id": 123,
+                "path": ".github/workflows/deploy-production.yml",
+                "event": "workflow_dispatch",
+                "status": "completed",
+                "conclusion": "cancelled",
+            }
         )
         dispatch = {
             "workflow_run_id": 123,
@@ -601,7 +755,7 @@ class EnforcementTests(unittest.TestCase):
                 }
                 with (
                     patch.object(promotion, "development_run", return_value=5),
-                    patch.object(promotion, "deployed_release", return_value=release),
+                    patch.object(promotion, "operation_release", return_value=release),
                 ):
                     actual_release = promotion.wait_development(
                         merged, sha, lambda: None
@@ -638,6 +792,8 @@ class EnforcementTests(unittest.TestCase):
                     if path == "/git/ref/heads/main"
                     else {
                         "id": 6,
+                        "path": ".github/workflows/deploy-production.yml",
+                        "event": "workflow_dispatch",
                         "status": "completed",
                         "conclusion": "success",
                         "run_attempt": 2,
@@ -647,7 +803,7 @@ class EnforcementTests(unittest.TestCase):
                     patch.object(promotion, "wait_development", return_value=release),
                     patch.object(promotion, "request", return_value=dispatch),
                     patch.object(
-                        promotion, "deployed_release", return_value=production_release
+                        promotion, "operation_release", return_value=production_release
                     ),
                 ):
                     actual_production = promotion.promote(

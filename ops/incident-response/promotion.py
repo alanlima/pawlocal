@@ -16,6 +16,7 @@ from admission import (
     current_alert,
     deployed_release,
     readiness,
+    verified_record,
 )
 from candidate import digest
 from control import LiveControl
@@ -154,7 +155,12 @@ def publication():
 def valid_run(run, workflow, event, sha=None):
     if not enabled():
         skipped("release")
-        return isinstance(run, dict) and type(run.get("id")) is int
+        return (
+            isinstance(run, dict)
+            and type(run.get("id")) is int
+            and run.get("path") == ".github/workflows/" + workflow
+            and run.get("event") == event
+        )
     return (
         isinstance(run, dict)
         and type(run.get("id")) is int
@@ -368,6 +374,7 @@ def development_run(client, sha):
         for run in listing.get("workflow_runs", [])
         if valid_run(run, "fullstack-release.yml", "push", sha)
         and run.get("head_branch") == "main"
+        and run.get("head_sha") == sha
     ]
     if enabled() and (len(runs) > 1):
         raise Denied("multiple development release attempts require escalation")
@@ -378,12 +385,49 @@ def development_run(client, sha):
     return runs[0]["id"]
 
 
+def operation_release(client, environment, sha, run_id):
+    """Read the artifact produced by an operation, rather than current runtime.
+
+    This selects usable deployment inputs. Optional policy about trusted
+    producers/current release identity is still handled by verified_record.
+    """
+    records = client.pages(
+        f"/deployments?environment={environment}&ref={sha}", maximum=2
+    )
+    matches = []
+    for record in records:
+        payload = record.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                continue
+        if (
+            record.get("environment") == environment
+            and record.get("sha") == sha
+            and isinstance(payload, dict)
+            and payload.get("workflow_run_id") == run_id
+        ):
+            matches.append(record)
+    if not matches:
+        return None
+    record = max(matches, key=lambda item: item.get("created_at", ""))
+    return verified_record(client, record, environment)
+
+
 def wait_development(client, sha, control):
     while True:
         control()
         run_id = development_run(client, sha)
         if run_id is not None:
-            development = deployed_release(client, "development")
+            development = (
+                deployed_release(client, "development")
+                if enabled()
+                else operation_release(client, "development", sha, run_id)
+            )
+            if development is None:
+                pause(client.deadline)
+                continue
             if enabled() and (
                 development["affected_sha"] != sha
                 or development["deployment_run"] != run_id
@@ -469,16 +513,21 @@ def promote(
     while True:
         control()
         run = client.request("GET", f"/actions/runs/{run_id}")
-        if enabled() and (
-            not valid_run(run, "deploy-production.yml", "workflow_dispatch", sha)
-        ):
+        if not valid_run(run, "deploy-production.yml", "workflow_dispatch", sha):
             raise Denied("production run provenance differs")
         if run.get("status") == "completed":
             if run.get("conclusion") != "success":
                 raise Denied(
                     "production release failed; no automatic infrastructure rollback"
                 )
-            production = deployed_release(client, "production")
+            production = (
+                deployed_release(client, "production")
+                if enabled()
+                else operation_release(client, "production", sha, run_id)
+            )
+            if production is None:
+                pause(client.deadline)
+                continue
             if enabled() and (
                 production["affected_sha"] != sha
                 or production["image_digest"] != development["image_digest"]
