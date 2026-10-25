@@ -1,6 +1,7 @@
-"""Neutral evidence boundaries, read-only transport, and incident adapter parity."""
+"""Neutral rollback boundaries, read-only transport, and incident compatibility."""
 
 import json
+import copy
 import os
 from pathlib import Path
 import subprocess
@@ -28,7 +29,8 @@ import pathlib, sys
 sys.path.insert(0, {str(ROOT / 'ops/incident-response')!r})
 import admission, publisher, promotion, job, finalize, quota
 assert admission.Denied is quota.Denied
-assert pathlib.Path(admission.release_evidence.__file__).resolve() == pathlib.Path({str(ROOT / 'ops/release_evidence.py')!r}).resolve()
+assert not hasattr(admission, 'release_evidence')
+assert 'release_evidence' not in sys.modules
 print('Trusted incident checkout imports passed')
 '''
         with tempfile.TemporaryDirectory() as directory:
@@ -59,7 +61,7 @@ print('Independent release evidence import passed')
                                 env=os.environ | {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "false"}, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_shared_verifier_is_strict_independent_of_incident_switch(self):
+    def test_manual_release_verifier_is_strict_independent_of_incident_switch(self):
         for mode in ("true", "false", "invalid"):
             fake = History()
             fake.records[0]["payload"]["evidence_validated"] = False
@@ -67,15 +69,43 @@ print('Independent release evidence import passed')
                 evidence.deployed_release(fake, "production", require_telemetry=False)
 
     @patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"})
-    def test_incident_adapter_preserves_results_errors_and_telemetry_policy(self):
+    def test_incident_preserves_results_errors_and_telemetry_policy(self):
         fake = History()
         self.assertEqual(admission.deployed_release(fake, "production"), evidence.deployed_release(fake, "production"))
         fake.records[0]["payload"]["telemetry_enabled"] = False
         with self.assertRaises(quota.Denied) as caught:
             admission.deployed_release(fake, "production")
         self.assertIs(type(caught.exception), quota.Denied)
-        self.assertIsInstance(caught.exception.__cause__, evidence.ReleaseEvidenceError)
+        self.assertIsNone(caught.exception.__cause__)
         self.assertIsNotNone(evidence.deployed_release(fake, "production", require_telemetry=False))
+
+    @patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"})
+    def test_incident_recognizes_only_trusted_production_rollback_producers(self):
+        wrapper = ".github/workflows/release-rollback-production.yml"
+        fake = History()
+        fake.runs[10]["path"] = wrapper
+        self.assertEqual(admission.deployed_release(fake, "production")["deployment_id"], 10)
+        fake.runs[8]["path"] = wrapper
+        self.assertEqual(admission.verified_record(fake, fake.records[2], "production", historical=True)["deployment_id"], 8)
+        for mutation in ({"path": ".github/workflows/attacker.yml"}, {"head_branch": "other"},
+                         {"event": "push"}, {"conclusion": "failure"}, {"status": "in_progress"},
+                         {"repository": {"id": 0}}, {"head_repository": {"id": 0}}, {"run_attempt": 2}):
+            fake = History()
+            fake.runs[10].update(path=wrapper)
+            fake.runs[10].update(mutation)
+            with self.subTest(mutation=mutation), self.assertRaises(quota.Denied):
+                admission.deployed_release(fake, "production")
+        # Adding a production producer never expands development's producer set.
+        fake = History()
+        fake.run["path"] = wrapper
+        development = copy.deepcopy(fake.records[0])
+        development["environment"] = "development"
+        development["id"] += 100
+        development["payload"]["workflow_run_id"] += 100
+        with self.assertRaises(quota.Denied):
+            admission.verified_record(fake, development, "development")
+        with self.assertRaises(TypeError):
+            admission.verified_record(fake, fake.records[0], "production", require_telemetry=False)
 
     @patch.dict(os.environ, {"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "false"})
     def test_incident_disabled_mode_retains_minimal_decode_and_no_release_api_calls(self):
