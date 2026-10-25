@@ -17,8 +17,11 @@ class OncallWorkflowPathTests(unittest.TestCase):
         self.events = workflow.get("on", workflow.get(True))
 
     def selected(self, event, path):
+        config = self.events[event] or {}
+        if "paths" not in config:
+            return True
         included = False
-        for pattern in self.events[event]["paths"]:
+        for pattern in config["paths"]:
             excluded = pattern.startswith("!")
             if fnmatch.fnmatchcase(path, pattern[1:] if excluded else pattern):
                 included = not excluded
@@ -30,18 +33,24 @@ class OncallWorkflowPathTests(unittest.TestCase):
                 self.assertTrue(self.selected("pull_request", guide))
                 self.assertFalse(self.selected("push", guide))
 
-    def test_other_markdown_remains_outside_both_path_selections(self):
+    def test_all_documentation_and_asset_prs_run_checks_without_release_push(self):
         for document in (
+            "README.md",
             "docs/testing.md",
+            "docs/images/delivery/architecture-end-to-end.png",
+            "docs/images/delivery/source/icons/react.svg",
+            "unrelated/file.txt",
+            "infra/terraform/main.tf",
+            "tests/new-test.py",
             "frontend/README.md",
             "backend/README.md",
             "ops/incident-response/README.md",
             "docs/oncall-future.md",
             "docs/oncall-setup.mdx",
         ):
-            for event in ("pull_request", "push"):
-                with self.subTest(document=document, event=event):
-                    self.assertFalse(self.selected(event, document))
+            with self.subTest(document=document):
+                self.assertTrue(self.selected("pull_request", document))
+                self.assertFalse(self.selected("push", document))
 
     def test_existing_application_and_workflow_paths_remain_selected(self):
         for path in (

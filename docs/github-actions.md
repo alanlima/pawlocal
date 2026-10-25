@@ -26,7 +26,7 @@ The workflow files remain authoritative. The synchronization test in `tests/ci/t
 
 | I want to... | Entry point | Accountable owner |
 |---|---|---|
-| Validate a PR | Automatic `fullstack-release.yml`, `compose-ci.yml`, `terraform-ci.yml`, `workflow-validation.yml`, according to paths below | Platform; Frontend/Backend own their checks |
+| Validate a PR | `fullstack-release.yml` on every PR; additional Compose, Terraform and delivery validation according to paths below | Platform; Frontend/Backend own their checks |
 | Run all checks | `ci.yml` manual | Platform |
 | Release development | `fullstack-release.yml` on main/manual main | Platform |
 | Promote production | `deploy-production.yml` with exact verified commit/image | Platform; owner approval |
@@ -240,7 +240,7 @@ Explicit legacy cleanup checks the active release/recovery consumers and exact c
 
 <!-- actions-reference: fullstack-release.yml; dispatch-inputs: -; call-inputs: - -->
 
-`fullstack-release.yml` performs checks on relevant pull requests, including changes to `docs/oncall-setup.md` or `docs/oncall-troubleshooting.md`. These two operator-guide exceptions apply only to pull-request paths so their required frontend/backend checks run; guide-only pushes remain excluded from automatic publication/deployment. A relevant push to `main`, or a manual dispatch from `main`, additionally:
+`fullstack-release.yml` runs the real frontend and backend checks on every pull request, including documentation, images, unrelated paths, deletions and renames. Its unfiltered `pull_request` trigger retains the default opened/synchronize/reopened activity types, without additional event types or conditional component skips. This supplies the globally required `Frontend checks and HTTP-mode build / frontend` and `Backend checks / Backend checks` contexts under [#411](https://github.com/alanlima/pawlocal/issues/411); the former two-guide allowlist is superseded. Main pushes retain their existing path filters, so documentation-only pushes remain excluded from automatic publication/deployment. A relevant push to `main`, or a manual dispatch from `main`, additionally:
 
 1. builds and publishes the backend image to GHCR;
 2. binds it to its immutable registry digest;
@@ -670,7 +670,7 @@ Matching on-call Environments provide public `PAWLOCAL_ONCALL_ENABLED`, `PAWLOCA
 | Display names | Catalogue, workflow map and detailed headings; Terraform `github.workflow` parent-name list; cleanup destroy `CALLER_WORKFLOW` | Catalogue policy and configuration nested-lock/caller tests |
 | Filenames | All 22 retain names; local `uses`, incident admission `fullstack-release.yml`, production dispatch `deploy-production.yml`, release eligibility APIs and historical links unchanged | Path/reference and incident promotion suites |
 | Job/status contexts | `Backend checks / Backend checks`, `Frontend checks and HTTP-mode build / frontend`; App-issued `PawLocal change authorization` | Catalogue pins nested names; incident candidate authenticity and authorization tests |
-| Triggers | Sole automatic frontend/backend owner is release candidate route; source/contract/dependency path union; shared action paths included in validation and relevant consumers | Trigger matrix tests; component workflows callable-only |
+| Triggers | Sole automatic frontend/backend owner is release candidate route on every PR; main pushes retain source/contract/dependency path filters; shared action paths included in validation and relevant consumers | Trigger matrix tests; component workflows callable-only |
 | Lifecycle | Development/production release outer lifecycle locks; Terraform nested distinct group keyed by exact caller names; reconcile nested/per-environment lock; destroy caller name and cleanup lock | Configuration integration exercises nested parent/generic callers and non-cancellation |
 | Source/evidence | Production selects verified release source at root, current trusted tools/action under `.configuration-tools`; no filename/source or evidence schema migration | Production action-source regression, eligibility, receipt and provenance tests |
 | Script ownership | `.github/scripts/` holds existing Terraform workflow helpers; `scripts/ci/` is a reserved filter/home with no tracked baseline files; `ops/configuration/`, `ops/change-authorization/`, `ops/incident-response/`, `ops/deployment-adapters/` retain domain logic | Ownership/runtime scans include composite metadata and action helpers |
@@ -679,7 +679,7 @@ The existing `.github/scripts/` and `ops/` inventory found distinct domain owner
 
 ## Automatic trigger matrix and duplicate resolution
 
-Before this migration, a frontend-only PR ran frontend validation directly **and** through `fullstack-release.yml` (two frontend jobs), plus its backend candidate check. A backend-only PR similarly ran backend validation twice plus its frontend candidate check. API changes duplicated both. Relevant main backend changes also ran direct backend validation plus release validation. Component workflows now run only when called: the automatic release candidate route owns each check exactly once. `ci.yml` remains an intentional manual rerun of all suites.
+Before this migration, a frontend-only PR ran frontend validation directly **and** through `fullstack-release.yml` (two frontend jobs), plus its backend candidate check. A backend-only PR similarly ran backend validation twice plus its frontend candidate check. API changes duplicated both. Relevant main backend changes also ran direct backend validation plus release validation. Component workflows now run only when called: the automatic release candidate route owns each check exactly once on every PR. #411 removes PR path filters to match globally required checks, while the existing main-push filters remain unchanged. `ci.yml` remains an intentional manual rerun of all suites.
 
 | Representative change | Before: automatic PR owners | After: automatic PR owners | Coverage and exceptions |
 |---|---|---|---|
@@ -687,15 +687,15 @@ Before this migration, a frontend-only PR ran frontend validation directly **and
 | `backend/pawlocal/main.py` | Backend + Release (backend twice) | Release (frontend + backend once each) | Main duplicate backend validation removed |
 | `openapi.yaml` | Frontend + Backend + Release + Compose | Release + Compose | Both candidate checks plus cross-layer Compose |
 | `docker-compose.yml` | Release + Compose | Release + Compose | Intentional candidate/build and integrated stack checks |
-| `infra/terraform/main.tf` | Terraform | Terraform | Offline validation; no release just for Terraform source |
+| `infra/terraform/main.tf` | Terraform | Release + Terraform | Real component PR checks plus offline validation; no main release just for Terraform source |
 | `.github/workflows/fullstack-release.yml` | Frontend + Release + delivery validation | Release + delivery validation | Candidate contract and YAML/security checks |
 | `.github/workflows/backend-ci.yml` | Backend + delivery validation | Release + delivery validation | Both candidate checks; main release gains equivalent check coverage |
 | `ops/configuration/reconcile.py` | Release + delivery validation | Release + delivery validation | Operational fixture validation remains separate |
 | `package-lock.json`, `poetry.lock`, `uv.lock` | Component only | Release | Union preserved for PR/main; main frontend lockfiles now also trigger verified development release |
 | `.github/actions/setup-frontend-toolchain/action.yml` | No previous action | Release + delivery validation | Exercises consumer build/checks; same coverage on main |
-| `.github/actions/setup-terraform-toolchain/action.yml` | No previous action | Terraform + delivery validation | Offline toolchain validation; apply/bootstrap remain gated entrypoints |
-| `README.md`, `docs/testing.md`, component Markdown | None | None | Approved docs-only exclusions retained |
-| `docs/github-actions.md`, `docs/terraform-greenfield-operations.md`, `docs/iam-bootstrap-actions.md`, `ops/iam-bootstrap/README.md` | Delivery validation | Delivery validation | Existing explicit guide exceptions retained |
+| `.github/actions/setup-terraform-toolchain/action.yml` | No previous action | Release + Terraform + delivery validation | Required PR checks plus offline validation; apply/bootstrap remain gated entrypoints |
+| `README.md`, `docs/testing.md`, component Markdown, images or unrelated paths | None | Release (frontend + backend) | Every PR creates real required checks; docs-only main pushes do not publish/deploy |
+| `docs/github-actions.md`, `docs/terraform-greenfield-operations.md`, `docs/iam-bootstrap-actions.md`, `ops/iam-bootstrap/README.md` | Delivery validation | Release + delivery validation | Required PR checks plus existing delivery-validation guide exceptions |
 
 Quality delivery validation intentionally exercises fixtures and policies also used by Terraform/Compose; they validate different integration boundaries. Its disposable Docker runtime smoke is distinct from the Compose journey. These are retained, intentional checks. No required status is removed or renamed. Real candidate CI remains bound to the exact workflow/job contract authenticated by the incident controller.
 
