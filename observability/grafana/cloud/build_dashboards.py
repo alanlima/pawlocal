@@ -146,7 +146,15 @@ def build():
                 "Related traces",
                 '{ resource.service.name = "$service" && resource.deployment.environment.name = "$environment" && resource.service.version =~ "$release" }',
                 datasource="TRACES",
+                kind="table",
+                description="Sampled traces for the selected environment and release. Open a result in Explore or copy its trace ID into Trace ID for the waterfall below. Request logs with trace_sampled=false intentionally have no stored trace; older logs omit this field.",
+            ),
+            panel(
+                "Selected trace waterfall",
+                "$traceId",
+                datasource="TRACES",
                 kind="traces",
+                description="Enter a sampled trace ID in the Trace ID box above. Inspect browser, API, application and database spans when those components exported the same trace.",
             ),
         ],
     }
@@ -221,6 +229,16 @@ def build():
             "annotations": {"list": []},
             "panels": panels,
         }
+        if name == "incidents":
+            result[name]["templating"]["list"].append(
+                {
+                    "name": "traceId",
+                    "label": "Trace ID",
+                    "type": "textbox",
+                    "query": "",
+                    "current": {"text": "", "value": ""},
+                }
+            )
     return result
 
 

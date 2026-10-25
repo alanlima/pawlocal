@@ -158,7 +158,8 @@ class ExperienceTests(unittest.TestCase):
         for dashboard in bound:
             self.assertEqual(
                 [var["name"] for var in dashboard["templating"]["list"]],
-                ["environment", "service", "release"],
+                ["environment", "service", "release"]
+                + (["traceId"] if dashboard["uid"] == "pawlocal-incidents" else []),
             )
             for panel in dashboard["panels"]:
                 self.assertEqual(
@@ -167,6 +168,40 @@ class ExperienceTests(unittest.TestCase):
                 for target in panel["targets"]:
                     self.assertNotIn("or vector(0)", target.get("expr", ""))
                     self.assertNotIn("place_id=", target.get("expr", ""))
+
+    def test_trace_search_table_and_single_trace_waterfall_have_matching_contracts(
+        self,
+    ):
+        template = (
+            ROOT.parents[2]
+            / "infra/terraform/modules/pawlocal-environment/dashboards/incidents.json.tftpl"
+        ).read_text()
+        for key, value in {
+            "environment": "production",
+            "title(environment)": "Production",
+            "metrics_uid": "metrics",
+            "logs_uid": "logs",
+            "traces_uid": "traces",
+        }.items():
+            template = template.replace("${" + key + "}", value)
+        for dashboard in (e.build()["incidents"], json.loads(template)):
+            panels = {panel["title"]: panel for panel in dashboard["panels"]}
+            self.assertEqual(panels["Related traces"]["type"], "table")
+            self.assertIn(
+                "resource.deployment.environment.name",
+                panels["Related traces"]["targets"][0]["query"],
+            )
+            self.assertEqual(panels["Selected trace waterfall"]["type"], "traces")
+            self.assertEqual(
+                panels["Selected trace waterfall"]["targets"][0]["query"], "$traceId"
+            )
+            variable = next(
+                var
+                for var in dashboard["templating"]["list"]
+                if var["name"] == "traceId"
+            )
+            self.assertEqual(variable["type"], "textbox")
+            self.assertEqual(variable["current"]["value"], "")
 
     def test_script_encodes_only_public_target_and_bounded_route_tags(self):
         check = e.synthetic(self.config)

@@ -230,7 +230,7 @@ def test_credential_outage_and_exporter_failure_leave_api_usable(client, monkeyp
         assert client[0].get("/health").status_code == 200
         monkeypatch.setattr(
             cloud.ObservedSession,
-            "post",
+            "request",
             lambda *a, **k: (_ for _ in ()).throw(
                 RuntimeError("synthetic exporter fault")
             ),
@@ -422,3 +422,225 @@ def test_public_pointer_setting_is_loaded_from_environment(monkeypatch):
     assert Settings(_env_file=None).grafana_otlp_token_parameter_name == ""
     monkeypatch.setenv("PAWLOCAL_GRAFANA_OTLP_TOKEN_PARAMETER_NAME", selected)
     assert Settings(_env_file=None).grafana_otlp_token_parameter_name == selected
+
+
+@pytest.mark.parametrize("outcome", [200, 302, 400, "exception"])
+def test_real_sdk_exporters_count_http_completions_and_failures(monkeypatch, outcome):
+    """Exercise SDK transport/auth/encoding through an entirely offline adapter."""
+    from collections import Counter
+
+    from requests.adapters import BaseAdapter
+
+    class CounterInstrument:
+        def __init__(self):
+            self.calls = Counter()
+
+        def add(self, value, labels):
+            assert labels["environment"] == "development"
+            self.calls[labels["signal"]] += value
+
+    sent = Counter()
+
+    class OfflineAdapter(BaseAdapter):
+        def send(self, request, **kwargs):
+            signal = request.url.rsplit("/", 1)[-1]
+            sent[signal] += 1
+            assert request.headers["Authorization"].startswith("Basic ")
+            assert SENTINEL.encode() not in request.body
+            if outcome == "exception":
+                raise requests.exceptions.InvalidURL("synthetic offline failure")
+            response = requests.Response()
+            response.status_code = outcome
+            response._content = b""
+            return response
+
+        def close(self):
+            pass
+
+    original_init = cloud.ObservedSession.__init__
+
+    def offline_init(self):
+        original_init(self)
+        self.mount("https://", OfflineAdapter())
+
+    monkeypatch.setattr(cloud.ObservedSession, "__init__", offline_init)
+    monkeypatch.setattr(cloud, "ssm_client", lambda _: Store())
+    settings = SimpleNamespace(
+        cloud_otlp_endpoint="https://gateway.grafana.net/otlp",
+        release_environment="development",
+        grafana_otlp_instance_id="123",
+        grafana_otlp_token_parameter_name="",
+        dsql_assume_role_arn=ROLE,
+        release_image_digest="sha256:" + "a" * 64,
+    )
+    traces, logs, meters, handler = cloud.configure(settings)
+    completed, failed = CounterInstrument(), CounterInstrument()
+    monkeypatch.setattr(cloud, "_exports", completed)
+    monkeypatch.setattr(cloud, "_export_failures", failed)
+    try:
+        with traces.get_tracer("test").start_as_current_span(
+            "db.query",
+            context=set_span_in_context(
+                NonRecordingSpan(SpanContext(1, 1, False, TraceFlags(1)))
+            ),
+        ):
+            handler.emit(logging.makeLogRecord({"msg": "operation", "levelno": 20}))
+        cloud.record_request("/api/v1/places", "GET", 200, 0.01)
+        traces.force_flush(timeout_millis=3000)
+        logs.force_flush(timeout_millis=3000)
+        meters.force_flush(timeout_millis=3000)
+        assert set(sent) == {"traces", "logs", "metrics"}
+        assert all(count >= 1 for count in sent.values())
+        # SDK retries are separate attempts, never duplicated by our observation.
+        assert completed.calls == (sent if outcome != "exception" else {})
+        assert failed.calls == ({} if outcome in {200, 302} else sent)
+    finally:
+        traces.shutdown()
+        logs.shutdown()
+        meters.shutdown()
+
+
+@pytest.mark.parametrize("entrypoint", ["post", "request"])
+def test_legacy_post_and_request_each_count_once(monkeypatch, entrypoint):
+    completed, failed = [], []
+    monkeypatch.setattr(
+        cloud, "_exports", SimpleNamespace(add=lambda *args: completed.append(args))
+    )
+    monkeypatch.setattr(
+        cloud,
+        "_export_failures",
+        SimpleNamespace(add=lambda *args: failed.append(args)),
+    )
+
+    def send(self, request, **kwargs):
+        response = requests.Response()
+        response.status_code = 200
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    with cloud.ObservedSession() as session:
+        args = ("POST",) if entrypoint == "request" else ()
+        getattr(session, entrypoint)(
+            *args, url="https://gateway.grafana.net/otlp/v1/logs"
+        )
+    assert len(completed) == 1
+    assert completed[0][0] == 1
+    assert completed[0][1]["signal"] == "logs"
+    assert not failed
+
+
+@pytest.mark.parametrize("entrypoint", ["post", "request"])
+@pytest.mark.parametrize("outcome", [200, 302, 400, "exception"])
+def test_export_observation_supports_legacy_post_and_preserves_outcome_when_sdk_fails(
+    monkeypatch, entrypoint, outcome
+):
+    class BrokenCounter:
+        def add(self, *_args):
+            raise RuntimeError("synthetic counter failure")
+
+    def send(self, request, **kwargs):
+        if outcome == "exception":
+            raise requests.exceptions.Timeout("original transport failure")
+        response = requests.Response()
+        response.status_code = outcome
+        return response
+
+    monkeypatch.setattr(requests.Session, "send", send)
+    monkeypatch.setattr(cloud, "_exports", BrokenCounter())
+    monkeypatch.setattr(cloud, "_export_failures", BrokenCounter())
+    with cloud.ObservedSession() as session:
+        args = ("POST",) if entrypoint == "request" else ()
+        call = getattr(session, entrypoint)
+        if outcome == "exception":
+            with pytest.raises(requests.exceptions.Timeout, match="original transport"):
+                call(*args, url="https://gateway.grafana.net/otlp/v1/metrics")
+        else:
+            assert (
+                call(
+                    *args, url="https://gateway.grafana.net/otlp/v1/metrics"
+                ).status_code
+                == outcome
+            )
+
+
+@pytest.mark.parametrize("sampled", [False, True])
+def test_log_correlation_explains_sampling_and_survives_cloud_privacy_filter(
+    monkeypatch, sampled
+):
+    import json
+
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+
+    from pawlocal import observability
+
+    span = NonRecordingSpan(SpanContext(1, 2, False, TraceFlags(int(sampled))))
+    fields = observability.current_correlation_fields(span)
+    assert fields == {
+        "trace_id": "0" * 31 + "1",
+        "span_id": "0" * 15 + "2",
+        "trace_sampled": sampled,
+    }
+    record = logging.makeLogRecord({"msg": "request", "levelno": 20, **fields})
+    assert (
+        json.loads(observability._SafeJsonFormatter().format(record))["trace_sampled"]
+        is sampled
+    )
+    captured = []
+    monkeypatch.setattr(
+        LoggingHandler, "emit", lambda self, record: captured.append(record)
+    )
+    provider = LoggerProvider(shutdown_on_exit=False)
+    try:
+        cloud.SafeCloudHandler(logger_provider=provider).emit(record)
+        assert json.loads(captured[0].getMessage())["trace_sampled"] is sampled
+    finally:
+        provider.shutdown()
+
+
+@pytest.mark.parametrize(
+    "query,expected",
+    [
+        ("SELECT places . id FROM places WHERE places . id = ?", True),
+        (
+            "SELECT places.id FROM places WHERE name = 'private-password-sentinel'",
+            False,
+        ),
+        ("SELECT private_password_sentinel FROM places", False),
+    ],
+)
+def test_cloud_span_export_accepts_only_canonical_safe_query_templates(
+    monkeypatch, query, expected
+):
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
+
+    captured = []
+
+    def export(self, spans):
+        captured.extend(spans)
+        return SpanExportResult.SUCCESS
+
+    monkeypatch.setattr(cloud.OTLPSpanExporter, "export", export)
+    provider = TracerProvider(shutdown_on_exit=False)
+    provider.add_span_processor(
+        SimpleSpanProcessor(
+            cloud.SafeSpanExporter(
+                endpoint="https://gateway.grafana.net/otlp/v1/traces"
+            )
+        )
+    )
+    try:
+        with provider.get_tracer("test").start_as_current_span(
+            "db.query",
+            attributes={
+                "db.query.text": query,
+                "db.statement": "private-password-sentinel",
+            },
+        ):
+            pass
+        assert ("db.query.text" in captured[0].attributes) is expected
+        assert "private-password-sentinel" not in captured[0].to_json()
+        assert "private_password_sentinel" not in captured[0].to_json()
+        assert "db.statement" not in captured[0].attributes
+    finally:
+        provider.shutdown()

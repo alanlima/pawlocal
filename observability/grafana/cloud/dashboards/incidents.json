@@ -73,6 +73,16 @@
           "value": "$__all"
         },
         "refresh": 2
+      },
+      {
+        "name": "traceId",
+        "label": "Trace ID",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
       }
     ]
   },
@@ -189,8 +199,8 @@
     },
     {
       "title": "Related traces",
-      "type": "traces",
-      "description": "",
+      "type": "table",
+      "description": "Sampled traces for the selected environment and release. Open a result in Explore or copy its trace ID into Trace ID for the waterfall below. Request logs with trace_sampled=false intentionally have no stored trace; older logs omit this field.",
       "datasource": {
         "type": "tempo",
         "uid": "__TRACES_UID__"
@@ -219,6 +229,42 @@
       "gridPos": {
         "x": 12,
         "y": 9,
+        "w": 12,
+        "h": 9
+      }
+    },
+    {
+      "title": "Selected trace waterfall",
+      "type": "traces",
+      "description": "Enter a sampled trace ID in the Trace ID box above. Inspect browser, API, application and database spans when those components exported the same trace.",
+      "datasource": {
+        "type": "tempo",
+        "uid": "__TRACES_UID__"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "$traceId"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "NO DATA / UNKNOWN"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "id": 5,
+      "gridPos": {
+        "x": 0,
+        "y": 18,
         "w": 12,
         "h": 9
       }

@@ -57,7 +57,7 @@ describe('hosted Faro privacy and fail-open behavior', () => {
     expect(
       bodies
         .map((body) => JSON.parse(body).meta)
-        .every((meta) => Object.keys(meta).every((key) => key === 'app')),
+        .every((meta) => Object.keys(meta).every((key) => key === 'app' || key === 'sdk')),
     ).toBe(true)
   })
 

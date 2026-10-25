@@ -137,13 +137,18 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def _start_query_span(conn, _cursor, statement, _parameters, _context, _many):
-    # SQL and bind values are deliberately not recorded: they may contain user data.
+    from pawlocal.infrastructure.query_telemetry import safe_query_template
+
+    attributes = {"db.system": conn.dialect.name, "db.operation.name": "query"}
+    template = safe_query_template(statement)
+    if template is not None:
+        attributes["db.query.text"] = template
     manager: AbstractContextManager = trace.get_tracer(
         "pawlocal.database"
     ).start_as_current_span(
         "db.query",
         kind=SpanKind.CLIENT,
-        attributes={"db.system": conn.dialect.name, "db.operation.name": "query"},
+        attributes=attributes,
         record_exception=False,
         set_status_on_exception=False,
     )

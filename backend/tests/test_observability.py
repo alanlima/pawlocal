@@ -55,6 +55,8 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     assert api_span.parent.span_id == int("2222222222222222", 16)
     assert application_span.parent.span_id == api_span.context.span_id
     assert database_span.parent.span_id == application_span.context.span_id
+    assert database_span.attributes["db.query.text"].startswith("SELECT ")
+    assert "private-search-term" not in database_span.attributes["db.query.text"]
     assert all(not span.context.trace_state.to_header() for span in spans)
     assert all("url.query" not in span.attributes for span in spans)
     exported = "\n".join(span.to_json() for span in spans)
@@ -63,6 +65,7 @@ def test_browser_trace_context_reaches_database_and_safe_logs(client, monkeypatc
     lines = [json.loads(line) for line in captured.getvalue().splitlines()]
     assert {line["severity"] for line in lines} == {"DEBUG", "INFO"}
     assert all(line["trace_id"] == "1" * 32 for line in lines)
+    assert all(line["trace_sampled"] is True for line in lines)
     assert "private-search-term" not in captured.getvalue()
 
 

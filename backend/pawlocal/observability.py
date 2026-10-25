@@ -53,6 +53,7 @@ class _SafeJsonFormatter(logging.Formatter):
             "duration_ms",
             "trace_id",
             "span_id",
+            "trace_sampled",
             "error_code",
             "exception_class",
             "exception_chain",
@@ -144,6 +145,7 @@ def current_correlation_fields(span) -> dict[str, Any]:
     return {
         "trace_id": f"{span_context.trace_id:032x}",
         "span_id": f"{span_context.span_id:016x}",
+        "trace_sampled": bool(span_context.trace_flags.sampled),
     }
 
 
