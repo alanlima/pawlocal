@@ -6,6 +6,8 @@ function releaseSettings(environment = 'development') {
   return {
     CI: 'true',
     VITE_RELEASE_ENV: environment,
+    VITE_APP_COMMIT: 'a'.repeat(40),
+    VITE_APP_BUILD_TIME: '2026-10-26T01:23:45Z',
     VITE_USE_MOCK_BACKEND: 'false',
     VITE_TELEMETRY_ENABLED: 'false',
     VITE_API_BASE_URL:
@@ -124,5 +126,31 @@ test('accepts enabled public Faro bindings and rejects credentials or foreign co
         VITE_FARO_COLLECTOR_URL: value,
       }),
     )
+  }
+})
+
+test('rejects missing or invalid release build identity in either environment', () => {
+  for (const environment of ['development', 'production']) {
+    for (const value of [undefined, '', 'local', 'abcdef0', 'g'.repeat(40)]) {
+      assert.throws(
+        () => validateReleaseSettings({ ...releaseSettings(environment), VITE_APP_COMMIT: value }),
+        /VITE_APP_COMMIT/,
+      )
+    }
+    for (const value of [
+      undefined,
+      '',
+      'not-a-time',
+      '2026-10-26',
+      '2026-10-26T01:23:45+10:00',
+      '2026-13-26T01:23:45Z',
+      '2026-02-30T01:23:45Z',
+    ]) {
+      assert.throws(
+        () =>
+          validateReleaseSettings({ ...releaseSettings(environment), VITE_APP_BUILD_TIME: value }),
+        /VITE_APP_BUILD_TIME/,
+      )
+    }
   }
 })

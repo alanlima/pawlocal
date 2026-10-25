@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { matchesOAuthSnapshot } from './oauth-snapshot.mjs'
 import { verifyServedTelemetry } from './verify-served-telemetry.mjs'
+import { verifyServedBuildIdentity } from './verify-served-build-identity.mjs'
 
 const require = createRequire(resolve('frontend/package.json'))
 let browser
@@ -35,6 +36,7 @@ try {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       })
+      await verifyServedBuildIdentity(page, process.env.SERVED_RELEASE_COMMIT, process.env.VITE_APP_BUILD_TIME)
       const [authorization] = await Promise.all([
         page.waitForRequest((request) => new URL(request.url()).pathname === '/oauth2/authorize', {
           timeout: 15000,
@@ -53,10 +55,10 @@ try {
   if (!verified) throw new Error('served configuration mismatch')
   await verifyServedTelemetry(browser, config, process.env.SERVED_RELEASE_ENV, process.env.SERVED_RELEASE_COMMIT)
   console.log(
-    'Served OAuth host/client/callback/scopes match the same-run reconciled configuration.',
+    'Served build identity and OAuth host/client/callback/scopes match the same-run reconciled configuration.',
   )
 } catch {
-  console.error('Served OAuth configuration verification failed.')
+  console.error('Served build identity or OAuth configuration verification failed.')
   process.exitCode = 1
 } finally {
   if (browser) await browser.close()

@@ -46,6 +46,27 @@ def matches(workflow: str, path: str) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
+    def test_release_frontend_builds_generate_and_verify_artifact_identity(self):
+        for workflow, environment, commit in (
+            ("fullstack-release.yml", "development", "${{ github.sha }}"),
+            ("deploy-production.yml", "production", "${{ inputs.release_commit }}"),
+        ):
+            with self.subTest(workflow=workflow):
+                source = (WORKFLOWS / workflow).read_text(encoding="utf-8-sig")
+                timestamp = source.index("      - name: Set frontend artifact build timestamp")
+                build = source.index(f"      - name: Build {environment} frontend")
+                next_step = source.index("      - name:", build + 1)
+                self.assertLess(timestamp, build)
+                self.assertIn('VITE_APP_BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)', source[timestamp:build])
+                self.assertIn('>> "$GITHUB_ENV"', source[timestamp:build])
+                self.assertIn(f"VITE_APP_COMMIT: {commit}", source[build:next_step])
+                self.assertIn("run: npm run build", source[build:next_step])
+                verification = source.index("      - name: Verify served OAuth configuration")
+                record = source.index(f"      - name: Record successful {'verified development' if environment == 'development' else 'production'} deployment")
+                self.assertLess(verification, record)
+                self.assertIn(f"SERVED_RELEASE_COMMIT: {commit}", source[verification:record])
+                self.assertIn("ops/configuration/verify-served-auth.mjs", source[verification:record])
+
     def test_hosted_telemetry_terraform_helpers_trigger_native_validation(self):
         for path in (
             ".github/scripts/validate-hosted-observability.py",
