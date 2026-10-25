@@ -75,6 +75,8 @@ try {
         name: 'Synthetic release fixture',
         category: 'dog_park',
         area: 'Fixture',
+        description:
+          'Synthetic public source: https://www.google.com/maps/search/?api=1&query=Baringa%20Dog%20Park%20Baringa%20Queensland',
       }
       return route.fulfill({
         json: new URL(route.request().url()).pathname.endsWith('/places/release-fixture')
@@ -91,17 +93,28 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/`)
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 900 })
+      await page.locator('button.card-content').first().waitFor({ state: 'visible' })
       await verifyServedBuildIdentity(page, buildCommit, buildTime)
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
         true,
       )
       await page.getByRole('button', { name: 'View Synthetic release fixture' }).click()
-      await page.getByRole('heading', { name: 'Synthetic release fixture' }).waitFor()
+      const detail = page.locator('main.detail-page')
+      await detail.waitFor({ state: 'visible' })
+      await detail
+        .getByRole('heading', { level: 1, name: 'Synthetic release fixture', exact: true })
+        .waitFor()
+      await detail.getByRole('button', { name: 'Share this place', exact: true }).waitFor()
+      assert.equal(
+        await detail.locator('.detail-description').innerText(),
+        'Synthetic public source: https://www.google.com/maps/search/?api=1&query=Baringa%20Dog%20Park%20Baringa%20Queensland',
+      )
       await verifyServedBuildIdentity(page, buildCommit, buildTime)
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
         true,
+        `Fully rendered detail must not overflow at ${width}px`,
       )
       await page.goto(`http://127.0.0.1:${server.address().port}/`)
     }
