@@ -503,6 +503,7 @@ class RecoveryTests(unittest.TestCase):
                 self.observe()
 
     def test_new_alert_generation_after_healthy_samples_denies(self):
+        options = self.production()
         initial = self.now
 
         def mutate(value, url):
@@ -511,7 +512,7 @@ class RecoveryTests(unittest.TestCase):
                     {
                         "fingerprint": "new-generation",
                         "labels": {
-                            "environment": "development",
+                            "environment": "production",
                             "service": "pawlocal-api",
                         },
                     }
@@ -520,8 +521,28 @@ class RecoveryTests(unittest.TestCase):
 
         self.mutate = mutate
         with self.assertRaisesRegex(Denied, "regressed"):
-            self.observe()
+            self.observe(**options)
         self.assertEqual(self.now - initial, 300)
+
+    def test_development_alert_generation_does_not_fail_recovery(self):
+        def mutate(value, url):
+            if url.endswith("/alerts"):
+                return [
+                    {
+                        "fingerprint": "dev-nodata",
+                        "labels": {
+                            "alertname": "pawlocal-development-search-detail-failure",
+                            "environment": "development",
+                            "service": "pawlocal-api",
+                        },
+                    }
+                ]
+            return value
+
+        self.mutate = mutate
+        proof = self.observe()
+        self.assertEqual(proof["environment"], "development")
+        self.assertEqual(proof["samples"], 21)
 
     def test_cold_start_settles_then_starts_full_stable_window(self):
         initial = self.now
