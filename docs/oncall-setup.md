@@ -808,7 +808,7 @@ sum(rate(pawlocal_api_requests_total{environment="production",service="pawlocal-
 
 The traffic-based fallback returns **0** when matching request metrics have enough samples for the two-minute rate but no 5xx series exists. If neither side has data, the result remains **No Data**; absent telemetry does not establish healthy recovery. Keep No Data and query errors visible rather than mapping them to Normal.
 
-Use the matching rule name (`alertname`) `pawlocal-development-search-detail-failure` or `pawlocal-production-search-detail-failure`, and explicitly set rule labels `environment=development` or `environment=production` and `service=pawlocal-api`. The sums remove metric labels, so these rule labels are required for notification routing. See [Grafana-managed alert rule configuration](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/) for query and condition controls.
+Keep the existing rule name (`alertname`) aligned with the target receiver's `allowed_alerts` in the [receiver configuration](#5a-update-pawlocal_oncall_receiver_config-variable); the examples use `pawlocal-development-search-detail-failure` and `pawlocal-production-search-detail-failure`. Explicitly set rule labels `environment=development` or `environment=production` and `service=pawlocal-api`. The sums remove metric labels, so these rule labels are required for notification routing. See [Grafana-managed alert rule configuration](https://grafana.com/docs/grafana/latest/alerting/alerting-rules/create-grafana-managed-rule/) for query and condition controls.
 
 ### Activate development routing
 
@@ -830,7 +830,7 @@ After G2 is accepted:
 
 1. Set `PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED = true` in `oncall-production`.
 2. Configure a PROD Grafana contact point targeting the PROD Function URL with the PROD HMAC secret.
-3. Configure the [search/detail alert query](#searchdetail-alert-query) with the production expression, rule name and labels, then assign the contact point to a notification policy matching `environment=production`, `service=pawlocal-api` alerts.
+3. Configure the [search/detail alert query](#searchdetail-alert-query) with the production expression and labels, preserving the existing approved rule name matching the PROD receiver's `allowed_alerts`, then assign the contact point to a notification policy matching `environment=production`, `service=pawlocal-api` alerts.
 4. Verify a live PROD alert triggers remediation and results in the exact DEV-verified release being automatically promoted to production with no runtime human approval gate.
 
 ---
