@@ -2,6 +2,8 @@
 
 ## Current work
 
+- **Task (#346 IAM prerequisite):** Platform Engineer audited deployed apply-role identities, permissions boundaries and DNS/certificate resources read-only. AI assistance implemented owner-directed permanent project/environment lifecycle deletion in the existing bootstrap inline policies, derived from configured zone/domain namespaces rather than fixed targets. Route 53 uses supported name/type/action conditions; the audit also filled exact missing S3 bucket-policy and DSQL cluster-policy delete actions, preserving existing bucket-name and project/environment tag scopes. Independent and GitHub Codex reviews, exact-plan review and protected owner approval remain required before apply; application cleanup follows verified bootstrap deployment.
+
 - **Task (#413):** Frontend Engineer added reusable, entity-independent pagination and applied it to Explore and saved places, with 20 results by default and selectable sizes through 100. AI assistance covered implementation and regression tests using synthetic fixtures; the existing full-result service contract is preserved. Local checks, browser evidence and independent review outcomes are recorded in the linked PR. No deployment acceptance is claimed.
 
 - **Task (#272):** Platform Engineer implemented the owner-approved purpose catalogue/DEC-014, shared frontend and Terraform setup, quality-only manual validation and duplicate candidate-check routing. Orchestrator inspected trigger/provenance/lock dependencies and live protection metadata; independent and GitHub Codex reviews are required on the exact PR head before owner-controlled merge.
