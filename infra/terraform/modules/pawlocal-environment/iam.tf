@@ -75,7 +75,7 @@ data "aws_iam_policy_document" "application" {
     sid    = "CreateTaggedEnvironmentResources"
     effect = "Allow"
     actions = concat(
-      ["cloudfront:CreateFunction", "cognito-idp:CreateUserPool", "lightsail:CreateCertificate", "lightsail:CreateContainerService"],
+      ["cloudfront:CreateFunction", "cognito-idp:CreateUserPool", "lightsail:CreateContainerService"],
       var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["cloudfront:CreateDistribution"] : []
     )
     resources = ["*"]
@@ -103,7 +103,6 @@ data "aws_iam_policy_document" "application" {
     resources = concat([
       "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:function/pawlocal-${var.environment}-spa-routing",
       "arn:${data.aws_partition.current.partition}:cognito-idp:${var.aws_region}:${data.aws_caller_identity.current.account_id}:userpool/*",
-      "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:Certificate/*",
       "arn:${data.aws_partition.current.partition}:lightsail:${var.aws_region}:${data.aws_caller_identity.current.account_id}:ContainerService/*"
       ],
       var.cloudfront_distribution_arn == "" && var.cloudfront_oac_arn == "" ? ["arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"] : []
@@ -252,12 +251,12 @@ data "aws_iam_policy_document" "application" {
     condition {
       test     = "ForAllValues:StringLike"
       variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
-      values   = [local.frontend_hostname, local.api_hostname, "_*.${local.api_hostname}"]
+      values   = [local.frontend_hostname]
     }
     condition {
       test     = "ForAllValues:StringEquals"
       variable = "route53:ChangeResourceRecordSetsRecordTypes"
-      values   = ["A", "AAAA", "CNAME"]
+      values   = ["A", "AAAA"]
     }
   }
 }

@@ -6,6 +6,19 @@ info:
 servers:
   - url: /api/v1
 paths:
+  /api/health:
+    servers:
+      - url: /
+    get:
+      operationId: getPublicHealth
+      summary: Public service health and release identity
+      description: Unversioned public health endpoint. Lightsail uses the same handler at internal /health.
+      responses:
+        '200':
+          description: Service health and nonsecret release identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
   /places:
     get:
       operationId: listPlaces
@@ -177,6 +190,15 @@ components:
         with an ID token or a client-supplied user ID. Pool issuer, app-client ID and resource
         audience are external configuration; no AWS resource provisioning is part of the contract.
   schemas:
+    Health:
+      type: object
+      required: [status, environment, image_digest, telemetry_enabled]
+      additionalProperties: false
+      properties:
+        status: { type: string, const: ok }
+        environment: { type: string }
+        image_digest: { type: string }
+        telemetry_enabled: { type: boolean }
     Facility:
       type: string
       enum: [Fenced, Off-leash area, Drinking water, Shade, Picnic tables, Accessible paths]

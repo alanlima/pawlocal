@@ -19,7 +19,7 @@ alembic -c alembic.ini upgrade head
 uvicorn pawlocal.main:app --reload
 ```
 
-The API health endpoint is `http://127.0.0.1:8000/health`; OpenAPI docs are at `/docs`. Run backend tests with `pytest` from this directory. API/repository tests use isolated SQLite fixtures and do not require approved production place data.
+Public service health is `/api/health` on the matching environment's frontend origin. Locally, use `http://127.0.0.1:8000/api/health`. The same handler remains at `/health` for Lightsail's internal probe; both routes return the existing nonsecret health/release identity and bypass request telemetry. OpenAPI docs are at `/docs`. Run backend tests with `pytest` from this directory. API/repository tests use isolated SQLite fixtures and do not require approved production place data.
 
 ## Aurora DSQL compatibility status
 

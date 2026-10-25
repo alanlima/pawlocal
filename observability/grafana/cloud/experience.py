@@ -309,11 +309,7 @@ class Experience(Provisioner):
             frontend.hostname.startswith("pawlocal-dev.") and frontend.port is None,
             "Expected the reviewed development Faro frontend origin",
         )
-        expected_api = (
-            "https://api-dev."
-            + frontend.hostname.removeprefix("pawlocal-dev.")
-            + "/api/v1"
-        )
+        expected_api = frontend.geturl() + "/api/v1"
         require(
             config["api_base_url"] == expected_api,
             "Development check API must match the approved development frontend domain",

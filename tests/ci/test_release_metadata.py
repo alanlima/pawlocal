@@ -177,9 +177,12 @@ class ReleaseMetadataTests(unittest.TestCase):
         self.assertEqual(module.API_PREFIX, api_prefix)
         self.assertEqual(route_path, "/places")
         self.assertEqual(
-            module.places_query_url("https://api.example.test/health"),
-            f"https://api.example.test{api_prefix}{route_path}?page=1&page_size=1",
+            module.places_query_url("https://pawlocal.example.test/api/health"),
+            f"https://pawlocal.example.test{api_prefix}{route_path}?page=1&page_size=1",
         )
+        for path in ("/health", "/api/v1/health", "/api/health/", "/api/health?x=1", "/api/health#x"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                module.places_query_url("https://pawlocal.example.test" + path)
 
     def test_release_schemas_describe_provider_and_migration_selection(self) -> None:
         manifest_schema = json.loads((ROOT / "ops" / "release-manifest.schema.json").read_text())

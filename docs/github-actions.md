@@ -508,7 +508,7 @@ Foundation intentionally leaves generated runtime inputs empty. After its review
    | `frontend_bucket` | `PAWLOCAL_FRONTEND_BUCKET` in the release Environment |
    | `cloudfront_distribution_id` | `PAWLOCAL_CLOUDFRONT_DISTRIBUTION_ID` in the release Environment |
    | `frontend_url` | `PAWLOCAL_PUBLIC_BASE_URL`; append `/auth/callback` for `VITE_COGNITO_REDIRECT_URI` and `/` for `VITE_COGNITO_LOGOUT_URI` |
-   | `api_health_url` | `PAWLOCAL_API_HEALTH_URL`; replace the terminal `/health` with `/api/v1` for `VITE_API_BASE_URL` |
+   | `api_health_url` | `PAWLOCAL_API_HEALTH_URL`, matching frontend origin plus `/api/health`; replace terminal `/api/health` with `/api/v1` for `VITE_API_BASE_URL` |
    | `cognito_client_id` | `VITE_COGNITO_CLIENT_ID` |
    | `dsql_endpoint` | `PAWLOCAL_DSQL_ENDPOINT` in `development-seed` only |
    | `lightsail_principal_arn` | Matching bootstrap runtime-trust input; do not place it directly in a release Environment |
@@ -560,7 +560,7 @@ The destroy input must describe the image currently configured in production, no
 
 ### Obtain the CloudFront ACM certificate ARN
 
-CloudFront requires its viewer certificate in `us-east-1`. This is an operator-controlled prerequisite, not the Lightsail API certificate created by the environment root.
+CloudFront requires its viewer certificate in `us-east-1`. This is an operator-controlled prerequisite. Under [DEC-018](decisions.md#dec-018--shared-cloudfront-application-entry-point-346), CloudFront serves both frontend and API paths using this certificate; the API origin uses the generated Lightsail HTTPS hostname. The obsolete custom API hostname/certificate is retired by reviewed Terraform, with no replacement API subdomain.
 
 1. List issued ACM certificates in `us-east-1`:
 

@@ -67,17 +67,34 @@ run "tagged_create_permissions_are_size_safe" {
 
   assert {
     condition = (
-      toset(keys(local.resource_suffixes)) == toset(["cert", "container_service"]) &&
-      local.resource_suffixes.cert == "cert" &&
+      toset(keys(local.resource_suffixes)) == toset(["container_service"]) &&
       local.resource_suffixes.container_service == "api" &&
-      local.resource_names.cert == "pawlocal-development-api-cert" &&
       local.cognito_pre_sign_up_name == "pawlocal-development-cognito-pre-signup" &&
       local.resource_names.container_service == "pawlocal-development-api" &&
       aws_lightsail_container_service.api.name == "pawlocal-development-api" &&
-      aws_lightsail_certificate.api.name == "pawlocal-development-api-cert" &&
-      aws_lightsail_container_service.api.name != aws_lightsail_certificate.api.name
+      length(aws_lightsail_container_service.api.public_domain_names) == 0
     )
-    error_message = "Lightsail names must use the normalized suffix map and keep the service and certificate names distinct."
+    error_message = "Lightsail must retain its service identity without a custom-domain certificate."
+  }
+
+  assert {
+    condition = (
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:CreateCertificate") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "Certificate/*") &&
+      strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:DeleteCertificate") &&
+      strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:UpdateContainerService") &&
+      toset(flatten([one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        statement.Condition["ForAllValues:StringLike"]["route53:ChangeResourceRecordSetsNormalizedRecordNames"]
+        if statement.Sid == "ChangeOnlyEnvironmentDNSNames"
+      ])])) == toset(["pawlocal-dev.example.test"]) &&
+      toset(flatten([one([
+        for statement in jsondecode(data.aws_iam_policy_document.application.minified_json).Statement :
+        statement.Condition["ForAllValues:StringEquals"]["route53:ChangeResourceRecordSetsRecordTypes"]
+        if statement.Sid == "ChangeOnlyEnvironmentDNSNames"
+      ])])) == toset(["A", "AAAA"])
+    )
+    error_message = "Application permissions must manage only frontend DNS and retain certificate deletion/service detachment without obsolete certificate creation or tagging; bootstrap owns independent lifecycle DNS deletion."
   }
 
   assert {
@@ -287,9 +304,7 @@ run "production_resource_names_use_normalized_suffixes" {
   assert {
     condition = (
       local.common_tags.project == "pawlocal" &&
-      local.resource_names.cert == "pawlocal-production-api-cert" &&
       local.resource_names.container_service == "pawlocal-production-api" &&
-      aws_lightsail_certificate.api.name == "pawlocal-production-api-cert" &&
       aws_lightsail_container_service.api.name == "pawlocal-production-api"
     )
     error_message = "The default project tag must remain pawlocal while production resource names use the normalized suffixes."

@@ -128,23 +128,52 @@ run "converged_production_publishes_its_own_managed_api_values" {
     values          = { fqdn = "pawlocal.fixture.example." }
   }
 
-  override_resource {
-    target          = aws_route53_record.api[0]
-    override_during = plan
-    values          = { fqdn = "api.fixture.example." }
-  }
-
   assert {
     condition = (toset(keys(aws_ssm_parameter.configuration)) == toset(["observability/enabled", "frontend/telemetry-enabled", "frontend/base-url", "frontend/bucket", "frontend/cloudfront-distribution-id", "frontend/cloudfront-distribution-arn", "frontend/cloudfront-oac-arn", "auth/client-id", "auth/domain", "auth/redirect-uri", "auth/logout-uri", "auth/scopes", "api/base-url", "api/health-url"]) && alltrue([
       for suffix, parameter in aws_ssm_parameter.configuration : parameter.name == "/pawlocal/production/config/${suffix}" &&
       parameter.type == "String" && parameter.tags.project == var.project_name &&
       parameter.tags.environment == "production" && parameter.tags["configuration-access"] == "github-public"
       ]) && aws_ssm_parameter.configuration["frontend/telemetry-enabled"].value == "false" &&
-      aws_ssm_parameter.configuration["observability/enabled"].value == "false" && aws_ssm_parameter.configuration["api/base-url"].value == "https://api.fixture.example/api/v1" &&
-      aws_ssm_parameter.configuration["api/health-url"].value == "https://api.fixture.example/health" &&
-      output.targets.api_base_url == "https://api.fixture.example/api/v1" &&
+      aws_ssm_parameter.configuration["observability/enabled"].value == "false" && aws_ssm_parameter.configuration["api/base-url"].value == "https://pawlocal.fixture.example/api/v1" &&
+      aws_ssm_parameter.configuration["api/health-url"].value == "https://pawlocal.fixture.example/api/health" &&
+      output.targets.api_base_url == "https://pawlocal.fixture.example/api/v1" &&
       output.targets.cognito_domain == "https://pawlocal-production-c0ffee.auth.ap-southeast-2.amazoncognito.com" &&
     aws_iam_role_policy_attachment.configuration.role == "pawlocal-production-terraform-apply")
     error_message = "Converged production must publish all 14 available matching sources in canonical formats without development contamination."
+  }
+}
+
+run "shared_cloudfront_routes_api_without_spa_or_caching" {
+  command = plan
+  providers = {
+    aws                    = aws.test
+    aws.cognito_deployment = aws.cognito_test
+    aws.oncall_deployment  = aws.cognito_test
+  }
+  assert {
+    condition = (
+      [for behavior in aws_cloudfront_distribution.frontend.ordered_cache_behavior : behavior.path_pattern] == ["/api", "/api/*"] &&
+      alltrue([for behavior in aws_cloudfront_distribution.frontend.ordered_cache_behavior :
+        behavior.target_origin_id == "pawlocal-development-api" &&
+        behavior.viewer_protocol_policy == "https-only" &&
+        toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]) &&
+        behavior.cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
+        behavior.origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac" &&
+        length(behavior.function_association) == 0
+      ])
+    )
+    error_message = "API behaviors must forward requests without SPA routing or caching."
+  }
+  assert {
+    condition = (
+      alltrue([for error in aws_cloudfront_distribution.frontend.custom_error_response :
+        error.error_caching_min_ttl == 0 && error.response_page_path == ""
+      ]) &&
+      aws_cloudfront_distribution.frontend.default_cache_behavior[0].target_origin_id == "pawlocal-development-private-s3" &&
+      length(aws_cloudfront_distribution.frontend.default_cache_behavior[0].function_association) == 1 &&
+      length(aws_lightsail_container_service.api.public_domain_names) == 0 &&
+      output.targets.api_health_url == null
+    )
+    error_message = "Foundation must route exact reserved API paths over HTTPS to generated Lightsail without rewriting/caching or public health publication; only frontend receives SPA routing."
   }
 }

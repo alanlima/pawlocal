@@ -3,6 +3,10 @@ import test from 'node:test'
 import { validateReleaseSettings } from './validate-release-config.mjs'
 
 function releaseSettings(environment = 'development') {
+  const origin =
+    environment === 'production'
+      ? 'https://pawlocal.example.test'
+      : 'https://pawlocal-dev.example.test'
   return {
     CI: 'true',
     VITE_RELEASE_ENV: environment,
@@ -12,12 +16,12 @@ function releaseSettings(environment = 'development') {
     VITE_TELEMETRY_ENABLED: 'false',
     VITE_API_BASE_URL:
       environment === 'production'
-        ? 'https://api.example.test/api/v1'
-        : 'https://api-dev.example.test/api/v1',
+        ? 'https://pawlocal.example.test/api/v1'
+        : 'https://pawlocal-dev.example.test/api/v1',
     VITE_COGNITO_DOMAIN: 'https://pawlocal-test.auth.ap-southeast-2.amazoncognito.com',
     VITE_COGNITO_CLIENT_ID: 'public-app-client',
-    VITE_COGNITO_REDIRECT_URI: 'https://pawlocal-dev.example.test/auth/callback',
-    VITE_COGNITO_LOGOUT_URI: 'https://pawlocal-dev.example.test/',
+    VITE_COGNITO_REDIRECT_URI: `${origin}/auth/callback`,
+    VITE_COGNITO_LOGOUT_URI: `${origin}/`,
   }
 }
 
@@ -58,11 +62,11 @@ test('rejects an invalid or insecure API URL', () => {
   }
 })
 
-test('cloud release API URL must use its environment API subdomain and /api/v1 path', () => {
+test('cloud release API URL must use its environment frontend origin and /api/v1 path', () => {
   for (const [environment, value] of [
-    ['production', 'https://api-dev.example.test/api/v1'],
-    ['development', 'https://api.example.test/api/v1'],
-    ['production', 'https://api.example.test/api/v2'],
+    ['production', 'https://pawlocal-dev.example.test/api/v1'],
+    ['development', 'https://pawlocal.example.test/api/v1'],
+    ['production', 'https://pawlocal.example.test/api/v2'],
     ['production', '/api/v1'],
   ]) {
     assert.throws(
@@ -150,6 +154,27 @@ test('rejects missing or invalid release build identity in either environment', 
         () =>
           validateReleaseSettings({ ...releaseSettings(environment), VITE_APP_BUILD_TIME: value }),
         /VITE_APP_BUILD_TIME/,
+      )
+    }
+  }
+})
+
+test('rejects foreign API or auth origins, legacy API hosts, and decorated URLs', () => {
+  for (const value of [
+    'https://pawlocal-dev.foreign.test/api/v1',
+    'https://pawlocal-dev.example.test:8443/api/v1',
+    'https://user:password@pawlocal-dev.example.test/api/v1',
+    'https://pawlocal-dev.example.test/api/v1?query=value',
+    'https://pawlocal-dev.example.test/api/v1#fragment',
+    'https://api-dev.example.test/api/v1',
+  ]) {
+    assert.throws(() => validateReleaseSettings({ ...releaseSettings(), VITE_API_BASE_URL: value }))
+  }
+  for (const variableName of ['VITE_COGNITO_REDIRECT_URI', 'VITE_COGNITO_LOGOUT_URI']) {
+    for (const origin of ['https://pawlocal.example.test', 'https://pawlocal-dev.foreign.test']) {
+      assert.throws(
+        () => validateReleaseSettings({ ...releaseSettings(), [variableName]: `${origin}/` }),
+        /same frontend origin/,
       )
     }
   }

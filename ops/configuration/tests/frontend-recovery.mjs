@@ -69,7 +69,19 @@ try {
   }
   async function observedRedirect() {
     const page = await browser.newPage()
-    await page.route(`${new URL(oldConfig.VITE_API_BASE_URL).origin}/**`, (route) => {
+    const applicationOrigin = new URL(oldConfig.VITE_API_BASE_URL).origin
+    // Serve fixture bytes through the logical cloud origin so runtime validation
+    // exercises the same-origin contract without contacting a public endpoint.
+    await page.route(`${applicationOrigin}/**`, async (route) => {
+      const requested = new URL(route.request().url())
+      const response = await fetch(`http://127.0.0.1:${server.address().port}${requested.pathname}${requested.search}`)
+      return route.fulfill({
+        status: response.status,
+        headers: Object.fromEntries(response.headers),
+        body: Buffer.from(await response.arrayBuffer()),
+      })
+    })
+    await page.route(`${applicationOrigin}/api/**`, (route) => {
       const place = {
         id: 'release-fixture',
         name: 'Synthetic release fixture',
@@ -90,7 +102,7 @@ try {
         body: '<html>OAuth fixture</html>',
       }),
     )
-    await page.goto(`http://127.0.0.1:${server.address().port}/`)
+    await page.goto(`${applicationOrigin}/`)
     for (const width of [1280, 375]) {
       await page.setViewportSize({ width, height: 900 })
       await page.locator('button.card-content').first().waitFor({ state: 'visible' })
@@ -116,7 +128,7 @@ try {
         true,
         `Fully rendered detail must not overflow at ${width}px`,
       )
-      await page.goto(`http://127.0.0.1:${server.address().port}/`)
+      await page.goto(`${applicationOrigin}/`)
     }
     const request = page.waitForRequest((request) => request.url().includes('/oauth2/authorize'))
     await page.getByRole('button', { name: /^Sign in/ }).click()

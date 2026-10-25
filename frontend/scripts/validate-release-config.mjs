@@ -81,10 +81,11 @@ export function validateReleaseSettings(env = process.env) {
       'Cloud release VITE_API_BASE_URL must end with /api/v1 and have no query or fragment',
     )
   }
-  const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
-  if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
+  const expectedFrontendHostPrefix =
+    releaseEnvironment === 'development' ? 'pawlocal-dev.' : 'pawlocal.'
+  if (!apiUrl.hostname.startsWith(expectedFrontendHostPrefix) || apiUrl.port) {
     throw new Error(
-      `Cloud ${releaseEnvironment} builds must set VITE_API_BASE_URL to the ${expectedApiHostPrefix}<domain> API hostname`,
+      `Cloud ${releaseEnvironment} builds must set VITE_API_BASE_URL to the ${expectedFrontendHostPrefix}<domain> frontend origin`,
     )
   }
 
@@ -93,8 +94,12 @@ export function validateReleaseSettings(env = process.env) {
   parseHttpsUrl(env.VITE_COGNITO_DOMAIN?.trim() ?? '', 'VITE_COGNITO_DOMAIN', {
     rootOnly: true,
   })
-  parseHttpsUrl(env.VITE_COGNITO_REDIRECT_URI?.trim() ?? '', 'VITE_COGNITO_REDIRECT_URI')
-  parseHttpsUrl(env.VITE_COGNITO_LOGOUT_URI?.trim() ?? '', 'VITE_COGNITO_LOGOUT_URI')
+  for (const variableName of ['VITE_COGNITO_REDIRECT_URI', 'VITE_COGNITO_LOGOUT_URI']) {
+    const frontendUrl = parseHttpsUrl(env[variableName]?.trim() ?? '', variableName)
+    if (frontendUrl.origin !== apiUrl.origin) {
+      throw new Error(`${variableName} must use the same frontend origin as VITE_API_BASE_URL`)
+    }
+  }
 
   return { skipped: false, environment: releaseEnvironment }
 }

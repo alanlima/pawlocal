@@ -10,7 +10,7 @@ afterEach(() => {
 describe('HttpPlaceService', () => {
   it('propagates hosted traceparent only to the configured API origin and omits tracestate', async () => {
     vi.stubEnv('VITE_RELEASE_ENV', 'development')
-    vi.stubEnv('VITE_API_BASE_URL', 'https://api-dev.example.test/api/v1')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://pawlocal-dev.example.test/api/v1')
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockImplementation(
@@ -21,7 +21,7 @@ describe('HttpPlaceService', () => {
       traceparent: '00-' + 'a'.repeat(32) + '-' + 'b'.repeat(16) + '-01',
       tracestate: 'private=sentinel',
     }
-    await new HttpPlaceService('https://api-dev.example.test/api/v1').listPlaces(
+    await new HttpPlaceService('https://pawlocal-dev.example.test/api/v1').listPlaces(
       {},
       undefined,
       context,

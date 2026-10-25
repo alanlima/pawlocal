@@ -54,13 +54,21 @@ export function validateReleaseConfig() {
   if (apiUrl.protocol !== 'https:') {
     throw new Error('Cloud release API endpoints must use HTTPS')
   }
-  if (apiUrl.pathname.replace(/\/$/, '') !== '/api/v1') {
-    throw new Error('Cloud release VITE_API_BASE_URL must end with /api/v1')
-  }
-  const expectedApiHostPrefix = releaseEnvironment === 'development' ? 'api-dev.' : 'api.'
-  if (!apiUrl.hostname.startsWith(expectedApiHostPrefix)) {
+  if (apiUrl.pathname.replace(/\/$/, '') !== '/api/v1' || apiUrl.search || apiUrl.hash) {
     throw new Error(
-      `Cloud ${releaseEnvironment} builds must use the ${expectedApiHostPrefix}<domain> API hostname`,
+      'Cloud release VITE_API_BASE_URL must end with /api/v1 and have no query or fragment',
+    )
+  }
+  const expectedFrontendHostPrefix =
+    releaseEnvironment === 'development' ? 'pawlocal-dev.' : 'pawlocal.'
+  if (
+    !apiUrl.hostname.startsWith(expectedFrontendHostPrefix) ||
+    apiUrl.port ||
+    apiUrl.username ||
+    apiUrl.password
+  ) {
+    throw new Error(
+      `Cloud ${releaseEnvironment} builds must use the ${expectedFrontendHostPrefix}<domain> frontend origin for VITE_API_BASE_URL`,
     )
   }
 
@@ -78,8 +86,22 @@ export function validateReleaseConfig() {
     import.meta.env.VITE_COGNITO_REDIRECT_URI,
     import.meta.env.VITE_COGNITO_LOGOUT_URI,
   ]) {
-    if (new URL(setting!).protocol !== 'https:') {
+    const url = new URL(setting!)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
       throw new Error('Cloud release Cognito domain and redirect URLs must use HTTPS')
     }
+  }
+  for (const setting of [
+    import.meta.env.VITE_COGNITO_REDIRECT_URI,
+    import.meta.env.VITE_COGNITO_LOGOUT_URI,
+  ]) {
+    if (new URL(setting!).origin !== apiUrl.origin) {
+      throw new Error(
+        'Cloud release Cognito redirect and logout URLs must use the same frontend origin as VITE_API_BASE_URL',
+      )
+    }
+  }
+  if (apiUrl.origin !== window.location.origin) {
+    throw new Error('Cloud release VITE_API_BASE_URL must use the serving frontend origin')
   }
 }

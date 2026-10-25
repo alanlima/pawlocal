@@ -16,7 +16,8 @@ describe('hosted trace correlation', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.01)
     vi.stubEnv('VITE_RELEASE_ENV', 'development')
     vi.stubEnv('VITE_TELEMETRY_ENABLED', 'true')
-    vi.stubEnv('VITE_API_BASE_URL', 'https://api-dev.example.test/api/v1')
+    vi.stubEnv('VITE_API_BASE_URL', 'https://pawlocal-dev.example.test/api/v1')
+    vi.stubGlobal('location', new URL('https://pawlocal-dev.example.test/'))
     vi.stubEnv('VITE_FARO_COLLECTOR_URL', 'https://faro-collector.grafana.net/collect/public-key')
     vi.stubEnv('VITE_APP_COMMIT', 'a'.repeat(40))
     const apiHeaders: Headers[] = []
@@ -27,7 +28,7 @@ describe('hosted trace correlation', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit) => {
-        if (url.startsWith('https://api-dev.example.test/')) {
+        if (url.startsWith('https://pawlocal-dev.example.test/')) {
           apiHeaders.push(new Headers(init.headers))
           return new Response(
             JSON.stringify(
@@ -47,7 +48,9 @@ describe('hosted trace correlation', () => {
     const telemetry = await import('./telemetry')
     const { HttpPlaceService } = await import('../services/HttpPlaceService')
     const { observePlaceService } = await import('../services/observedPlaceService')
-    const service = observePlaceService(new HttpPlaceService('https://api-dev.example.test/api/v1'))
+    const service = observePlaceService(
+      new HttpPlaceService('https://pawlocal-dev.example.test/api/v1'),
+    )
     try {
       await service.listPlaces({ q: 'private-search-sentinel' })
       await service.getPlace('private-place-id')
@@ -85,7 +88,7 @@ describe('hosted trace correlation', () => {
         'private-search-sentinel',
         'private-place-id',
         'private-place-name',
-        'https://api-dev.example.test',
+        'https://pawlocal-dev.example.test',
       ])
         expect(collectorBodies.join('')).not.toContain(privateValue)
       for (const body of collectorBodies) {

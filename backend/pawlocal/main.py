@@ -77,7 +77,7 @@ _request_routes = tuple(
 
 @app.middleware("http")
 async def trace_and_log_request(request: Request, call_next):
-    if request.url.path == "/health":
+    if request.url.path in {"/health", "/api/health"}:
         return await call_next(request)
 
     started = perf_counter()
@@ -199,6 +199,7 @@ async def http_error_handler(_: Request, exc: HTTPException) -> JSONResponse:
 
 
 @app.get("/health")
+@app.get("/api/health")
 def health() -> dict[str, str | bool]:
     return {
         "status": "ok",

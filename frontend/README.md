@@ -153,7 +153,7 @@ Supply these **public client settings separately for development and production*
 | `VITE_APP_BUILD_TIME` | ISO 8601 UTC artifact build time generated immediately before bundling. |
 | `VITE_USE_MOCK_BACKEND`     | Must be exactly `false` for cloud release builds.                                                              |
 | `VITE_TELEMETRY_ENABLED`    | Must be explicitly `true` or `false`; hosted enabled mode requires matching public Faro settings. See [hosted telemetry operations](../docs/hosted-telemetry-operations.md).                                                         |
-| `VITE_API_BASE_URL`         | Absolute HTTPS API URL ending in `/api/v1`; use the environment's separate `api-dev.<domain>` or `api.<domain>` host. |
+| `VITE_API_BASE_URL`         | Absolute HTTPS API URL ending in `/api/v1` on the environment's frontend origin: `https://pawlocal-dev.<domain>/api/v1` or `https://pawlocal.<domain>/api/v1`; callback and logout origins must match. |
 | `VITE_COGNITO_DOMAIN`       | HTTPS Cognito Hosted UI domain for the selected user pool.                                                     |
 | `VITE_COGNITO_CLIENT_ID`    | Public app-client ID configured for authorization-code flow without a client secret.                           |
 | `VITE_COGNITO_REDIRECT_URI` | Exact callback URL registered with the app client.                                                             |
@@ -162,6 +162,6 @@ Supply these **public client settings separately for development and production*
 
 The release workflow generates build identity metadata for each artifact; these values are not synchronized Environment configuration.
 
-`npm run build` always runs `prebuild` and requires valid release settings, including for a workstation build; it fails before TypeScript/Vite runs if `VITE_RELEASE_ENV` or any required value is missing or malformed. Local `npm run dev` does not require release settings. The frontend also checks the same release invariants at startup. Run `npm run validate:release-config` to validate the currently selected release environment directly.
+`npm run build` always runs `prebuild` and requires valid release settings, including for a workstation build; it fails before TypeScript/Vite runs if `VITE_RELEASE_ENV` or any required value is missing or malformed. Local `npm run dev` does not require release settings. The frontend also checks the same release invariants at startup and requires the API origin to match the origin serving the page. Run `npm run validate:release-config` to validate the currently selected release environment directly.
 
 The authorization state, PKCE verifier, access token and refresh token stay in the current tab's `sessionStorage`; the frontend refreshes short-lived access tokens and clears the session on sign-out. Tokens are never logged or added to telemetry. If Cognito is not configured during local development, HTTP browsing remains available but protected actions report that authentication is not configured. Mock demo-member mode remains local-only and never authenticates HTTP requests.

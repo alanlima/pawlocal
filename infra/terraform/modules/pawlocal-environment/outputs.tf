@@ -5,7 +5,7 @@ output "targets" {
     aws_account_id              = data.aws_caller_identity.current.account_id
     aws_region                  = var.aws_region
     frontend_url                = "https://${local.frontend_hostname}"
-    api_health_url              = "https://${local.api_hostname}/health"
+    api_health_url              = local.public_configuration.api_health_url
     frontend_bucket             = aws_s3_bucket.frontend.bucket
     cloudfront_distribution_id  = aws_cloudfront_distribution.frontend.id
     cloudfront_distribution_arn = aws_cloudfront_distribution.frontend.arn

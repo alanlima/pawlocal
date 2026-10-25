@@ -18,7 +18,7 @@ def enabled():
         "usage_datasource_uid": "usage",
         "synthetic_api_url": "https://synthetic-monitoring-api-au-southeast-0.grafana.net",
         "probe_id": 123,
-        "api_base_url": "https://api-dev.test.org/api/v1",
+        "api_base_url": "https://pawlocal-dev.test.org/api/v1",
         "webhook_url": "https://abcdefgh.lambda-url.ap-southeast-2.on.aws/",
         "operator_receiver": "reviewed-operator",
         "approval": "issue-226-live-owner-reference",
@@ -309,8 +309,8 @@ class ExperienceTests(unittest.TestCase):
 
     def test_production_or_foreign_api_origin_rejected_before_any_network(self):
         for api in (
-            "https://api.test.org/api/v1",
-            "https://api-dev.foreign.org/api/v1",
+            "https://pawlocal.test.org/api/v1",
+            "https://pawlocal-dev.foreign.org/api/v1",
         ):
             with self.subTest(api=api):
                 self.config["api_base_url"] = api
@@ -320,7 +320,7 @@ class ExperienceTests(unittest.TestCase):
                         self.config, self.binding, apply=True
                     )
                 self.assertEqual(self.api.calls, [])
-        self.config["api_base_url"] = "https://api-dev.test.org/api/v1"
+        self.config["api_base_url"] = "https://pawlocal-dev.test.org/api/v1"
         self.binding["frontend_origin"] = "https://pawlocal.test.org"
         with self.assertRaises(e.ProvisionError):
             self.runner.reconcile_experience(self.config, self.binding, apply=True)
