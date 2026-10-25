@@ -15,6 +15,8 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import promotion
 
+BASH = os.environ.get("PAWLOCAL_TEST_BASH") or ("bash" if os.name != "nt" else None)
+
 
 def publication():
     return {
@@ -191,25 +193,28 @@ class PromotionTests(unittest.TestCase):
                 with self.subTest(job=name):
                     self.assertTrue(depends(name))
 
-    @unittest.skipIf(os.name == "nt", "Production guard executes under hosted Linux bash")
+    @unittest.skipUnless(BASH, "Hosted Linux Bash or explicit PAWLOCAL_TEST_BASH required")
     def test_actual_entry_guard_rejects_race_and_preserves_ordinary_older_release(self):
         root = Path(__file__).resolve().parents[2]
         workflow = yaml.safe_load((root / ".github/workflows/deploy-production.yml").read_text())
         script = workflow["jobs"]["workflow-binding"]["steps"][0]["run"]
-        for expected, actual, release, accepted in (
-            ("a" * 40, "a" * 40, "a" * 40, True),
-            ("a" * 40, "b" * 40, "a" * 40, False),
-            ("a" * 40, "a" * 40, "b" * 40, False),
-            ("true", "a" * 40, "a" * 40, False),
-            ("", "b" * 40, "a" * 40, True),
+        for mode, expected, actual, release, accepted in (
+            ("true", "a" * 40, "a" * 40, "a" * 40, True),
+            ("true", "a" * 40, "b" * 40, "a" * 40, False),
+            ("true", "a" * 40, "a" * 40, "b" * 40, False),
+            ("true", "true", "a" * 40, "a" * 40, False),
+            ("true", "", "b" * 40, "a" * 40, True),
+            ("false", "a" * 40, "b" * 40, "a" * 40, True),
+            ("invalid", "", "b" * 40, "a" * 40, False),
         ):
-            with self.subTest(expected=expected, actual=actual, release=release):
+            with self.subTest(mode=mode, expected=expected, actual=actual, release=release):
                 result = subprocess.run(
-                    ["bash", "-c", script], check=False, capture_output=True,
+                    [BASH, "-c", script], check=False, capture_output=True,
                     env={"PATH": os.environ["PATH"], "EXPECTED_WORKFLOW_SHA": expected,
-                         "ACTUAL_WORKFLOW_SHA": actual, "RELEASE_COMMIT": release},
+                         "ACTUAL_WORKFLOW_SHA": actual, "RELEASE_COMMIT": release,
+                         "PAWLOCAL_ONCALL_ENFORCE_GUARDS": mode},
                 )
-                self.assertEqual(result.returncode == 0, accepted)
+                self.assertEqual(result.returncode == 0, accepted, result.stderr.decode())
 
     def test_configured_production_rule_is_required_before_dispatch(self):
         metadata = {"alert": {"environment": "development", "service": "pawlocal-api"}}
