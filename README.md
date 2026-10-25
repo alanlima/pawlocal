@@ -65,24 +65,97 @@ Backend API/repository tests use isolated SQLite fixtures by default. PostgreSQL
 
 ## Architecture
 
+### End-to-end application architecture
+
+The cloud path below applies separately to development and production. Each environment has its own frontend, API, identity, database and application Terraform state.
+
 ```mermaid
-flowchart LR
-  U[React / TypeScript / Vite] --> S[Typed PlaceService]
-  S --> A[FastAPI: routes / use cases / repositories]
-  S -. explicit local demo mode .-> M[Mock adapter]
-  C[Cognito: hosted sign-in / PKCE] --> U
-  A --> P[Local: PostgreSQL / Alembic]
-  A --> D[Hosted: Aurora DSQL / separate baseline]
-  U --> O[Journey telemetry]
-  A --> O
-  O --> G[Grafana: metrics / logs / traces / alerts]
-  G --> I[Incident controller / bounded repair]
-  I --> R[GitHub PR / CI / releases]
+flowchart TD
+  USER["Dog owner"] -->|"HTTPS pages / assets"| EDGE
+  subgraph AWS["AWS: separate development and production environments"]
+    EDGE["CloudFront + S3<br/>Frontend delivery"]
+    AUTH["Cognito Hosted UI<br/>OAuth / PKCE"]
+    API["Lightsail Container Service<br/>FastAPI routes → use cases → repositories"]
+    DB["Aurora DSQL<br/>Persistent application data"]
+    IAM["Runtime IAM role<br/>Short-lived database credentials"]
+    SSM["Parameter Store<br/>Server-only OTLP token"]
+    API -->|"TLS SQL / IAM authentication"| DB
+    IAM -.-> API
+    SSM -.->|"Runtime credential lookup"| API
+  end
+  EDGE --> UI["Browser: React / TypeScript / Vite<br/>Typed PlaceService HTTP adapter"]
+  UI <-->|"Sign in / refresh"| AUTH
+  UI -->|"HTTPS API; access token for writes"| API
+  API -.->|"Issuer / signing keys"| AUTH
+  subgraph OBS["Grafana Cloud"]
+    FARO["Faro browser signals"]
+    SIGNALS["Metrics / logs / sampled traces"]
+    DASH["Dashboards / user-impact alerts"]
+    FARO --> SIGNALS --> DASH
+  end
+  UI -->|"Manual journey signals"| FARO
+  API -->|"Direct asynchronous OTLP"| SIGNALS
+
+  classDef client fill:#e8f1e8,stroke:#557356,color:#182b19
+  classDef cloud fill:#edf3fa,stroke:#4e719b,color:#17283e
+  classDef data fill:#fff1da,stroke:#ad7c2e,color:#3d2c0d
+  classDef observe fill:#f1eafa,stroke:#8661a6,color:#30203f
+  class USER,UI client
+  class EDGE,AUTH,API,IAM,SSM cloud
+  class DB data
+  class FARO,SIGNALS,DASH observe
 ```
 
-CloudFront/S3 serve the frontend; Lightsail Container Services run the API. Terraform owns AWS resources through separate IAM-bootstrap, development and production states. Runtime secrets stay outside Terraform state. See [architecture](docs/architecture.md), [infrastructure operations](docs/terraform-greenfield-operations.md) and [hosting/cost decisions](docs/stage4-hosting-options.md).
+CloudFront/S3 serve the frontend; the browser calls the separate HTTPS API host. Deployment injects general configuration; the backend reads the OTLP credential from Parameter Store at runtime. Local HTTP mode uses PostgreSQL and the local Collector stack; explicit standalone mock mode uses the interchangeable mock adapter. Cloud telemetry uses direct Faro/OTLP, rather than the local Collector. Runtime secrets stay outside Terraform state. Diagram paths describe implemented capabilities; the [evidence map](#project-self-review-guide) retains the hosted correlation and identity acceptance gaps. See [architecture](docs/architecture.md), [infrastructure operations](docs/terraform-greenfield-operations.md) and [hosting/cost decisions](docs/stage4-hosting-options.md).
 
-Applicable PRs run CI; successful application releases publish an immutable backend image and deploy/verify development. Ordinary production promotion is manually dispatched for that exact verified release. The incident exception can merge/promote automatically; read its current enforcement mode in [on-call setup](docs/oncall-setup.md). Documentation-only changes do not automatically run all application workflows.
+### Operations and CI/CD architecture
+
+Ordinary changes and alert-driven repairs share the release path, with separate authorization routes. Terraform owns deployment changes through the matching environment state.
+
+```mermaid
+flowchart TD
+  ISSUE["Public issue / scoped branch / agent work"] --> PR["Pull request"]
+  PR --> CI["Applicable Quality CI: frontend / backend / Compose / Terraform / workflow checks"]
+  PR --> ROUTE["Change authorization route"]
+  ROUTE -->|"Ordinary change"| OWNER["Protected owner approval"]
+  ROUTE -->|"Incident candidate"| INCIDENTAUTH["Incident authorization / review policies: enforcement-mode dependent"]
+  CI --> MERGE["Squash merge: owner for ordinary PR; trusted job for incident PR"]
+  OWNER --> MERGE
+  INCIDENTAUTH --> MERGE
+  MERGE --> MAIN["main: frontend / backend release checks"]
+  MAIN --> IMAGE["Publish immutable backend image to GHCR"]
+  IMAGE --> DEVTF["Terraform development plan / exact saved-plan apply"]
+  DEVTF --> DEVVERIFY["Build / publish DEV frontend; verify API / database / served release"]
+  DEVVERIFY --> EVIDENCE["Development release evidence: source commit + backend digest"]
+  EVIDENCE -->|"Ordinary release"| MANUAL["Manual production dispatch / ordinary approvals"]
+  EVIDENCE -->|"Incident release"| PROMOTER["Automatic incident promoter: mode-dependent provenance checks"]
+  MANUAL --> PRODTF["Terraform production plan / exact saved-plan apply"]
+  PROMOTER --> PRODTF
+  PRODTF --> PRODVERIFY["Build / publish PROD frontend; verify served release / API / database"]
+
+  BOOT["Separate IAM-bootstrap Terraform state: identities / trust / boundaries"] -.-> DEVTF
+  BOOT -.-> PRODTF
+  CONFIG["Parameter Store / reviewed configuration reconciliation"] -.-> DEVVERIFY
+  CONFIG -.-> PRODVERIFY
+
+  PRODVERIFY -->|"Deployed service / journey telemetry"| MONITOR["Grafana: journey signals / user-impact alerts"]
+  MONITOR -->|"Firing alert"| RECEIVER["HMAC webhook / Lambda Function URL"]
+  RECEIVER --> CONTROLLER["Incident workflow: fixer / checks / fresh reviewer; mode-dependent"]
+  CONTROLLER --> PR
+  PRODVERIFY -.-> RECOVERY["Incident controller: assess recovery / record outcome"]
+  MONITOR -.-> RECOVERY
+  OPS["Operator runbooks: investigate / emergency stop / recovery review"] -.-> MONITOR
+  OPS -.-> CONTROLLER
+
+  classDef delivery fill:#e8f1e8,stroke:#557356,color:#182b19
+  classDef infrastructure fill:#edf3fa,stroke:#4e719b,color:#17283e
+  classDef incident fill:#f1eafa,stroke:#8661a6,color:#30203f
+  class MAIN,IMAGE,DEVVERIFY,EVIDENCE,PRODVERIFY delivery
+  class DEVTF,PRODTF,BOOT,CONFIG infrastructure
+  class INCIDENTAUTH,PROMOTER,MONITOR,RECEIVER,CONTROLLER,RECOVERY,OPS incident
+```
+
+Development and production use independent application states. Production selects the development-verified source/backend digest and rebuilds frontend assets with production configuration. The incident route has no runtime human approval; DEC-017 can disable software review/provenance/budget/stop/recovery checks, while external GitHub/IAM controls and exact-plan/state ownership remain. The observed drill therefore retains `RELEASE_COMPLETED_UNVERIFIED`. DEC-015 separately disables shared strict release-only rejection. See the [Actions catalogue](docs/github-actions.md) and [canonical enforcement matrix](docs/oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017). Documentation-only changes do not automatically run every application workflow; final rollback acceptance remains with the owner.
 
 ![Grafana production application panels: requests, latency, status classes and structured logs](docs/images/delivery/grafana-production-application-2026-10-25.jpg)
 
