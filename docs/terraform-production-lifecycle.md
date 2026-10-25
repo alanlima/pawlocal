@@ -1,13 +1,18 @@
 # Production Terraform lifecycle
 
-This runbook defines the only supported steady-state production application
+This runbook defines the standard production application
 lifecycle: foundation, runtime-trust handoff, convergence, release, destroy,
 and clean redeploy. It does not provide a recovery or break-glass path and does
 not authorize disposition of resources outside the production application
 state.
 
-Every apply and destroy remains subject to explicit owner approval, the saved
-plan shown by GitHub Actions, and independent review. Do not use this runbook
+Ordinary infrastructure applies and every destroy remain subject to explicit owner
+approval, the saved plan shown by GitHub Actions, and independent review.
+The #239 incident release route has no runtime human approval; its software
+checks follow [DEC-017](oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017).
+[DEC-015](decisions.md#dec-015--temporary-disabling-of-shared-strict-release-plan-invocation-305)
+also disables shared automated strict release-only rejection. These exceptions
+do not authorize a new apply, destroy or unrelated infrastructure change. Do not use this runbook
 while the production state is locked, incomplete, or inconsistent with the
 read-only cloud inventory.
 
@@ -44,20 +49,20 @@ by the reviewed teardown-preparation plan.
 2. Review and approve the exact foundation plan. Foundation always forces the
    runtime role, backend image, and generated CloudFront handoff inputs empty.
    The default-off teardown variable remains false.
-3. Manually copy the reviewed foundation outputs into the matching protected
-   environment variables. This temporary operator step is tracked by deferred
-   Issue #155; do not put the values in an issue, pull request, fixture, or
-   runbook.
+3. Reconcile reviewed generated configuration through the maintained
+   [mapping and configuration workflow](configuration-management.md). Operator
+   entry settings and runtime-trust handoffs remain separately reviewed; do not
+   copy secret payloads into issues, pull requests, fixtures or runbooks.
 4. Use the separately reviewed Issue #135 bootstrap plan to bind the generated
    Lightsail principal to the matching runtime role. No application state or
    cloud resource is edited manually.
-5. Manually refresh the matching protected environment variables from the
-   reviewed bootstrap and application outputs.
+5. Reconcile the matching protected configuration from the reviewed bootstrap
+   and application sources using the same configuration workflow.
 6. Dispatch `terraform-environment.yml` with `phase=converge`, a full
    development-verified commit, its immutable backend image digest, and
    `release_only=false`. Review the plan as a full-infrastructure convergence,
    not a release-only promotion.
-7. After successful convergence and a manual refresh of the reviewed generated
+7. After successful convergence and successful reconciliation of reviewed generated
    environment values, use `deploy-production.yml` for subsequent
    development-verified versions. It passes `phase=release`.
 8. Verify frontend HTML, API health, database-backed discovery, authenticated

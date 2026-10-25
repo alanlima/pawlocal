@@ -152,7 +152,7 @@ Supply these **public client settings separately for development and production*
 | `VITE_APP_COMMIT` | Full source commit SHA embedded in the release footer. |
 | `VITE_APP_BUILD_TIME` | ISO 8601 UTC artifact build time generated immediately before bundling. |
 | `VITE_USE_MOCK_BACKEND`     | Must be exactly `false` for cloud release builds.                                                              |
-| `VITE_TELEMETRY_ENABLED`    | Must be exactly `false` for the initial cloud release.                                                         |
+| `VITE_TELEMETRY_ENABLED`    | Must be explicitly `true` or `false`; hosted enabled mode requires matching public Faro settings. See [hosted telemetry operations](../docs/hosted-telemetry-operations.md).                                                         |
 | `VITE_API_BASE_URL`         | Absolute HTTPS API URL ending in `/api/v1`; use the environment's separate `api-dev.<domain>` or `api.<domain>` host. |
 | `VITE_COGNITO_DOMAIN`       | HTTPS Cognito Hosted UI domain for the selected user pool.                                                     |
 | `VITE_COGNITO_CLIENT_ID`    | Public app-client ID configured for authorization-code flow without a client secret.                           |

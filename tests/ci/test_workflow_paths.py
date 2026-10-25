@@ -1,42 +1,33 @@
 from __future__ import annotations
 
 import fnmatch
-import re
 import unittest
 from pathlib import Path
+
+import yaml
 
 WORKFLOWS = Path(".github/workflows")
 
 
-def workflow_paths(workflow: str) -> list[str]:
-    """Collect path patterns from automatic pull_request and push triggers."""
-    lines = (WORKFLOWS / workflow).read_text(encoding="utf-8-sig").splitlines()
-    patterns: list[str] = []
-    in_event = False
-    in_paths = False
-    for line in lines:
-        if re.match(r"^  (pull_request|push):\s*$", line):
-            in_event = True
-            in_paths = False
-            continue
-        if in_event and re.match(r"^  [A-Za-z_][A-Za-z0-9_-]*:\s*$", line):
-            in_event = False
-            in_paths = False
-        if in_event and re.match(r"^    paths:\s*$", line):
-            in_paths = True
-            continue
-        if in_paths:
-            match = re.match(r'^\s+-\s+["\']?([^"\']+)["\']?\s*$', line)
-            if match:
-                patterns.append(match.group(1))
-            elif line.strip() and not line.startswith("      "):
-                in_paths = False
-    return patterns
+def workflow_events(workflow: str) -> dict:
+    source = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8-sig"))
+    return source.get("on", source.get(True, {}))
 
 
-def matches(workflow: str, path: str) -> bool:
+def workflow_paths(workflow: str, event: str = "push") -> list[str]:
+    """Inspect one event's path filters; legacy callers inspect main-push coverage."""
+    return (workflow_events(workflow).get(event) or {}).get("paths", [])
+
+
+def matches(workflow: str, path: str, event: str = "push") -> bool:
+    events = workflow_events(workflow)
+    if event not in events:
+        return False
+    config = events[event] or {}
+    if "paths" not in config:
+        return not any(fnmatch.fnmatchcase(path, p) for p in config.get("paths-ignore", []))
     included = False
-    for pattern in workflow_paths(workflow):
+    for pattern in config["paths"]:
         if pattern.startswith("!"):
             if fnmatch.fnmatchcase(path, pattern[1:]):
                 included = False
@@ -46,6 +37,22 @@ def matches(workflow: str, path: str) -> bool:
 
 
 class WorkflowPathTests(unittest.TestCase):
+    def test_release_checks_every_pull_request_without_filters_or_extra_activity_types(self):
+        events = workflow_events("fullstack-release.yml")
+        self.assertIn("pull_request", events)
+        self.assertIsNone(events["pull_request"])
+        self.assertEqual(events["push"]["branches"], ["main"])
+        self.assertTrue(events["push"]["paths"])
+        source = yaml.safe_load((WORKFLOWS / "fullstack-release.yml").read_text(encoding="utf-8"))
+        for job, name, callee in (
+            ("frontend", "Frontend checks and HTTP-mode build", "frontend-deploy.yml"),
+            ("backend", "Backend checks", "backend-ci.yml"),
+        ):
+            with self.subTest(job=job):
+                self.assertEqual(source["jobs"][job], {
+                    "name": name, "uses": f"./.github/workflows/{callee}"
+                })
+
     def test_release_frontend_builds_generate_and_verify_artifact_identity(self):
         for workflow, environment, commit in (
             ("fullstack-release.yml", "development", "${{ github.sha }}"),
@@ -154,7 +161,7 @@ class WorkflowPathTests(unittest.TestCase):
             api,
         )
 
-    def test_docs_only_changes_do_not_trigger_any_automatic_workflow(self) -> None:
+    def test_docs_only_changes_do_not_trigger_other_automatic_workflows(self) -> None:
         workflows = (
             "frontend-deploy.yml",
             "backend-ci.yml",
@@ -173,7 +180,7 @@ class WorkflowPathTests(unittest.TestCase):
                 self.assertFalse(matches(workflow, "observability/README.md"))
                 self.assertFalse(matches(workflow, ".github/workflows/README.md"))
 
-    def test_component_paths_trigger_only_their_component_workflow(self) -> None:
+    def test_push_component_paths_trigger_only_their_matching_workflows(self) -> None:
         cases = {
             "frontend/src/App.tsx": "fullstack-release.yml",
             "backend/app/main.py": "fullstack-release.yml",
@@ -192,7 +199,7 @@ class WorkflowPathTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual([w for w in workflows if matches(w, path)], [expected])
 
-    def test_shared_root_inputs_trigger_relevant_checks(self) -> None:
+    def test_push_shared_root_inputs_trigger_relevant_checks(self) -> None:
         expected = {
             "openapi.yaml": {"fullstack-release.yml", "fullstack-release.yml", "compose-ci.yml"},
             "package-lock.json": {"fullstack-release.yml"},
@@ -216,8 +223,9 @@ class WorkflowPathTests(unittest.TestCase):
                 )
 
     def test_local_action_changes_trigger_workflow_validation(self) -> None:
-        self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actions/**"), 2)
-        self.assertEqual(workflow_paths("workflow-validation.yml").count(".github/actionlint.yaml"), 2)
+        for event in ("pull_request", "push"):
+            self.assertEqual(workflow_paths("workflow-validation.yml", event).count(".github/actions/**"), 1)
+            self.assertEqual(workflow_paths("workflow-validation.yml", event).count(".github/actionlint.yaml"), 1)
         for path in (
             ".github/actionlint.yaml",
             ".github/actions/deploy/action.yml",

@@ -1,6 +1,6 @@
 # Hosted observability specification — Issue #59
 
-**Status: agreed architecture for planning; documentation/specification PR. Implementation, provisioning and live acceptance remain pending.** This specification covers [#59](https://github.com/alanlima/pawlocal/issues/59); the dependent [incident responder](incident-responder.md) belongs to [#42](https://github.com/alanlima/pawlocal/issues/42). Read the [ten-package implementation plan](../plans/monitoring-implementation.md).
+**Status: approved design baseline; implementation and live acceptance are separate.** Instrumentation and dashboard sources are implemented; [#225](https://github.com/alanlima/pawlocal/issues/225) records amended development acceptance. This specification retains the original setup/activation requirements and does not certify current live settings. Use the [delivery evidence](../submission.md) for dated deployments, captures and remaining #226/#230 acceptance. This specification covers [#59](https://github.com/alanlima/pawlocal/issues/59); the dependent [incident responder](incident-responder.md) belongs to [#42](https://github.com/alanlima/pawlocal/issues/42). Read the [ten-package implementation plan](../plans/monitoring-implementation.md).
 
 ## Scope, baseline and readiness
 

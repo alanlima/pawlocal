@@ -1,6 +1,6 @@
 # Grafana Cloud bindings and provisioning (#224)
 
-Implementation is present; **live Free-plan access, credentials, origins, quotas and per-signal isolation remain pending; the existing shared stack and region are identified**. Both checked-in environment bindings are disabled/null. No live requests, registration, token creation, Grafana mutation or AWS apply was performed to deliver this package.
+Implementation is present. **`bindings.json` contains enabled public environment metadata; `experience.json` retains disabled/null defaults. Neither file alone establishes current live acceptance.** The original package delivered no live mutations. Later development ingestion acceptance is recorded in [#225](https://github.com/alanlima/pawlocal/issues/225); [delivery evidence](../../../docs/submission.md) links actual production dashboards and the remaining #226/#230 acceptance. Live Free-plan entitlement, quotas and per-signal read/privacy isolation require their own evidence. Use the [hosted telemetry guide](../../../docs/hosted-telemetry-operations.md) for the operating contract.
 
 ## Ownership
 

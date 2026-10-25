@@ -3,32 +3,6 @@ run-name: 'Release · Publish and verify development · ${{ github.ref_name }} �
 
 on:
   pull_request:
-    paths:
-      - "frontend/**"
-      - "backend/**"
-      - "package.json"
-      - "package-lock.json"
-      - "pnpm-lock.yaml"
-      - "yarn.lock"
-      - "poetry.lock"
-      - "uv.lock"
-      - ".github/workflows/frontend-deploy.yml"
-      - ".github/workflows/backend-ci.yml"
-      - ".github/actions/setup-frontend-toolchain/**"
-      - ".github/workflows/deploy-production.yml"
-      - ".github/workflows/release-rollback-production.yml"
-      - ".github/workflows/frontend-production-deploy.yml"
-      - "openapi.yaml"
-      - "pyproject.toml"
-      - "requirements.txt"
-      - "docker-compose.yml"
-      - ".github/workflows/fullstack-release.yml"
-      - ".github/workflows/terraform-environment.yml"
-      - "ops/**"
-      - "!**/*.md"
-      - "!**/*.mdx"
-      - "docs/oncall-setup.md"
-      - "docs/oncall-troubleshooting.md"
   push:
     branches: [main]
     paths:
