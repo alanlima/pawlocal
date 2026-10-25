@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fnmatch
 import json
 import re
 import unittest
@@ -76,13 +75,15 @@ class WorkflowCatalogueTests(unittest.TestCase):
                  '.github/workflows/deploy-production.yml', '.github/workflows/frontend-production-deploy.yml',
                  '.github/actions/setup-frontend-toolchain/action.yml']
         release = load('fullstack-release.yml')
+        self.assertIsNone(events(release)['pull_request'])
         for event in ['pull_request', 'push']:
             for path in paths:
                 with self.subTest(event=event, path=path):
-                    self.assertTrue(any(fnmatch.fnmatchcase(path, pattern) for pattern in events(release)[event]['paths']))
+                    self.assertTrue(matches('fullstack-release.yml', path, event))
         self.assertTrue(matches('terraform-ci.yml', '.github/actions/setup-terraform-toolchain/action.yml'))
         self.assertTrue(matches('workflow-validation.yml', '.github/workflow-catalogue.json'))
-        self.assertFalse(matches('fullstack-release.yml', 'frontend/README.md'))
+        self.assertTrue(matches('fullstack-release.yml', 'frontend/README.md', 'pull_request'))
+        self.assertFalse(matches('fullstack-release.yml', 'frontend/README.md', 'push'))
         self.assertTrue(matches('workflow-validation.yml', 'docs/github-actions.md'))
 
     def test_literal_caller_names_follow_current_display_names(self):
