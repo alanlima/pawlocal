@@ -94,6 +94,7 @@ jobs:
   terraform-production:
     name: Apply exact production release plan
     needs: workflow-binding
+    if: ${{ !cancelled() && needs.workflow-binding.result == 'success' }}
     permissions:
       actions: read
       contents: read
@@ -116,6 +117,7 @@ jobs:
   verify-production:
     name: Publish frontend and verify production
     needs: [workflow-binding, terraform-production]
+    if: ${{ !cancelled() && needs.workflow-binding.result == 'success' && needs.terraform-production.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: production
     permissions:

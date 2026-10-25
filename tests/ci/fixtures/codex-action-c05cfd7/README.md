@@ -1,1 +1,0 @@
-This fixture contains only the exact actor permission validator and license from the pinned Codex action. provenance.json records the source commit, Git blob identities and SHA-256 digests. The regression test strips TypeScript types and stubs imported logging/network dependencies; the validator body is unchanged. No upstream action bundle or network dependency is required.
