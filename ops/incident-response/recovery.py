@@ -204,11 +204,14 @@ def _rule(rules, environment, service, rule_uid, metrics_uid, alert_name=None):
         "recovery rule unhealthy",
     )
     instances = rule["alerts"]
+    allowed_instance_states = {"Normal", "Pending", "Alerting", "Recovering"}
+    if environment == "development":
+        allowed_instance_states.add("NoData")
     _require(
         len(instances) <= 1000
         and all(
             isinstance(instance, dict)
-            and instance.get("state") in {"Normal", "Pending", "Alerting", "Recovering"}
+            and instance.get("state") in allowed_instance_states
             for instance in instances
         ),
         "recovery rule instance health unknown",
@@ -358,10 +361,13 @@ def observe(
         instances = rule["alerts"]
         # Grafana retains Normal instances on inactive healthy rules; an empty
         # list is not the only healthy API shape (official api_prometheus_test).
+        allowed_settled_states = (
+            {"Normal", "NoData"} if environment == "development" else {"Normal"}
+        )
         _ready(
             rule["health"] == "ok"
             and rule["state"] == "inactive"
-            and all(instance["state"] == "Normal" for instance in instances),
+            and all(instance["state"] in allowed_settled_states for instance in instances),
             "recovery rule settling",
         )
         evaluated = _timestamp(rule.get("lastEvaluation"))

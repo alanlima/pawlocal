@@ -224,6 +224,20 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(proof["samples"], 21)
         self.assertEqual(proof["settling_samples"], 0)
 
+    def test_development_nodata_instance_reports_healthy(self):
+        def mutate(value, url):
+            if url.endswith("/rules"):
+                value["data"]["groups"][0]["rules"][0]["alerts"] = [
+                    {"state": "NoData"}
+                ]
+            return value
+
+        self.mutate = mutate
+        proof = self.observe()
+        self.assertEqual(proof["environment"], "development")
+        self.assertEqual(proof["samples"], 21)
+        self.assertEqual(proof["settling_samples"], 0)
+
     def test_production_non_normal_instances_never_report_healthy(self):
         options = self.production()
         for state in [
