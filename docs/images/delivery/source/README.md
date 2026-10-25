@@ -1,6 +1,6 @@
 # Architecture artwork sources
 
-The two architecture images are custom, hand-positioned vector layouts. No Mermaid or automatic graph layout is used. PNGs are the README display assets; SVGs provide a scalable copy with accessible titles and descriptions.
+The two architecture images are custom, hand-positioned vector layouts. No Mermaid or automatic graph layout is used. PNGs are the README display assets; SVGs provide a scalable copy with accessible titles and descriptions. The Python builders and optional renderer are one-off artwork helpers; finished images display directly and have no application or workflow dependency.
 
 From the repository root, regenerate the vectors with Python's standard library. Regeneration requires HTTPS access to `cdn.jsdelivr.net` for the eight AWS service icons; viewing the checked-in SVG/PNG images requires no network. The shared `icon_assets.py` loader uses commit-pinned URLs, verifies each asset against its SHA-256 manifest and caches bytes only in process memory. Download, HTTP or integrity failures stop generation; there is no local AWS fallback or persistent icon cache:
 
