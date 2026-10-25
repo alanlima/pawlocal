@@ -1,12 +1,12 @@
+import os
+from unittest.mock import patch
 """Required backend quality parity and restricted unprivileged execution."""
 
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 import yaml
 
@@ -24,6 +24,7 @@ INTEGRATIONS = (
 )
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class BackendQualityTests(unittest.TestCase):
     def test_real_required_ci_commands_and_dependencies_have_explicit_parity(self):
         workflow = yaml.safe_load(

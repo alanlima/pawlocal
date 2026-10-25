@@ -1,5 +1,8 @@
 # Signed incident receiver — Issue #227
 
+Temporary owner exception: [all incident enforcement guards default off](../../docs/oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017) under DEC-017 / #375. Set exact `PAWLOCAL_ONCALL_ENFORCE_GUARDS=true` to restore the policies described below; disabled evidence is not verified recovery. See the canonical setup guard matrix for external controls and operational errors that still block.
+
+
 This independent adapter accepts Grafana Alerting notifications and requests only the deployment-configured repository → `incident-responder.yml` → `main`. It implements the amended [#42](https://github.com/alanlima/pawlocal/issues/42) contract in [receiver-openapi.yaml](receiver-openapi.yaml); it adds no FastAPI route. Resources and identities are **disabled by default**. No live App, AWS apply, Grafana contact point or dispatch is verified by the code/tests alone.
 
 ## Contract and failure behaviour

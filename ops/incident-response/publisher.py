@@ -24,6 +24,7 @@ from control import LiveControl
 from deadline import arm
 from job import context, download, remaining
 from quota import Denied, strict_json
+from enforcement import enabled, skipped, evidence
 from quota_gateway import NoRedirect
 
 
@@ -53,13 +54,17 @@ class Broker:
                 set(body) == {"base_tree", "tree"}
                 and re.fullmatch(r"[0-9a-f]{40}", str(body["base_tree"]))
                 and isinstance(body["tree"], list)
-                and 1 <= len(body["tree"]) <= 20
+                and (not enabled() or 1 <= len(body["tree"]) <= 20)
                 and all(
                     set(item) == {"path", "mode", "type", "sha"}
                     and item["path"] in ALLOWED
                     and item["mode"] == "100644"
                     and item["type"] == "blob"
-                    and re.fullmatch(r"[0-9a-f]{40}", str(item["sha"]))
+                    and (
+                        not enabled()
+                        and item["sha"] is None
+                        or re.fullmatch(r"[0-9a-f]{40}", str(item["sha"]))
+                    )
                     for item in body["tree"]
                 )
             )
@@ -89,7 +94,7 @@ class Broker:
         return False
 
     def request(self, method, path, body=None):
-        if not self.approved(method, path, body):
+        if enabled() and not self.approved(method, path, body):
             raise Denied("publisher operation denied")
         if method != "GET":
             if self.control is None:
@@ -115,6 +120,9 @@ class Broker:
 
 
 def authentic_jobs(github, run_id):
+    if not enabled():
+        skipped("checks")
+        return
     run = github.request("GET", f"/actions/runs/{run_id}")
     if (
         run.get("id") != int(run_id)
@@ -138,7 +146,7 @@ def authentic_jobs(github, run_id):
         "Fresh review",
     ):
         selected = [job for job in jobs if job.get("name") == name]
-        if (
+        if enabled() and (
             len(selected) != 1
             or selected[0].get("conclusion") != "success"
             or selected[0].get("run_attempt") != 1
@@ -149,6 +157,9 @@ def authentic_jobs(github, run_id):
 
 
 def can_publish(github, metadata):
+    if not enabled():
+        skipped("publication")
+        return
     if os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true":
         raise Denied("emergency admission disabled")
     environment = metadata["alert"]["environment"]
@@ -197,7 +208,9 @@ def main():
         os.environ.get(key)
         for key in ("FIXER_RESULT", "CHECKS_RESULT", "REVIEWER_RESULT")
     ]
-    if outcome != ["success"] * 3 or os.environ.get("CANDIDATE_ELIGIBLE") != "true":
+    if enabled() and (
+        outcome != ["success"] * 3 or os.environ.get("CANDIDATE_ELIGIBLE") != "true"
+    ):
         state = (
             "RELEASE_LAG"
             if os.environ.get("CHECKS_RESULT") == "success"
@@ -223,19 +236,21 @@ def main():
     review = download("oncall-review-" + metadata["run_id"], {"review.json"})[
         "review.json"
     ]
-    if any(
-        digest(raw) != os.environ.get(key)
-        for raw, key in (
-            (candidate, "CANDIDATE_SHA256"),
-            (checks, "CHECKS_SHA256"),
-            (review, "REVIEW_SHA256"),
+    if enabled() and (
+        any(
+            digest(raw) != os.environ.get(key)
+            for raw, key in (
+                (candidate, "CANDIDATE_SHA256"),
+                (checks, "CHECKS_SHA256"),
+                (review, "REVIEW_SHA256"),
+            )
         )
     ):
         raise Denied("artifact provenance differs")
     files = load(candidate, metadata)
     checked, reviewed = strict_json(checks), strict_json(review)
     pinned = os.environ["PINNED_CANDIDATE_SHA"]
-    if (
+    if enabled() and (
         checked.get("candidate_sha") != pinned
         or checked.get("base_sha") != metadata["base_sha"]
         or checked.get("patch_sha256") != digest(candidate)
@@ -256,7 +271,7 @@ def main():
         "verdict": "pass",
         "findings": [],
     }
-    if reviewed != expected_review:
+    if enabled() and (reviewed != expected_review):
         raise Denied("fresh review provenance differs")
     can_publish(github, metadata)
     token_path = Path(os.environ["RUNNER_TEMP"]) / "oncall-publisher-token.json"
@@ -275,19 +290,22 @@ def main():
     base = broker.request("GET", "/git/commits/" + metadata["base_sha"])
     tree = []
     for name, raw in sorted(files.items()):
+        if raw is None and not enabled():
+            tree.append({"path": name, "mode": "100644", "type": "blob", "sha": None})
+            continue
         sha = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
         blob = broker.request(
             "POST",
             "/git/blobs",
             {"content": base64.b64encode(raw).decode(), "encoding": "base64"},
         )
-        if blob.get("sha") != sha:
+        if enabled() and (blob.get("sha") != sha):
             raise Denied("published blob differs")
         tree.append({"path": name, "mode": "100644", "type": "blob", "sha": sha})
     created_tree = broker.request(
         "POST", "/git/trees", {"base_tree": base["tree"]["sha"], "tree": tree}
     )
-    if created_tree.get("sha") != checked["tree_sha"]:
+    if enabled() and (created_tree.get("sha") != checked["tree_sha"]):
         raise Denied("published tree differs")
     identity = {
         "name": "PawLocal Incident Responder",
@@ -307,13 +325,21 @@ def main():
             "committer": identity,
         },
     )
-    if commit.get("sha") != pinned:
+    if enabled() and (commit.get("sha") != pinned):
         raise Denied("published commit differs from reviewed candidate")
     can_publish(github, metadata)
     broker.request(
         "POST", "/git/refs", {"ref": "refs/heads/" + broker.branch, "sha": pinned}
     )
     body = f"Addresses incident #{metadata['issue']} in the search/detail journey. The identical regression reproduced on affected `{metadata['affected_sha']}` and current main `{metadata['base_sha']}`; candidate `{pinned}` passed trusted checks and fresh machine review.\n\nTrusted automation requires authentic candidate PR CI before squash merge, verifies the resulting development release, then promotes that exact verified release to production and checks recovery.\n\nWorkflow evidence: https://github.com/alanlima/pawlocal/actions/runs/{metadata['run_id']}\n\nCandidate artifact SHA256: `{digest(candidate)}`.\n\nRelated: #{metadata['issue']}, #42."
+    if not enabled():
+        body = (
+            f"Addresses incident #{metadata['issue']}. Candidate `{pinned}` was constructed from actual source bytes. "
+            "Incident enforcement is disabled: regression, review/CI, publication provenance and recovery policy are not required. "
+            "Skipped checks are not passes; external GitHub required checks still apply. "
+            f"\n\nWorkflow evidence: https://github.com/alanlima/pawlocal/actions/runs/{metadata['run_id']}"
+            f"\n\nCandidate artifact SHA256: `{digest(candidate)}`. Related: #{metadata['issue']}, #42."
+        )
     can_publish(github, metadata)
     published_at = int(time.time())
     result = broker.request(
@@ -344,6 +370,7 @@ def main():
         },
     )
     publication = {
+        **({"enforcement": evidence()} if not enabled() else {}),
         "schema": 1,
         "run_id": metadata["run_id"],
         "issue": metadata["issue"],

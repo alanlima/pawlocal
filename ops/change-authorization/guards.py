@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from candidate import is_allowed_path
+from enforcement import enabled as guards_enabled, skipped
 
 
 class PlanViolation(Exception):
@@ -61,6 +62,9 @@ def validate_production_promotion(
         raise ValueError("Invalid backend image reference")
 
     if is_machine_route:
+        if not guards_enabled():
+            skipped("release")
+            return True
         if not lineage_receipt or not isinstance(lineage_receipt, dict):
             raise ValueError("Machine production promotion requires authenticated incident lineage")
         if lineage_receipt.get("schema") != 1:
@@ -88,6 +92,9 @@ def validate_release_plan_strict(plan_dict: dict[str, Any]) -> None:
       module-local Lambda packaging sidecars are permitted.
     - No modifications to IAM, database, security groups, or secrets.
     """
+    if not guards_enabled():
+        skipped("release")
+        return
     resource_changes = plan_dict.get("resource_changes", [])
     if not isinstance(resource_changes, list):
         raise PlanViolation("Plan resource_changes missing or invalid")
@@ -157,7 +164,10 @@ def main():
             lineage_receipt = json.loads(Path(lineage_file).read_text(encoding="utf-8"))
         is_machine = args.is_machine_route or bool(lineage_receipt)
         validate_production_promotion(lineage_receipt, release_commit, backend_image, is_machine)
-        print("Production promotion authorization verified successfully.")
+        if is_machine and not guards_enabled():
+            print("Incident production promotion enforcement disabled; authorization verification skipped.")
+        else:
+            print("Production promotion authorization verified successfully.")
 
     elif args.mode == "validate-plan":
         plan_path = Path(args.plan_file)
@@ -165,7 +175,10 @@ def main():
             raise PlanViolation(f"Plan file missing at {plan_path}")
         plan_dict = json.loads(plan_path.read_text(encoding="utf-8"))
         validate_release_plan_strict(plan_dict)
-        print("Strict release plan validation passed successfully.")
+        if guards_enabled():
+            print("Strict release plan validation passed successfully.")
+        else:
+            print("Incident strict release plan enforcement disabled; validation skipped.")
 
 
 if __name__ == "__main__":

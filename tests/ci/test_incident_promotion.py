@@ -1,14 +1,14 @@
+import os
+from unittest.mock import patch
 import copy
 import io
 import json
-import os
 import subprocess
 import sys
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import yaml
 
@@ -93,6 +93,7 @@ class Client:
         raise AssertionError(path)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class PromotionTests(unittest.TestCase):
     def test_dispatch_broker_requires_the_exact_workflow_assertion(self):
         body = {
@@ -201,7 +202,7 @@ class PromotionTests(unittest.TestCase):
         with (
             patch.dict(
                 os.environ,
-                {
+                ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | {
                     "PROMOTION_DEADLINE": str(value["promotion_deadline"]),
                     "GH_TOKEN": "fixture",
                     "PAWLOCAL_ONCALL_ENABLED": "true",
@@ -210,7 +211,7 @@ class PromotionTests(unittest.TestCase):
                     "GITHUB_WORKSPACE": "/fixture",
                     "MERGE_SHA256": "e" * 64,
                     "DEVELOPMENT_SHA256": "f" * 64,
-                },
+                }),
                 clear=True,
             ),
             patch.object(sys, "argv", ["promotion.py", "promote"]),
@@ -347,12 +348,12 @@ class PromotionTests(unittest.TestCase):
                 self.subTest(phase=phase),
                 patch.dict(
                     os.environ,
-                    {
+                    ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | {
                         "PAWLOCAL_ONCALL_ENABLED": "true",
                         "PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED": "false",
                         "PROMOTION_DEADLINE": str(int(time.time()) + 600),
                         "GH_TOKEN": "fixture",
-                    },
+                    }),
                     clear=True,
                 ),
                 patch.object(sys, "argv", ["promotion.py", phase]),

@@ -8,6 +8,7 @@ const HMAC = 'hmac-test-fixture-32-bytes-minimum';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const KEY = privateKey.export({ type: 'pkcs8', format: 'pem' });
 const env = {
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'true',
   PAWLOCAL_PROJECT_NAME: 'pawlocal', PAWLOCAL_DISPATCH_REPOSITORY: 'alanlima/pawlocal',
   PAWLOCAL_ONCALL_ENVIRONMENT: 'development', PAWLOCAL_ONCALL_ALLOWED_SERVICES: '["pawlocal-api"]',
   PAWLOCAL_ONCALL_ALLOWED_ALERTS: '["pawlocal-development-search-detail-failure"]',
@@ -209,4 +210,27 @@ test('unrestricted alert allowlist admits any valid alert name routed by Grafana
       assert.equal(JSON.parse(dispatched.inputs.alerts_json)[0].alert_name, alertname);
     }
   }
+});
+
+for (const mode of [undefined, '', 'false']) test(`disabled receiver (${String(mode)}) skips signature, age, allowlist and duplicate policy honestly`, async () => {
+  const environment = { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: mode };
+  const h = harness({ environment });
+  const input = event(payload([alert(), alert()]), '1');
+  delete input.headers['x-grafana-alerting-signature'];
+  assert.equal((await h.handler(input)).statusCode, 204);
+  assert.equal(h.parameters.length, 1);
+  assert.ok(h.logs.some(line => JSON.parse(line).enforcement?.enabled === false));
+});
+test('disabled receiver still reports operational API failures and invalid mode', async () => {
+  const disabled = { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'false' };
+  assert.equal((await harness({ environment: disabled, httpFailure: true }).handler(event())).statusCode, 502);
+  assert.equal((await harness({ environment: { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'TRUE' } }).handler(event())).statusCode, 503);
+  assert.equal((await harness({ environment: disabled }).handler(event('{broken'))).statusCode, 400);
+});
+
+test('disabled receiver bypasses actual allowlist and App permission mismatches', async () => {
+  const environment = { ...env, PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'false' };
+  const h = harness({ environment, overrides: { '/app': () => Response.json({ id: 99, permissions: { actions: 'write', administration: 'write' } }) } });
+  const input = alert({ labels: { environment: 'production', service: 'other-service', alertname: 'other-alert' } });
+  assert.equal((await h.handler(event(payload([input])))).statusCode, 204);
 });

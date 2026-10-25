@@ -1,5 +1,8 @@
 # Incident responder specification — Issue #42
 
+Temporary owner exception: [all incident enforcement guards default off](../oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017) under DEC-017 / #375. Set exact `PAWLOCAL_ONCALL_ENFORCE_GUARDS=true` to restore the policies described below; disabled evidence is not verified recovery. See the canonical setup guard matrix for external controls and operational errors that still block.
+
+
 **Status: owner-approved unattended MVP contract (#239); implementation and live acceptance pending.** Baseline [#42](https://github.com/alanlima/pawlocal/issues/42), dependent on development acceptance G1 under [#59 hosted observability](hosted-observability.md). See the [implementation plan](../plans/monitoring-implementation.md) and [DEC-011](../decisions.md#dec-011--hosted-observability-and-minimal-cloud-incident-responder).
 
 ## Explicit amendment and readiness boundary

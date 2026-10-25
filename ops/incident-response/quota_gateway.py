@@ -20,6 +20,7 @@ from pathlib import Path
 from usage import Observation, UsageRecorder
 from control import LiveControl
 from quota import Denied, Profile, RequestBudget, strict_json
+from enforcement import enabled, skipped, operational_deadline
 
 ORIGIN = "https://api.openai.com/v1/responses"
 MAX_BODY = 4 * 1024 * 1024
@@ -201,13 +202,18 @@ class Gateway:
         diagnostic=None,
         usage=None,
     ):
-        if not key or len(local_token) < 32 or not clock() < deadline <= clock() + 1200:
+        if (
+            not key
+            or len(local_token) < 32
+            or enabled()
+            and not clock() < deadline <= clock() + 1200
+        ):
             raise Denied("invalid gateway authorization/deadline")
         self.usage = usage or UsageRecorder()
         self.profile = profile
         self.key = key
         self.local_token = local_token
-        self.deadline = deadline
+        self.deadline = deadline if enabled() else operational_deadline()
         self.clock = clock
         self.budget = RequestBudget(profile)
         self.received = 0
@@ -248,6 +254,9 @@ class Gateway:
             self.control()
 
     def remaining(self):
+        if not enabled():
+            skipped("deadline")
+            return 90
         self.profile.valid_at(self.clock())
         remaining = self.deadline - self.clock()
         if remaining <= 0:
@@ -280,7 +289,7 @@ class Gateway:
         self.ensure_live()
         self.stage = "request_quota"
         self.received += 1
-        if self.received > self.profile.requests_per_role:
+        if enabled() and self.received > self.profile.requests_per_role:
             raise Denied("request count quota exhausted")
         if len(raw) > MAX_BODY:
             raise Denied("request body bound exceeded")
@@ -297,7 +306,7 @@ class Gateway:
             ):
                 body.pop(field, None)
             body.setdefault("service_tier", self.profile.service_tier)
-        count_body = validate_request(body, self.profile)
+        count_body = validate_request(body, self.profile) if enabled() else body
         # Token counting includes tool schemas, instructions and entire history.
         # Failure, unknown schema, redirect, or missing count denies inference.
         self.stage = "input_token_count"
@@ -385,7 +394,9 @@ def serve(gateway, port):
                         )
                     ):
                         raise Denied("unexpected upstream content type")
-                    observation = Observation(content_type.startswith("text/event-stream"))
+                    observation = Observation(
+                        content_type.startswith("text/event-stream")
+                    )
                     started = True
                     self.send_response(200)
                     self.send_header("Content-Type", content_type)
@@ -511,12 +522,13 @@ def main():
     ):
         raise Denied("trusted owner-only profile required")
     remaining = args.deadline - time.time()
-    if not 0 < remaining <= 1200:
+    if enabled() and not 0 < remaining <= 1200:
         raise Denied("invalid absolute deadline")
     # Kernel-delivered main-thread alarm covers header parsing, socket reads,
     # blocked upstream/client writes and idle time, not merely loop boundaries.
     signal.signal(signal.SIGALRM, lambda *_: os._exit(124))
-    signal.setitimer(signal.ITIMER_REAL, remaining)
+    if enabled():
+        signal.setitimer(signal.ITIMER_REAL, remaining)
     profile = Profile.load(Path(args.profile).read_text())
     # stdin avoids real API key in argv, candidate files or exported job env.
     credentials = strict_json(sys.stdin.readline(MAX_BODY))

@@ -17,6 +17,7 @@ from deadline import arm
 from diagnostics import gather
 from protection import classic_absent
 from quota import Denied, Profile, integer, reserve, strict_json
+from enforcement import enabled, skipped, evidence, operational_deadline
 from quota_gateway import NoRedirect
 from settings import bindings_ready, runtime_ready
 
@@ -32,7 +33,7 @@ class GitHub:
         if not token:
             raise Denied("GitHub credential missing")
         self.token = token
-        self.deadline = deadline
+        self.deadline = deadline if enabled() else operational_deadline()
         self.opener = opener or urllib.request.build_opener(NoRedirect)
 
     def request(self, method, path, data=None):
@@ -51,7 +52,7 @@ class GitHub:
             and re.fullmatch(r"/issues/[1-9][0-9]*", path)
             and data == {"state": "closed", "state_reason": "completed"}
         )
-        if not allowed or time.time() >= self.deadline:
+        if enabled() and (not allowed or time.time() >= self.deadline):
             raise Denied("unapproved GitHub operation/deadline")
         raw = None if data is None else json.dumps(data, separators=(",", ":")).encode()
         request = urllib.request.Request(
@@ -110,26 +111,33 @@ def alerts(raw, environment):
         }
         if not isinstance(value, dict) or not required <= set(value):
             raise Denied("normalized alert fields missing")
-        if not isinstance(value, dict) or set(value) - {
-            "incident_key",
-            "fingerprint",
-            "status",
-            "starts_at",
-            "ends_at",
-            "environment",
-            "service",
-            "alert_name",
-            "release",
-            "route",
-        }:
+        if enabled() and (
+            not isinstance(value, dict)
+            or set(value)
+            - {
+                "incident_key",
+                "fingerprint",
+                "status",
+                "starts_at",
+                "ends_at",
+                "environment",
+                "service",
+                "alert_name",
+                "release",
+                "route",
+            }
+        ):
             raise Denied("invalid normalized alert schema")
-        if value.get("environment") != environment or not all(
-            isinstance(value.get(key), str)
-            and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", value[key])
-            for key in ("service", "alert_name")
+        if enabled() and (
+            value.get("environment") != environment
+            or not all(
+                isinstance(value.get(key), str)
+                and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", value[key])
+                for key in ("service", "alert_name")
+            )
         ):
             raise Denied("unsupported alert")
-        if (
+        if enabled() and (
             value.get("status") not in {"firing", "resolved"}
             or not isinstance(value.get("fingerprint"), str)
             or not re.fullmatch(r"[0-9a-f]{16,64}", value["fingerprint"])
@@ -139,7 +147,7 @@ def alerts(raw, environment):
             started = dt.datetime.fromisoformat(value["starts_at"])
         except (ValueError, TypeError, KeyError) as error:
             raise Denied("invalid start time") from error
-        if (
+        if enabled() and (
             started.tzinfo != dt.UTC
             or started.timestamp() < 0
             or started.timestamp() > time.time() + 30
@@ -151,7 +159,7 @@ def alerts(raw, environment):
             ended = dt.datetime.fromisoformat(value["ends_at"])
         except (ValueError, TypeError) as error:
             raise Denied("invalid normalized resolution") from error
-        if (
+        if enabled() and (
             ended.tzinfo != dt.UTC
             or ended.isoformat(timespec="milliseconds").replace("+00:00", "Z")
             != value["ends_at"]
@@ -165,13 +173,16 @@ def alerts(raw, environment):
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        if value.get("incident_key") != key or key in seen:
+        if enabled() and (value.get("incident_key") != key or key in seen):
             raise Denied("incorrect or duplicate incident identity")
         seen.add(key)
-        if "release" in value and (
-            not isinstance(value["release"], str)
-            or not re.fullmatch(
-                r"(?:[0-9a-f]{40}|sha256:[0-9a-f]{64})", value["release"]
+        if enabled() and (
+            "release" in value
+            and (
+                not isinstance(value["release"], str)
+                or not re.fullmatch(
+                    r"(?:[0-9a-f]{40}|sha256:[0-9a-f]{64})", value["release"]
+                )
             )
         ):
             raise Denied("invalid release")
@@ -183,6 +194,9 @@ def alerts(raw, environment):
 
 
 def current_alert(stack_url, token, alert, deadline, opener=None):
+    if not enabled():
+        skipped("continuity")
+        return True
     parsed = urllib.parse.urlsplit(stack_url)
     if (
         parsed.scheme != "https"
@@ -237,7 +251,7 @@ def current_alert(stack_url, token, alert, deadline, opener=None):
 
 def verified_record(github, deployment, environment, *, historical=False):
     """Verify current runtime, or durable success of an exact past producer attempt."""
-    if (
+    if enabled() and (
         deployment.get("environment") != environment
         or deployment.get("repository_url") != GITHUB
         or deployment.get("creator", {}).get("login") != "github-actions[bot]"
@@ -255,7 +269,20 @@ def verified_record(github, deployment, environment, *, historical=False):
     ):
         raise Denied("explicit deployed commit missing")
     digest = payload.get("backend_image_digest", "")
-    if (
+    if not enabled():
+        skipped("release")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(digest)):
+            raise Denied("usable deployed image digest missing")
+        run_id = payload.get("workflow_run_id")
+        if type(run_id) is not int:
+            raise Denied("deployment producer run missing")
+        return {
+            "affected_sha": sha,
+            "image_digest": digest,
+            "deployment_id": deployment["id"],
+            "deployment_run": run_id,
+        }
+    if enabled() and (
         not isinstance(digest, str)
         or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
         or payload.get("running_image_digest") != digest
@@ -265,15 +292,20 @@ def verified_record(github, deployment, environment, *, historical=False):
     record_schema = payload.get("record_schema_version")
     manifest_schema = payload.get("manifest_schema_version")
     evidence_schema = payload.get("evidence_schema_version")
-    if (
-        any(type(version) is not int for version in (record_schema, manifest_schema, evidence_schema))
+    if enabled() and (
+        any(
+            type(version) is not int
+            for version in (record_schema, manifest_schema, evidence_schema)
+        )
         or record_schema != 1
         or (manifest_schema, evidence_schema) not in {(2, 1), (3, 2)}
     ):
         raise Denied("validated release/telemetry evidence missing")
-    if (
-        manifest_schema == 2 and "frontend_telemetry_enabled" in payload
-        or manifest_schema == 3 and not isinstance(payload.get("frontend_telemetry_enabled"), bool)
+    if enabled() and (
+        manifest_schema == 2
+        and "frontend_telemetry_enabled" in payload
+        or manifest_schema == 3
+        and not isinstance(payload.get("frontend_telemetry_enabled"), bool)
     ):
         raise Denied("validated release/telemetry evidence missing")
     required = {
@@ -283,28 +315,37 @@ def verified_record(github, deployment, environment, *, historical=False):
         "migration_id": "dsql_0001_initial",
         "telemetry_enabled": True,
     }
-    if any(
-        type(payload.get(key)) is not type(value) or payload.get(key) != value
-        for key, value in required.items()
+    if enabled() and (
+        any(
+            type(payload.get(key)) is not type(value) or payload.get(key) != value
+            for key, value in required.items()
+        )
     ):
         raise Denied("validated release/telemetry evidence missing")
-    if any(
-        not isinstance(payload.get(key), str)
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", payload[key])
-        for key in (
-            "release_manifest_digest",
-            "verification_evidence_digest",
-            "frontend_artifact_digest",
+    if enabled() and (
+        any(
+            not isinstance(payload.get(key), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", payload[key])
+            for key in (
+                "release_manifest_digest",
+                "verification_evidence_digest",
+                "frontend_artifact_digest",
+            )
         )
     ):
         raise Denied("release evidence digests missing")
-    if payload.get("public_endpoint_health") != {
-        "frontend": True,
-        "api": True,
-    } or payload.get("database_query_smoke") != {
-        "route": "/api/v1/places",
-        "result": "valid_place_page",
-    }:
+    if enabled() and (
+        payload.get("public_endpoint_health")
+        != {
+            "frontend": True,
+            "api": True,
+        }
+        or payload.get("database_query_smoke")
+        != {
+            "route": "/api/v1/places",
+            "result": "valid_place_page",
+        }
+    ):
         raise Denied("release health evidence missing")
     run_id = payload.get("workflow_run_id")
     attempt = payload.get("workflow_run_attempt")
@@ -329,7 +370,7 @@ def verified_record(github, deployment, environment, *, historical=False):
         if environment == "development"
         else {"workflow_dispatch"}
     )
-    if (
+    if enabled() and (
         run.get("id") != run_id
         or run.get("status") != "completed"
         or run.get("repository", {}).get("id") != 1423024931
@@ -341,7 +382,7 @@ def verified_record(github, deployment, environment, *, historical=False):
         or run.get("run_attempt") != attempt
     ):
         raise Denied("untrusted deployment producer")
-    if environment == "development" and run.get("head_sha") != sha:
+    if enabled() and (environment == "development" and run.get("head_sha") != sha):
         raise Denied("development producer commit differs")
     statuses = github.request(
         "GET", f"/deployments/{deployment['id']}/statuses?per_page=100"
@@ -360,7 +401,10 @@ def verified_record(github, deployment, environment, *, historical=False):
     # verified history. No failure/error/unknown state may be crossed to find it.
     try:
         dated = [
-            (dt.datetime.fromisoformat(value["created_at"].replace("Z", "+00:00")), value)
+            (
+                dt.datetime.fromisoformat(value["created_at"].replace("Z", "+00:00")),
+                value,
+            )
             for value in statuses
         ]
         if any(date.tzinfo is None for date, _value in dated):
@@ -371,11 +415,13 @@ def verified_record(github, deployment, environment, *, historical=False):
         value for _date, value in sorted(dated, key=lambda pair: pair[0], reverse=True)
     ]
     for status in ordered:
-        if status.get("creator", {}).get("login") != "github-actions[bot]":
+        if enabled() and (
+            status.get("creator", {}).get("login") != "github-actions[bot]"
+        ):
             raise Denied("untrusted deployment status")
         if status.get("state") == "success":
             break
-        if not historical or status.get("state") != "inactive":
+        if enabled() and (not historical or status.get("state") != "inactive"):
             raise Denied("latest deployment is not a trusted successful release")
     else:
         raise Denied("deployment has no trusted successful verification")
@@ -395,7 +441,7 @@ def deployed_release(github, environment):
     # not silently fall back to an older successful record.
     selected = max(deployments, key=lambda value: value.get("created_at", ""))
     release = verified_record(github, selected, environment)
-    if environment == "production":
+    if enabled() and environment == "production":
         development = github.pages(
             "/deployments?environment=development&ref=" + release["affected_sha"],
             maximum=2,
@@ -403,7 +449,9 @@ def deployed_release(github, environment):
         matched = False
         for candidate in development:
             try:
-                verified = verified_record(github, candidate, "development", historical=True)
+                verified = verified_record(
+                    github, candidate, "development", historical=True
+                )
             except Denied:
                 continue
             if (
@@ -412,7 +460,7 @@ def deployed_release(github, environment):
             ):
                 matched = True
                 break
-        if not matched:
+        if enabled() and (not matched):
             raise Denied("production lacks matching development-verified pair")
     return release
 
@@ -421,7 +469,7 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
     if not re.fullmatch(r"[1-9]\d{0,9}", issue_number):
         raise Denied("protected ledger issue missing")
     issue = github.request("GET", "/issues/" + issue_number)
-    if (
+    if enabled() and (
         issue.get("state") != "open"
         or not issue.get("body", "").startswith(LEDGER_MARKER)
         or issue.get("user", {}).get("login") != "alanlima"
@@ -432,7 +480,7 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
     for comment in comments:
         if not comment.get("body", "").startswith(ENTRY_MARKER):
             continue
-        if comment.get("user", {}).get("login") != "github-actions[bot]":
+        if enabled() and comment.get("user", {}).get("login") != "github-actions[bot]":
             raise Denied("untrusted ledger reservation")
         ledger.append(strict_json(comment["body"][len(ENTRY_MARKER) :].strip()))
     month = dt.datetime.now(dt.UTC).strftime("%Y-%m")
@@ -456,6 +504,9 @@ def reserve_month(github, profile, issue_number, run_id, attempt):
 
 
 def readiness(github):
+    if not enabled():
+        skipped("readiness")
+        return
     authorizer = integer(int(os.environ.get("PAWLOCAL_AUTHORIZER_APP_ID", "0")))
     path = Path(os.environ.get("RUNNER_TEMP", "")) / "oncall-readiness-token.json"
     if path.is_file():
@@ -464,13 +515,25 @@ def readiness(github):
             token = capability.get("token")
             if token and isinstance(token, str):
                 github = GitHub(token, github.deadline, github.opener)
-                print(f"[readiness] Loaded elevated readiness token from {path}", file=sys.stderr)
+                print(
+                    f"[readiness] Loaded elevated readiness token from {path}",
+                    file=sys.stderr,
+                )
             else:
-                print(f"[readiness] Warning: {path} found but missing valid 'token' string", file=sys.stderr)
+                print(
+                    f"[readiness] Warning: {path} found but missing valid 'token' string",
+                    file=sys.stderr,
+                )
         except Exception as exc:
-            print(f"[readiness] Warning: Failed to parse readiness token from {path}: {exc}", file=sys.stderr)
+            print(
+                f"[readiness] Warning: Failed to parse readiness token from {path}: {exc}",
+                file=sys.stderr,
+            )
     else:
-        print(f"[readiness] No oncall-readiness-token.json found at {path}; using default GitHub token", file=sys.stderr)
+        print(
+            f"[readiness] No oncall-readiness-token.json found at {path}; using default GitHub token",
+            file=sys.stderr,
+        )
     summaries = github.request("GET", "/rulesets?per_page=100")
     if not isinstance(summaries, list) or len(summaries) >= 100:
         msg = f"ruleset inventory unknown (type={type(summaries).__name__}, count={len(summaries) if isinstance(summaries, list) else 'N/A'})"
@@ -507,7 +570,10 @@ def readiness(github):
         rule_id = summary["id"]
         rule = github.request("GET", f"/rulesets/{rule_id}")
         rule_name = rule.get("name", summary.get("name", f"ruleset-{rule_id}"))
-        print(f"[readiness] Inspecting ruleset id={rule_id} name={rule_name!r}", file=sys.stderr)
+        print(
+            f"[readiness] Inspecting ruleset id={rule_id} name={rule_name!r}",
+            file=sys.stderr,
+        )
         if (
             rule.get("enforcement") in {"disabled", "evaluate"}
             or rule.get("target") == "tag"
@@ -559,7 +625,9 @@ def readiness(github):
             if bypass is not None and bypass != []:
                 reasons.append(f"bypass_actors is non-empty: {bypass!r}")
             if current_bypass != "never":
-                reasons.append(f"current_user_can_bypass is {current_bypass!r} (must be 'never')")
+                reasons.append(
+                    f"current_user_can_bypass is {current_bypass!r} (must be 'never')"
+                )
             if not isinstance(rules_list, list):
                 reasons.append(f"rules is not a list: {type(rules_list).__name__}")
             msg = f"ruleset id={rule_id} ({rule_name!r}): applicable bypass or policy inventory unsupported: {'; '.join(reasons)}"
@@ -585,11 +653,19 @@ def readiness(github):
                 and parameters.get("require_last_push_approval", False) is False
             ):
                 actual_pr_params = {
-                    "required_approving_review_count": parameters.get("required_approving_review_count"),
-                    "require_code_owner_review": parameters.get("require_code_owner_review"),
-                    "required_review_thread_resolution": parameters.get("required_review_thread_resolution"),
+                    "required_approving_review_count": parameters.get(
+                        "required_approving_review_count"
+                    ),
+                    "require_code_owner_review": parameters.get(
+                        "require_code_owner_review"
+                    ),
+                    "required_review_thread_resolution": parameters.get(
+                        "required_review_thread_resolution"
+                    ),
                     "allowed_merge_methods": parameters.get("allowed_merge_methods"),
-                    "require_last_push_approval": parameters.get("require_last_push_approval", False),
+                    "require_last_push_approval": parameters.get(
+                        "require_last_push_approval", False
+                    ),
                 }
                 msg = (
                     f"ruleset id={rule_id} ({rule_name!r}): effective PR policy requires unsupported/human gates "
@@ -626,7 +702,12 @@ def readiness(github):
                 checks.update(entry["context"] for entry in entries)
             protections.add(kind)
         active_rulesets.append(f"id={rule_id} ({rule_name!r})")
-    missing_protections = {"deletion", "non_fast_forward", "pull_request", "required_status_checks"} - protections
+    missing_protections = {
+        "deletion",
+        "non_fast_forward",
+        "pull_request",
+        "required_status_checks",
+    } - protections
     missing_checks = required - checks
     if missing_protections or missing_checks:
         reasons = []
@@ -644,13 +725,17 @@ def readiness(github):
     )
     classic_absent(github.deadline)
     runtime_ready(github)
-    print("[readiness] Preflight readiness checks completed successfully", file=sys.stderr)
+    print(
+        "[readiness] Preflight readiness checks completed successfully", file=sys.stderr
+    )
 
 
 def _main():
-    deadline = int(os.environ["INCIDENT_DEADLINE"])
+    deadline = (
+        int(os.environ["INCIDENT_DEADLINE"]) if enabled() else operational_deadline()
+    )
     arm(deadline)
-    if (
+    if enabled() and (
         os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
         or os.environ.get("GITHUB_REF") != "refs/heads/main"
         or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
@@ -658,12 +743,12 @@ def _main():
     ):
         raise Denied("trusted main first-attempt dispatch required")
     actor = os.environ.get("PAWLOCAL_DISPATCH_ACTOR", "")
-    if (
+    if enabled() and (
         not re.fullmatch(r"[a-z0-9-]+\[bot\]", actor)
         or os.environ.get("GITHUB_ACTOR") != actor
     ):
         raise Denied("exact installed dispatch App actor required")
-    if (
+    if enabled() and (
         os.environ.get("PAWLOCAL_ONCALL_ENABLED") != "true"
         or os.environ.get("SCHEMA_VERSION") != "1"
     ):
@@ -671,7 +756,7 @@ def _main():
     profile = Profile.load(os.environ.get("PAWLOCAL_MODEL_PROFILE", ""))
     bindings_ready(os.environ["GITHUB_WORKSPACE"])
     environment = os.environ.get("INCIDENT_ENVIRONMENT", "")
-    if (
+    if enabled() and (
         environment == "production"
         and os.environ.get("PAWLOCAL_PRODUCTION_TELEMETRY_READ_APPROVED") != "true"
     ):
@@ -691,14 +776,18 @@ def _main():
             if marker in issue.get("body", "")
             and issue.get("user", {}).get("login") == "github-actions[bot]"
         ]
-        if matches:
+        if enabled() and matches:
             # Closed/failed/resolved claims consume the single generation too.
             continue
-        active = alert["status"] == "firing" and current_alert(
-            os.environ.get("GRAFANA_STACK_URL", ""),
-            os.environ.get("PAWLOCAL_GRAFANA_QUERY_TOKEN", ""),
-            alert,
-            deadline,
+        active = (
+            not enabled()
+            or alert["status"] == "firing"
+            and current_alert(
+                os.environ.get("GRAFANA_STACK_URL", ""),
+                os.environ.get("PAWLOCAL_GRAFANA_QUERY_TOKEN", ""),
+                alert,
+                deadline,
+            )
         )
         state = (
             "ADMISSION_PENDING"
@@ -712,7 +801,12 @@ def _main():
             {
                 "title": f"Incident {environment}: search/detail {alert['incident_key'][:12]}",
                 "body": marker
-                + f"\n\nState: {state}.\n\nGeneration: `{alert['starts_at']}`.\n\nRun: https://github.com/{REPOSITORY}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n\nOne attempt only; trusted automation enforces fresh review, candidate CI, squash merge and verified release promotion.",
+                + f"\n\nState: {state}.\n\nGeneration: `{alert['starts_at']}`.\n\nRun: https://github.com/{REPOSITORY}/actions/runs/{os.environ['GITHUB_RUN_ID']}\n\n"
+                + (
+                    "One attempt only; trusted automation enforces fresh review, candidate CI, squash merge and verified release promotion."
+                    if enabled()
+                    else "Incident enforcement is disabled. Generation/status, deduplication, quotas, check/review verdicts and recovery policy are skipped; no skipped check is a pass."
+                ),
                 "labels": ["stage-5", "bug"],
             },
         )
@@ -740,15 +834,22 @@ def _main():
     if selected is None:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
             output.write("admitted=false\n")
-        print("[admission] Preflight completed: no firing alerts selected for admission", file=sys.stderr)
+        print(
+            "[admission] Preflight completed: no firing alerts selected for admission",
+            file=sys.stderr,
+        )
         return
     try:
         release = deployed_release(github, environment)
         supplied_release = selected["alert"].get("release")
-        if supplied_release and supplied_release not in {
-            release["affected_sha"],
-            release["image_digest"],
-        }:
+        if enabled() and (
+            supplied_release
+            and supplied_release
+            not in {
+                release["affected_sha"],
+                release["image_digest"],
+            }
+        ):
             raise Denied("alert release differs from current deployment")
         diagnostics = gather(
             os.environ["GITHUB_WORKSPACE"],
@@ -772,6 +873,7 @@ def _main():
             selected
             | release
             | {
+                **({"enforcement": evidence()} if not enabled() else {}),
                 "diagnostics": diagnostics,
                 "base_sha": base,
                 "deadline": deadline,
@@ -792,7 +894,10 @@ def _main():
             stream.write(
                 f"admitted=true\nmetadata_sha256={hashlib.sha256(payload).hexdigest()}\nprofile_sha256={profile.digest}\ndeadline={deadline}\n"
             )
-        print(f"[admission] Preflight completed: admitted incident for issue #{selected['issue']}", file=sys.stderr)
+        print(
+            f"[admission] Preflight completed: admitted incident for issue #{selected['issue']}",
+            file=sys.stderr,
+        )
     except Exception:
         if time.time() < deadline:
             check_ledger(

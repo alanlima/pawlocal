@@ -23,6 +23,7 @@ import urllib.request
 from pathlib import Path
 
 from quota import Denied, strict_json
+from enforcement import enabled, skipped, evidence
 from quota_gateway import NoRedirect
 
 MAX_BODY = 2 * 1024 * 1024
@@ -113,7 +114,11 @@ def _scope(
         isinstance(service, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", service),
         "recovery service invalid",
     )
-    rule_uid = profile.rule_uids.get(environment, "") if hasattr(profile, "rule_uids") and isinstance(profile.rule_uids, dict) else ""
+    rule_uid = (
+        profile.rule_uids.get(environment, "")
+        if hasattr(profile, "rule_uids") and isinstance(profile.rule_uids, dict)
+        else ""
+    )
     if rule_uid:
         _require(
             re.fullmatch(r"[A-Za-z0-9_-]{1,40}", rule_uid),
@@ -241,6 +246,19 @@ def observe(
     _require(
         environment in {"development", "production"}, "recovery environment invalid"
     )
+    if not enabled():
+        skipped("recovery")
+        return {
+            "schema": 1,
+            "environment": environment,
+            "recovery_verified": False,
+            "enforcement": evidence(),
+            "observations": [],
+            "window_seconds": 0,
+            "started_at": clock(),
+            "completed_at": clock(),
+            "profile_sha256": profile.digest,
+        }
     _enabled(environment, profile, clock(), deadline)
     _require(
         isinstance(service, str) and re.fullmatch(r"[a-z][a-z0-9-]{0,99}", service),
@@ -367,7 +385,9 @@ def observe(
         _ready(
             rule["health"] == "ok"
             and rule["state"] == "inactive"
-            and all(instance["state"] in allowed_settled_states for instance in instances),
+            and all(
+                instance["state"] in allowed_settled_states for instance in instances
+            ),
             "recovery rule settling",
         )
         evaluated = _timestamp(rule.get("lastEvaluation"))
@@ -520,6 +540,9 @@ def configured_rule(
     Known firing/pending instances are allowed because the repair is not yet
     promoted. Missing/paused/stale/error/unknown rule state fails closed.
     """
+    if not enabled():
+        skipped("recovery")
+        return
     _enabled(environment, profile, clock(), deadline)
     rule_uid, stack, frontend, _ = _scope(
         environment,

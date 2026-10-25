@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 
 # Candidate path boundary enforcement
 from candidate import MAX_FILES, is_allowed_path
+from enforcement import enabled as guards_enabled, evidence as guard_evidence, skipped
 
 DEFAULT_CONTEXT = "PawLocal change authorization"
 CONTEXT = DEFAULT_CONTEXT
@@ -48,6 +49,7 @@ class GitHubClient:
         deadline: float | None = None,
         read_token: str | None = None,
         opener=None,
+        incident_mode: bool = False,
     ):
         if not token:
             raise Denied("GitHub token required")
@@ -60,9 +62,16 @@ class GitHubClient:
         self.api_base = f"https://api.github.com/repos/{repository}"
         self.deadline = deadline or (time.time() + 600)
         self.opener = opener or urllib.request.build_opener(NoRedirect)
+        self.incident_mode = incident_mode
+
+    def enforce_deadline(self):
+        if self.incident_mode and not guards_enabled():
+            skipped("deadline")
+            return False
+        return True
 
     def request(self, method: str, path: str, data: dict | None = None, use_status_token: bool = False) -> dict | list:
-        if time.time() >= self.deadline:
+        if self.enforce_deadline() and time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
         url = self.api_base + path if path.startswith("/") else path
@@ -91,7 +100,7 @@ class GitHubClient:
 
     def download_raw(self, path: str) -> bytes:
         """Downloads artifact archive, following signed redirect without forwarding credentials."""
-        if time.time() >= self.deadline:
+        if self.enforce_deadline() and time.time() >= self.deadline:
             raise Denied("Operation deadline exceeded")
 
         url = self.api_base + path if path.startswith("/") else path
@@ -177,12 +186,7 @@ def classify_pr(pr_data: dict, publisher_bot_logins: set[str] | list[str] | None
     if not isinstance(pr_data, dict):
         raise Denied("Invalid PR payload")
 
-    if pr_data.get("draft") is True:
-        raise Denied("Draft PRs are not eligible for change authorization")
-
     base = pr_data.get("base", {})
-    if base.get("ref") != "main":
-        raise Denied(f"Target branch must be main, got: {base.get('ref')}")
 
     user = pr_data.get("user", {})
     login = user.get("login", "")
@@ -200,8 +204,17 @@ def classify_pr(pr_data: dict, publisher_bot_logins: set[str] | list[str] | None
         or bool(re.fullmatch(r"[A-Za-z0-9_.-]+-publisher\[bot\]", login))
     )
 
+    head_ref = pr_data.get("head", {}).get("ref", "")
+    if head_ref.startswith("incident/") and not guards_enabled():
+        skipped("authorization")
+        return "incident"
+
+    if pr_data.get("draft") is True:
+        raise Denied("Draft PRs are not eligible for change authorization")
+    if base.get("ref") != "main":
+        raise Denied(f"Target branch must be main, got: {base.get('ref')}")
+
     if is_bot:
-        head_ref = pr_data.get("head", {}).get("ref", "")
         if head_ref.startswith("incident/"):
             return "incident"
 
@@ -272,6 +285,22 @@ def verify_incident_candidate(
 ) -> dict:
     """Verifies that an incident candidate meets all safety constraints and allowlists."""
     pr = client.get_pr(pr_number)
+    if not guards_enabled():
+        # This is an authorization exception, not a claim that provenance,
+        # candidate paths, review or CI were independently verified.
+        head_sha = pr.get("head", {}).get("sha", "")
+        base_sha = pr.get("base", {}).get("sha", "")
+        if not all(re.fullmatch(r"[0-9a-f]{40}", sha) for sha in (head_sha, base_sha)):
+            raise Denied("Incident authorization requires usable PR commit identities")
+        skipped("authorization")
+        return {
+            "pr_number": pr_number,
+            "head_sha": head_sha,
+            "base_sha": base_sha,
+            "authorized": True,
+            "route": "incident",
+            "enforcement": guard_evidence(),
+        }
     if pr.get("state") != "open" or pr.get("draft") is True:
         raise Denied("PR is not open or is draft")
 
@@ -396,6 +425,7 @@ def main():
         repository=repo,
         context=args.context,
         read_token=os.environ.get("GITHUB_TOKEN"),
+        incident_mode=args.mode == "incident",
     )
 
     if args.mode == "reset":
@@ -416,7 +446,12 @@ def main():
                 expected_head_sha=head_sha,
                 expected_base_sha=base_sha,
             )
-            client.post_status(head_sha, "success", "Authenticated incident candidate authorized")
+            description = (
+                "Authenticated incident candidate authorized"
+                if guards_enabled()
+                else "Incident enforcement disabled; verification skipped"
+            )
+            client.post_status(result["head_sha"], "success", description)
             print("Incident change authorization status posted successfully.")
         except Denied as e:
             client.post_status(head_sha, "failure", f"Incident authorization denied: {e}")

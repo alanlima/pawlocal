@@ -1,7 +1,8 @@
+import os
+from unittest.mock import patch
 """Credential-free hosted setup-python ancestor proof using a distinct real UID."""
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 
 @unittest.skipUnless(os.name == "posix", "actual Ubuntu UID/traversal contract")
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class HostedInterpreterAccessTests(unittest.TestCase):
     def test_actual_setup_python_venv_is_readable_and_private_ancestor_denies(self):
         import pwd

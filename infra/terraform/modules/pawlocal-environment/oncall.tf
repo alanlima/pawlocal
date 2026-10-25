@@ -5,6 +5,7 @@ variable "oncall_receiver" {
     installation_id  = string
     repository_id    = string
     repository       = string
+    enforce_guards   = optional(bool, false)
     allowed_services = set(string)
     allowed_alerts   = optional(set(string), [])
     kms_key_arn      = optional(string)
@@ -76,6 +77,7 @@ module "oncall_receiver" {
   create_sam_metadata               = false
   allowed_triggers                  = {}
   environment_variables = {
+    PAWLOCAL_ONCALL_ENFORCE_GUARDS    = tostring(var.oncall_receiver.enforce_guards)
     PAWLOCAL_PROJECT_NAME             = var.project_name
     PAWLOCAL_ONCALL_ENVIRONMENT       = var.environment
     PAWLOCAL_DISPATCH_APP_ID          = var.oncall_receiver.app_id

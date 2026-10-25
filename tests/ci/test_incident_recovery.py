@@ -1,15 +1,15 @@
+import os
+from unittest.mock import patch
 import copy
 import datetime as dt
 import io
 import json
-import os
 import sys
 import tempfile
 import unittest
 import urllib.parse
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import recovery
@@ -29,6 +29,7 @@ class Response(io.BytesIO):
         return self.url
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class RecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

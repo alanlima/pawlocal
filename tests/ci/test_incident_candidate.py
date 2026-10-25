@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import importlib.util
 import json
 import sys
@@ -14,6 +16,7 @@ candidate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(candidate)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class CandidateTests(unittest.TestCase):
     def metadata(self):
         return {"base_sha": "a" * 40, "alert": {"incident_key": "b" * 64}}

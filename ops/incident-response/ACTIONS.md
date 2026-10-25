@@ -1,5 +1,8 @@
 # Trusted incident workflow — #228
 
+Temporary owner exception: [all incident enforcement guards default off](../../docs/oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017) under DEC-017 / #375. Set exact `PAWLOCAL_ONCALL_ENFORCE_GUARDS=true` to restore the policies described below; disabled evidence is not verified recovery. See the canonical setup guard matrix for external controls and operational errors that still block.
+
+
 Implementation is default-disabled and has no configured model, spending authority, credentials or live acceptance evidence. The MVP runtime path is automatic: triage, one fixer execution, fresh review, candidate PR checks, squash merge, development verification and recovery, then exact production promotion and recovery. A later human approval option is outside this MVP. Initial setup and resource activation remain separately reviewed.
 
 ## Credential boundaries

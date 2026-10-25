@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import datetime as dt
 import importlib.util
 import json
@@ -6,12 +8,14 @@ import unittest
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).resolve().parents[2] / "ops/incident-response/quota.py"
+sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("incident_quota", MODULE_PATH)
 quota = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = quota
 SPEC.loader.exec_module(quota)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class QuotaTests(unittest.TestCase):
     def profile(self, **changes):
         # Fictional fixture model/rates are never a configured runtime default.

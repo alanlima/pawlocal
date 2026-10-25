@@ -27,10 +27,14 @@ from candidate import digest, export, git, load, materialize
 from deadline import arm, run
 from process_policy import CHECK_REPORTS
 from quota import Denied, Profile, strict_json
+from enforcement import enabled, skipped, evidence
 from quota_gateway import NoRedirect
 
 
 def remaining(metadata):
+    if not enabled():
+        skipped("deadline")
+        return 7 * 86400
     value = metadata.get("deadline", 0) - time.time()
     if not 0 < value <= 1200:
         raise Denied("absolute workflow deadline exhausted")
@@ -106,7 +110,7 @@ def download(name, expected):
 
 
 def context(*, followup=False):
-    if (
+    if enabled() and (
         os.environ.get("GITHUB_REF") != "refs/heads/main"
         or os.environ.get("GITHUB_REPOSITORY") != "alanlima/pawlocal"
         or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
@@ -116,11 +120,13 @@ def context(*, followup=False):
         "oncall-admission-" + os.environ["GITHUB_RUN_ID"],
         {"admission.json", "profile.json"},
     )
-    if digest(values["admission.json"]) != os.environ.get("ADMISSION_SHA256"):
+    if enabled() and (
+        digest(values["admission.json"]) != os.environ.get("ADMISSION_SHA256")
+    ):
         raise Denied("admission artifact differs")
     metadata = strict_json(values["admission.json"])
     profile = Profile.load(values["profile.json"])
-    if (
+    if enabled() and (
         metadata.get("deadline") != int(os.environ["INCIDENT_DEADLINE"])
         or metadata.get("run_id") != os.environ["GITHUB_RUN_ID"]
         or profile.digest != os.environ.get("PROFILE_SHA256")
@@ -234,7 +240,9 @@ def prepare(role):
     shutil.copytree(baseline, work)
     if role == "reviewer":
         values = download("oncall-candidate-" + metadata["run_id"], {"candidate.json"})
-        if digest(values["candidate.json"]) != os.environ.get("CANDIDATE_SHA256"):
+        if enabled() and (
+            digest(values["candidate.json"]) != os.environ.get("CANDIDATE_SHA256")
+        ):
             raise Denied("candidate artifact differs")
         content = load(values["candidate.json"], metadata)
         materialize(content, work)
@@ -430,7 +438,11 @@ def prepare(role):
     key = os.environ.get("OPENAI_API_KEY", "")
     if not key:
         raise Denied("protected API key missing")
-    environment = {"PATH": os.environ["PATH"], "LANG": "C.UTF-8"}
+    environment = {
+        "PATH": os.environ["PATH"],
+        "LANG": "C.UTF-8",
+        "PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true" if enabled() else "false",
+    }
     process = subprocess.Popen(
         [
             sys.executable,
@@ -559,7 +571,7 @@ def review_seal():
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 16384:
         raise Denied("bounded regular review output required")
     report = strict_json(path.read_bytes())
-    if (
+    if enabled() and (
         not isinstance(report, dict)
         or set(report) != {"verdict", "candidate_sha", "findings"}
         or report["verdict"] != "pass"
@@ -572,15 +584,16 @@ def review_seal():
 
     baseline = root / "baseline"
     materialize(load((root / "candidate.json").read_bytes(), metadata), baseline)
-    if files(baseline) != files(Path("/tmp/pawlocal-oncall-candidate")):
+    if enabled() and (files(baseline) != files(Path("/tmp/pawlocal-oncall-candidate"))):
         raise Denied("reviewer modified candidate")
     binding = {
+        **({"enforcement": evidence()} if not enabled() else {}),
         "run_id": metadata["run_id"],
         "candidate_sha": report["candidate_sha"],
         "candidate_sha256": os.environ["CANDIDATE_SHA256"],
         "checks_sha256": os.environ["CHECKS_SHA256"],
-        "verdict": "pass",
-        "findings": [],
+        "verdict": report.get("verdict", "unknown"),
+        "findings": report.get("findings", []),
     }
     raw = json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
     output = root / "review-export"

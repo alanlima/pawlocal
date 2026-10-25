@@ -25,6 +25,11 @@ concurrency:
   group: pawlocal-lifecycle-production
   cancel-in-progress: false
 
+# Repository variable only: same-name Environment variables are unsupported.
+# Controller predicates and runner mode must use the same repository setting.
+env:
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+
 jobs:
   workflow-binding:
     name: Verify production workflow source binding
@@ -39,7 +44,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "$EXPECTED_WORKFLOW_SHA" ]]; then
+          if [[ "$PAWLOCAL_ONCALL_ENFORCE_GUARDS" != true && "$PAWLOCAL_ONCALL_ENFORCE_GUARDS" != false ]]; then
+            echo 'PAWLOCAL_ONCALL_ENFORCE_GUARDS must be true or false' >&2
+            exit 1
+          fi
+          if [[ -n "$EXPECTED_WORKFLOW_SHA" && "$PAWLOCAL_ONCALL_ENFORCE_GUARDS" == false ]]; then
+            echo '[incident-enforcement] disabled: production workflow source binding policy'
+          elif [[ -n "$EXPECTED_WORKFLOW_SHA" ]]; then
             [[ "$EXPECTED_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
             test "$ACTUAL_WORKFLOW_SHA" = "$EXPECTED_WORKFLOW_SHA"
             test "$RELEASE_COMMIT" = "$EXPECTED_WORKFLOW_SHA"

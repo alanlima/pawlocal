@@ -1,9 +1,10 @@
+import os
+from unittest.mock import patch
 import contextlib
 import http.client
 import importlib.util
 import io
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -28,6 +29,7 @@ class Response(io.BytesIO):
     status = 200
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class GatewayTests(unittest.TestCase):
     def body(self, **changes):
         return {

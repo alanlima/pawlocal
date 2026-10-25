@@ -1,14 +1,14 @@
+import os
+from unittest.mock import patch
 """Offline actual pip/PEP 517 fixture for trusted source-build side effects."""
 
 import json
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops/incident-response"))
@@ -18,6 +18,7 @@ import job
 import process_policy
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class BaselineBuildTests(unittest.TestCase):
     def metadata(self):
         return {"base_sha": "a" * 40, "alert": {"incident_key": "b" * 64}}

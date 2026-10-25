@@ -12,6 +12,11 @@ concurrency:
   group: pawlocal-change-authorization-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# Repository variable only: same-name Environment variables are unsupported.
+# Controller predicates and runner mode must use the same repository setting.
+env:
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+
 jobs:
   classify:
     name: Classify change authorization route
@@ -50,6 +55,8 @@ jobs:
     needs: classify
     runs-on: ubuntu-24.04
     environment: incident-change-authorization
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ needs.classify.outputs.route == 'incident' && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false') || 'true' }}
     timeout-minutes: 5
     steps:
       - name: Check out trusted main
@@ -94,6 +101,8 @@ jobs:
     if: needs.classify.outputs.route == 'incident'
     runs-on: ubuntu-24.04
     environment: incident-change-authorization
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
     timeout-minutes: 10
     steps:
       - name: Check out trusted main
@@ -140,6 +149,8 @@ jobs:
     if: needs.classify.outputs.route == 'ordinary'
     runs-on: ubuntu-24.04
     environment: ordinary-change-approval
+    env:
+      PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'true'
     timeout-minutes: 15
     steps:
       - name: Check out trusted main

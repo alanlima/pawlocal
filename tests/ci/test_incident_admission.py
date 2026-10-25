@@ -1,13 +1,13 @@
+import os
+from unittest.mock import patch
 import copy
 import hashlib
 import json
-import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 DIRECTORY = Path(__file__).resolve().parents[2] / "ops/incident-response"
 sys.path.insert(0, str(DIRECTORY))
@@ -134,6 +134,7 @@ class FakeGitHub:
         raise AssertionError(path)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class AdmissionTests(unittest.TestCase):
     def test_every_effective_ruleset_is_checked_before_admission(self):
         rule = {
@@ -431,7 +432,7 @@ class AdmissionTests(unittest.TestCase):
                 "GITHUB_OUTPUT": str(output),
             }
             with (
-                patch.dict(os.environ, env, clear=True),
+                patch.dict(os.environ, ({"PAWLOCAL_ONCALL_ENFORCE_GUARDS": "true"} | env), clear=True),
                 patch.object(admission, "GitHub", return_value=fake),
                 patch.object(admission, "readiness"),
                 patch.object(admission, "bindings_ready"),

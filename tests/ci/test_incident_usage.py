@@ -1,5 +1,6 @@
-import json
 import os
+from unittest.mock import patch
+import json
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from usage_summary import render, validated_report, validate_limits, LIMIT_FIELD
 import test_incident_quota as fixtures
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class UsageTests(unittest.TestCase):
     def response(self, **changes):
         return {'status': 'completed', 'usage': {'input_tokens': 100, 'output_tokens': 40, 'total_tokens': 140, 'input_tokens_details': {'cached_tokens': 50}, 'output_tokens_details': {'reasoning_tokens': 30}}, 'output': 'PRIVATE CONTENT', **changes}

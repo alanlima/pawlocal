@@ -1,15 +1,16 @@
 import os
+from unittest.mock import patch
 import sys
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 DIRECTORY = Path(__file__).resolve().parents[2] / "ops/incident-response"
 sys.path.insert(0, str(DIRECTORY))
 import publisher
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class PublisherPolicyTests(unittest.TestCase):
     def test_live_stop_prevents_even_git_object_publication(self):
         broker = self.fixture()

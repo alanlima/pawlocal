@@ -7,7 +7,7 @@ const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const appPermissions = { contents: 'write', pull_requests: 'write', issues: 'write', statuses: 'write', administration: 'read' };
 
 function fixture(purpose, change = {}) {
-  const env = { GITHUB_REPOSITORY: 'alanlima/pawlocal', GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ATTEMPT: '1',
+  const env = { PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'true', GITHUB_REPOSITORY: 'alanlima/pawlocal', GITHUB_REF: 'refs/heads/main', GITHUB_RUN_ATTEMPT: '1',
     INCIDENT_DEADLINE: String(Math.floor(Date.now() / 1000) + 600), PAWLOCAL_CREDENTIAL_PHASE: purpose,
     PAWLOCAL_PUBLISHER_APP_ID: '1', PAWLOCAL_PUBLISHER_INSTALLATION_ID: '2', RUNNER_TEMP: '/fixture',
     PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: keys.privateKey.export({ type: 'pkcs8', format: 'pem' }) };
@@ -82,4 +82,20 @@ test('status credential permits rerun attempts while publish and merge remain at
   const rerunMerge = fixture('merge');
   rerunMerge.env.GITHUB_RUN_ATTEMPT = '2';
   await assert.rejects(rerunMerge.run());
+});
+
+for (const mode of [undefined, '', 'false']) test(`disabled token policy (${String(mode)}) tolerates rerun, deadline and App policy mismatch`, async () => {
+  const value = fixture('publish', { app: { contents: 'write' } });
+  value.env.PAWLOCAL_ONCALL_ENFORCE_GUARDS = mode;
+  value.env.GITHUB_RUN_ATTEMPT = '2';
+  value.env.INCIDENT_DEADLINE = '1';
+  await value.run();
+  assert.equal(value.writes.length, 1);
+  assert.deepEqual(JSON.parse(value.calls.at(-1).options.body).permissions, { contents: 'write', pull_requests: 'write', issues: 'write' });
+});
+test('invalid enforcement mode fails before any credential request', async () => {
+  const value = fixture('publish');
+  value.env.PAWLOCAL_ONCALL_ENFORCE_GUARDS = 'TRUE';
+  await assert.rejects(value.run(), /must be true or false/);
+  assert.equal(value.calls.length, 0);
 });

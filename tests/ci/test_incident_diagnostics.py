@@ -1,3 +1,5 @@
+import os
+from unittest.mock import patch
 import io
 import json
 import sys
@@ -25,6 +27,7 @@ def frame(fields, values):
     }
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class DiagnosticsTests(unittest.TestCase):
     def test_three_fixed_queries_bind_environment_release_and_remove_private_content(
         self,

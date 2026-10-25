@@ -5,6 +5,12 @@ import subprocess
 import sys
 import time
 
+from enforcement import enabled, skipped
+
+if not enabled():
+    skipped("deadline")
+    raise SystemExit(0)
+
 deadline = int(sys.argv[1])
 remaining = deadline - time.time()
 if not 0 < remaining <= 1200:

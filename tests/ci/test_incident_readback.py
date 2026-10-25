@@ -1,6 +1,7 @@
+import os
+from unittest.mock import patch
 """Trusted readback ownership boundary, including real distinct Linux UIDs."""
 
-import os
 import shutil
 import stat
 import subprocess
@@ -9,7 +10,6 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ops/incident-response"))
@@ -21,6 +21,7 @@ WORK = Path("/tmp/pawlocal-oncall-candidate")
 REPORT = Path("/tmp/pawlocal-oncall-review.json")
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class ReadbackTests(unittest.TestCase):
     def identity(self):
         return patch.multiple(os, getuid=lambda: 123, getgid=lambda: 456, create=True)

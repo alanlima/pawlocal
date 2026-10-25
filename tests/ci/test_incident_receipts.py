@@ -1,19 +1,20 @@
+import os
+from unittest.mock import patch
 import copy
 import json
-import os
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ops/incident-response"))
 import receipts
 import settings
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class RecoveryReceiptTests(unittest.TestCase):
     def setUp(self):
         self.now = int(time.time())
@@ -103,6 +104,7 @@ class RecoveryReceiptTests(unittest.TestCase):
                     receipts.read("production", expected, metadata, publication)
 
 
+@patch.dict(os.environ, {'PAWLOCAL_ONCALL_ENFORCE_GUARDS': 'true'})
 class ConfiguredBindingsTests(unittest.TestCase):
     def fixture(self):
         return {

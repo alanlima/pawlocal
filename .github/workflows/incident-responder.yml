@@ -29,10 +29,15 @@ concurrency:
   cancel-in-progress: false
   queue: max
 
+# Repository variable only: same-name Environment variables are unsupported.
+# Controller predicates and runner mode must use the same repository setting.
+env:
+  PAWLOCAL_ONCALL_ENFORCE_GUARDS: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS || 'false' }}
+
 jobs:
   preflight:
     name: Trusted preflight
-    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS != 'true' || (github.ref == 'refs/heads/main' && github.run_attempt == 1)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: oncall-${{ inputs.environment }}
@@ -60,6 +65,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+      - name: Record incident enforcement mode
+        run: |
+          python -c "import sys; sys.path.insert(0, 'ops/incident-response'); import enforcement; print(enforcement.evidence())" >> "$GITHUB_STEP_SUMMARY"
       - name: Start one absolute admission work budget
         id: budget
         run: python -c "import time; print('deadline=' + str(int(time.time()) + 1200))" >> "$GITHUB_OUTPUT"
@@ -156,7 +164,7 @@ jobs:
           permission-profile: ':workspace'
           working-directory: /tmp/pawlocal-oncall-candidate
           prompt-file: /home/oncall/incident-prompt.md
-          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS == 'true' && vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR || '*' }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
       - name: Show quota gateway failure diagnostics
         if: always()
@@ -228,7 +236,7 @@ jobs:
           CANDIDATE_SHA256: ${{ needs.fixer.outputs.candidate_sha256 }}
         run: python ops/incident-response/checks.py
       - uses: actions/upload-artifact@v7
-        if: steps.check.outputs.eligible == 'true'
+        if: steps.check.outputs.checks_sha256 != ''
         with:
           name: oncall-checks-${{ github.run_id }}
           path: ${{ runner.temp }}/oncall-checks/export/checks.json
@@ -238,7 +246,7 @@ jobs:
   reviewer:
     name: Fresh review
     needs: [preflight, fixer, checks]
-    if: needs.checks.outputs.eligible == 'true'
+    if: needs.checks.outputs.checks_sha256 != '' && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS != 'true' || needs.checks.outputs.eligible == 'true')
     runs-on: ubuntu-24.04
     services:
       postgres:
@@ -312,7 +320,7 @@ jobs:
           prompt-file: /home/oncall/incident-prompt.md
           output-file: /tmp/pawlocal-oncall-review.json
           output-schema-file: /home/oncall/review-schema.json
-          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR }}
+          allow-bot-users: ${{ vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS == 'true' && vars.PAWLOCAL_ONCALL_DISPATCH_ACTOR || '*' }}
           codex-args: '["--config", "service_tier=\"default\"", "--config", "web_search=\"disabled\""]'
       - name: Show quota gateway failure diagnostics
         if: always()
@@ -364,7 +372,7 @@ jobs:
         with:
           node-version: '24'
       - name: Mint separate publisher installation credential
-        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        if: needs.checks.outputs.checks_sha256 != '' && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS != 'true' || (needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'))
         env:
           INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
           PAWLOCAL_PUBLISHER_APP_ID: ${{ vars.PAWLOCAL_ONCALL_PUBLISHER_APP_ID }}
@@ -372,7 +380,7 @@ jobs:
           PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY: ${{ secrets.PAWLOCAL_ONCALL_PUBLISHER_APP_PRIVATE_KEY }}
         run: node ops/incident-response/publisher-token.mjs
       - name: Recheck protection capability before publication
-        if: needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'
+        if: needs.checks.outputs.checks_sha256 != '' && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS != 'true' || (needs.checks.outputs.eligible == 'true' && needs.reviewer.result == 'success'))
         env:
           INCIDENT_DEADLINE: ${{ needs.preflight.outputs.deadline }}
           PAWLOCAL_CREDENTIAL_PHASE: readiness
@@ -582,7 +590,7 @@ jobs:
   finalize:
     name: Record incident outcome
     needs: [preflight, fixer, checks, reviewer, publisher, merge, development_recovery, promote]
-    if: always() && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    if: always() && (vars.PAWLOCAL_ONCALL_ENFORCE_GUARDS != 'true' || (github.ref == 'refs/heads/main' && github.run_attempt == 1))
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: oncall-${{ inputs.environment }}
