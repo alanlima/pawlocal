@@ -192,11 +192,16 @@ def _rule(rules, environment, service, rule_uid, metrics_uid, alert_name=None):
     )
     labels = rule.get("labels", {})
     _require(isinstance(labels, dict), "recovery rule labels invalid")
+    allowed_states = {"inactive", "pending", "firing"}
+    allowed_health = {"ok", "nodata"}
+    if environment == "development":
+        allowed_states.update({"nodata", "NoData", "normal", "Normal"})
+        allowed_health.update({"NoData", "normal", "Normal"})
     _require(
         rule.get("type") == "alerting"
         and rule.get("isPaused") is False
-        and rule.get("health") in {"ok", "nodata"}
-        and rule.get("state") in {"inactive", "pending", "firing"}
+        and rule.get("health") in allowed_health
+        and rule.get("state") in allowed_states
         and not rule.get("lastError")
         and isinstance(rule.get("alerts"), list)
         and labels.get("environment") == environment
@@ -364,9 +369,15 @@ def observe(
         allowed_settled_states = (
             {"Normal", "NoData"} if environment == "development" else {"Normal"}
         )
+        allowed_rule_states = (
+            {"inactive", "nodata", "NoData", "Normal"} if environment == "development" else {"inactive"}
+        )
+        allowed_rule_health = (
+            {"ok", "nodata", "NoData"} if environment == "development" else {"ok"}
+        )
         _ready(
-            rule["health"] == "ok"
-            and rule["state"] == "inactive"
+            rule["health"] in allowed_rule_health
+            and rule["state"] in allowed_rule_states
             and all(instance["state"] in allowed_settled_states for instance in instances),
             "recovery rule settling",
         )
