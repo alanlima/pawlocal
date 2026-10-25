@@ -26,7 +26,11 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self.record(Path(directory), False, frontend=True)
 
-    def record(self, tmp_path, enabled, frontend=None):
+    def test_rollback_record_retains_verified_evidence_and_lineage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.record(Path(directory), True, rollback=True)
+
+    def record(self, tmp_path, enabled, frontend=None, rollback=False):
         workflow = yaml.safe_load(
             (ROOT / ".github/workflows/deploy-production.yml").read_text()
         )
@@ -65,6 +69,8 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
         (release / "production-verification.json").write_bytes(evidence_bytes)
         harness = """
     const calls = [];
+    const summary = {addHeading(){return this},addTable(){return this},addRaw(){return this},addCodeBlock(){return this},async write(){}};
+    const core = {summary};
     const context = {repo:{owner:'alanlima',repo:'pawlocal'},runId:123,serverUrl:'https://github.com'};
     const github = {rest:{repos:{
      createDeployment: async value => {calls.push(value);return {data:{id:456}}},
@@ -82,6 +88,9 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
                 "BACKEND_IMAGE": "ghcr.io/alanlima/pawlocal-api@"
                 + evidence["backend_image_digest"],
                 "ENVIRONMENT_URL": "https://pawlocal.example.test",
+                "ROLLBACK_FROM": "7309" if rollback else "",
+                "ROLLBACK_TO": "7308" if rollback else "",
+                "ROLLBACK_REASON": "Incident #404" if rollback else "",
             },
             capture_output=True,
             text=True,
@@ -108,5 +117,13 @@ class ProductionDeploymentRecordTests(unittest.TestCase):
         )
         for name in evidence.keys() - {"schema_version"}:
             assert payload[name] == evidence[name]
+        if rollback:
+            assert payload["operation"] == "rollback"
+            assert payload["rollback_from_deployment_id"] == 7309
+            assert payload["rollback_to_deployment_id"] == 7308
+            assert payload["rollback_reason"] == "Incident #404"
+        else:
+            assert "operation" not in payload
+            assert "rollback_from_deployment_id" not in payload
         assert status["deployment_id"] == 456
         assert status["state"] == "success"

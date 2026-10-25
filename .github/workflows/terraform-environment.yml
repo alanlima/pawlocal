@@ -42,6 +42,11 @@ on:
       frontend_config:
         value: ${{ jobs.reconcile-after-apply.outputs.frontend_config }}
     inputs:
+      rollback_only:
+        description: Require a strictly application-only rollback plan before transfer/apply.
+        required: false
+        default: false
+        type: boolean
       enforce_guards:
         description: Resolved incident enforcement mode from the origin on-call Environment; ordinary calls keep true.
         required: false
@@ -73,7 +78,7 @@ permissions:
   deployments: read
 
 concurrency:
-  group: ${{ contains(fromJSON('["Release · Publish and verify development","Release · Promote verified release to production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
+  group: ${{ contains(fromJSON('["Release · Publish and verify development","Release · Promote verified release to production","Release · Roll back production"]'), github.workflow) && format('pawlocal-terraform-{0}', inputs.environment) || format('pawlocal-lifecycle-{0}', inputs.environment) }}
   cancel-in-progress: false
 
 env:
@@ -474,6 +479,13 @@ jobs:
       #   env:
       #     PYTHONPATH: ops/change-authorization:ops/incident-response
       #   run: python ops/change-authorization/guards.py --mode=validate-plan --plan-file="$RUNNER_TEMP/terraform-plan.json"
+
+      - name: Reject unrelated infrastructure changes in a rollback
+        if: inputs.rollback_only
+        env:
+          PYTHONPATH: ops/change-authorization:ops/incident-response
+          PAWLOCAL_ONCALL_ENFORCE_GUARDS: 'true'
+        run: python ops/change-authorization/guards.py --mode=validate-plan --plan-file="$RUNNER_TEMP/terraform-plan.json"
 
       - name: Bind exact plan metadata
         id: metadata

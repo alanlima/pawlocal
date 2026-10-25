@@ -44,6 +44,8 @@ def schedule(jobs, route="ordinary", outcomes=None, cancel_before=None):
             expression,
         )
         expression = expression.replace("inputs.incident_environment", repr("development" if route == "incident" else ""))
+        for key, value in {"rollback_from_deployment_id": "10", "rollback_to_deployment_id": "8", "rollback_reason": "reason"}.items():
+            expression = expression.replace("inputs." + key, repr(value if route == "rollback" else ""))
         expression = expression.replace("&&", " and ").replace("||", " or ")
         expression = re.sub(r"!(?!=)", "not ", expression)
         allowed = eval(expression, {"__builtins__": {}}, {
@@ -117,6 +119,15 @@ class ProductionSchedulingTests(unittest.TestCase):
                     self.assertEqual(result[name], "success", name)
         self.assertEqual(self.jobs["verify-production"]["environment"], "production")
         self.assertTrue(self.jobs["terraform-production"]["uses"].endswith("/terraform-environment.yml"))
+
+    def test_rollback_stale_binding_failure_stops_all_release_jobs(self):
+        good = schedule(self.jobs, "rollback")
+        self.assertEqual(good["rollback-binding"], "success")
+        self.assertEqual(good["verify-production"], "success")
+        for outcome in ("failure", "cancelled"):
+            bad = schedule(self.jobs, "rollback", {"rollback-binding": outcome})
+            for name in ("workflow-binding", "terraform-production", "verify-production"):
+                self.assertEqual(bad[name], "skipped")
 
     def test_old_default_conditions_reproduce_ordinary_release_skip(self):
         for name in ("terraform-production", "verify-production"):

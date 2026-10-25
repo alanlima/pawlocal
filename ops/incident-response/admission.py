@@ -377,7 +377,10 @@ def verified_record(github, deployment, environment, *, historical=False):
         or run.get("head_repository", {}).get("id") != 1423024931
         or run.get("conclusion") != "success"
         or run.get("event") not in events
-        or run.get("path") != expected
+        or run.get("path") not in (
+            {expected, ".github/workflows/release-rollback-production.yml"}
+            if environment == "production" else {expected}
+        )
         or run.get("head_branch") != "main"
         or run.get("run_attempt") != attempt
     ):
@@ -442,6 +445,13 @@ def deployed_release(github, environment):
     selected = max(deployments, key=lambda value: value.get("created_at", ""))
     release = verified_record(github, selected, environment)
     if enabled() and environment == "production":
+        matching_development(github, release)
+    return release
+
+
+def matching_development(github, release):
+    """Require the exact pair's durable development proof, including retired success."""
+    if enabled():
         development = github.pages(
             "/deployments?environment=development&ref=" + release["affected_sha"],
             maximum=2,
@@ -462,7 +472,6 @@ def deployed_release(github, environment):
                 break
         if enabled() and (not matched):
             raise Denied("production lacks matching development-verified pair")
-    return release
 
 
 def reserve_month(github, profile, issue_number, run_id, attempt):

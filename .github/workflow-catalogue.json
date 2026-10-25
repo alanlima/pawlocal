@@ -22,7 +22,8 @@
     "incident-responder.yml": "Automation \u00b7 Recover from an application incident",
     "frontend-production-deploy.yml": "Retired \u00b7 Static frontend deployment",
     "rollback-development.yml": "Retired \u00b7 Combined-state development rollback",
-    "terraform-current-stack-operations.yml": "Retired \u00b7 Combined-state infrastructure operations"
+    "terraform-current-stack-operations.yml": "Retired \u00b7 Combined-state infrastructure operations",
+    "release-rollback-production.yml": "Release \u00b7 Roll back production"
   },
   "legacy_filenames": [
     "backend-ci.yml",

@@ -23,6 +23,41 @@ on:
         default: ''
         type: string
 
+  workflow_call:
+    inputs:
+      release_commit:
+        required: true
+        type: string
+      backend_image:
+        required: true
+        type: string
+      incident_environment:
+        required: false
+        default: ''
+        type: string
+      expected_workflow_sha:
+        required: false
+        default: ''
+        type: string
+      rollback_from_deployment_id:
+        required: true
+        type: string
+      rollback_to_deployment_id:
+        required: true
+        type: string
+      rollback_reason:
+        required: true
+        type: string
+    secrets:
+      PAWLOCAL_CONFIG_GITHUB_TOKEN:
+        required: true
+      PAWLOCAL_CLOUDFRONT_CERTIFICATE_ARN:
+        required: false
+      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN:
+        required: false
+      GRAFANA_SERVICE_ACCOUNT_TOKEN:
+        required: false
+
 permissions:
   contents: read
 
@@ -60,10 +95,36 @@ jobs:
           esac
           python ops/incident-response/enforcement.py
 
+  rollback-binding:
+    name: Revalidate rollback selection under production lifecycle lock
+    if: inputs.rollback_from_deployment_id != '' || inputs.rollback_to_deployment_id != '' || inputs.rollback_reason != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Reject stale or changed rollback target before deployment authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROLLBACK_FROM: ${{ inputs.rollback_from_deployment_id }}
+          ROLLBACK_TO: ${{ inputs.rollback_to_deployment_id }}
+          ROLLBACK_REASON: ${{ inputs.rollback_reason }}
+          RELEASE_COMMIT: ${{ inputs.release_commit }}
+          BACKEND_IMAGE: ${{ inputs.backend_image }}
+        run: python ops/rollback-production.py validate
+
   workflow-binding:
     name: Verify production workflow source binding
-    needs: incident-enforcement
-    if: always() && (needs.incident-enforcement.result == 'success' || needs.incident-enforcement.result == 'skipped')
+    needs: [incident-enforcement, rollback-binding]
+    if: always() && (needs.rollback-binding.result == 'success' || needs.rollback-binding.result == 'skipped') && (needs.incident-enforcement.result == 'success' || needs.incident-enforcement.result == 'skipped')
     outputs:
       enforce_guards: ${{ needs.incident-enforcement.outputs.enforce_guards || 'true' }}
     env:
@@ -107,6 +168,7 @@ jobs:
       backend_image: ${{ inputs.backend_image }}
       release_commit: ${{ inputs.release_commit }}
       release_only: true
+      rollback_only: ${{ inputs.rollback_from_deployment_id != '' }}
       enforce_guards: ${{ needs.workflow-binding.outputs.enforce_guards }}
     secrets:
       PAWLOCAL_CONFIG_GITHUB_TOKEN: ${{ secrets.PAWLOCAL_CONFIG_GITHUB_TOKEN }}
@@ -245,6 +307,9 @@ jobs:
           ENVIRONMENT_URL: ${{ env.PAWLOCAL_PUBLIC_BASE_URL }}
           BACKEND_IMAGE: ${{ inputs.backend_image }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
+          ROLLBACK_FROM: ${{ inputs.rollback_from_deployment_id }}
+          ROLLBACK_TO: ${{ inputs.rollback_to_deployment_id }}
+          ROLLBACK_REASON: ${{ inputs.rollback_reason }}
         with:
           script: |
             const fs = require('fs')
@@ -258,6 +323,12 @@ jobs:
               ...context.repo, ref: process.env.RELEASE_COMMIT, environment: 'production',
               production_environment: true, auto_merge: false, required_contexts: [],
               payload: {
+                ...(process.env.ROLLBACK_FROM ? {
+                  operation: 'rollback',
+                  rollback_from_deployment_id: Number(process.env.ROLLBACK_FROM),
+                  rollback_to_deployment_id: Number(process.env.ROLLBACK_TO),
+                  rollback_reason: process.env.ROLLBACK_REASON,
+                } : {}),
                 record_schema_version: 1,
                 manifest_schema_version: manifest.schema_version,
                 evidence_schema_version: evidence.schema_version,
@@ -286,3 +357,13 @@ jobs:
               log_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               description: 'Production release and public verification passed',
             })
+            if (process.env.ROLLBACK_FROM) {
+              await core.summary.addHeading('Production rollback verified')
+                .addTable([
+                  ['From deployment', process.env.ROLLBACK_FROM],
+                  ['Restored deployment', process.env.ROLLBACK_TO],
+                  ['New deployment', String(deployment.data.id)],
+                  ['Restored commit', manifest.commit],
+                  ['Backend image', process.env.BACKEND_IMAGE],
+                ]).addRaw('Reason: ').addCodeBlock(process.env.ROLLBACK_REASON.replaceAll('`', '\\u0060')).write()
+            }
