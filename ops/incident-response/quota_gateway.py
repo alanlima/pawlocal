@@ -186,7 +186,6 @@ def validate_request(body, profile):
                 )
             ):
                 raise Denied("remote namespace tools forbidden")
-    return {key: value for key, value in body.items() if key in COUNT_FIELDS}
 
 
 class Gateway:
@@ -306,7 +305,13 @@ class Gateway:
             ):
                 body.pop(field, None)
             body.setdefault("service_tier", self.profile.service_tier)
-        count_body = validate_request(body, self.profile) if enabled() else body
+        else:
+            raise Denied("Responses API request object required")
+        if enabled():
+            validate_request(body, self.profile)
+        # Counting and generation are different provider endpoint schemas.
+        # Project transport fields in both modes; this is not policy admission.
+        count_body = {key: value for key, value in body.items() if key in COUNT_FIELDS}
         # Token counting includes tool schemas, instructions and entire history.
         # Failure, unknown schema, redirect, or missing count denies inference.
         self.stage = "input_token_count"
