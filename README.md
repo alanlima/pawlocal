@@ -114,45 +114,31 @@ Ordinary changes and alert-driven repairs share the release path, with separate 
 
 ```mermaid
 flowchart TD
-  ISSUE["Public issue / scoped branch / agent work"] --> PR["Pull request"]
-  PR --> CI["Applicable Quality CI: frontend / backend / Compose / Terraform / workflow checks"]
-  PR --> ROUTE["Change authorization route"]
-  ROUTE -->|"Ordinary change"| OWNER["Protected owner approval"]
-  ROUTE -->|"Incident candidate"| INCIDENTAUTH["Incident authorization / review policies: enforcement-mode dependent"]
-  CI --> MERGE["Squash merge: owner for ordinary PR; trusted job for incident PR"]
-  OWNER --> MERGE
-  INCIDENTAUTH --> MERGE
-  MERGE --> MAIN["main: frontend / backend release checks"]
-  MAIN --> IMAGE["Publish immutable backend image to GHCR"]
-  IMAGE --> DEVTF["Terraform development plan / exact saved-plan apply"]
-  DEVTF --> DEVVERIFY["Build / publish DEV frontend; verify API / database / served release"]
-  DEVVERIFY --> EVIDENCE["Development release evidence: source commit + backend digest"]
-  EVIDENCE -->|"Ordinary release"| MANUAL["Manual production dispatch / ordinary approvals"]
-  EVIDENCE -->|"Incident release"| PROMOTER["Automatic incident promoter: mode-dependent provenance checks"]
-  MANUAL --> PRODTF["Terraform production plan / exact saved-plan apply"]
-  PROMOTER --> PRODTF
-  PRODTF --> PRODVERIFY["Build / publish PROD frontend; verify served release / API / database"]
-
-  BOOT["Separate IAM-bootstrap Terraform state: identities / trust / boundaries"] -.-> DEVTF
-  BOOT -.-> PRODTF
-  CONFIG["Parameter Store / reviewed configuration reconciliation"] -.-> DEVVERIFY
-  CONFIG -.-> PRODVERIFY
-
-  PRODVERIFY -->|"Deployed service / journey telemetry"| MONITOR["Grafana: journey signals / user-impact alerts"]
-  MONITOR -->|"Firing alert"| RECEIVER["HMAC webhook / Lambda Function URL"]
-  RECEIVER --> CONTROLLER["Incident workflow: fixer / checks / fresh reviewer; mode-dependent"]
-  CONTROLLER --> PR
-  PRODVERIFY -.-> RECOVERY["Incident controller: assess recovery / record outcome"]
+  PR["Issue / scoped branch / pull request"] --> CHECK["Applicable CI + change authorization<br/>Owner approval for ordinary changes<br/>Mode-dependent policies for incidents"]
+  CHECK --> MERGE["Squash merge<br/>Owner ordinary / trusted job incident"]
+  MERGE --> BUILD["main: frontend / backend checks<br/>Publish immutable backend image to GHCR"]
+  BUILD --> DEV["Development Terraform state<br/>Exact plan / apply → frontend publish<br/>Verify API / database / served release"]
+  DEV --> RELEASE["Verified development evidence<br/>Source commit + backend digest"]
+  RELEASE -->|"Ordinary release"| MANUAL["Manual production dispatch<br/>Ordinary approvals"]
+  RELEASE -->|"Incident release"| AUTO["Automatic incident promoter<br/>Mode-dependent provenance checks"]
+  MANUAL --> PROD["Production Terraform state<br/>Exact plan / apply → frontend rebuild / publish<br/>Verify served release / API / database"]
+  AUTO --> PROD
+  BOOT["Separate IAM-bootstrap state<br/>Identities / trust / boundaries"] -.-> DEV
+  BOOT -.-> PROD
+  PROD -->|"Service / journey telemetry"| MONITOR["Grafana dashboards<br/>User-impact alerts"]
+  MONITOR -->|"Firing alert"| RECEIVER["HMAC webhook<br/>Lambda Function URL"]
+  RECEIVER --> FIX["Incident workflow<br/>Fixer / checks / fresh reviewer<br/>Enforcement-mode dependent"]
+  FIX --> PR
+  PROD -.-> RECOVERY["Incident controller<br/>Recovery assessment / recorded outcome"]
   MONITOR -.-> RECOVERY
-  OPS["Operator runbooks: investigate / emergency stop / recovery review"] -.-> MONITOR
-  OPS -.-> CONTROLLER
+  OPS["Operator runbooks<br/>Investigate / emergency stop / recovery review"] -.-> MONITOR
 
   classDef delivery fill:#e8f1e8,stroke:#557356,color:#182b19
   classDef infrastructure fill:#edf3fa,stroke:#4e719b,color:#17283e
   classDef incident fill:#f1eafa,stroke:#8661a6,color:#30203f
-  class MAIN,IMAGE,DEVVERIFY,EVIDENCE,PRODVERIFY delivery
-  class DEVTF,PRODTF,BOOT,CONFIG infrastructure
-  class INCIDENTAUTH,PROMOTER,MONITOR,RECEIVER,CONTROLLER,RECOVERY,OPS incident
+  class BUILD,RELEASE delivery
+  class DEV,PROD,BOOT infrastructure
+  class AUTO,MONITOR,RECEIVER,FIX,RECOVERY,OPS incident
 ```
 
 Development and production use independent application states. Production selects the development-verified source/backend digest and rebuilds frontend assets with production configuration. The incident route has no runtime human approval; DEC-017 can disable software review/provenance/budget/stop/recovery checks, while external GitHub/IAM controls and exact-plan/state ownership remain. The observed drill therefore retains `RELEASE_COMPLETED_UNVERIFIED`. DEC-015 separately disables shared strict release-only rejection. See the [Actions catalogue](docs/github-actions.md) and [canonical enforcement matrix](docs/oncall-setup.md#temporary-incident-enforcement-mode-375--dec-017). Documentation-only changes do not automatically run every application workflow; final rollback acceptance remains with the owner.
