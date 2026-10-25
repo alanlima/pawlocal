@@ -36,7 +36,7 @@ paths:
               $ref: '#/components/schemas/Notification'
       responses:
         '204':
-          description: GitHub returned exactly HTTP 204 accepting the fixed workflow dispatch; execution is not yet verified.
+          description: Valid resolved-only notification acknowledged without dispatch, or GitHub returned exactly HTTP 204 accepting firing-only workflow dispatch; execution is not yet verified.
         '400':
           description: Invalid body/schema/date/group status/duplicate group entry/query/length.
         '401':
@@ -81,7 +81,7 @@ components:
           maxItems: 20
           items:
             $ref: '#/components/schemas/Alert'
-      description: Resolved groups contain only resolved alerts; firing groups contain at least one firing alert.
+      description: Resolved groups contain only resolved alerts and are acknowledged without dispatch. Firing groups contain at least one firing alert; only firing children are dispatched.
     Alert:
       type: object
       required: [status, labels, fingerprint, startsAt, endsAt]

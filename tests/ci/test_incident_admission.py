@@ -404,7 +404,7 @@ class AdmissionTests(unittest.TestCase):
         with self.assertRaises(admission.Denied):
             admission.alerts(json.dumps([alert(), alert()]), "development")
 
-    def run_preflight(self, fake, current=True, reserve_error=False, profile_changes=None, enforce_guards="true", alert_changes=None):
+    def run_preflight(self, fake, current=True, reserve_error=False, profile_changes=None, enforce_guards="true", alert_changes=None, received_alerts=None):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             output.touch()
@@ -423,7 +423,7 @@ class AdmissionTests(unittest.TestCase):
                 "SCHEMA_VERSION": "1",
                 "PAWLOCAL_MODEL_PROFILE": json.dumps(profile.__dict__),
                 "INCIDENT_ENVIRONMENT": "development",
-                "ALERTS_JSON": json.dumps([alert() | (alert_changes or {})]),
+                "ALERTS_JSON": json.dumps(received_alerts if received_alerts is not None else [alert() | (alert_changes or {})]),
                 "GH_TOKEN": "fixture",
                 "GRAFANA_STACK_URL": "https://fixture.grafana.net",
                 "PAWLOCAL_GRAFANA_QUERY_TOKEN": "fixture",
@@ -461,6 +461,37 @@ class AdmissionTests(unittest.TestCase):
             return output.read_text(), json.loads(
                 metadata_path.read_text()
             ) if metadata_path.exists() else None
+
+    def test_resolved_only_does_not_load_profile_bindings_or_touch_github(self):
+        resolved = alert() | {"status": "resolved", "ends_at": "2026-10-02T00:00:00.000Z"}
+        for mode in ("false", "true"):
+            fake = FakeGitHub()
+            with (
+                self.subTest(mode=mode),
+                patch.object(admission.Profile, "load", side_effect=AssertionError("profile loaded")),
+                patch.object(admission, "check_ledger", side_effect=AssertionError("quota read")),
+                patch.object(admission, "reserve_month", side_effect=AssertionError("quota reserved")),
+            ):
+                output, metadata = self.run_preflight(fake, enforce_guards=mode, received_alerts=[resolved])
+            self.assertIn("admitted=false", output)
+            self.assertIsNone(metadata)
+            self.assertEqual(fake.calls, [])
+
+    def test_mixed_group_selects_firing_after_resolved_in_both_modes(self):
+        resolved = alert() | {"status": "resolved", "ends_at": "2026-10-02T00:00:00.000Z"}
+        firing = alert() | {"fingerprint": "b" * 16}
+        firing["incident_key"] = hashlib.sha256(json.dumps(
+            [firing["environment"], firing["fingerprint"], firing["starts_at"]], separators=(",", ":")
+        ).encode()).hexdigest()
+        for mode in ("false", "true"):
+            fake = FakeGitHub()
+            with self.subTest(mode=mode):
+                output, metadata = self.run_preflight(fake, enforce_guards=mode, received_alerts=[resolved, firing])
+                self.assertIn("admitted=true", output)
+                self.assertEqual(metadata["alert"], firing)
+                claims = [data for method, path, data in fake.calls if method == "POST" and path == "/issues"]
+                self.assertEqual(len(claims), 1)
+                self.assertNotIn(resolved["incident_key"], claims[0]["body"])
 
     def test_claim_precedes_monthly_reservation_and_model_metadata(self):
         fake = FakeGitHub()

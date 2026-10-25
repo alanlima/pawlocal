@@ -353,7 +353,7 @@ jobs:
   publisher:
     name: Publish incident PR
     needs: [preflight, fixer, checks, reviewer]
-    if: always() && needs.preflight.outputs.admitted == 'true' && needs.fixer.outputs.candidate_sha256 != ''
+    if: ${{ !cancelled() && needs.preflight.outputs.admitted == 'true' && needs.fixer.outputs.candidate_sha256 != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: oncall-${{ inputs.environment }}
