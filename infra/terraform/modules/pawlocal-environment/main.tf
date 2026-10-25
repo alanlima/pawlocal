@@ -385,6 +385,19 @@ module "dsql_post_apply_setup" {
   ]
 }
 
+# Recovery phase: retain existing ownership until both services have detached.
+# domain_name is computed by the provider; no obsolete hostname is configured.
+# Remove this block only after development and production readback confirms detach.
+resource "aws_lightsail_certificate" "api" {
+  name       = "${local.resource_names.container_service}-cert"
+  tags       = local.common_tags
+  depends_on = [time_sleep.application_permissions_propagation]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "aws_lightsail_container_service" "api" {
   name        = local.resource_names.container_service
   power       = var.container_power

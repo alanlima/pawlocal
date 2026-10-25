@@ -100,7 +100,11 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn('origin_path', origins)
         self.assertNotIn('function_association', origins)
         self.assertNotIn('resource "aws_route53_record" "api"', source)
-        self.assertNotIn('resource "aws_lightsail_certificate" "api"', source)
+        certificate = source.split('resource "aws_lightsail_certificate" "api" {', 1)[1].split('resource "aws_lightsail_container_service"', 1)[0]
+        self.assertIn('prevent_destroy = true', certificate)
+        self.assertNotIn('domain_name =', certificate)
+        self.assertNotIn('domain_name  =', certificate)
+        self.assertNotIn('subject_alternative_names', certificate)
         service = source.split('resource "aws_lightsail_container_service" "api" {', 1)[1].split('locals {', 1)[0]
         self.assertNotIn('public_domain_names', service)
         self.assertNotIn('aws_cloudfront_distribution', service)
