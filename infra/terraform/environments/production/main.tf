@@ -23,7 +23,7 @@ module "pawlocal" {
   cloudfront_distribution_arn = var.cloudfront_distribution_arn
   cloudfront_oac_arn          = var.cloudfront_oac_arn
   teardown_enabled            = var.teardown_enabled
-  container_power             = "medium"
+  container_power             = "micro"
   container_scale             = 1
 
   cognito_pre_sign_up_role_arn = var.cognito_pre_sign_up_role_arn
