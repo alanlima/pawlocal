@@ -72,16 +72,15 @@ run "tagged_create_permissions_are_size_safe" {
       local.cognito_pre_sign_up_name == "pawlocal-development-cognito-pre-signup" &&
       local.resource_names.container_service == "pawlocal-development-api" &&
       aws_lightsail_container_service.api.name == "pawlocal-development-api" &&
-      length(aws_lightsail_container_service.api.public_domain_names) == 1 &&
-      one(one(aws_lightsail_container_service.api.public_domain_names).certificate).domain_names == tolist(["api-dev.example.test"])
+      length(aws_lightsail_container_service.api.public_domain_names) == 0
     )
-    error_message = "The default flag must preserve the original service identity and certificate domain attachment."
+    error_message = "Lightsail must retain its service identity without a custom-domain certificate."
   }
 
   assert {
     condition = (
-      strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:CreateCertificate") &&
-      strcontains(data.aws_iam_policy_document.application.minified_json, "Certificate/*") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:CreateCertificate") &&
+      !strcontains(data.aws_iam_policy_document.application.minified_json, "Certificate/*") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:DeleteCertificate") &&
       strcontains(data.aws_iam_policy_document.application.minified_json, "lightsail:UpdateContainerService") &&
       toset(flatten([one([
@@ -95,7 +94,7 @@ run "tagged_create_permissions_are_size_safe" {
         if statement.Sid == "ChangeOnlyEnvironmentDNSNames"
       ])])) == toset(["A", "AAAA"])
     )
-    error_message = "Application permissions must retain tagged certificate creation/ownership and scoped frontend DNS; validation CNAME permission is separate and bootstrap owns independent lifecycle DNS deletion."
+    error_message = "Application permissions must manage only frontend DNS and retain certificate deletion/service detachment without obsolete certificate creation or tagging; bootstrap owns independent lifecycle DNS deletion."
   }
 
   assert {

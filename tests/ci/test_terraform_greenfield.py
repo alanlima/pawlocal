@@ -100,23 +100,16 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn('origin_path', origins)
         self.assertNotIn('function_association', origins)
         self.assertNotIn('resource "aws_route53_record" "api"', source)
-        certificate = source.split('resource "aws_lightsail_certificate" "api" {', 1)[1].split('resource "aws_lightsail_container_service"', 1)[0]
-        self.assertIn('prevent_destroy = true', certificate)
-        self.assertIn('domain_name = local.legacy_certificate_domain', certificate)
-        self.assertNotIn('count', certificate)
-        self.assertNotIn('subject_alternative_names', certificate)
+        self.assertNotIn('resource "aws_lightsail_certificate" "api"', source)
+        self.assertNotIn('resource "aws_route53_record" "api_certificate_validation"', source)
+        self.assertNotIn("legacy_certificate_domain", source)
+        self.assertNotIn("detach_lightsail_certificate", (ROOT / "infra/terraform/modules/pawlocal-environment/variables.tf").read_text(encoding="utf-8"))
+        for environment in ("development", "production"):
+            root = (ROOT / f"infra/terraform/environments/{environment}/main.tf").read_text(encoding="utf-8")
+            self.assertNotIn("detach_lightsail_certificate", root)
         service = source.split('resource "aws_lightsail_container_service" "api" {', 1)[1].split('locals {', 1)[0]
-        self.assertIn('dynamic "public_domain_names"', service)
-        self.assertIn('var.detach_lightsail_certificate ? [] : [true]', service)
-        self.assertIn('domain_names     = [local.legacy_certificate_domain]', service)
+        self.assertNotIn('public_domain_names', service)
         self.assertNotIn('aws_cloudfront_distribution', service)
-        for environment in ('development', 'production'):
-            root = (ROOT / f'infra/terraform/environments/{environment}/main.tf').read_text(encoding='utf-8')
-            self.assertRegex(root, r'detach_lightsail_certificate\s*=\s*true')
-        inputs = (ROOT / 'infra/terraform/modules/pawlocal-environment/variables.tf').read_text(encoding='utf-8')
-        flag = inputs.split('variable "detach_lightsail_certificate" {', 1)[1].split('}', 1)[0]
-        self.assertRegex(flag, r'default\s*=\s*false')
-        self.assertRegex(flag, r'nullable\s*=\s*false')
 
     def test_environment_creation_roots_wait_for_application_permissions(self) -> None:
         module = (ROOT / "infra/terraform/modules/pawlocal-environment/main.tf").read_text(
@@ -364,8 +357,9 @@ class GreenfieldTerraformTests(unittest.TestCase):
         self.assertNotIn('"s3:PutPublicAccessBlock"', module_permissions)
         self.assertIn('"s3:GetBucket*", "s3:Get*Configuration"', boundary)
         self.assertNotIn('"s3:Get*"', boundary)
-        self.assertIn('Certificate/*', module_permissions)
-        self.assertIn('lightsail:CreateCertificate', module_permissions)
+        self.assertNotIn('Certificate/*', module_permissions)
+        self.assertNotIn('lightsail:CreateCertificate', module_permissions)
+        self.assertNotIn("ValidateOnlyLegacyCertificateDNS", module_permissions)
         self.assertIn('lightsail:DeleteCertificate', module_permissions)
         self.assertNotIn('retired_api_hostname', module_main)
         self.assertIn('Certificate/*', boundary)
