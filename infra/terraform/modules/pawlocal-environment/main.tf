@@ -18,6 +18,8 @@ locals {
   cognito_pre_sign_up_role_arn         = coalesce(var.cognito_pre_sign_up_role_arn, local.default_cognito_pre_sign_up_role_arn)
 
   frontend_hostname = "${local.frontend_label}.${trimsuffix(var.root_domain, ".")}"
+  # Certificate identity/creation input only; never published as an API endpoint.
+  legacy_certificate_domain = "${var.environment == "development" ? "api-dev" : "api"}.${trimsuffix(var.root_domain, ".")}"
   common_tags = {
     project     = var.project_name
     environment = var.environment
@@ -385,6 +387,29 @@ module "dsql_post_apply_setup" {
   ]
 }
 
+# Keep the original address/name and valid creation inputs in every mode.
+# Detachment changes only the service association, never certificate ownership.
+resource "aws_lightsail_certificate" "api" {
+  name        = "${local.resource_names.container_service}-cert"
+  domain_name = local.legacy_certificate_domain
+  tags        = local.common_tags
+  depends_on  = [time_sleep.application_permissions_propagation]
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Retain the original validation record identity for issuance and renewal.
+# This CNAME validates the certificate; it does not route API requests.
+resource "aws_route53_record" "api_certificate_validation" {
+  zone_id = var.route53_zone_id
+  name    = one(aws_lightsail_certificate.api.domain_validation_options).resource_record_name
+  type    = one(aws_lightsail_certificate.api.domain_validation_options).resource_record_type
+  records = [one(aws_lightsail_certificate.api.domain_validation_options).resource_record_value]
+  ttl     = 60
+}
+
 resource "aws_lightsail_container_service" "api" {
   name        = local.resource_names.container_service
   power       = var.container_power
@@ -392,7 +417,17 @@ resource "aws_lightsail_container_service" "api" {
   is_disabled = false
   tags        = local.common_tags
 
-  depends_on = [time_sleep.application_permissions_propagation]
+  dynamic "public_domain_names" {
+    for_each = var.detach_lightsail_certificate ? [] : [true]
+    content {
+      certificate {
+        certificate_name = aws_lightsail_certificate.api.name
+        domain_names     = [local.legacy_certificate_domain]
+      }
+    }
+  }
+
+  depends_on = [time_sleep.application_permissions_propagation, aws_route53_record.api_certificate_validation]
 }
 
 locals {

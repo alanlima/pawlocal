@@ -31,6 +31,8 @@ on:
       - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
+      - "tests/ci/test_terraform_certificate_detach_ordering.py"
+      - "tests/ci/fixtures/certificate-detach-ordering/**"
       - "tests/ci/test_terraform_production_lifecycle.py"
       - "tests/ci/test_cognito_terraform_workflow.py"
       - '!**/*.md'
@@ -67,6 +69,8 @@ on:
       - ".github/workflows/terraform-environment-destroy.yml"
       - "tests/ci/test_dsql_setup_terraform_lifecycle.py"
       - "tests/ci/test_terraform_greenfield.py"
+      - "tests/ci/test_terraform_certificate_detach_ordering.py"
+      - "tests/ci/fixtures/certificate-detach-ordering/**"
       - "tests/ci/test_terraform_production_lifecycle.py"
       - "tests/ci/test_cognito_terraform_workflow.py"
       - '!**/*.md'
@@ -152,6 +156,10 @@ jobs:
             terraform test -filter=tests/configuration_reader.tftest.hcl -no-color -json -verbose > "$RUNNER_TEMP/reader-test.jsonl"
             python ../../../tests/ci/check_configuration_reader_policy.py "$RUNNER_TEMP/reader-test.jsonl"
           fi
+
+      - name: Verify certificate detach and destroy execution ordering
+        if: matrix.root == 'modules/pawlocal-environment'
+        run: python ../../../../tests/ci/test_terraform_certificate_detach_ordering.py -v
 
       - name: Test Cognito pre sign-up trigger
         if: matrix.root == 'modules/pawlocal-environment'

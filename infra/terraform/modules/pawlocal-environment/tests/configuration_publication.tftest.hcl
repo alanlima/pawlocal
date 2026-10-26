@@ -145,6 +145,7 @@ run "converged_production_publishes_its_own_managed_api_values" {
 
 run "shared_cloudfront_routes_api_without_spa_or_caching" {
   command = plan
+  variables { detach_lightsail_certificate = true }
   providers = {
     aws                    = aws.test
     aws.cognito_deployment = aws.cognito_test

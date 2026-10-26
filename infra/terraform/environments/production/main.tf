@@ -9,6 +9,8 @@ module "pawlocal" {
 
   oncall_receiver = var.oncall_receiver
 
+  detach_lightsail_certificate = true
+
   environment                 = "production"
   aws_region                  = var.aws_region
   project_name                = var.project_name
