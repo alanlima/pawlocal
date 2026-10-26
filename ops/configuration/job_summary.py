@@ -171,6 +171,7 @@ class Report:
                 "Unchanged",
                 "Secret write accepted",
                 "Missing source",
+                "Invalid source",
                 "Missing target",
                 "Missing required source",
                 "Missing optional source",
