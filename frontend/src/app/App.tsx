@@ -39,6 +39,7 @@ import type {
 } from '../types/place'
 import { recordOperation } from '../observability/telemetry'
 import { buildIdentity } from './buildIdentity'
+import './discoveryLayout.css'
 
 const categories: { id: PlaceCategory | ''; label: string; icon: typeof PawPrint }[] = [
   { id: '', label: 'All places', icon: PawPrint },
@@ -64,6 +65,8 @@ export default function App() {
     places,
     loading,
     error,
+    hasLoaded,
+    resultsRevision,
     updateQuery: searchPlaces,
     refresh,
   } = useDiscovery(placeService)
@@ -87,8 +90,8 @@ export default function App() {
   const [view, setCurrentView] = useState<'explore' | 'favourites'>('explore')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [paginatedRevision, setPaginatedRevision] = useState(resultsRevision)
   const updateQuery = (nextQuery: PlaceQuery) => {
-    setPage(1)
     searchPlaces(nextQuery)
   }
   const setView = (nextView: typeof view) => {
@@ -172,7 +175,9 @@ export default function App() {
     [places, favourites, view],
   )
   const totalPages = Math.max(1, Math.ceil(visiblePlaces.length / pageSize))
-  const currentPage = Math.min(page, totalPages)
+  // Keep the current page intact until a new search result is ready to display.
+  const currentPage = paginatedRevision === resultsRevision ? Math.min(page, totalPages) : 1
+  if (paginatedRevision !== resultsRevision) setPaginatedRevision(resultsRevision)
   // Persist the clamped page so newly added favourites cannot restore a stale page.
   if (page !== currentPage) setPage(currentPage)
   const pageStart = (currentPage - 1) * pageSize
@@ -541,75 +546,82 @@ export default function App() {
               </div>
             )}
             <div className="result-line">
-              <span>
+              <span aria-live="polite" aria-atomic="true">
                 {loading
-                  ? 'Finding your places…'
-                  : `${visiblePlaces.length} lovely ${visiblePlaces.length === 1 ? 'place' : 'places'} to explore`}
+                  ? !error && places.length > 0
+                    ? 'Finding your places\u2026 Previous results are shown below.'
+                    : 'Finding your places\u2026'
+                  : error
+                    ? 'Search interrupted. Please try again.'
+                    : `${visiblePlaces.length} lovely ${visiblePlaces.length === 1 ? 'place' : 'places'} to explore`}
               </span>
             </div>
-            {!loading && !error && visiblePlaces.length > 0 && (
-              <Pagination
-                itemLabel="places"
-                pageSizeLabel="Places per page"
-                ariaLabel="Place list pagination"
-                page={currentPage}
-                pageSize={pageSize}
-                total={visiblePlaces.length}
-                onPageChange={setPage}
-                onPageSizeChange={(size) => {
-                  setPageSize(size)
-                  setPage(1)
-                }}
-              />
-            )}
-            {loading ? (
-              <div className="place-grid" aria-label="Loading places">
-                {[1, 2, 3].map((number) => (
-                  <div className="skeleton-card" key={number}>
-                    <div />
-                    <span />
-                    <span />
-                  </div>
-                ))}
-              </div>
-            ) : error ? (
-              <div className="state-card">
-                <div className="state-icon">↻</div>
-                <h3>We couldn't find the places</h3>
-                <p>Something interrupted the search. Give it another go.</p>
-                <button className="primary-button" onClick={() => void refresh()}>
-                  Try again
-                </button>
-              </div>
-            ) : visiblePlaces.length === 0 ? (
-              <div className="state-card">
-                <div className="state-icon">⌕</div>
-                <h3>No spots on this search</h3>
-                <p>Try a different area or clear a filter to see more places.</p>
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    setView('explore')
-                    updateQuery({ q: '', area: '', category: '', facilities: [] })
-                  }}
-                >
-                  Clear all filters <ArrowUpRight size={15} />
-                </button>
-              </div>
-            ) : (
-              <div className="place-grid">
-                {paginatedPlaces.map((place, index) => (
-                  <FeaturePlaceCard
-                    key={place.id}
-                    place={place}
-                    index={index}
-                    saved={favourites.includes(place.id)}
-                    onOpen={() => void openPlace(place)}
-                    onSave={() => void toggleFavourite(place)}
+            <section className="discovery-results" aria-label="Places" aria-busy={loading}>
+              <div className="results-pagination">
+                {!error && visiblePlaces.length > 0 && (
+                  <Pagination
+                    itemLabel="places"
+                    pageSizeLabel="Places per page"
+                    ariaLabel="Place list pagination"
+                    page={currentPage}
+                    pageSize={pageSize}
+                    total={visiblePlaces.length}
+                    onPageChange={setPage}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size)
+                      setPage(1)
+                    }}
                   />
-                ))}
+                )}
               </div>
-            )}
+              {!hasLoaded ? (
+                <div className="place-grid" aria-label="Loading places">
+                  {[1, 2, 3, 4].map((number) => (
+                    <div className="skeleton-card" key={number}>
+                      <div />
+                      <span />
+                      <span />
+                    </div>
+                  ))}
+                </div>
+              ) : error ? (
+                <div className="state-card">
+                  <div className="state-icon">↻</div>
+                  <h3>We couldn't find the places</h3>
+                  <p>Something interrupted the search. Give it another go.</p>
+                  <button className="primary-button" onClick={() => void refresh()}>
+                    Try again
+                  </button>
+                </div>
+              ) : visiblePlaces.length === 0 ? (
+                <div className="state-card">
+                  <div className="state-icon">⌕</div>
+                  <h3>No spots on this search</h3>
+                  <p>Try a different area or clear a filter to see more places.</p>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setView('explore')
+                      updateQuery({ q: '', area: '', category: '', facilities: [] })
+                    }}
+                  >
+                    Clear all filters <ArrowUpRight size={15} />
+                  </button>
+                </div>
+              ) : (
+                <div className="place-grid">
+                  {paginatedPlaces.map((place) => (
+                    <FeaturePlaceCard
+                      key={place.id}
+                      place={place}
+                      saved={favourites.includes(place.id)}
+                      onOpen={() => void openPlace(place)}
+                      onSave={() => void toggleFavourite(place)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
             <div className="community-banner">
               <div className="banner-spark">✳</div>
               <div>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { placeService } from '../services'
@@ -60,6 +60,26 @@ describe('place list pagination', { timeout: 20_000 }, () => {
     await user.click(screen.getByRole('button', { name: 'Previous' }))
     expect(pagination()).toHaveTextContent('Showing 81–100 of 105 places')
     expect(placeService.listPlaces).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps page two while searching and resets to page one when many new results arrive', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByText(/Showing 1\u201320 of 105 places/)
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    let resolve!: (value: typeof places) => void
+    vi.mocked(placeService.listPlaces).mockReturnValue(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    await user.type(screen.getByLabelText('Search places or areas'), 'x')
+    expect(pagination()).toHaveTextContent('Page 2 of 6')
+    expect(cards()).toHaveLength(20)
+    expect(screen.getByRole('button', { name: 'View Pagination fixture 21' })).toBeVisible()
+    await act(async () => resolve([...places]))
+    await waitFor(() => expect(pagination()).toHaveTextContent('Page 1 of 6'))
+    expect(screen.getByRole('button', { name: 'View Pagination fixture 1' })).toBeVisible()
   })
 
   it('offers exactly the five requested sizes and resets each size change to page one', async () => {

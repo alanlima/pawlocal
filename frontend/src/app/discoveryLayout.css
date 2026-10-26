@@ -1,0 +1,39 @@
+/* Auto margins in the column shell must not shrink the frame to its contents. */
+.content-wrap {
+  width: min(1200px, 87.6%);
+  min-width: 0;
+}
+
+/* Reserve one useful row, rather than a full page of empty card slots. */
+.discovery-results {
+  min-height: 340px;
+}
+
+.results-pagination {
+  min-height: 64px;
+}
+
+.place-grid {
+  align-items: start;
+}
+
+.place-name,
+.place-area {
+  overflow-wrap: anywhere;
+}
+
+.place-area svg {
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .content-wrap {
+    width: 90%;
+  }
+}
+
+@media (max-width: 650px) {
+  .discovery-results {
+    min-height: 310px;
+  }
+}

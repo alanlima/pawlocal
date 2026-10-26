@@ -57,4 +57,31 @@ describe('useDiscovery', () => {
     unmount()
     expect(signals[1].aborted).toBe(true)
   })
+  it('retains settled results and errors until the latest request finishes', async () => {
+    const pending = deferred<typeof demoPlaces>()
+    const service = {
+      listPlaces: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockRejectedValueOnce(new Error('failure'))
+        .mockReturnValueOnce(pending.promise),
+    } as unknown as PlaceService
+    const { result } = renderHook(() => useDiscovery(service))
+    expect(result.current.hasLoaded).toBe(false)
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true))
+    act(() => {
+      void result.current.refresh()
+    })
+    await waitFor(() => expect(result.current.error).toBe(true))
+    act(() => {
+      void result.current.refresh()
+    })
+    expect(result.current.loading).toBe(true)
+    expect(result.current.error).toBe(true)
+    expect(result.current.hasLoaded).toBe(true)
+    await act(async () => pending.resolve([demoPlaces[0]]))
+    expect(result.current.places).toEqual([demoPlaces[0]])
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBe(false)
+  })
 })
