@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -74,7 +75,7 @@ class SummaryTests(unittest.TestCase):
                 patch.object(
                     module, "parameter_store", return_value=module.ParameterStore(ssm)
                 ),
-                contextlib.redirect_stdout(io.StringIO()),
+                contextlib.redirect_stdout(io.StringIO()) as messages,
                 contextlib.redirect_stderr(io.StringIO()) as errors,
             ):
                 status = module.main(
@@ -86,6 +87,7 @@ class SummaryTests(unittest.TestCase):
                         mode,
                     ]
                 )
+            self.last_messages = messages.getvalue()
             self.last_errors = errors.getvalue()
             output_path = Path(directory) / "outputs"
             self.last_outputs = output_path.read_text() if output_path.is_file() else ""
@@ -120,6 +122,175 @@ class SummaryTests(unittest.TestCase):
                     if source_failure:
                         self.assertIn("AccessDeniedException", self.last_errors)
                         self.assertFalse(any(r.method != "GET" for r in api.calls))
+
+    def test_available_valid_rows_sync_while_legacy_api_rows_stay_untouched(self):
+        for environment in ("development", "production"):
+            data = values(environment)
+            legacy_host = (
+                "api-dev.example.test"
+                if environment == "development"
+                else "api.example.test"
+            )
+            data["VITE_API_BASE_URL"] = f"https://{legacy_host}/api/v1"
+            data["PAWLOCAL_API_HEALTH_URL"] = f"https://{legacy_host}/health"
+            rejected = {"VITE_API_BASE_URL", "PAWLOCAL_API_HEALTH_URL"}
+            for strict in (False, True):
+                with self.subTest(environment=environment, strict=strict):
+                    api = FakeAPI()
+                    # A skipped stale destination is never deleted or replaced
+                    # with a guessed shared-domain value.
+                    api.variables[(environment, "VITE_API_BASE_URL")] = data[
+                        "VITE_API_BASE_URL"
+                    ]
+                    status, content, _ = self.execute(
+                        environment=environment,
+                        data=data,
+                        api=api,
+                        fail_on_error=strict,
+                    )
+                    self.assertEqual(status, int(strict))
+                    self.assertEqual(self.last_outputs, "summary_written=true\n")
+                    self.assertIn("Invalid source", content)
+                    self.assertIn("**FAILED**" if strict else "**INCOMPLETE**", content)
+                    if not strict:
+                        self.assertIn("::warning::", self.last_errors)
+                    for value in data.values():
+                        self.assertNotIn(value, self.last_messages)
+                    for mapping in mappings(environment):
+                        key = (mapping.github_environment, mapping.env_name)
+                        if mapping.env_name in rejected:
+                            self.assertIn(
+                                f"invalid-source {mapping.github_environment}/{mapping.env_name}",
+                                self.last_messages,
+                            )
+                            continue
+                        if not strict:
+                            self.assertEqual(api.variables[key], data[mapping.env_name])
+                    self.assertEqual(
+                        api.variables[(environment, "VITE_API_BASE_URL")],
+                        data["VITE_API_BASE_URL"],
+                    )
+                    self.assertFalse(
+                        any(
+                            request.method != "GET"
+                            and any(
+                                name in request.full_url
+                                or name
+                                in json.loads(request.data or b"{}").get("name", "")
+                                for name in rejected
+                            )
+                            for request in api.calls
+                        )
+                    )
+                    if strict:
+                        self.assertTrue(
+                            all(request.method == "GET" for request in api.calls)
+                        )
+
+    def test_invalid_anchors_reject_dependants_without_blocking_independent_values(
+        self,
+    ):
+        account_dependants = module.PREFLIGHT_FIELDS | {"PAWLOCAL_DEPLOY_ROLE_ARN"}
+        url_dependants = {
+            "PAWLOCAL_PUBLIC_BASE_URL",
+            "PAWLOCAL_API_HEALTH_URL",
+            "VITE_API_BASE_URL",
+            "VITE_COGNITO_REDIRECT_URI",
+            "VITE_COGNITO_LOGOUT_URI",
+        }
+        for environment in ("development", "production"):
+            for anchor, invalid, rejected in (
+                ("PAWLOCAL_AWS_ACCOUNT_ID", "invalid-account", account_dependants),
+                (
+                    "PAWLOCAL_PUBLIC_BASE_URL",
+                    "http://invalid.example.test",
+                    url_dependants,
+                ),
+            ):
+                with self.subTest(environment=environment, anchor=anchor):
+                    data = values(environment)
+                    data[anchor] = invalid
+                    status, content, api = self.execute(
+                        environment=environment, data=data, fail_on_error=False
+                    )
+                    self.assertEqual(status, 0)
+                    self.assertIn("**INCOMPLETE**", content)
+                    self.assertEqual(self.last_outputs, "summary_written=true\n")
+                    self.assertTrue(
+                        all(name not in rejected for _, name in api.variables)
+                    )
+                    self.assertEqual(
+                        api.variables[(environment, "VITE_COGNITO_CLIENT_ID")],
+                        data["VITE_COGNITO_CLIENT_ID"],
+                    )
+                    self.assertEqual(
+                        api.variables[(environment, "VITE_COGNITO_DOMAIN")],
+                        data["VITE_COGNITO_DOMAIN"],
+                    )
+
+    def test_warning_subset_preserves_account_environment_and_domain_crosschecks(self):
+        for environment in ("development", "production"):
+            data = values(environment)
+            data["PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN"] = data[
+                "PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN"
+            ].replace("123456789012", "222222222222")
+            data["VITE_COGNITO_LOGOUT_URI"] = data["VITE_COGNITO_LOGOUT_URI"].replace(
+                "example.test", "foreign.test"
+            )
+            other = "production" if environment == "development" else "development"
+            data["VITE_COGNITO_DOMAIN"] = values(other)["VITE_COGNITO_DOMAIN"]
+            status, _, api = self.execute(
+                environment=environment, data=data, fail_on_error=False
+            )
+            self.assertEqual(status, 0)
+            self.assertEqual(self.last_outputs, "summary_written=true\n")
+            rejected = {
+                "PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN",
+                "VITE_COGNITO_LOGOUT_URI",
+                "VITE_COGNITO_DOMAIN",
+            }
+            self.assertTrue(all(name not in rejected for _, name in api.variables))
+            self.assertEqual(
+                api.variables[(environment, "VITE_COGNITO_CLIENT_ID")],
+                data["VITE_COGNITO_CLIENT_ID"],
+            )
+
+    def test_invalid_subset_does_not_swallow_source_or_uncertain_destination_errors(
+        self,
+    ):
+        data = values("development")
+        data["VITE_API_BASE_URL"] = "https://api-dev.example.test/api/v1"
+        for source_failure in (True, False):
+            api = FakeAPI()
+            if not source_failure:
+                api.mismatch = True
+            status, content, _ = self.execute(
+                data=data,
+                api=api,
+                fail_on_error=False,
+                source_error=RuntimeError("AccessDeniedException: ssm:GetParameter")
+                if source_failure
+                else None,
+            )
+            self.assertEqual(status, 0)
+            self.assertIn("**FAILED**", content)
+            self.assertEqual(self.last_outputs, "summary_written=true\n")
+            if source_failure:
+                self.assertTrue(all(request.method == "GET" for request in api.calls))
+                self.assertIn("AccessDeniedException", self.last_errors)
+                self.assertNotIn("invalid-source", self.last_messages)
+            else:
+                self.assertIn("Accepted mutation, verification incomplete", content)
+                self.assertEqual(len(api.variables), 1)
+
+    def test_optional_missing_source_keeps_existing_warning_snapshot_contract(self):
+        data = values("development")
+        data.pop("VITE_FARO_COLLECTOR_URL")
+        status, content, _ = self.execute(data=data, fail_on_error=False)
+        self.assertEqual(status, 0)
+        self.assertIn("**SUCCESS WITH WARNINGS**", content)
+        self.assertIn("reconciled=true", self.last_outputs)
+        self.assertIn("frontend_config=", self.last_outputs)
 
     def test_only_successful_complete_reporting_confirms_workflow_outputs(self):
         status, _, _ = self.execute(fail_on_error=False)

@@ -76,7 +76,7 @@ GLOBALS = {
 }
 DYNAMIC_READERS = {
     "ops/configuration/tests/test_integration.py": "6a6d9d3c31054a1eb60316bab018093e6529b8e584fefc5daf1de5a16891ca0a",
-    "ops/configuration/tests/test_job_summary.py": "bdbac3edd26f3b5dc889ff3aacee998bcd39e68669949fa2541185825a0f96e5",
+    "ops/configuration/tests/test_job_summary.py": "5c0f69e390bc4c433e6730d7ec0d6f23393f6e69a4bb992982c2b4c802b7918d",
     "ops/configuration/tests/test_reconcile.py": "98dcf2e0764a561fc641b90f4763e1d052201f5a2d0bf71a5b4af30c19612c9a",
     "ops/incident-response/settings.py": "7fdb481adb4b1be232a2619a4960d7ee96538f57ba9f53b7a2b2d6cc72732399",
     "ops/tests/test_validate_seeded_places.py": "88f5748f233258e54d7fbbd2762e812279a24208778d2dbe0c6ab25eb1c6f268",

@@ -1,7 +1,8 @@
 """Allowlisted Parameter Store -> GitHub Environment reconciliation.
 
 Reports contain names/statuses only. Audit warns about missing values;
-enforce validates all selected values before writing. Existing release gates remain.
+strict validation precedes writes; warning mode skips invalid public rows.
+Existing release gates remain.
 """
 
 from __future__ import annotations
@@ -62,10 +63,14 @@ def inventory_mappings(environment):
     )
 
 
-def validate_values(values, environment):
+def validate_values(values, environment, names=None):
     """Validate canonical public formats without logging values or inventing IDs."""
     account = values.get("PAWLOCAL_AWS_ACCOUNT_ID")
-    if account is not None and not re.fullmatch(r"[0-9]{12}", account):
+    if (
+        account is not None
+        and (names is None or names & (PREFLIGHT_FIELDS | {"PAWLOCAL_DEPLOY_ROLE_ARN"}))
+        and not re.fullmatch(r"[0-9]{12}", account)
+    ):
         raise ReconciliationError("Invalid account configuration")
     role_suffixes = {
         "PAWLOCAL_TERRAFORM_PLAN_ROLE_ARN": "terraform-plan",
@@ -74,6 +79,8 @@ def validate_values(values, environment):
         "PAWLOCAL_DEPLOY_ROLE_ARN": "github-deploy",
     }
     for name, value in values.items():
+        if names is not None and name not in names:
+            continue
         if not value or any(character in value for character in ("\n", "\r", "\x00")):
             raise ReconciliationError("Invalid public configuration value")
         if name == "VITE_COGNITO_CLIENT_ID" and not re.fullmatch(
@@ -162,6 +169,9 @@ def validate_values(values, environment):
                 ):
                     raise ReconciliationError("Public URL environment or path mismatch")
                 base = values.get("PAWLOCAL_PUBLIC_BASE_URL")
+                if base is not None and name != "PAWLOCAL_PUBLIC_BASE_URL":
+                    # A rejected anchor must still invalidate its dependants.
+                    validate_values({"PAWLOCAL_PUBLIC_BASE_URL": base}, environment)
                 if (
                     base
                     and url.hostname.split(".", 1)[1]
@@ -174,6 +184,17 @@ def validate_values(values, environment):
             or not re.fullmatch(r"[a-z]+(?: [a-z]+)*", value)
         ):
             raise ReconciliationError("Invalid OAuth scopes")
+
+
+def invalid_values(values, environment):
+    """Collect rejected names without dropping their original validation context."""
+    rejected = {}
+    for name in values:
+        try:
+            validate_values(values, environment, names={name})
+        except ReconciliationError as error:
+            rejected[name] = str(error)
+    return rejected
 
 
 def configuration_outputs(values):
@@ -454,6 +475,7 @@ def reconcile(
     mode="audit",
     environment="development",
     summary=None,
+    fail_on_error=True,
 ):
     if mode not in ("audit", "enforce"):
         raise ReconciliationError("Unsupported reconciliation mode")
@@ -534,7 +556,7 @@ def reconcile(
             if mapping.env_name in values and values[mapping.env_name] != value:
                 raise ReconciliationError("Conflicting configuration destinations")
             values[mapping.env_name] = value
-    validate_values(
+    rejected = invalid_values(
         {
             name: value
             for name, value in values.items()
@@ -542,6 +564,27 @@ def reconcile(
         },
         environment,
     )
+    for mapping, _ in loaded:
+        if not mapping.secret and mapping.env_name in rejected:
+            if summary:
+                row = summary.row(mapping)
+                row.status = row.diagnostic = "Invalid source"
+                row.reason = rejected[mapping.env_name] + "; destination write skipped."
+            report(
+                f"WARNING invalid-source {mapping.github_environment}/{mapping.env_name}; {rejected[mapping.env_name]}; skipped"
+            )
+    if rejected and fail_on_error:
+        raise ReconciliationError(
+            "Invalid selected public configuration; no destination writes started"
+        )
+    # Keep source-context validation above intact; filter only after every value
+    # has been checked, including dependencies on rejected anchors.
+    values = {name: value for name, value in values.items() if name not in rejected}
+    loaded = [
+        (mapping, value)
+        for mapping, value in loaded
+        if mapping.secret or mapping.env_name not in rejected
+    ]
     if summary:
         summary.reason = "Destination operation failed; completed actions remain; remaining writes were not attempted."
         for row in summary.rows.values():
@@ -593,7 +636,9 @@ def reconcile(
             )
             raise
     report(
-        "Audit completed; this does not establish release readiness"
+        "Reconciliation incomplete; invalid public sources skipped; available valid mappings synchronized"
+        if rejected
+        else "Audit completed; this does not establish release readiness"
         if mode == "audit"
         else "Reconciliation completed; release consumers must check their required configuration"
     )
@@ -614,6 +659,7 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     summary = Report(arguments.environment, arguments.mode, "parameter-mapping.yaml")
     status = 0
+    incomplete = False
     try:
         summary.clear()
         inventory = inventory_mappings("development") + inventory_mappings("production")
@@ -630,8 +676,16 @@ def main(argv=None):
             mode=arguments.mode,
             environment=arguments.environment,
             summary=summary,
+            fail_on_error=arguments.fail_on_error,
         )
-        if arguments.mode == "enforce" and os.environ.get("GITHUB_OUTPUT"):
+        incomplete = any(
+            row.diagnostic == "Invalid source" for row in summary.rows.values()
+        )
+        if (
+            not incomplete
+            and arguments.mode == "enforce"
+            and os.environ.get("GITHUB_OUTPUT")
+        ):
             summary.reason = "Workflow output writing failed; completed destination actions remain. Publication is blocked."
             outputs = configuration_outputs(values)
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -639,7 +693,11 @@ def main(argv=None):
                     f"{name}={json.dumps(value, separators=(',', ':'))}\n"
                     for name, value in outputs.items()
                 )
-        summary.succeeded()
+        if incomplete:
+            summary.result = "INCOMPLETE"
+            summary.reason = "Available valid mappings synchronized; invalid public sources were skipped. Configuration is not verified for release."
+        else:
+            summary.succeeded()
     except ReconciliationError as error:
         print(str(error), file=sys.stderr)
         status = 1
@@ -654,14 +712,14 @@ def main(argv=None):
     except Exception as error:  # noqa: BLE001 - summary failure never authorizes publication
         print(f"Cannot write configuration summary: {error}", file=sys.stderr)
         status = 1
-    if not status and os.environ.get("GITHUB_OUTPUT"):
+    if not status and not incomplete and os.environ.get("GITHUB_OUTPUT"):
         try:
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                 output.write("reconciled=true\n")
         except OSError as error:
             print(f"Cannot confirm reconciliation output: {error}", file=sys.stderr)
             status = 1
-    if status and not arguments.fail_on_error:
+    if (status or incomplete) and not arguments.fail_on_error:
         print(
             "::warning::Configuration reconciliation could not complete; "
             "configuration was not verified. See the operational errors and summary.",
