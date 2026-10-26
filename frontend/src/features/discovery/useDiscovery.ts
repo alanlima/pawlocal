@@ -9,6 +9,8 @@ export function useDiscovery(service: PlaceService) {
   const [places, setPlaces] = useState<Place[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [resultsRevision, setResultsRevision] = useState(0)
   const latestRequest = useRef(0)
   const activeController = useRef<AbortController | null>(null)
 
@@ -18,14 +20,20 @@ export function useDiscovery(service: PlaceService) {
     const controller = new AbortController()
     activeController.current = controller
     setLoading(true)
-    setError(false)
     try {
       const results = await service.listPlaces(nextQuery, controller.signal)
-      if (requestId === latestRequest.current) setPlaces(results)
+      if (requestId === latestRequest.current) {
+        setPlaces(results)
+        setResultsRevision((revision) => revision + 1)
+        setError(false)
+      }
     } catch {
       if (requestId === latestRequest.current) setError(true)
     } finally {
-      if (requestId === latestRequest.current) setLoading(false)
+      if (requestId === latestRequest.current) {
+        setLoading(false)
+        setHasLoaded(true)
+      }
     }
   }
 
@@ -41,18 +49,34 @@ export function useDiscovery(service: PlaceService) {
     void service
       .listPlaces(initialQuery, controller.signal)
       .then((results) => {
-        if (requestId === latestRequest.current) setPlaces(results)
+        if (requestId === latestRequest.current) {
+          setPlaces(results)
+          setResultsRevision((revision) => revision + 1)
+          setError(false)
+        }
       })
       .catch(() => {
         if (requestId === latestRequest.current) setError(true)
       })
       .finally(() => {
-        if (requestId === latestRequest.current) setLoading(false)
+        if (requestId === latestRequest.current) {
+          setLoading(false)
+          setHasLoaded(true)
+        }
       })
     return () => {
       latestRequest.current += 1
       activeController.current?.abort()
     }
   }, [service])
-  return { query, places, loading, error, updateQuery, refresh: () => search() }
+  return {
+    query,
+    places,
+    loading,
+    error,
+    hasLoaded,
+    resultsRevision,
+    updateQuery,
+    refresh: () => search(),
+  }
 }

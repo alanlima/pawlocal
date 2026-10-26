@@ -9,11 +9,11 @@ const categoryName: Record<PlaceCategory, string> = {
   hiking_area: 'Hiking area',
   cafe: 'Dog-friendly café',
 }
-type Props = { place: Place; index: number; saved: boolean; onOpen: () => void; onSave: () => void }
+type Props = { place: Place; saved: boolean; onOpen: () => void; onSave: () => void }
 
-export function PlaceCard({ place, index, saved, onOpen, onSave }: Props) {
+export function PlaceCard({ place, saved, onOpen, onSave }: Props) {
   return (
-    <article className="place-card" style={{ animationDelay: `${index * 55}ms` }}>
+    <article className="place-card">
       <button className="card-art-button" onClick={onOpen} aria-label={`View ${place.name}`}>
         <PlaceArtwork
           place={place}
