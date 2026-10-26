@@ -15,40 +15,51 @@ MODULE = ROOT / "infra/terraform/modules/pawlocal-environment"
 
 @unittest.skipUnless(shutil.which("terraform"), "Terraform executable is required")
 class CertificateDetachOrderingTests(unittest.TestCase):
-    def test_pinned_provider_plans_the_actual_flag_without_certificate_destruction(self):
-        """Mock only seed applies; migration plans use the actual pinned AWS provider.
+    def test_pinned_provider_final_source_deletes_only_the_unused_certificate(self):
+        """Mock seed applies, then plan final source with real AWS 6.69.1 offline.
 
-        All identifiers and states are synthetic. Only the two affected resources
-        are isolated from the application graph; their configuration is extracted
-        verbatim, excluding external dependency barriers. No AWS reads or writes.
+        Attached original/partial projections remain negative readiness controls:
+        their service needs an update, so cleanup must wait for actual detachment.
+        These isolated plans do not establish live usage or full-module ordering.
         """
         providers = MODULE / ".terraform/providers"
         if not providers.exists():
             self.skipTest("Initialize the environment module providers first")
         source = (MODULE / "main.tf").read_text(encoding="utf-8")
-        blocks = []
-        for kind in ("aws_lightsail_certificate", "aws_lightsail_container_service"):
-            block = source.split(f'resource "{kind}" "api" {{', 1)[1].split("\n}\n", 1)[0]
-            block = re.sub(r"^\s*depends_on\s*=.*$", "", block, flags=re.MULTILINE)
-            blocks.append(f'resource "{kind}" "api" {{' + block + "\n}\n")
+        self.assertNotIn('resource "aws_lightsail_certificate"', source)
+        self.assertNotIn('resource "aws_route53_record" "api_certificate_validation"', source)
+        block = source.split('resource "aws_lightsail_container_service" "api" {', 1)[1].split("\n}\n", 1)[0]
+        block = re.sub(r"^\s*depends_on\s*=.*$", "", block, flags=re.MULTILINE)
+        service = 'resource "aws_lightsail_container_service" "api" {' + block + "\n}\n"
         prefix = '''terraform {
-  required_version = "= 1.14.3"
-  required_providers { aws = { source = "hashicorp/aws", version = "= 6.69.1" } }
+ required_version = "= 1.14.3"
+ required_providers { aws = { source = "hashicorp/aws", version = "= 6.69.1" } }
 }
 variable "environment" { type = string }
-variable "root_domain" { default = "example.test" }
 variable "container_power" { default = "micro" }
 variable "container_scale" { default = 1 }
-variable "detach_lightsail_certificate" {
- type = bool
- default = false
-}
 locals {
-  resource_names = { container_service = "pawlocal-${var.environment}-api" }
-  legacy_certificate_domain = "${var.environment == "development" ? "api-dev" : "api"}.${var.root_domain}"
-  common_tags = { project = "pawlocal", environment = var.environment }
+ resource_names = { container_service = "pawlocal-${var.environment}-api" }
+ common_tags = { project = "pawlocal", environment = var.environment }
 }
 '''
+        seed = prefix + '''variable "detached" { default = false }
+resource "aws_lightsail_certificate" "api" {
+ name = "pawlocal-${var.environment}-api-cert"
+ domain_name = "${var.environment == "development" ? "api-dev" : "api"}.example.test"
+ tags = local.common_tags
+}
+''' + service
+        seed = seed.replace("  tags        = local.common_tags", '''  tags        = local.common_tags
+ dynamic "public_domain_names" {
+  for_each = var.detached ? [] : [true]
+  content {
+   certificate {
+   certificate_name = aws_lightsail_certificate.api.name
+   domain_names = [aws_lightsail_certificate.api.domain_name]
+   }
+  }
+ }''')
         tests = '''mock_provider "aws" { alias = "seed" }
 provider "aws" {
  alias = "offline"
@@ -68,19 +79,16 @@ provider "aws" {
             domain = ("api-dev" if environment == "development" else "api") + ".example.test"
             for snapshot in ("original", "partial", "detached"):
                 key = f"{environment}_{snapshot}"
-                # Original and partially applied #346 states have identical
-                # certificate/service bindings; only unrelated DNS differs.
-                detached = snapshot == "detached"
-                expected[f"plan_{key}"] = "no-op" if detached else "update"
+                expected[f"cleanup_{key}"] = "no-op" if snapshot == "detached" else "update"
                 tests += f'''
 run "seed_{key}" {{
  command = apply
  state_key = "{key}"
- module {{ source = "./subject" }}
+ module {{ source = "./seed" }}
  providers = {{ aws = aws.seed }}
  variables {{
-  environment = "{environment}"
-  detach_lightsail_certificate = {str(detached).lower()}
+ environment = "{environment}"
+ detached = {str(snapshot == "detached").lower()}
  }}
  override_resource {{
   target = aws_lightsail_certificate.api
@@ -104,51 +112,42 @@ run "seed_{key}" {{
   }}
  }}
 }}
-run "plan_{key}" {{
+run "cleanup_{key}" {{
  command = plan
  state_key = "{key}"
- module {{ source = "./subject" }}
+ module {{ source = "./final" }}
  providers = {{ aws = aws.offline }}
  plan_options {{ refresh = false }}
- variables {{
-  environment = "{environment}"
-  detach_lightsail_certificate = true
- }}
+ variables {{ environment = "{environment}" }}
 }}
 '''
-            for detach in (False, True):
-                key = f"fresh_{environment}_{str(detach).lower()}"
-                expected[key] = "create"
-                tests += f'''
+            key = f"fresh_{environment}"
+            expected[key] = "create"
+            tests += f'''
 run "{key}" {{
  command = plan
  state_key = "{key}"
- module {{ source = "./subject" }}
+ module {{ source = "./final" }}
  providers = {{ aws = aws.offline }}
  plan_options {{ refresh = false }}
- variables {{
-  environment = "{environment}"
-  detach_lightsail_certificate = {str(detach).lower()}
- }}
+ variables {{ environment = "{environment}" }}
 }}
 '''
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            (directory / "subject").mkdir()
-            (directory / "tests").mkdir()
+            for name in ("seed", "final", "tests"):
+                (directory / name).mkdir()
             (directory / "main.tf").write_text(prefix.split('variable "environment"', 1)[0], encoding="utf-8")
-            (directory / "subject/main.tf").write_text(prefix + "\n".join(blocks), encoding="utf-8")
-            (directory / "tests/toggle.tftest.hcl").write_text(tests, encoding="utf-8")
-            environment = {**os.environ, "AWS_EC2_METADATA_DISABLED": "true"}
+            (directory / "seed/main.tf").write_text(seed, encoding="utf-8")
+            (directory / "final/main.tf").write_text(prefix + service, encoding="utf-8")
+            (directory / "tests/cleanup.tftest.hcl").write_text(tests, encoding="utf-8")
+            env = {**os.environ, "AWS_EC2_METADATA_DISABLED": "true"}
             arguments = ["terraform", "init", "-backend=false", "-input=false"]
-            # Reuse an installed pinned binary when available. A fresh CI module
-            # may have a newer compatible AWS version, so download the exact
-            # historical provider instead of silently testing that newer one.
             if (providers / "registry.terraform.io/hashicorp/aws/6.69.1").exists():
                 arguments.append(f"-plugin-dir={providers}")
-            init = subprocess.run(arguments, cwd=directory, env=environment, capture_output=True, text=True, timeout=180)
+            init = subprocess.run(arguments, cwd=directory, env=env, capture_output=True, text=True, timeout=180)
             self.assertEqual(init.returncode, 0, init.stdout + init.stderr)
-            result = subprocess.run(["terraform", "test", "-json", "-verbose"], cwd=directory, env=environment, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(["terraform", "test", "-json", "-verbose"], cwd=directory, env=env, capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             plans = {}
             for line in result.stdout.splitlines():
@@ -158,19 +157,15 @@ run "{key}" {{
             self.assertEqual(set(plans), set(expected))
             for run, action in expected.items():
                 changes = {r["address"]: r["change"] for r in plans[run]["resource_changes"]}
-                certificate = changes["aws_lightsail_certificate.api"]
-                service = changes["aws_lightsail_container_service.api"]
-                self.assertEqual(certificate["actions"], ["create" if action == "create" else "no-op"], run)
-                self.assertEqual(service["actions"], [action], run)
-                self.assertNotIn("delete", certificate["actions"], run)
-                self.assertNotIn("delete", service["actions"], run)
-                if action != "create":
-                    self.assertEqual(certificate["before"]["arn"], certificate["after"]["arn"], run)
-                    self.assertEqual(service["before"]["arn"], service["after"]["arn"], run)
-                    self.assertEqual(service["after"]["public_domain_names"], [], run)
+                service_change = changes["aws_lightsail_container_service.api"]
+                self.assertEqual(service_change["actions"], [action], run)
+                self.assertEqual(service_change["after"]["public_domain_names"], [], run)
+                if action == "create":
+                    self.assertNotIn("aws_lightsail_certificate.api", changes, run)
                 else:
-                    self.assertTrue(certificate["after"]["domain_name"].endswith(".example.test"), run)
-                    self.assertEqual(bool(service["after"]["public_domain_names"]), run.endswith("false"), run)
+                    self.assertEqual(changes["aws_lightsail_certificate.api"]["actions"], ["delete"], run)
+                    self.assertEqual(service_change["before"]["arn"], service_change["after"]["arn"], run)
+                self.assertFalse(any("create" in item["actions"] for address, item in changes.items() if address != "aws_lightsail_container_service.api"), run)
 
     def test_detach_before_destroy_requires_retaining_the_existing_certificate(self):
         with tempfile.TemporaryDirectory() as temporary:

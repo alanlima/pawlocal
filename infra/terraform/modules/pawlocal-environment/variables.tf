@@ -66,13 +66,6 @@ variable "route53_zone_id" {
   type        = string
 }
 
-variable "detach_lightsail_certificate" {
-  description = "Detach the retained Lightsail certificate from the service. False preserves the original custom-domain attachment; public API routing always uses CloudFront."
-  type        = bool
-  default     = false
-  nullable    = false
-}
-
 variable "cloudfront_certificate_arn" {
   description = "Existing us-east-1 ACM certificate covering the environment frontend hostname."
   type        = string
