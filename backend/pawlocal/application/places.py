@@ -9,10 +9,6 @@ class PlaceQueries:
 
     def search(self, **filters) -> tuple[list[Place], int]:
         with application_span("places.search", {"pawlocal.operation": "search"}) as span:
-            if filters.get("category") == "hiking_area":
-                raise RuntimeError(
-                    "Controlled production incident drill: hiking-area discovery unavailable"
-                )
             places, total = self.repository.search(**filters)
             span.set_attribute("pawlocal.outcome", "success" if places else "empty")
             return places, total
