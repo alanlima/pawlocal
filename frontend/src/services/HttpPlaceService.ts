@@ -59,7 +59,7 @@ export class HttpPlaceService implements PlaceService {
     requiresAuthentication = false,
   ): Promise<T> {
     const headers = new Headers(init.headers)
-    headers.set('Content-Type', 'application/json')
+    if (init.body != null) headers.set('Content-Type', 'application/json')
     const token = requiresAuthentication ? await this.token() : null
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const approvedOrigin =
